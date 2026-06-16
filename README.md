@@ -107,18 +107,21 @@ recommended additions (trufflehog, checkov, syft, bandit, brakeman).
 
 ## Tested on real projects
 
-ultrasec's cross-file taint engine was run on real, intentionally-vulnerable repos
-(graph + taint only, `--tools none`):
+Validated **end-to-end inside the Docker toolbox** (engine + trivy + osv-scanner +
+semgrep + gitleaks, all four scanners) on real, intentionally-vulnerable repos:
 
-| repo | lang | what it surfaced |
-|------|------|------------------|
-| [OWASP/NodeGoat](https://github.com/OWASP/NodeGoat) | JS | 13 candidates incl. the signature **server-side `eval()` injection** (`eval(req.body.…)`, CWE-94), **command injection** in the Gruntfile (CWE-78), **open redirects** in `session.js` (CWE-601), reflected **XSS** in `research.js` (CWE-79) |
-| [we45/Vulnerable-Flask-App](https://github.com/we45/Vulnerable-Flask-App) | Python | **SQLi** (CWE-89), **insecure deserialization** (CWE-502), **path traversal** (CWE-22), **SSTI/XSS** via `render_template_string` (CWE-79), **weak crypto** `md5` (CWE-327) |
+| repo | lang | findings (taint + tools) | highlights |
+|------|------|--------------------------|------------|
+| [OWASP/NodeGoat](https://github.com/OWASP/NodeGoat) | JS | **275** — 13 taint · 262 tool (trivy 67, osv 163, semgrep 29, gitleaks 3) | the signature server-side **`eval()` SSJI** (`eval(req.body.…)`, CWE-94), **command injection**, **open redirects**, reflected **XSS** — plus dependency CVEs, hardcoded secrets (incl. a private key), and SAST findings |
+| [we45/Vulnerable-Flask-App](https://github.com/we45/Vulnerable-Flask-App) | Python | **206** — 6 taint · 200 tool (trivy 69, osv 110, semgrep 21) | **SQLi**, **insecure deserialization**, **path traversal**, **SSTI**, **weak crypto** (CWE-89/502/22/79/327) — plus Python dep CVEs and SAST |
 
-And the external-tool path, validated live via `--docker`: a planted GitHub PAT +
-API key were found by dockerized **gitleaks** and normalized to `CWE-798` findings
-with repo-relative locations. Each candidate is then adjudicated by the AI and the
-grounding gate (`check --semantic`) before it counts.
+Every finding's path is repo-relative and the grounding gate (`check`) passes over
+all of them; each is then adjudicated by the AI before it counts as confirmed.
+Reproduce:
+
+```bash
+TARGET=/path/to/repo docker compose run --rm ultrasec scan --repo /work --out /work/.ultrasec
+```
 
 ## How it works
 
