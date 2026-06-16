@@ -29,19 +29,45 @@ plus **adversarial AI verification** — and stays whole-repo and anti-hallucina
 ## Quick start
 
 ```bash
-node scripts/ultrasec.mjs tools          # what scanners are installed + how to get the rest
-node scripts/ultrasec.mjs scan --repo .  # build the audit dossier
-node scripts/ultrasec.mjs check --run .ultrasec --semantic   # the grounding gate
+node scripts/ultrasec.mjs tools                       # installed scanners + how to get the rest
+node scripts/ultrasec.mjs scan --repo . --out .ultrasec   # graph + cross-file taint + tools → dossier
+node scripts/ultrasec.mjs paths --run .ultrasec       # the candidate source→sink chains
+node scripts/ultrasec.mjs dossier <id> --run .ultrasec    # one finding's real code + path (adjudicate)
+node scripts/ultrasec.mjs verify --run .ultrasec      # adversarial worklist → write verdicts.json
+node scripts/ultrasec.mjs verify --apply verdicts.json --run .ultrasec
+node scripts/ultrasec.mjs check --run .ultrasec --semantic   # exit gate: grounded + adjudicated
+node scripts/ultrasec.mjs render --run .ultrasec      # SUMMARY/REPORT/FULL.md + index.html
 ```
 
-Nothing external is required — the link-graph and AI taint reasoning are the
+Nothing external is required — the link-graph and taint reasoning are the
 always-on core. Installed scanners (Trivy, OpenGrep/Semgrep, gitleaks,
-osv-scanner, cargo-audit, govulncheck, …) are an automatic bonus.
+osv-scanner, cargo-audit, govulncheck, …) are an automatic bonus, normalized into
+one finding model.
 
-## Status
+See [`assets/example-audit/`](assets/example-audit/) for a complete run, and
+[`SKILL.md`](SKILL.md) + [`references/`](references/) for the agent workflow
+(including the [deep-audit playbook](references/deep-audit-playbook.md)).
 
-Under active construction. See the milestones in the repo's plan.
+## How it works
+
+| stage | who | what |
+|-------|-----|------|
+| scan | engine | walk repo → cross-file/function link-graph (~15 langs) → enumerate candidate source→sink taint paths → run installed scanners → evidence packets |
+| adjudicate | **AI** | read the real code along each path; confirm reachability + exploitability; find authz/business-logic bugs the tools miss |
+| verify | **AI** + engine | adversarial worklist, conservative gate (uncertain high-severity → `needs-human`, never auto-dropped) |
+| report | engine | grounded, cited, tiered Markdown + self-contained HTML |
+
+## Development
+
+```bash
+pnpm install
+pnpm typecheck && pnpm test && pnpm run check:build   # the CI gate
+```
+
+Releases are automatic: Conventional Commits on `main` drive semantic-release
+(GitHub release + tarball).
 
 ## License
 
 MIT
+
