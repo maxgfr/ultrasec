@@ -105,6 +105,22 @@ TARGET=/path/to/repo docker compose run --rm ultrasec tools     # all show ✓ i
 See [`references/tools.md`](references/tools.md) for the full scanner matrix and
 recommended additions (trufflehog, checkov, syft, bandit, brakeman).
 
+## Cleanup
+
+ultrasec never installs anything globally, and you can remove everything it
+created — straight from the script — when you're done:
+
+```bash
+node scripts/ultrasec.mjs clean --run .ultrasec            # remove the audit dossier
+node scripts/ultrasec.mjs clean --run .ultrasec --docker   # + pulled scanner images, toolbox image, trivy cache volume
+node scripts/ultrasec.mjs clean --docker --dry-run         # preview what would be removed
+```
+
+`clean --docker` removes only the artifacts ultrasec is responsible for (the
+pinned scanner images, `ultrasec-toolbox`, and the `*trivy-cache*` volume) — your
+other Docker images are untouched. The compose stack tears down the same way with
+`docker compose down -v`.
+
 ## Tested on real projects
 
 Validated **end-to-end inside the Docker toolbox** (engine + trivy + osv-scanner +

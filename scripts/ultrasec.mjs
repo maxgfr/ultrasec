@@ -1083,12 +1083,12 @@ function runDocker(adapter, repo) {
   const { stdout, failed, err } = exec("docker", args, repo);
   return finish(adapter, repo, stdout, failed, err, true);
 }
-function finish(adapter, repo, stdout, failed, err, docker) {
+function finish(adapter, repo, stdout, failed, err, docker2) {
   if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
   try {
-    const base = docker ? MOUNT : repo;
+    const base = docker2 ? MOUNT : repo;
     const findings = relativizeFindings(adapter.parse(stdout, repo), base);
-    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker ? " (docker)" : ""}` };
+    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker2 ? " (docker)" : ""}` };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };
   }
@@ -2278,6 +2278,73 @@ function runRender(args) {
   return 0;
 }
 
+// src/commands/clean.ts
+import { execFileSync as execFileSync3 } from "child_process";
+import { existsSync as existsSync3, rmSync } from "fs";
+import { resolve as resolve8 } from "path";
+var TOOLBOX_IMAGE = "ultrasec-toolbox";
+var VOLUME_NAME_FILTER = "trivy-cache";
+function dockerImages() {
+  return [...new Set(ADAPTERS.map((a) => a.dockerImage).filter((x) => Boolean(x))), TOOLBOX_IMAGE];
+}
+function dockerAvailable() {
+  try {
+    execFileSync3("docker", ["--version"], { stdio: "ignore", timeout: 5e3 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function docker(args) {
+  try {
+    const out = execFileSync3("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 });
+    return { ok: true, out };
+  } catch {
+    return { ok: false, out: "" };
+  }
+}
+function runClean(args) {
+  const run = resolve8(flagStr(args, "run") ?? ".ultrasec");
+  const dry = flagBool(args, "dry-run");
+  const withDocker = flagBool(args, "docker");
+  const keepOutput = flagBool(args, "keep-output");
+  const removed = [];
+  if (!keepOutput && existsSync3(run)) {
+    if (!dry) rmSync(run, { recursive: true, force: true });
+    removed.push(`output  ${run}`);
+  }
+  if (withDocker) {
+    if (!dockerAvailable()) {
+      eprintln("ultrasec clean: docker not available \u2014 skipping image/volume cleanup.");
+    } else {
+      for (const img of dockerImages()) {
+        const present = docker(["images", "-q", img]);
+        if (present.ok && present.out.trim()) {
+          if (!dry) docker(["image", "rm", "-f", img]);
+          removed.push(`image   ${img}`);
+        }
+      }
+      const vols = docker(["volume", "ls", "-q", "-f", `name=${VOLUME_NAME_FILTER}`]);
+      for (const v of vols.out.split("\n").map((s) => s.trim()).filter(Boolean)) {
+        if (!dry) docker(["volume", "rm", v]);
+        removed.push(`volume  ${v}`);
+      }
+    }
+  }
+  if (flagBool(args, "json")) {
+    println(JSON.stringify({ dryRun: dry, removed }, null, 2));
+    return 0;
+  }
+  if (!removed.length) {
+    println("ultrasec clean: nothing to remove.");
+    return 0;
+  }
+  println(`ultrasec clean${dry ? " (dry-run)" : ""}:`);
+  for (const r of removed) println(`  ${dry ? "would remove" : "removed"}  ${r}`);
+  if (!withDocker) println(`  (add --docker to also remove scanner images + the trivy cache volume)`);
+  return 0;
+}
+
 // src/cli.ts
 var HELP = `ultrasec ${VERSION} \u2014 cross-file security audit (taint + AI + tool orchestration)
 
@@ -2300,6 +2367,8 @@ COMMANDS
   render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
              --semantic also folds in the verify verdicts.
+  clean      Remove the audit dossier and, with --docker, the scanner images +
+             toolbox image + trivy cache volume (--dry-run to preview).
 
 GLOBAL
   --help, -h     Show this help.
@@ -2333,6 +2402,8 @@ async function dispatch(cmd, args) {
       return runCheck(args);
     case "render":
       return runRender(args);
+    case "clean":
+      return runClean(args);
     default:
       eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
       return 2;

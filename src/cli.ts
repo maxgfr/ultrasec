@@ -8,6 +8,7 @@ import { runPaths } from "./commands/paths.js";
 import { runVerify } from "./commands/verify.js";
 import { runCheck } from "./commands/check.js";
 import { runRender } from "./commands/render.js";
+import { runClean } from "./commands/clean.js";
 
 const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
 
@@ -30,6 +31,8 @@ COMMANDS
   render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
              --semantic also folds in the verify verdicts.
+  clean      Remove the audit dossier and, with --docker, the scanner images +
+             toolbox image + trivy cache volume (--dry-run to preview).
 
 GLOBAL
   --help, -h     Show this help.
@@ -64,6 +67,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runCheck(args);
     case "render":
       return runRender(args);
+    case "clean":
+      return runClean(args);
     default:
       eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
       return 2;
