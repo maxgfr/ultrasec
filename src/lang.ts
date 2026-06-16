@@ -279,6 +279,10 @@ export function extract(spec: LangSpec, content: string): Extraction {
     callRe.lastIndex = 0;
     let cm: RegExpExecArray | null;
     while ((cm = callRe.exec(line))) {
+      // Reject a match that starts in the middle of an identifier (e.g. the
+      // `abc` in `123abc.exec()`), which would yield a bogus receiver/callee.
+      const before = cm.index > 0 ? line[cm.index - 1] : "";
+      if (before && /[\w$]/.test(before)) continue;
       const receiver = cm[1];
       const callee = cm[2]!;
       if (kw.has(callee)) continue;

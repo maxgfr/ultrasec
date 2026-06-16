@@ -21,10 +21,13 @@ export const govulncheck: ToolAdapter = {
     for (const m of msgs) {
       const f = m?.finding;
       if (!f?.osv) continue;
-      if (seen.has(f.osv)) continue; // one finding per advisory
-      seen.add(f.osv);
       const osv = osvById.get(f.osv) ?? {};
       const top = (f.trace ?? [])[0] ?? {};
+      // De-dup per (advisory, call-site) — the same OSV can be reachable via
+      // several distinct sites, each a finding worth its own location.
+      const key = `${f.osv}:${top.position?.filename ?? ""}:${top.position?.line ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const reachable = Boolean(top.function && top.position);
       out.push(
         makeToolFinding({

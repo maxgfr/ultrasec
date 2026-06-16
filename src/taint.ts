@@ -137,9 +137,12 @@ export function enumerateTaint(scan: RepoScan, graph: Graph): Finding[] {
 
         if (fr.depth >= MAX_DEPTH || !fr.sym) continue;
 
-        // Walk back to callers of this frame's symbol (only if uniquely defined here).
+        // Walk back to callers of this frame's symbol, as long as it is exported
+        // from this file. (We don't require it to be the *only* definition — a
+        // name shared across files shouldn't silently drop a real taint path;
+        // recall-oriented, the AI adjudicates.)
         const defs = graph.symbolDefs[fr.sym];
-        if (!defs || defs.length !== 1 || defs[0] !== fr.file) continue;
+        if (!defs || !defs.includes(fr.file)) continue;
 
         for (const caller of scan.files) {
           if (caller.rel === fr.file) continue;

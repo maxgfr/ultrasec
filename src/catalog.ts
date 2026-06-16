@@ -133,11 +133,10 @@ export function findSinks(lang: LangSpec, calls: Call[]): SinkHit[] {
     for (const rule of SINKS) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (!rule.callees.includes(c.callee)) continue;
-      // If the rule pins receivers and this call has a *different* known one, skip.
-      if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) {
-        // allow common DB-ish receivers for sql even if not pinned
-        if (rule.kind !== "sql") continue;
-      }
+      // If the rule pins receivers and this call has a *different* known one, skip
+      // it (cuts false positives like `arr.call(...)` matching the command rule).
+      // Rules with no `receivers` (e.g. sql) match any receiver.
+      if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) continue;
       out.push({
         line: c.line,
         callee: c.callee,
@@ -163,12 +162,12 @@ export interface SourceRule {
 }
 
 export const SOURCES: SourceRule[] = [
-  { kind: "http", languages: ["javascript"], re: /\breq(?:uest)?\s*\.\s*(?:query|body|params|headers|cookies|url|originalUrl|hostname|ip)\b/, title: "HTTP request input" },
+  { kind: "http", languages: ["javascript"], re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|params|headers|cookies|url|originalUrl|hostname|ip)\b/, title: "HTTP request input" },
   { kind: "http", languages: ["javascript"], re: /\bctx\s*\.\s*(?:request|query|params|body)\b/, title: "Koa/HTTP context input" },
-  { kind: "http", languages: ["python"], re: /\brequest\s*\.\s*(?:args|form|values|json|data|files|cookies|headers|GET|POST)\b/, title: "HTTP request input" },
+  { kind: "http", languages: ["python"], re: /(?<![\w.])request\s*\.\s*(?:args|form|values|json|data|files|cookies|headers|GET|POST)\b/, title: "HTTP request input" },
   { kind: "http", languages: ["php"], re: /\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\b/, title: "HTTP superglobal input" },
   { kind: "http", languages: ["java", "kotlin", "scala"], re: /\.get(?:Parameter|Header|QueryString)\s*\(/, title: "Servlet request input" },
-  { kind: "http", languages: ["ruby"], re: /\bparams\s*\[/, title: "Rails params input" },
+  { kind: "http", languages: ["ruby"], re: /(?<![\w.])params\s*\[/, title: "Rails params input" },
   { kind: "http", languages: ["go"], re: /\br\s*\.\s*(?:URL|FormValue|PostFormValue|Header)\b/, title: "net/http request input" },
   { kind: "cli", languages: ["javascript"], re: /\bprocess\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["python"], re: /\bsys\.argv\b/, title: "CLI argument" },
@@ -211,7 +210,7 @@ export interface SanitizerRule {
 
 export const SANITIZERS: SanitizerRule[] = [
   { kind: "sql", languages: ["*"], re: /\?|\$\d+|:\w+|%s|@\w+/, note: "looks parameterized (placeholder present)" },
-  { kind: "command", languages: ["*"], re: /\bexecFile\b|\bexecvp?\b|shlex\.quote|escapeshellarg|\.split\(/, note: "argv-array / quoting present" },
+  { kind: "command", languages: ["*"], re: /\bexecFile\b|\bexecvp?\b|shlex\.quote|escapeshellarg/, note: "argv-array / quoting present" },
   { kind: "path", languages: ["*"], re: /\bbasename\b|\brealpath\b|secure_filename|path\.resolve|startsWith\(/, note: "path-confinement helper present" },
   { kind: "xss", languages: ["*"], re: /\bescape(?:Html)?\b|sanitize|DOMPurify|bleach|markupsafe|escapeHTML/, note: "escaping/sanitizer present" },
   { kind: "deserialize", languages: ["*"], re: /safe_load|safeLoad|JSON\.parse/, note: "safe loader present" },

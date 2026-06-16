@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import type { Dossier } from "./store.js";
 import { SEVERITIES, type CodeLoc, type Finding, type Severity } from "./types.js";
 
@@ -27,7 +27,17 @@ export interface CheckResult {
   messages: string[];
 }
 
+// A location is "external" if it resolves outside the repo (an absolute path
+// from a dependency scanner, or a `../` escape). Such refs aren't graded for
+// grounding — and crucially we never READ them (path-traversal guard).
+function insideRepo(repo: string, file: string): boolean {
+  const base = resolve(repo);
+  const abs = resolve(base, file);
+  return abs === base || abs.startsWith(base + sep);
+}
+
 function lineCount(repo: string, file: string): number | null {
+  if (!insideRepo(repo, file)) return null;
   const abs = join(repo, file);
   if (!existsSync(abs)) return null;
   try {
@@ -71,6 +81,9 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     // Dismissed findings need not resolve (the code may have been the false lead).
     if (f.status === "dismissed") continue;
     for (const loc of locsOf(f)) {
+      // External references (absolute dependency paths, etc.) aren't repo
+      // citations — don't grade or read them.
+      if (!insideRepo(repo, loc.file)) continue;
       const lc = linesOf(loc.file);
       if (lc === null) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
       else if (loc.line < 1 || loc.line > lc) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range (file has ${lc} lines)` });

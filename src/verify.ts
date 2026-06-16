@@ -1,5 +1,5 @@
 import type { Dossier } from "./store.js";
-import type { Finding, Status, Verdict } from "./types.js";
+import { VERDICTS, type Finding, type Status, type Verdict } from "./types.js";
 import { byStr } from "./util.js";
 
 // The adversarial verification gate. The engine emits a claim↔evidence worklist;
@@ -114,6 +114,8 @@ function nextStatus(verdict: Verdict, severity: string): Status {
       return isHigh(severity) ? "needs-human" : "dismissed";
     case "partial":
       return "needs-human";
+    default:
+      return "needs-human"; // unknown verdict: never silently drop
   }
 }
 
@@ -155,6 +157,6 @@ export function parseVerdicts(raw: string): VerdictInput[] {
   const data = JSON.parse(raw) as unknown;
   const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.verdicts) ? (data as any).verdicts : [];
   return (arr as any[])
-    .filter((v) => v && typeof v.id === "string" && typeof v.verdict === "string")
-    .map((v) => ({ id: v.id, verdict: v.verdict, note: v.note, exploitPath: v.exploitPath }));
+    .filter((v) => v && typeof v.id === "string" && (VERDICTS as readonly string[]).includes(v.verdict))
+    .map((v) => ({ id: v.id, verdict: v.verdict as Verdict, note: v.note, exploitPath: v.exploitPath }));
 }

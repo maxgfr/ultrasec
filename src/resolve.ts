@@ -19,8 +19,13 @@ function normalize(path: string): string {
   const parts: string[] = [];
   for (const seg of path.split("/")) {
     if (seg === "" || seg === ".") continue;
-    if (seg === "..") parts.pop();
-    else parts.push(seg);
+    if (seg === "..") {
+      // Pop a real segment, but PRESERVE leading `..` (don't pop past the root)
+      // so a spec that escapes the repo stays unresolvable instead of silently
+      // collapsing to a wrong in-repo path.
+      if (parts.length && parts[parts.length - 1] !== "..") parts.pop();
+      else parts.push("..");
+    } else parts.push(seg);
   }
   return parts.join("/");
 }

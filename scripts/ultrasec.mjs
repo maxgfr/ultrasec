@@ -4,6 +4,7 @@
 var VERSION = "0.0.0-development";
 var SCHEMA_VERSION = 1;
 var SEVERITIES = ["critical", "high", "medium", "low", "info"];
+var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 
 // src/util.ts
 import { createHash } from "crypto";
@@ -517,6 +518,8 @@ function extract(spec, content) {
     callRe.lastIndex = 0;
     let cm;
     while (cm = callRe.exec(line)) {
+      const before = cm.index > 0 ? line[cm.index - 1] : "";
+      if (before && /[\w$]/.test(before)) continue;
       const receiver = cm[1];
       const callee = cm[2];
       if (kw.has(callee)) continue;
@@ -587,8 +590,10 @@ function normalize(path) {
   const parts = [];
   for (const seg of path.split("/")) {
     if (seg === "" || seg === ".") continue;
-    if (seg === "..") parts.pop();
-    else parts.push(seg);
+    if (seg === "..") {
+      if (parts.length && parts[parts.length - 1] !== "..") parts.pop();
+      else parts.push("..");
+    } else parts.push(seg);
   }
   return parts.join("/");
 }
@@ -691,7 +696,7 @@ function neighbors(graph, target, depth = 1) {
       }
       for (const e of (inn.get(node) ?? []).slice().sort((a, b) => byStr(a.from, b.from))) {
         if (seen.has(e.from)) continue;
-        links.push({ node: e.from, direction: "in", kind: e.kind, weight: e.weight, depth: d, symbol: e.toSymbol });
+        links.push({ node: e.from, direction: "in", kind: e.kind, weight: e.weight, depth: d, symbol: e.fromSymbol });
         seen.add(e.from);
         next.push(e.from);
       }
@@ -848,9 +853,7 @@ function findSinks(lang, calls) {
     for (const rule of SINKS) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (!rule.callees.includes(c.callee)) continue;
-      if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) {
-        if (rule.kind !== "sql") continue;
-      }
+      if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) continue;
       out.push({
         line: c.line,
         callee: c.callee,
@@ -867,12 +870,12 @@ function findSinks(lang, calls) {
   return out;
 }
 var SOURCES = [
-  { kind: "http", languages: ["javascript"], re: /\breq(?:uest)?\s*\.\s*(?:query|body|params|headers|cookies|url|originalUrl|hostname|ip)\b/, title: "HTTP request input" },
+  { kind: "http", languages: ["javascript"], re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|params|headers|cookies|url|originalUrl|hostname|ip)\b/, title: "HTTP request input" },
   { kind: "http", languages: ["javascript"], re: /\bctx\s*\.\s*(?:request|query|params|body)\b/, title: "Koa/HTTP context input" },
-  { kind: "http", languages: ["python"], re: /\brequest\s*\.\s*(?:args|form|values|json|data|files|cookies|headers|GET|POST)\b/, title: "HTTP request input" },
+  { kind: "http", languages: ["python"], re: /(?<![\w.])request\s*\.\s*(?:args|form|values|json|data|files|cookies|headers|GET|POST)\b/, title: "HTTP request input" },
   { kind: "http", languages: ["php"], re: /\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\b/, title: "HTTP superglobal input" },
   { kind: "http", languages: ["java", "kotlin", "scala"], re: /\.get(?:Parameter|Header|QueryString)\s*\(/, title: "Servlet request input" },
-  { kind: "http", languages: ["ruby"], re: /\bparams\s*\[/, title: "Rails params input" },
+  { kind: "http", languages: ["ruby"], re: /(?<![\w.])params\s*\[/, title: "Rails params input" },
   { kind: "http", languages: ["go"], re: /\br\s*\.\s*(?:URL|FormValue|PostFormValue|Header)\b/, title: "net/http request input" },
   { kind: "cli", languages: ["javascript"], re: /\bprocess\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["python"], re: /\bsys\.argv\b/, title: "CLI argument" },
@@ -897,7 +900,7 @@ function findSources(lang, content) {
 }
 var SANITIZERS = [
   { kind: "sql", languages: ["*"], re: /\?|\$\d+|:\w+|%s|@\w+/, note: "looks parameterized (placeholder present)" },
-  { kind: "command", languages: ["*"], re: /\bexecFile\b|\bexecvp?\b|shlex\.quote|escapeshellarg|\.split\(/, note: "argv-array / quoting present" },
+  { kind: "command", languages: ["*"], re: /\bexecFile\b|\bexecvp?\b|shlex\.quote|escapeshellarg/, note: "argv-array / quoting present" },
   { kind: "path", languages: ["*"], re: /\bbasename\b|\brealpath\b|secure_filename|path\.resolve|startsWith\(/, note: "path-confinement helper present" },
   { kind: "xss", languages: ["*"], re: /\bescape(?:Html)?\b|sanitize|DOMPurify|bleach|markupsafe|escapeHTML/, note: "escaping/sanitizer present" },
   { kind: "deserialize", languages: ["*"], re: /safe_load|safeLoad|JSON\.parse/, note: "safe loader present" },
@@ -1012,7 +1015,7 @@ function enumerateTaint(scan, graph) {
         }
         if (fr.depth >= MAX_DEPTH || !fr.sym) continue;
         const defs = graph.symbolDefs[fr.sym];
-        if (!defs || defs.length !== 1 || defs[0] !== fr.file) continue;
+        if (!defs || !defs.includes(fr.file)) continue;
         for (const caller of scan.files) {
           if (caller.rel === fr.file) continue;
           for (const c of caller.calls) {
@@ -1443,10 +1446,11 @@ var govulncheck = {
     for (const m of msgs) {
       const f = m?.finding;
       if (!f?.osv) continue;
-      if (seen.has(f.osv)) continue;
-      seen.add(f.osv);
       const osv = osvById.get(f.osv) ?? {};
       const top = (f.trace ?? [])[0] ?? {};
+      const key = `${f.osv}:${top.position?.filename ?? ""}:${top.position?.line ?? ""}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
       const reachable = Boolean(top.function && top.position);
       out.push(
         makeToolFinding({
@@ -1779,6 +1783,8 @@ function nextStatus(verdict, severity) {
       return isHigh(severity) ? "needs-human" : "dismissed";
     case "partial":
       return "needs-human";
+    default:
+      return "needs-human";
   }
 }
 function applyVerdicts(dossier, verdicts) {
@@ -1812,7 +1818,7 @@ Verdict (${v.verdict}): ${v.note}`;
 function parseVerdicts(raw) {
   const data = JSON.parse(raw);
   const arr = Array.isArray(data) ? data : Array.isArray(data?.verdicts) ? data.verdicts : [];
-  return arr.filter((v) => v && typeof v.id === "string" && typeof v.verdict === "string").map((v) => ({ id: v.id, verdict: v.verdict, note: v.note, exploitPath: v.exploitPath }));
+  return arr.filter((v) => v && typeof v.id === "string" && VERDICTS.includes(v.verdict)).map((v) => ({ id: v.id, verdict: v.verdict, note: v.note, exploitPath: v.exploitPath }));
 }
 
 // src/commands/verify.ts
@@ -1882,12 +1888,18 @@ function applyMode(run, dossier, applyPath, args) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve5 } from "path";
+import { resolve as resolve6 } from "path";
 
 // src/check.ts
 import { existsSync as existsSync2, readFileSync as readFileSync4 } from "fs";
-import { join as join6 } from "path";
+import { join as join6, resolve as resolve5, sep as sep2 } from "path";
+function insideRepo(repo, file) {
+  const base = resolve5(repo);
+  const abs = resolve5(base, file);
+  return abs === base || abs.startsWith(base + sep2);
+}
 function lineCount(repo, file) {
+  if (!insideRepo(repo, file)) return null;
   const abs = join6(repo, file);
   if (!existsSync2(abs)) return null;
   try {
@@ -1919,6 +1931,7 @@ function check(dossier, opts = {}) {
   for (const f of findings) {
     if (f.status === "dismissed") continue;
     for (const loc of locsOf(f)) {
+      if (!insideRepo(repo, loc.file)) continue;
       const lc = linesOf(loc.file);
       if (lc === null) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
       else if (loc.line < 1 || loc.line > lc) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range (file has ${lc} lines)` });
@@ -1947,7 +1960,7 @@ function check(dossier, opts = {}) {
 
 // src/commands/check.ts
 function runCheck(args) {
-  const run = resolve5(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve6(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
   const minSevRaw = flagStr(args, "min-severity");
@@ -1973,7 +1986,7 @@ function runCheck(args) {
 
 // src/commands/render.ts
 import { writeFileSync as writeFileSync3 } from "fs";
-import { join as join7, resolve as resolve6 } from "path";
+import { join as join7, resolve as resolve7 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -2205,7 +2218,7 @@ function renderHtml(d) {
 
 // src/commands/render.ts
 function runRender(args) {
-  const run = resolve6(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve7(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);

@@ -39,7 +39,9 @@ export function neighbors(graph: Graph, target: string, depth = 1): NeighborResu
       }
       for (const e of (inn.get(node) ?? []).slice().sort((a, b) => byStr(a.from, b.from))) {
         if (seen.has(e.from)) continue;
-        links.push({ node: e.from, direction: "in", kind: e.kind, weight: e.weight, depth: d, symbol: e.toSymbol });
+        // For an inbound edge the relevant symbol is the CALLER's (fromSymbol),
+        // not the callee in the target node.
+        links.push({ node: e.from, direction: "in", kind: e.kind, weight: e.weight, depth: d, symbol: e.fromSymbol });
         seen.add(e.from);
         next.push(e.from);
       }
