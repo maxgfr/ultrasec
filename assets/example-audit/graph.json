@@ -1,0 +1,64 @@
+{
+  "files": [
+    "src/db.js",
+    "src/report.js",
+    "src/server.js",
+    "src/sqlite.js"
+  ],
+  "edges": [
+    {
+      "from": "src/db.js",
+      "to": "src/sqlite.js",
+      "kind": "call",
+      "weight": 2,
+      "fromSymbol": "getUser",
+      "toSymbol": "query"
+    },
+    {
+      "from": "src/db.js",
+      "to": "src/sqlite.js",
+      "kind": "import",
+      "weight": 1
+    },
+    {
+      "from": "src/server.js",
+      "to": "src/db.js",
+      "kind": "call",
+      "weight": 1,
+      "toSymbol": "getUser"
+    },
+    {
+      "from": "src/server.js",
+      "to": "src/db.js",
+      "kind": "import",
+      "weight": 1
+    },
+    {
+      "from": "src/server.js",
+      "to": "src/report.js",
+      "kind": "call",
+      "weight": 1,
+      "toSymbol": "runReport"
+    },
+    {
+      "from": "src/server.js",
+      "to": "src/report.js",
+      "kind": "import",
+      "weight": 1
+    }
+  ],
+  "symbolDefs": {
+    "getUser": [
+      "src/db.js"
+    ],
+    "getUserSafe": [
+      "src/db.js"
+    ],
+    "runReport": [
+      "src/report.js"
+    ],
+    "query": [
+      "src/sqlite.js"
+    ]
+  }
+}

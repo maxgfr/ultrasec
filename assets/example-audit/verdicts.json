@@ -1,0 +1,19 @@
+[
+  {
+    "id": "3ffa0917b004",
+    "verdict": "supported",
+    "note": "req.query.name flows into execSync shell string in report.runReport",
+    "exploitPath": "GET /report?name=x;id"
+  },
+  {
+    "id": "54b733703450",
+    "verdict": "supported",
+    "note": "req.query.id concatenated into SQL across files; getUser builds a raw query",
+    "exploitPath": "GET /user?id=1 OR 1=1 -- "
+  },
+  {
+    "id": "9b0bcc91ea6a",
+    "verdict": "refuted",
+    "note": "res.send echoes server-generated report text, not attacker HTML in a browser-executable context"
+  }
+]
