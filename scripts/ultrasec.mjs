@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/types.ts
-var VERSION = "1.1.0";
+var VERSION = "1.1.1";
 var SCHEMA_VERSION = 1;
 var SEVERITIES = ["critical", "high", "medium", "low", "info"];
 var VERDICTS = ["supported", "partial", "unsupported", "refuted"];

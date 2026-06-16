@@ -1,7 +1,7 @@
 // Single source of truth for the version the bundle reports. `sync-version.mjs`
 // rewrites this string at release time (kept in lockstep with package.json and
 // SKILL.md). SCHEMA_VERSION bumps when the on-disk audit-dossier format changes.
-export const VERSION = "1.1.0";
+export const VERSION = "1.1.1";
 export const SCHEMA_VERSION = 1;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
