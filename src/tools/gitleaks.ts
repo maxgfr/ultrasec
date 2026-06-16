@@ -9,7 +9,10 @@ import { makeToolFinding } from "./normalize.js";
 export const gitleaks: ToolAdapter = {
   name: "gitleaks",
   category: "secret",
-  argv: (repo) => ["detect", "--no-git", "--source", repo, "--report-format", "json", "--report-path", "/dev/stdout", "--no-banner", "--redact"],
+  dockerImage: "ghcr.io/gitleaks/gitleaks:v8.30.1",
+  // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);
+  // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
+  argv: (target) => ["detect", "--no-git", "--source", target, "--report-format", "json", "--report-path", "-", "--no-banner", "--redact", "--exit-code", "0"],
   parse(raw): Finding[] {
     const arr = JSON.parse(raw || "[]") as any;
     if (!Array.isArray(arr)) return [];

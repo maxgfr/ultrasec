@@ -42,13 +42,17 @@ function parseSemgrep(tool: string, raw: string): Finding[] {
 export const semgrep: ToolAdapter = {
   name: "semgrep",
   category: "sast",
-  argv: (repo) => ["scan", "--json", "--quiet", "--config", "auto", repo],
+  // The semgrep/semgrep image entrypoint is NOT `semgrep`, so the runner prepends it.
+  dockerImage: "semgrep/semgrep:1.166.0",
+  dockerEntrypointIsTool: false,
+  argv: (target) => ["scan", "--json", "--quiet", "--config", "auto", target],
   parse: (raw) => parseSemgrep("semgrep", raw),
 };
 
 export const opengrep: ToolAdapter = {
   name: "opengrep",
   category: "sast",
-  argv: (repo) => ["scan", "--json", "--quiet", "--config", "auto", repo],
+  // No official OpenGrep image yet (only broken third-party ones) — native-only.
+  argv: (target) => ["scan", "--json", "--quiet", "--config", "auto", target],
   parse: (raw) => parseSemgrep("opengrep", raw),
 };

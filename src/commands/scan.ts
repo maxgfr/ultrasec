@@ -24,7 +24,8 @@ export function runScan(args: ParsedArgs): number {
   const toolsFlag = flagStr(args, "tools");
   const skipTools = flagBool(args, "no-tools") || toolsFlag === "none";
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : undefined;
-  const tool = skipTools ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] } : orchestrate(ADAPTERS, repo, which);
+  const useDocker = flagBool(args, "docker");
+  const tool = skipTools ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
 
   // Merge taint candidates with tool findings (ids are disjoint by construction).
   const findings = [...taintFindings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));

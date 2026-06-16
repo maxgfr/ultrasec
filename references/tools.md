@@ -27,6 +27,32 @@ Severity is normalized to critical/high/medium/low/info: label vocabularies are
 aliased; tools that emit only a CVSS vector or score (cargo-audit, osv-scanner)
 are bucketed via the CVSS v3 base-score calculator in `src/tools/cvss.ts`.
 
+## Via Docker (no native install)
+
+Two ways to get the scanners without installing them on the host:
+
+- **`scan --docker`** runs each scanner from its official, version-pinned image on
+  demand (repo bind-mounted at `/work`, paths rewritten back to repo-relative).
+  Only Docker is needed. Adapters with images: trivy, gitleaks, osv-scanner,
+  semgrep. Pinned: `ghcr.io/aquasecurity/trivy:0.71.1`,
+  `ghcr.io/gitleaks/gitleaks:v8.30.1`, `ghcr.io/google/osv-scanner:v2.3.8`,
+  `semgrep/semgrep:1.166.0` (its entrypoint isn't the tool, so the runner prepends
+  `semgrep`). OpenGrep has no official image yet → native-only.
+- **Toolbox image** (`docker/Dockerfile` + `docker-compose.yml`) bakes the engine +
+  all four scanners into one image (`docker compose build`), so the whole audit
+  runs in-container with everything on PATH. Versions are pinned build-args; arch
+  (amd64/arm64) is auto-detected.
+
+## Recommended additions (researched, not yet adapters)
+
+High-value, non-overlapping scanners worth adding next (official image / install):
+**trufflehog** — secret *verification* (authenticates candidates, cuts FP noise)
+`ghcr.io/trufflesecurity/trufflehog`; **checkov** — deep IaC/misconfig
+`bridgecrew/checkov` / `pip install checkov`; **syft** — SBOM (SPDX/CycloneDX)
+`anchore/syft`; **bandit** — Python AST security `pip install bandit`; **brakeman**
+— Rails-aware taint `gem install brakeman`. Add one by following "Adding an
+adapter" below.
+
 ## Triaging tool findings
 
 Tool findings arrive `open` like taint candidates — adjudicate them too. Scanners

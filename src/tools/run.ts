@@ -1,22 +1,27 @@
 import { execFileSync } from "node:child_process";
-import type { Category, Finding } from "../types.js";
+import type { Category, Finding, PathStep, CodeLoc } from "../types.js";
 import { detect } from "./registry.js";
 import { byStr } from "../util.js";
 
 // Adapter contract: each scanner provides how to invoke it and how to parse its
 // JSON into normalized Findings. The runner detects presence, runs the installed
 // ones, and tolerates the non-zero exit codes scanners use to signal "findings
-// found" (trivy/gitleaks/semgrep/osv-scanner all exit non-zero on hits).
+// found". With `useDocker`, a scanner that publishes an official image is run via
+// `docker run` instead — zero local install — with the repo bind-mounted at /work.
 
 export interface ToolAdapter {
   name: string;
   category: Category;
-  /** Args after the binary; `repo` is the absolute repo path. */
-  argv(repo: string): string[];
+  /** Args after the binary; `target` is the repo path (native) or /work (docker). */
+  argv(target: string): string[];
   /** Normalize raw stdout (JSON) into findings. Must not throw on empty input. */
   parse(raw: string, repo: string): Finding[];
   /** Some tools (govulncheck) stream NDJSON; default reads one JSON blob. */
   streaming?: boolean;
+  /** Pinned official image enabling `--docker` mode (omitted ⇒ native-only). */
+  dockerImage?: string;
+  /** False when the image's ENTRYPOINT is NOT the tool (e.g. semgrep). Default true. */
+  dockerEntrypointIsTool?: boolean;
 }
 
 export interface ToolRunResult {
@@ -27,8 +32,9 @@ export interface ToolRunResult {
   note: string;
 }
 
-const TIMEOUT_MS = 180_000;
+const TIMEOUT_MS = 300_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
+const MOUNT = "/work";
 
 function exec(name: string, args: string[], cwd: string): { stdout: string; failed: boolean; err?: string } {
   try {
@@ -43,26 +49,58 @@ function exec(name: string, args: string[], cwd: string): { stdout: string; fail
   } catch (e: unknown) {
     // execFileSync throws on non-zero exit — but scanners exit non-zero WHEN they
     // find issues, and still print JSON to stdout. Recover it.
-    const err = e as { stdout?: Buffer | string; status?: number; message?: string };
+    const err = e as { stdout?: Buffer | string; message?: string };
     const stdout = err.stdout ? err.stdout.toString() : "";
     if (stdout.trim()) return { stdout, failed: false };
     return { stdout: "", failed: true, err: err.message };
   }
 }
 
-/** Run one adapter if its binary is present. Never throws. */
-export function runAdapter(adapter: ToolAdapter, repo: string): ToolRunResult {
+/** Rewrite a /work-mounted path back to repo-relative (docker mode). */
+function unmountLoc<T extends CodeLoc>(loc: T): T {
+  if (loc.file.startsWith(MOUNT + "/")) return { ...loc, file: loc.file.slice(MOUNT.length + 1) };
+  if (loc.file === MOUNT) return { ...loc, file: "." };
+  return loc;
+}
+export function unmountFindings(findings: Finding[]): Finding[] {
+  return findings.map((f) => ({
+    ...f,
+    source: f.source ? unmountLoc(f.source) : f.source,
+    sink: f.sink ? unmountLoc(f.sink) : f.sink,
+    path: f.path ? (f.path.map(unmountLoc) as PathStep[]) : f.path,
+  }));
+}
+
+/** Run one adapter natively if its binary is present. Never throws. */
+function runNative(adapter: ToolAdapter, repo: string): ToolRunResult {
   if (!detect(adapter.name).installed) {
     return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
   }
   const { stdout, failed, err } = exec(adapter.name, adapter.argv(repo), repo);
+  return finish(adapter, repo, stdout, failed, err, false);
+}
+
+/** Run one adapter via its official Docker image. Never throws. */
+function runDocker(adapter: ToolAdapter, repo: string): ToolRunResult {
+  if (!adapter.dockerImage) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no docker image" };
+  const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(adapter.argv(MOUNT));
+  const args = ["run", "--rm", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
+  const { stdout, failed, err } = exec("docker", args, repo);
+  return finish(adapter, repo, stdout, failed, err, true);
+}
+
+function finish(adapter: ToolAdapter, repo: string, stdout: string, failed: boolean, err: string | undefined, docker: boolean): ToolRunResult {
   if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
   try {
-    const findings = adapter.parse(stdout, repo);
-    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)` };
+    const findings = docker ? unmountFindings(adapter.parse(stdout, repo)) : adapter.parse(stdout, repo);
+    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker ? " (docker)" : ""}` };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${(e as Error).message}` };
   }
+}
+
+export function runAdapter(adapter: ToolAdapter, repo: string, useDocker = false): ToolRunResult {
+  return useDocker ? runDocker(adapter, repo) : runNative(adapter, repo);
 }
 
 export interface OrchestrateResult {
@@ -71,17 +109,24 @@ export interface OrchestrateResult {
   results: ToolRunResult[];
 }
 
+export interface OrchestrateOptions {
+  which?: string[];
+  useDocker?: boolean;
+}
+
 /**
  * Run a set of adapters and merge their findings, de-duplicated by id. `which`
- * selects adapters by name; default = all registered. Missing tools are skipped
- * gracefully (recorded in `results`, not fatal).
+ * selects adapters by name; default = all. In docker mode only adapters with an
+ * official image run. Missing tools are skipped gracefully (recorded, not fatal).
  */
-export function orchestrate(adapters: ToolAdapter[], repo: string, which?: string[]): OrchestrateResult {
-  const selected = which && which.length ? adapters.filter((a) => which.includes(a.name)) : adapters;
+export function orchestrate(adapters: ToolAdapter[], repo: string, opts: OrchestrateOptions = {}): OrchestrateResult {
+  let selected = opts.which && opts.which.length ? adapters.filter((a) => opts.which!.includes(a.name)) : adapters;
+  if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
+
   const results: ToolRunResult[] = [];
   const merged = new Map<string, Finding>();
   for (const a of selected) {
-    const r = runAdapter(a, repo);
+    const r = runAdapter(a, repo, opts.useDocker);
     results.push(r);
     for (const f of r.findings) if (!merged.has(f.id)) merged.set(f.id, f);
   }

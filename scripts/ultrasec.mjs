@@ -1036,8 +1036,9 @@ function enumerateTaint(scan, graph) {
 
 // src/tools/run.ts
 import { execFileSync as execFileSync2 } from "child_process";
-var TIMEOUT_MS = 18e4;
+var TIMEOUT_MS = 3e5;
 var MAX_BUFFER = 64 * 1024 * 1024;
+var MOUNT = "/work";
 function exec(name, args, cwd) {
   try {
     const stdout = execFileSync2(name, args, {
@@ -1055,25 +1056,52 @@ function exec(name, args, cwd) {
     return { stdout: "", failed: true, err: err.message };
   }
 }
-function runAdapter(adapter, repo) {
+function unmountLoc(loc) {
+  if (loc.file.startsWith(MOUNT + "/")) return { ...loc, file: loc.file.slice(MOUNT.length + 1) };
+  if (loc.file === MOUNT) return { ...loc, file: "." };
+  return loc;
+}
+function unmountFindings(findings) {
+  return findings.map((f) => ({
+    ...f,
+    source: f.source ? unmountLoc(f.source) : f.source,
+    sink: f.sink ? unmountLoc(f.sink) : f.sink,
+    path: f.path ? f.path.map(unmountLoc) : f.path
+  }));
+}
+function runNative(adapter, repo) {
   if (!detect(adapter.name).installed) {
     return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
   }
   const { stdout, failed, err } = exec(adapter.name, adapter.argv(repo), repo);
+  return finish(adapter, repo, stdout, failed, err, false);
+}
+function runDocker(adapter, repo) {
+  if (!adapter.dockerImage) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no docker image" };
+  const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(adapter.argv(MOUNT));
+  const args = ["run", "--rm", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
+  const { stdout, failed, err } = exec("docker", args, repo);
+  return finish(adapter, repo, stdout, failed, err, true);
+}
+function finish(adapter, repo, stdout, failed, err, docker) {
   if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
   try {
-    const findings = adapter.parse(stdout, repo);
-    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)` };
+    const findings = docker ? unmountFindings(adapter.parse(stdout, repo)) : adapter.parse(stdout, repo);
+    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker ? " (docker)" : ""}` };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };
   }
 }
-function orchestrate(adapters, repo, which) {
-  const selected = which && which.length ? adapters.filter((a) => which.includes(a.name)) : adapters;
+function runAdapter(adapter, repo, useDocker = false) {
+  return useDocker ? runDocker(adapter, repo) : runNative(adapter, repo);
+}
+function orchestrate(adapters, repo, opts = {}) {
+  let selected = opts.which && opts.which.length ? adapters.filter((a) => opts.which.includes(a.name)) : adapters;
+  if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
   const results = [];
   const merged = /* @__PURE__ */ new Map();
   for (const a of selected) {
-    const r = runAdapter(a, repo);
+    const r = runAdapter(a, repo, opts.useDocker);
     results.push(r);
     for (const f of r.findings) if (!merged.has(f.id)) merged.set(f.id, f);
   }
@@ -1166,7 +1194,8 @@ function firstCwe(input) {
 var trivy = {
   name: "trivy",
   category: "dep",
-  argv: (repo) => ["fs", "--scanners", "vuln,secret,misconfig", "--format", "json", "--quiet", repo],
+  dockerImage: "ghcr.io/aquasecurity/trivy:0.71.1",
+  argv: (target) => ["fs", "--scanners", "vuln,secret,misconfig", "--format", "json", "--quiet", target],
   parse(raw) {
     const data = JSON.parse(raw || "{}");
     const out = [];
@@ -1227,7 +1256,10 @@ var trivy = {
 var gitleaks = {
   name: "gitleaks",
   category: "secret",
-  argv: (repo) => ["detect", "--no-git", "--source", repo, "--report-format", "json", "--report-path", "/dev/stdout", "--no-banner", "--redact"],
+  dockerImage: "ghcr.io/gitleaks/gitleaks:v8.30.1",
+  // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);
+  // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
+  argv: (target) => ["detect", "--no-git", "--source", target, "--report-format", "json", "--report-path", "-", "--no-banner", "--redact", "--exit-code", "0"],
   parse(raw) {
     const arr = JSON.parse(raw || "[]");
     if (!Array.isArray(arr)) return [];
@@ -1301,7 +1333,9 @@ function deriveSeverity(input, fallback = "medium") {
 var osvScanner = {
   name: "osv-scanner",
   category: "dep",
-  argv: (repo) => ["--format", "json", "--output", "-", "-r", repo],
+  dockerImage: "ghcr.io/google/osv-scanner:v2.3.8",
+  // v2 CLI: `scan source` walks a directory for lockfiles/manifests. JSON → stdout.
+  argv: (target) => ["scan", "source", "--recursive", "--format", "json", target],
   parse(raw) {
     const data = JSON.parse(raw || "{}");
     const out = [];
@@ -1372,13 +1406,17 @@ function parseSemgrep(tool, raw) {
 var semgrep = {
   name: "semgrep",
   category: "sast",
-  argv: (repo) => ["scan", "--json", "--quiet", "--config", "auto", repo],
+  // The semgrep/semgrep image entrypoint is NOT `semgrep`, so the runner prepends it.
+  dockerImage: "semgrep/semgrep:1.166.0",
+  dockerEntrypointIsTool: false,
+  argv: (target) => ["scan", "--json", "--quiet", "--config", "auto", target],
   parse: (raw) => parseSemgrep("semgrep", raw)
 };
 var opengrep = {
   name: "opengrep",
   category: "sast",
-  argv: (repo) => ["scan", "--json", "--quiet", "--config", "auto", repo],
+  // No official OpenGrep image yet (only broken third-party ones) — native-only.
+  argv: (target) => ["scan", "--json", "--quiet", "--config", "auto", target],
   parse: (raw) => parseSemgrep("opengrep", raw)
 };
 
@@ -1560,7 +1598,8 @@ function runScan(args) {
   const toolsFlag = flagStr(args, "tools");
   const skipTools = flagBool(args, "no-tools") || toolsFlag === "none";
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
-  const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, which);
+  const useDocker = flagBool(args, "docker");
+  const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
   const findings = [...taintFindings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
   const languages = [...new Set(scan.files.map((f) => f.lang))].sort();
   const manifest = {

@@ -1,0 +1,21 @@
+# ultrasec toolbox — run the engine + all bundled scanners against a repo, with
+# nothing installed on the host but Docker.
+#
+#   TARGET=/path/to/repo docker compose run --rm ultrasec scan --repo /work --out /work/.ultrasec
+#   TARGET=/path/to/repo docker compose run --rm ultrasec tools
+#
+# The repo is bind-mounted read-write at /work (so the audit dossier can be
+# written under it). The trivy/grype DB caches persist in named volumes.
+services:
+  ultrasec:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    image: ultrasec-toolbox
+    volumes:
+      - "${TARGET:-.}:/work"
+      - trivy-cache:/root/.cache
+    working_dir: /work
+
+volumes:
+  trivy-cache:
