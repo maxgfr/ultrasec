@@ -1,6 +1,6 @@
 {
   "name": "ultrasec",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Audit a whole repo for security vulnerabilities by tracing untrusted data across functions and files (cross-file source→sink taint), orchestrating best-in-class OSS scanners (Trivy, OpenGrep/Semgrep, gitleaks, osv-scanner…), and adversarially verifying every finding into a cited, tiered report. A deterministic zero-dependency engine builds the link-graph and evidence packets; the AI does the security reasoning. A skills.sh agent skill.",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
