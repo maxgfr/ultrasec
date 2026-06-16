@@ -262,9 +262,13 @@ export function extract(spec: LangSpec, content: string): Extraction {
     const line = lines[i]!;
     const ln = i + 1;
 
+    // Names defined ON this line — so we don't mistake `function query(` or
+    // `def handle(` for a *call* to query/handle (the def syntax has parens too).
+    const definedHere = new Set<string>();
     for (const d of spec.defs) {
       const m = d.re.exec(line);
       if (m && m[1]) {
+        definedHere.add(m[1]);
         symbols.push({ name: m[1], kind: d.kind, line: ln, exported: isExported(spec.exportRule, m[1], line, content) });
       }
     }
@@ -278,6 +282,7 @@ export function extract(spec: LangSpec, content: string): Extraction {
       const receiver = cm[1];
       const callee = cm[2]!;
       if (kw.has(callee)) continue;
+      if (!receiver && definedHere.has(callee)) continue; // a definition, not a call
       calls.push(receiver ? { callee, receiver, line: ln } : { callee, line: ln });
     }
   }

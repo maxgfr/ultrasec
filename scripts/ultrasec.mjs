@@ -2,6 +2,8 @@
 
 // src/types.ts
 var VERSION = "0.0.0-development";
+var SCHEMA_VERSION = 1;
+var SEVERITIES = ["critical", "high", "medium", "low", "info"];
 
 // src/util.ts
 import { createHash } from "crypto";
@@ -37,6 +39,9 @@ function flagStr(args, name) {
 function flagBool(args, name) {
   const v = args.flags[name];
   return v === true || v === "true";
+}
+function shortHash(input, len = 12) {
+  return createHash("sha256").update(input).digest("hex").slice(0, len);
 }
 function byStr(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
@@ -497,9 +502,11 @@ function extract(spec, content) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const ln = i + 1;
+    const definedHere = /* @__PURE__ */ new Set();
     for (const d of spec.defs) {
       const m = d.re.exec(line);
       if (m && m[1]) {
+        definedHere.add(m[1]);
         symbols.push({ name: m[1], kind: d.kind, line: ln, exported: isExported(spec.exportRule, m[1], line, content) });
       }
     }
@@ -513,6 +520,7 @@ function extract(spec, content) {
       const receiver = cm[1];
       const callee = cm[2];
       if (kw.has(callee)) continue;
+      if (!receiver && definedHere.has(callee)) continue;
       calls.push(receiver ? { callee, receiver, line: ln } : { callee, line: ln });
     }
   }
@@ -733,6 +741,524 @@ function runGraph(args) {
   return 0;
 }
 
+// src/commands/scan.ts
+import { resolve } from "path";
+
+// src/taint.ts
+import { join as join2 } from "path";
+
+// src/catalog.ts
+function appliesTo(languages, langId) {
+  return languages.includes("*") || languages.includes(langId);
+}
+function cweUrl(cwe) {
+  const n = cwe.replace(/\D/g, "");
+  return `https://cwe.mitre.org/data/definitions/${n}.html`;
+}
+var SINKS = [
+  {
+    kind: "sql",
+    cwe: "CWE-89",
+    severity: "high",
+    languages: ["javascript", "python", "go", "java", "php", "ruby", "rust", "csharp", "kotlin", "scala"],
+    callees: ["query", "execute", "executeQuery", "executemany", "raw", "queryRaw", "unsafe", "exec_query"],
+    title: "SQL injection",
+    note: "Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query."
+  },
+  {
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["*"],
+    callees: ["exec", "execSync", "spawn", "spawnSync", "system", "popen", "Popen", "shell_exec", "passthru", "proc_open", "check_output", "check_call", "call", "run"],
+    receivers: ["child_process", "subprocess", "os", "Runtime", "shell"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell."
+  },
+  {
+    kind: "code",
+    cwe: "CWE-94",
+    severity: "high",
+    languages: ["*"],
+    callees: ["eval", "Function", "runInThisContext", "runInContext", "compile", "execfile"],
+    title: "Code injection / eval",
+    note: "Tainted data evaluated as code. Almost never safe; verify the argument is a constant."
+  },
+  {
+    kind: "path",
+    cwe: "CWE-22",
+    severity: "high",
+    languages: ["*"],
+    callees: ["readFile", "readFileSync", "writeFile", "writeFileSync", "createReadStream", "createWriteStream", "sendFile", "unlink", "open", "readdir", "appendFile"],
+    title: "Path traversal",
+    note: "Tainted data used as a filesystem path. Verify it's confined (basename/realpath + allow-list under a base dir)."
+  },
+  {
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["*"],
+    callees: ["fetch", "request", "urlopen", "urlretrieve", "got", "axios", "openConnection"],
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a request URL/host. Verify the destination is allow-listed (no internal/metadata endpoints)."
+  },
+  {
+    kind: "xss",
+    cwe: "CWE-79",
+    severity: "medium",
+    languages: ["javascript", "python", "php", "ruby"],
+    callees: ["send", "write", "end", "html", "render_template_string", "writeHead"],
+    receivers: ["res", "response", "resp", "w"],
+    title: "Cross-site scripting (reflected)",
+    note: "Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser."
+  },
+  {
+    kind: "deserialize",
+    cwe: "CWE-502",
+    severity: "high",
+    languages: ["*"],
+    callees: ["loads", "load", "unserialize", "deserialize", "readObject", "load_yaml", "full_load"],
+    receivers: ["pickle", "yaml", "marshal", "cPickle", "ObjectInputStream"],
+    title: "Insecure deserialization",
+    note: "Tainted data deserialized into objects. Use a safe loader (yaml.safe_load, JSON) and never unpickle untrusted input."
+  },
+  {
+    kind: "crypto",
+    cwe: "CWE-327",
+    severity: "medium",
+    languages: ["*"],
+    callees: ["md5", "sha1", "createCipher", "DES", "RC4"],
+    title: "Weak cryptography",
+    note: "Broken/weak primitive. Use SHA-256+/bcrypt/argon2 and authenticated encryption (AES-GCM)."
+  },
+  {
+    kind: "redirect",
+    cwe: "CWE-601",
+    severity: "medium",
+    languages: ["javascript", "python", "php", "ruby"],
+    callees: ["redirect"],
+    receivers: ["res", "response", "resp"],
+    title: "Open redirect",
+    note: "Tainted data used as a redirect target. Allow-list the destination or only permit relative paths."
+  }
+];
+function findSinks(lang, calls) {
+  const out = [];
+  for (const c of calls) {
+    for (const rule of SINKS) {
+      if (!appliesTo(rule.languages, lang.id)) continue;
+      if (!rule.callees.includes(c.callee)) continue;
+      if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) {
+        if (rule.kind !== "sql") continue;
+      }
+      out.push({
+        line: c.line,
+        callee: c.callee,
+        receiver: c.receiver,
+        kind: rule.kind,
+        cwe: rule.cwe,
+        severity: rule.severity,
+        title: rule.title,
+        note: rule.note
+      });
+      break;
+    }
+  }
+  return out;
+}
+var SOURCES = [
+  { kind: "http", languages: ["javascript"], re: /\breq(?:uest)?\s*\.\s*(?:query|body|params|headers|cookies|url|originalUrl|hostname|ip)\b/, title: "HTTP request input" },
+  { kind: "http", languages: ["javascript"], re: /\bctx\s*\.\s*(?:request|query|params|body)\b/, title: "Koa/HTTP context input" },
+  { kind: "http", languages: ["python"], re: /\brequest\s*\.\s*(?:args|form|values|json|data|files|cookies|headers|GET|POST)\b/, title: "HTTP request input" },
+  { kind: "http", languages: ["php"], re: /\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\b/, title: "HTTP superglobal input" },
+  { kind: "http", languages: ["java", "kotlin", "scala"], re: /\.get(?:Parameter|Header|QueryString)\s*\(/, title: "Servlet request input" },
+  { kind: "http", languages: ["ruby"], re: /\bparams\s*\[/, title: "Rails params input" },
+  { kind: "http", languages: ["go"], re: /\br\s*\.\s*(?:URL|FormValue|PostFormValue|Header)\b/, title: "net/http request input" },
+  { kind: "cli", languages: ["javascript"], re: /\bprocess\.argv\b/, title: "CLI argument" },
+  { kind: "cli", languages: ["python"], re: /\bsys\.argv\b/, title: "CLI argument" },
+  { kind: "cli", languages: ["go"], re: /\bos\.Args\b/, title: "CLI argument" },
+  { kind: "env", languages: ["javascript"], re: /\bprocess\.env\b/, title: "Environment variable" },
+  { kind: "env", languages: ["python"], re: /\bos\.(?:environ|getenv)\b/, title: "Environment variable" },
+  { kind: "env", languages: ["*"], re: /\bgetenv\s*\(/, title: "Environment variable" },
+  { kind: "stdin", languages: ["python"], re: /\binput\s*\(/, title: "Interactive/stdin input" }
+];
+function findSources(lang, content) {
+  const out = [];
+  const lines = content.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    for (const rule of SOURCES) {
+      if (!appliesTo(rule.languages, lang.id)) continue;
+      const m = rule.re.exec(line);
+      if (m) out.push({ line: i + 1, kind: rule.kind, match: m[0], title: rule.title });
+    }
+  }
+  return out;
+}
+var SANITIZERS = [
+  { kind: "sql", languages: ["*"], re: /\?|\$\d+|:\w+|%s|@\w+/, note: "looks parameterized (placeholder present)" },
+  { kind: "command", languages: ["*"], re: /\bexecFile\b|\bexecvp?\b|shlex\.quote|escapeshellarg|\.split\(/, note: "argv-array / quoting present" },
+  { kind: "path", languages: ["*"], re: /\bbasename\b|\brealpath\b|secure_filename|path\.resolve|startsWith\(/, note: "path-confinement helper present" },
+  { kind: "xss", languages: ["*"], re: /\bescape(?:Html)?\b|sanitize|DOMPurify|bleach|markupsafe|escapeHTML/, note: "escaping/sanitizer present" },
+  { kind: "deserialize", languages: ["*"], re: /safe_load|safeLoad|JSON\.parse/, note: "safe loader present" },
+  { kind: "*", languages: ["*"], re: /\bparseInt\b|\bNumber\(|\bInteger\.parse|validator\.|\bz\.|Joi\.|\bisInt\b|\bUUID\b/, note: "type-coercion/validation present" }
+];
+function findSanitizers(lang, line, sinkKind) {
+  const hints = [];
+  for (const rule of SANITIZERS) {
+    if (!appliesTo(rule.languages, lang.id)) continue;
+    if (rule.kind !== "*" && rule.kind !== sinkKind) continue;
+    if (rule.re.test(line)) hints.push(rule.note);
+  }
+  return hints;
+}
+
+// src/taint.ts
+var MAX_DEPTH = 6;
+var MAX_FINDINGS = 1e3;
+function severityRank(s) {
+  return SEVERITIES.indexOf(s);
+}
+function enclosingSymbol2(file, line) {
+  let best;
+  for (const s of file.symbols) {
+    if (s.line <= line && (!best || s.line > best.line)) best = s;
+  }
+  return best?.name;
+}
+function truncate(s, n = 60) {
+  return s.length > n ? s.slice(0, n - 1) + "\u2026" : s;
+}
+function enumerateTaint(scan, graph) {
+  const byRel = new Map(scan.files.map((f) => [f.rel, f]));
+  const contentCache = /* @__PURE__ */ new Map();
+  const sourceCache = /* @__PURE__ */ new Map();
+  const lineCache = /* @__PURE__ */ new Map();
+  const content = (rel) => {
+    let c = contentCache.get(rel);
+    if (c === void 0) contentCache.set(rel, c = readText(join2(scan.repo, rel)));
+    return c;
+  };
+  const lines = (rel) => {
+    let l = lineCache.get(rel);
+    if (!l) lineCache.set(rel, l = content(rel).split(/\r?\n/));
+    return l;
+  };
+  const sourcesOf = (rel) => {
+    let s = sourceCache.get(rel);
+    if (!s) {
+      const lang = langForFile(rel);
+      s = lang ? findSources(lang, content(rel)) : [];
+      sourceCache.set(rel, s);
+    }
+    return s;
+  };
+  const findings = [];
+  const emitted = /* @__PURE__ */ new Set();
+  const emit = (sink, sinkFile, sinkSym, srcHit, srcFile, hops) => {
+    const id = shortHash(`${srcFile}:${srcHit.line}->${sinkFile}:${sink.line}:${sink.kind}`);
+    if (emitted.has(id)) return;
+    emitted.add(id);
+    const srcStep = {
+      file: srcFile,
+      line: srcHit.line,
+      symbol: enclosingSymbol2(byRel.get(srcFile), srcHit.line),
+      why: `untrusted input (${srcHit.kind}): ${truncate(srcHit.match)}`
+    };
+    const path = [srcStep, ...hops];
+    const sinkLine = lines(sinkFile)[sink.line - 1] ?? "";
+    const lang = langForFile(sinkFile);
+    const sanitizers = findSanitizers(lang, sinkLine, sink.kind);
+    const crossFile = new Set(path.map((p) => p.file)).size > 1;
+    const confidence = sanitizers.length ? "low" : "low";
+    const note = sanitizers.length ? ` Possible sanitizer on the sink line (${sanitizers.join("; ")}) \u2014 confirm it actually neutralizes this flow.` : "";
+    findings.push({
+      id,
+      category: "taint",
+      cwe: sink.cwe,
+      title: `${sink.title}: untrusted input reaches ${sink.callee}()`,
+      severity: sink.severity,
+      confidence,
+      source: { file: srcStep.file, line: srcStep.line, kind: srcHit.kind },
+      sink: { file: sinkFile, line: sink.line, kind: sink.kind, symbol: sinkSym },
+      path,
+      message: `${crossFile ? "Cross-file" : "Intra-file"} candidate: ${srcHit.kind} input at ${srcStep.file}:${srcStep.line} may reach the ${sink.kind} sink ${sink.callee}() at ${sinkFile}:${sink.line} through ${path.length - 1} hop(s). ${sink.note}${note} Heuristic \u2014 verify the data actually reaches the sink unsanitized before trusting it.`,
+      tool: "ultrasec",
+      references: [cweUrl(sink.cwe)],
+      status: "open"
+    });
+  };
+  for (const file of scan.files) {
+    if (findings.length >= MAX_FINDINGS) break;
+    const lang = langForFile(file.rel);
+    if (!lang) continue;
+    for (const sink of findSinks(lang, file.calls)) {
+      const sinkSym = enclosingSymbol2(file, sink.line);
+      const sinkStep = {
+        file: file.rel,
+        line: sink.line,
+        symbol: sinkSym,
+        why: `${sink.kind} sink: ${sink.callee}()`
+      };
+      const start = { file: file.rel, sym: sinkSym, entryLine: sink.line, hops: [sinkStep], depth: 0 };
+      const queue = [start];
+      const visited = /* @__PURE__ */ new Set([`${file.rel}#${sinkSym ?? sink.line}`]);
+      while (queue.length) {
+        const fr = queue.shift();
+        const above = sourcesOf(fr.file).filter((s) => s.line <= fr.entryLine);
+        if (above.length) {
+          const nearest = above.reduce((a, b) => b.line > a.line ? b : a);
+          emit(sink, file.rel, sinkSym, nearest, fr.file, fr.hops);
+        }
+        if (fr.depth >= MAX_DEPTH || !fr.sym) continue;
+        const defs = graph.symbolDefs[fr.sym];
+        if (!defs || defs.length !== 1 || defs[0] !== fr.file) continue;
+        for (const caller of scan.files) {
+          if (caller.rel === fr.file) continue;
+          for (const c of caller.calls) {
+            if (c.callee !== fr.sym) continue;
+            const callerSym = enclosingSymbol2(caller, c.line);
+            const key = `${caller.rel}#${callerSym ?? c.line}`;
+            if (visited.has(key)) continue;
+            visited.add(key);
+            const hop = { file: caller.rel, line: c.line, symbol: callerSym, why: `calls ${fr.sym}()` };
+            queue.push({ file: caller.rel, sym: callerSym, entryLine: c.line, hops: [hop, ...fr.hops], depth: fr.depth + 1 });
+          }
+        }
+      }
+    }
+  }
+  return findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || byStr(a.id, b.id));
+}
+
+// src/store.ts
+import { mkdirSync, writeFileSync, readFileSync as readFileSync2, existsSync } from "fs";
+import { join as join3 } from "path";
+function emptySeverityCounts() {
+  return { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+}
+function countBySeverity(findings) {
+  const c = emptySeverityCounts();
+  for (const f of findings) c[f.severity]++;
+  return c;
+}
+function writeDossier(outDir, d) {
+  mkdirSync(outDir, { recursive: true });
+  writeFileSync(join3(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
+  writeFileSync(join3(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
+  writeFileSync(join3(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
+  writeFileSync(join3(outDir, "DOSSIER.md"), renderDossierMd(d));
+}
+function loadDossier(outDir) {
+  const read = (name) => JSON.parse(readFileSync2(join3(outDir, name), "utf8"));
+  if (!existsSync(join3(outDir, "findings.json"))) {
+    throw new Error(`no audit dossier at ${outDir} (run \`ultrasec scan --out ${outDir}\` first)`);
+  }
+  return { manifest: read("manifest.json"), findings: read("findings.json"), graph: read("graph.json") };
+}
+function severityBadge(s) {
+  return { critical: "\u{1F7E5} CRIT", high: "\u{1F7E7} HIGH", medium: "\u{1F7E8} MED", low: "\u{1F7E9} LOW", info: "\u2B1C INFO" }[s];
+}
+function renderDossierMd(d) {
+  const { manifest: m, findings } = d;
+  const c = m.counts.bySeverity;
+  const L = [];
+  L.push(`# ultrasec audit dossier`);
+  L.push("");
+  L.push(`- repo: \`${m.repo}\``);
+  L.push(`- languages: ${m.languages.join(", ") || "\u2014"}`);
+  L.push(`- external tools run: ${m.toolsRun.join(", ") || "none (graph + taint only)"}`);
+  L.push(`- findings: **${m.counts.findings}** \u2014 ${SEVERITIES.map((s) => `${severityBadge(s)} ${c[s]}`).join("  ")}`);
+  L.push("");
+  L.push(`> Candidates are deterministic and **recall-oriented** \u2014 every one needs`);
+  L.push(`> adjudication. Open each with \`ultrasec dossier <id>\` (real code + the`);
+  L.push(`> cross-file path), confirm whether the flow is real and exploitable, then`);
+  L.push(`> record a verdict via \`ultrasec verify\`. An uncertain high-severity stays`);
+  L.push(`> **needs-human** \u2014 never silently dropped.`);
+  L.push("");
+  if (!findings.length) {
+    L.push(`_No candidate findings._`);
+    return L.join("\n") + "\n";
+  }
+  L.push(`## Candidates`);
+  L.push("");
+  for (const f of findings) {
+    L.push(`### ${f.id} \u2014 ${severityBadge(f.severity)} ${f.title}`);
+    L.push("");
+    L.push(`- category: ${f.category}${f.cwe ? ` \xB7 ${f.cwe}` : ""} \xB7 confidence ${f.confidence} \xB7 status ${f.status}${f.tool !== "ultrasec" ? ` \xB7 via ${f.tool}` : ""}`);
+    if (f.path && f.path.length) {
+      L.push(`- path: ${f.path.map((p) => `\`${p.file}:${p.line}\``).join(" \u2192 ")}`);
+    } else if (f.sink) {
+      L.push(`- at: \`${f.sink.file}:${f.sink.line}\``);
+    }
+    L.push(`- ${f.message}`);
+    L.push("");
+  }
+  L.push(`---`);
+  L.push(`Engine: ultrasec ${m.version}. ${m.generatedNote}`);
+  return L.join("\n") + "\n";
+}
+
+// src/commands/scan.ts
+function runScan(args) {
+  const repo = resolve(flagStr(args, "repo") ?? ".");
+  const out = resolve(flagStr(args, "out") ?? ".ultrasec");
+  const scan = scanRepo(repo);
+  const graph = buildGraph(scan);
+  const findings = enumerateTaint(scan, graph);
+  const languages = [...new Set(scan.files.map((f) => f.lang))].sort();
+  const manifest = {
+    version: VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    repo,
+    generatedNote: "Deterministic: re-scanning an unchanged repo yields the same findings.",
+    languages,
+    toolsRun: [],
+    // external tools are added in M4
+    counts: { findings: findings.length, bySeverity: countBySeverity(findings) }
+  };
+  const dossier = { manifest, findings, graph };
+  writeDossier(out, dossier);
+  if (flagBool(args, "json")) {
+    println(JSON.stringify({ out, counts: manifest.counts, languages, files: scan.files.length }, null, 2));
+    return 0;
+  }
+  const c = manifest.counts.bySeverity;
+  println(`ultrasec scan \u2192 ${out}`);
+  println(`  files scanned: ${scan.files.length}  \xB7  languages: ${languages.join(", ") || "\u2014"}`);
+  println(`  candidate findings: ${findings.length}  (crit ${c.critical} \xB7 high ${c.high} \xB7 med ${c.medium} \xB7 low ${c.low})`);
+  if (!findings.length) {
+    println(`  no taint candidates \u2014 still review the DOSSIER and run external tools (\`ultrasec tools\`).`);
+  } else {
+    println(`  next: read ${out}/DOSSIER.md, then \`ultrasec dossier <id> --run ${out}\` to adjudicate.`);
+  }
+  return 0;
+}
+
+// src/commands/dossier.ts
+import { resolve as resolve2 } from "path";
+
+// src/dossier.ts
+import { join as join4 } from "path";
+function excerpt(repo, step, ctx = 3) {
+  const lines = readText(join4(repo, step.file)).split(/\r?\n/);
+  const lo = Math.max(1, step.line - ctx);
+  const hi = Math.min(lines.length, step.line + ctx);
+  const out = [];
+  for (let n = lo; n <= hi; n++) {
+    const marker = n === step.line ? ">>" : "  ";
+    out.push(`${marker} ${String(n).padStart(4)} | ${lines[n - 1] ?? ""}`);
+  }
+  return out.join("\n");
+}
+function renderFindingDossier(repo, graph, f) {
+  const L = [];
+  L.push(`# ${f.id} \u2014 ${f.title}`);
+  L.push("");
+  L.push(`- severity: ${f.severity} \xB7 confidence: ${f.confidence} \xB7 status: ${f.status}`);
+  if (f.cwe) L.push(`- ${f.cwe} \u2014 ${(f.references ?? [])[0] ?? ""}`);
+  L.push(`- category: ${f.category}${f.tool !== "ultrasec" ? ` \xB7 reported by ${f.tool}` : ""}`);
+  L.push("");
+  L.push(`## What to decide`);
+  L.push(f.message);
+  L.push("");
+  if (f.path && f.path.length) {
+    L.push(`## Cross-file path (source \u2192 sink)`);
+    L.push("");
+    f.path.forEach((step, i) => {
+      const tag = i === 0 ? "SOURCE" : i === f.path.length - 1 ? "SINK" : "HOP";
+      L.push(`### ${i + 1}. [${tag}] ${step.file}:${step.line}${step.symbol ? ` \u2014 in ${step.symbol}()` : ""}`);
+      L.push(`_${step.why}_`);
+      L.push("```");
+      L.push(excerpt(repo, step));
+      L.push("```");
+      L.push("");
+    });
+  } else if (f.sink) {
+    L.push(`## Location`);
+    L.push("```");
+    L.push(excerpt(repo, { file: f.sink.file, line: f.sink.line, why: "" }));
+    L.push("```");
+    L.push("");
+  }
+  const anchor = f.sink?.file ?? f.path?.[f.path.length - 1]?.file;
+  if (anchor && graph.files.includes(anchor)) {
+    const nb = neighbors(graph, anchor, 1).links;
+    if (nb.length) {
+      L.push(`## Graph neighbours of \`${anchor}\``);
+      for (const l of nb) {
+        const arrow = l.direction === "out" ? "\u2192" : "\u2190";
+        L.push(`- ${arrow} ${l.kind} ${l.node}${l.symbol ? ` [${l.symbol}]` : ""}`);
+      }
+      L.push("");
+    }
+  }
+  L.push(`## How to verify`);
+  L.push(`1. Confirm the SOURCE is genuinely attacker-controlled.`);
+  L.push(`2. Follow each HOP \u2014 does the tainted value actually pass through unchanged?`);
+  L.push(`3. Check for a sanitizer/validator/authz guard anywhere on the path.`);
+  L.push(`4. Confirm the SINK is exploitable with the value that arrives.`);
+  L.push(`5. Record \`supported\` / \`partial\` / \`unsupported\` / \`refuted\` via \`ultrasec verify\`.`);
+  L.push(`   If unsure and severity is high, leave it **needs-human** \u2014 do not dismiss.`);
+  return L.join("\n") + "\n";
+}
+
+// src/commands/dossier.ts
+function runDossier(args) {
+  const run = resolve2(flagStr(args, "run") ?? ".ultrasec");
+  const id = args._[1];
+  if (!id) {
+    eprintln("ultrasec dossier: need a <finding-id>. List them in DOSSIER.md or with `paths`.");
+    return 2;
+  }
+  let d;
+  try {
+    d = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec dossier: ${e.message}`);
+    return 2;
+  }
+  const f = d.findings.find((x) => x.id === id || x.id.startsWith(id));
+  if (!f) {
+    eprintln(`ultrasec dossier: no finding "${id}" in ${run}.`);
+    return 2;
+  }
+  const repo = flagStr(args, "repo") ?? d.manifest.repo;
+  println(renderFindingDossier(repo, d.graph, f));
+  return 0;
+}
+
+// src/commands/paths.ts
+import { resolve as resolve3 } from "path";
+function runPaths(args) {
+  const run = resolve3(flagStr(args, "run") ?? ".ultrasec");
+  const kind = flagStr(args, "kind");
+  const sev = flagStr(args, "severity");
+  let d;
+  try {
+    d = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec paths: ${e.message}`);
+    return 2;
+  }
+  let findings = d.findings.filter((f) => f.path && f.path.length);
+  if (kind) findings = findings.filter((f) => f.sink?.kind === kind);
+  if (sev) findings = findings.filter((f) => f.severity === sev);
+  if (flagBool(args, "json")) {
+    println(JSON.stringify(findings.map((f) => ({ id: f.id, severity: f.severity, cwe: f.cwe, path: f.path })), null, 2));
+    return 0;
+  }
+  if (!findings.length) {
+    println("no candidate taint paths match.");
+    return 0;
+  }
+  for (const f of findings) {
+    println(`${f.id}  ${f.severity.padEnd(8)} ${f.cwe ?? ""}  ${f.title}`);
+    println(`        ${f.path.map((p) => `${p.file}:${p.line}`).join(" \u2192 ")}`);
+  }
+  return 0;
+}
+
 // src/cli.ts
 var HELP = `ultrasec ${VERSION} \u2014 cross-file security audit (taint + AI + tool orchestration)
 
@@ -764,9 +1290,6 @@ GLOBAL
 Run \`ultrasec <command> --help\` for command-specific options.
 `;
 var NOT_YET = {
-  scan: "M2/M3",
-  paths: "M3",
-  dossier: "M3",
   verify: "M5",
   render: "M5",
   check: "M5"
@@ -784,6 +1307,12 @@ async function dispatch(cmd, args) {
       return runTools(args);
     case "graph":
       return runGraph(args);
+    case "scan":
+      return runScan(args);
+    case "dossier":
+      return runDossier(args);
+    case "paths":
+      return runPaths(args);
     default:
       if (cmd in NOT_YET) {
         eprintln(`ultrasec: \`${cmd}\` is not implemented yet (planned in ${NOT_YET[cmd]}).`);

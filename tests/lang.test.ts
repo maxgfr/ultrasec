@@ -48,6 +48,23 @@ describe("extract (python)", () => {
   });
 });
 
+describe("def lines are not mistaken for calls", () => {
+  it("does not extract a call from `function query(...)`", () => {
+    const js = langForFile("x.js")!;
+    const { calls, symbols } = extract(js, "function query(sql, params) {\n  return db.run(sql);\n}");
+    expect(symbols.some((s) => s.name === "query")).toBe(true);
+    expect(calls.some((c) => c.callee === "query" && !c.receiver)).toBe(false);
+    expect(calls.some((c) => c.callee === "run")).toBe(true); // real call kept
+  });
+
+  it("does not extract a call from python `def handle(req):`", () => {
+    const py = langForFile("x.py")!;
+    const { calls } = extract(py, "def handle(req):\n    return run(req)");
+    expect(calls.some((c) => c.callee === "handle")).toBe(false);
+    expect(calls.some((c) => c.callee === "run")).toBe(true);
+  });
+});
+
 describe("extract (go) export rule = capitalized", () => {
   const go = langForFile("x.go")!;
   const { symbols } = extract(go, ["func Handler(w, r) {", "}", "func helper() {", "}"].join("\n"));
