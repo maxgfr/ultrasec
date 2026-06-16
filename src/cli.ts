@@ -5,6 +5,9 @@ import { runGraph } from "./commands/graph.js";
 import { runScan } from "./commands/scan.js";
 import { runDossier } from "./commands/dossier.js";
 import { runPaths } from "./commands/paths.js";
+import { runVerify } from "./commands/verify.js";
+import { runCheck } from "./commands/check.js";
+import { runRender } from "./commands/render.js";
 
 const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
 
@@ -36,12 +39,6 @@ GLOBAL
 Run \`ultrasec <command> --help\` for command-specific options.
 `;
 
-const NOT_YET: Record<string, string> = {
-  verify: "M5",
-  render: "M5",
-  check: "M5",
-};
-
 async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<number> {
   switch (cmd) {
     case undefined:
@@ -61,11 +58,13 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runDossier(args);
     case "paths":
       return runPaths(args);
+    case "verify":
+      return runVerify(args);
+    case "check":
+      return runCheck(args);
+    case "render":
+      return runRender(args);
     default:
-      if (cmd in NOT_YET) {
-        eprintln(`ultrasec: \`${cmd}\` is not implemented yet (planned in ${NOT_YET[cmd]}).`);
-        return 2;
-      }
       eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
       return 2;
   }

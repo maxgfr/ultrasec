@@ -1123,13 +1123,13 @@ function parseJsonStream(raw) {
   const out = [];
   let depth = 0;
   let inStr = false;
-  let esc = false;
+  let esc3 = false;
   let start = -1;
   for (let i = 0; i < raw.length; i++) {
     const ch = raw[i];
     if (inStr) {
-      if (esc) esc = false;
-      else if (ch === "\\") esc = true;
+      if (esc3) esc3 = false;
+      else if (ch === "\\") esc3 = true;
       else if (ch === '"') inStr = false;
       continue;
     }
@@ -1713,6 +1713,518 @@ function runPaths(args) {
   return 0;
 }
 
+// src/commands/verify.ts
+import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, readdirSync as readdirSync2, statSync as statSync2 } from "fs";
+import { join as join5, resolve as resolve4 } from "path";
+
+// src/verify.ts
+function pending(findings) {
+  return findings.filter((f) => f.status === "open" || f.status === "needs-human");
+}
+function buildWorklist(dossier) {
+  return pending(dossier.findings).slice().sort((a, b) => byStr(a.id, b.id)).map((f) => {
+    const files = /* @__PURE__ */ new Set();
+    for (const p of f.path ?? []) files.add(`${p.file}:${p.line}`);
+    if (f.sink) files.add(`${f.sink.file}:${f.sink.line}`);
+    if (f.source) files.add(`${f.source.file}:${f.source.line}`);
+    return {
+      id: f.id,
+      severity: f.severity,
+      cwe: f.cwe,
+      title: f.title,
+      category: f.category,
+      claim: f.message,
+      files: [...files],
+      verdict: null,
+      note: ""
+    };
+  });
+}
+function shard(items, n, i) {
+  return items.filter((_, idx) => idx % n === i);
+}
+function renderWorklistMd(items) {
+  const L = [];
+  L.push(`# ultrasec verification worklist (${items.length})`);
+  L.push("");
+  L.push(`For each item: open the cited code (\`ultrasec dossier <id>\`), decide whether`);
+  L.push(`the flow is **real and exploitable**, and set a verdict:`);
+  L.push(`\`supported\` \xB7 \`partial\` \xB7 \`unsupported\` \xB7 \`refuted\` (+ a short note, and an`);
+  L.push(`\`exploitPath\` when supported). Save as verdicts.json (array of`);
+  L.push(`{id, verdict, note, exploitPath}) and run \`ultrasec verify --apply verdicts.json\`.`);
+  L.push("");
+  L.push(`> Be skeptical, but do NOT dismiss a high/critical finding unless you can`);
+  L.push(`> positively **refute** it. Uncertain \u21D2 leave it for a human.`);
+  L.push("");
+  for (const it of items) {
+    L.push(`## ${it.id} \u2014 [${it.severity}] ${it.title}`);
+    if (it.cwe) L.push(`- ${it.cwe} \xB7 ${it.category}`);
+    L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
+    L.push(`- claim: ${it.claim}`);
+    L.push("");
+  }
+  return L.join("\n") + "\n";
+}
+function isHigh(sev) {
+  return sev === "critical" || sev === "high";
+}
+function nextStatus(verdict, severity) {
+  switch (verdict) {
+    case "supported":
+      return "confirmed";
+    case "refuted":
+      return "dismissed";
+    // an explicit contradiction — safe to drop
+    case "unsupported":
+      return isHigh(severity) ? "needs-human" : "dismissed";
+    case "partial":
+      return "needs-human";
+  }
+}
+function applyVerdicts(dossier, verdicts) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const v of verdicts) byId.set(v.id, v);
+  let confirmed = 0, dismissed = 0, needsHuman = 0, applied = 0;
+  const keptForHuman = [];
+  const findings = dossier.findings.map((f) => {
+    const v = byId.get(f.id);
+    if (!v) return f;
+    applied++;
+    const status = nextStatus(v.verdict, f.severity);
+    if (v.verdict === "unsupported" && isHigh(f.severity)) keptForHuman.push({ id: f.id, verdict: v.verdict, severity: f.severity });
+    if (status === "confirmed") confirmed++;
+    else if (status === "dismissed") dismissed++;
+    else needsHuman++;
+    const next = {
+      ...f,
+      status,
+      verdict: v.verdict,
+      confidence: v.verdict === "supported" ? "high" : v.verdict === "partial" ? "medium" : f.confidence
+    };
+    if (v.exploitPath) next.exploitPath = v.exploitPath;
+    if (v.note) next.message = `${f.message}
+
+Verdict (${v.verdict}): ${v.note}`;
+    return next;
+  });
+  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman };
+}
+function parseVerdicts(raw) {
+  const data = JSON.parse(raw);
+  const arr = Array.isArray(data) ? data : Array.isArray(data?.verdicts) ? data.verdicts : [];
+  return arr.filter((v) => v && typeof v.id === "string" && typeof v.verdict === "string").map((v) => ({ id: v.id, verdict: v.verdict, note: v.note, exploitPath: v.exploitPath }));
+}
+
+// src/commands/verify.ts
+function runVerify(args) {
+  const run = resolve4(flagStr(args, "run") ?? ".ultrasec");
+  let dossier;
+  try {
+    dossier = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec verify: ${e.message}`);
+    return 2;
+  }
+  const applyPath = flagStr(args, "apply");
+  if (applyPath) return applyMode(run, dossier, applyPath, args);
+  let items = buildWorklist(dossier);
+  const shards = Number(flagStr(args, "shards") ?? "0") || 0;
+  const shardIdx = Number(flagStr(args, "shard") ?? "0") || 0;
+  if (shards > 1) items = shard(items, shards, shardIdx);
+  const todoName = shards > 1 ? `VERIFY.todo.${shardIdx}.json` : "VERIFY.todo.json";
+  writeFileSync2(join5(run, todoName), JSON.stringify(items, null, 2));
+  writeFileSync2(join5(run, "VERIFY.md"), renderWorklistMd(buildWorklist(dossier)));
+  if (flagBool(args, "json")) {
+    println(JSON.stringify(items, null, 2));
+    return 0;
+  }
+  println(`ultrasec verify \u2192 ${join5(run, todoName)} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
+  println(`  adjudicate each (\`ultrasec dossier <id> --run ${run}\`), save verdicts.json, then:`);
+  println(`  ultrasec verify --apply verdicts.json --run ${run}`);
+  return 0;
+}
+function collectVerdictFiles(applyPath) {
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve4(s.trim()));
+  const abs = resolve4(applyPath);
+  try {
+    if (statSync2(abs).isDirectory()) {
+      return readdirSync2(abs).filter((n) => /verdict.*\.json$/i.test(n)).map((n) => join5(abs, n));
+    }
+  } catch {
+  }
+  return [abs];
+}
+function applyMode(run, dossier, applyPath, args) {
+  const files = collectVerdictFiles(applyPath);
+  const verdicts = [];
+  for (const f of files) {
+    try {
+      verdicts.push(...parseVerdicts(readFileSync3(f, "utf8")));
+    } catch (e) {
+      eprintln(`ultrasec verify: cannot read verdicts at ${f}: ${e.message}`);
+      return 2;
+    }
+  }
+  const res = applyVerdicts(dossier, verdicts);
+  const manifest = { ...dossier.manifest, counts: { findings: res.findings.length, bySeverity: countBySeverity(res.findings) } };
+  writeDossier(run, { manifest, findings: res.findings, graph: dossier.graph });
+  if (flagBool(args, "json")) {
+    println(JSON.stringify({ applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman }, null, 2));
+    return 0;
+  }
+  println(`ultrasec verify --apply \u2192 updated ${run}/findings.json`);
+  println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
+  if (res.keptForHuman.length) {
+    println(`  kept for human (high-severity, only 'unsupported' \u2014 not auto-dismissed):`);
+    for (const k of res.keptForHuman) println(`    - ${k.id} [${k.severity}]`);
+  }
+  return 0;
+}
+
+// src/commands/check.ts
+import { resolve as resolve5 } from "path";
+
+// src/check.ts
+import { existsSync as existsSync2, readFileSync as readFileSync4 } from "fs";
+import { join as join6 } from "path";
+function lineCount(repo, file) {
+  const abs = join6(repo, file);
+  if (!existsSync2(abs)) return null;
+  try {
+    return readFileSync4(abs, "utf8").split(/\r?\n/).length;
+  } catch {
+    return null;
+  }
+}
+function locsOf(f) {
+  const locs = [];
+  if (f.source) locs.push(f.source);
+  if (f.sink) locs.push(f.sink);
+  for (const p of f.path ?? []) locs.push(p);
+  return locs;
+}
+function atLeast(sev, floor) {
+  return SEVERITIES.indexOf(sev) <= SEVERITIES.indexOf(floor);
+}
+function check(dossier, opts = {}) {
+  const repo = opts.repo ?? dossier.manifest.repo;
+  const floor = opts.minSeverity;
+  const findings = floor ? dossier.findings.filter((f) => atLeast(f.severity, floor)) : dossier.findings;
+  const dangling = [];
+  const lineCache = /* @__PURE__ */ new Map();
+  const linesOf = (file) => {
+    if (!lineCache.has(file)) lineCache.set(file, lineCount(repo, file));
+    return lineCache.get(file);
+  };
+  for (const f of findings) {
+    if (f.status === "dismissed") continue;
+    for (const loc of locsOf(f)) {
+      const lc = linesOf(loc.file);
+      if (lc === null) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
+      else if (loc.line < 1 || loc.line > lc) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range (file has ${lc} lines)` });
+    }
+  }
+  const open = findings.filter((f) => f.status === "open").length;
+  const confirmed = findings.filter((f) => f.status === "confirmed").length;
+  const dismissed = findings.filter((f) => f.status === "dismissed").length;
+  const needsHuman = findings.filter((f) => f.status === "needs-human").length;
+  const messages = [];
+  let ok = true;
+  if (dangling.length) {
+    ok = false;
+    messages.push(`${dangling.length} dangling citation(s) \u2014 a cited [file:line] does not resolve (hallucinated or stale).`);
+  }
+  if (opts.semantic) {
+    if (open > 0) {
+      ok = false;
+      messages.push(`${open} candidate(s) still unadjudicated \u2014 run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
+    }
+    if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human \u2014 review required (not auto-failing).`);
+  }
+  if (ok) messages.push(`grounding OK${opts.semantic ? " \xB7 audit adjudicated" : ""} \u2014 ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
+  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, messages };
+}
+
+// src/commands/check.ts
+function runCheck(args) {
+  const run = resolve5(flagStr(args, "run") ?? ".ultrasec");
+  const repo = flagStr(args, "repo");
+  const semantic = flagBool(args, "semantic");
+  const minSevRaw = flagStr(args, "min-severity");
+  const minSeverity = minSevRaw && SEVERITIES.includes(minSevRaw) ? minSevRaw : void 0;
+  let dossier;
+  try {
+    dossier = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec check: ${e.message}`);
+    return 2;
+  }
+  const res = check(dossier, { repo, semantic, minSeverity });
+  if (flagBool(args, "json")) {
+    println(JSON.stringify(res, null, 2));
+    return res.ok ? 0 : 1;
+  }
+  for (const d of res.dangling.slice(0, 50)) {
+    eprintln(`  \u2717 ${d.id}: ${d.file}:${d.line} \u2014 ${d.reason}`);
+  }
+  for (const m of res.messages) println((res.ok ? "  \u2713 " : "  \u2022 ") + m);
+  return res.ok ? 0 : 1;
+}
+
+// src/commands/render.ts
+import { writeFileSync as writeFileSync3 } from "fs";
+import { join as join7, resolve as resolve6 } from "path";
+
+// src/render/mermaid.ts
+function esc(s) {
+  return s.replace(/"/g, "'").replace(/[\n\r]/g, " ");
+}
+function pathMermaid(f) {
+  if (!f.path || f.path.length < 2) return null;
+  const L = ["flowchart LR"];
+  f.path.forEach((p, i) => {
+    const tag = i === 0 ? "SOURCE" : i === f.path.length - 1 ? "SINK" : "hop";
+    const sym = p.symbol ? `<br/>${esc(p.symbol)}()` : "";
+    L.push(`  n${i}["${tag}<br/>${esc(p.file)}:${p.line}${sym}"]`);
+  });
+  for (let i = 0; i < f.path.length - 1; i++) L.push(`  n${i} --> n${i + 1}`);
+  L.push(`  classDef src fill:#fde68a,stroke:#b45309;`);
+  L.push(`  classDef snk fill:#fecaca,stroke:#b91c1c;`);
+  L.push(`  class n0 src;`);
+  L.push(`  class n${f.path.length - 1} snk;`);
+  return L.join("\n");
+}
+
+// src/render/report.ts
+var BADGE = {
+  critical: "\u{1F7E5} CRITICAL",
+  high: "\u{1F7E7} HIGH",
+  medium: "\u{1F7E8} MEDIUM",
+  low: "\u{1F7E9} LOW",
+  info: "\u2B1C INFO"
+};
+function sevRank(s) {
+  return SEVERITIES.indexOf(s);
+}
+function sortFindings(fs) {
+  return fs.slice().sort((a, b) => sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
+}
+function pathLine(f) {
+  if (f.path?.length) return f.path.map((p) => `\`${p.file}:${p.line}\``).join(" \u2192 ");
+  if (f.sink) return `\`${f.sink.file}:${f.sink.line}\``;
+  return "\u2014";
+}
+function header(d) {
+  const c = d.manifest.counts.bySeverity;
+  return [
+    `repo \`${d.manifest.repo}\` \xB7 ultrasec ${d.manifest.version}`,
+    `findings: **${d.manifest.counts.findings}** \u2014 ${SEVERITIES.map((s) => `${BADGE[s]} ${c[s]}`).join(" \xB7 ")}`,
+    `tools: ${d.manifest.toolsRun.join(", ") || "none (graph + taint only)"}`
+  ].join("  \n");
+}
+function statusTag(f) {
+  const v = f.verdict ? ` \xB7 verdict ${f.verdict}` : "";
+  return `status **${f.status}**${v} \xB7 confidence ${f.confidence}`;
+}
+function renderSummary(d) {
+  const fs = sortFindings(d.findings);
+  const confirmed = fs.filter((f) => f.status === "confirmed");
+  const needs = fs.filter((f) => f.status === "needs-human");
+  const L = [`# Security audit \u2014 summary`, "", header(d), ""];
+  if (!confirmed.length && !needs.length) {
+    L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) \u2014 see REPORT.md.` : `No findings.`);
+    return L.join("\n") + "\n";
+  }
+  if (confirmed.length) {
+    L.push(`## Confirmed (${confirmed.length})`);
+    for (const f of confirmed) L.push(`- ${BADGE[f.severity]} **${f.title}** \u2014 ${pathLine(f)} (${f.cwe ?? f.category})`);
+    L.push("");
+  }
+  if (needs.length) {
+    L.push(`## Needs human review (${needs.length})`);
+    for (const f of needs) L.push(`- ${BADGE[f.severity]} ${f.title} \u2014 ${pathLine(f)} (${f.cwe ?? f.category})`);
+  }
+  return L.join("\n") + "\n";
+}
+function renderFinding(f, opts = {}) {
+  const L = [];
+  L.push(`### ${BADGE[f.severity]} ${f.title}`);
+  L.push("");
+  L.push(`\`${f.id}\` \xB7 ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) \xB7 ` : ""}${f.category} \xB7 ${statusTag(f)}${f.tool !== "ultrasec" ? ` \xB7 via ${f.tool}` : ""}`);
+  L.push("");
+  L.push(`**Path:** ${pathLine(f)}`);
+  L.push("");
+  L.push(f.message);
+  if (f.exploitPath) {
+    L.push("");
+    L.push(`**Exploit path:** ${f.exploitPath}`);
+  }
+  if (opts.mermaid) {
+    const mm = pathMermaid(f);
+    if (mm) {
+      L.push("");
+      L.push("```mermaid");
+      L.push(mm);
+      L.push("```");
+    }
+  }
+  if (f.references?.length) {
+    L.push("");
+    L.push(`References: ${f.references.slice(0, 5).map((r) => `<${r}>`).join(" \xB7 ")}`);
+  }
+  return L.join("\n");
+}
+function renderReport(d) {
+  const fs = sortFindings(d.findings).filter((f) => f.status === "confirmed" || f.status === "needs-human" || f.status === "open");
+  const L = [`# Security audit \u2014 report`, "", header(d), ""];
+  if (!fs.length) {
+    L.push(`No actionable findings. (See FULL.md for dismissed candidates.)`);
+    return L.join("\n") + "\n";
+  }
+  L.push(`Confirmed and to-review findings, most severe first. Dismissed candidates are in FULL.md.`);
+  L.push("");
+  for (const f of fs) {
+    L.push(renderFinding(f, { mermaid: true }));
+    L.push("");
+    L.push("---");
+    L.push("");
+  }
+  return L.join("\n") + "\n";
+}
+function renderFull(d) {
+  const fs = sortFindings(d.findings);
+  const L = [`# Security audit \u2014 full`, "", header(d), ""];
+  const groups = [
+    ["Confirmed", fs.filter((f) => f.status === "confirmed")],
+    ["Needs human review", fs.filter((f) => f.status === "needs-human")],
+    ["Unadjudicated candidates", fs.filter((f) => f.status === "open")],
+    ["Dismissed", fs.filter((f) => f.status === "dismissed")]
+  ];
+  for (const [name, list] of groups) {
+    if (!list.length) continue;
+    L.push(`## ${name} (${list.length})`);
+    L.push("");
+    for (const f of list) {
+      L.push(renderFinding(f, { mermaid: name !== "Dismissed" }));
+      L.push("");
+    }
+  }
+  L.push(`---`);
+  L.push(`Engine: ultrasec ${d.manifest.version}. ${d.manifest.generatedNote}`);
+  return L.join("\n") + "\n";
+}
+
+// src/render/html.ts
+function esc2(s) {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+var SEV_COLOR = {
+  critical: "#b91c1c",
+  high: "#c2410c",
+  medium: "#b45309",
+  low: "#15803d",
+  info: "#64748b"
+};
+function sevRank2(s) {
+  return SEVERITIES.indexOf(s);
+}
+function badge(text, color) {
+  return `<span class="badge" style="background:${color}">${esc2(text)}</span>`;
+}
+function pathHtml(f) {
+  if (!f.path?.length) return f.sink ? `<code>${esc2(f.sink.file)}:${f.sink.line}</code>` : "\u2014";
+  const nodes = f.path.map((p, i) => {
+    const tag = i === 0 ? "source" : i === f.path.length - 1 ? "sink" : "hop";
+    const sym = p.symbol ? `<div class="sym">${esc2(p.symbol)}()</div>` : "";
+    return `<div class="node ${tag}"><div class="loc">${esc2(p.file)}:${p.line}</div>${sym}<div class="why">${esc2(p.why)}</div></div>`;
+  }).join('<div class="arrow">\u2192</div>');
+  return `<div class="flow">${nodes}</div>`;
+}
+function findingHtml(f) {
+  const refs = (f.references ?? []).slice(0, 5).map((r) => `<a href="${esc2(r)}" rel="noreferrer noopener">${esc2(r.replace(/^https?:\/\//, ""))}</a>`).join(" \xB7 ");
+  return `
+  <section class="finding" id="${esc2(f.id)}">
+    <h3>${badge(f.severity.toUpperCase(), SEV_COLOR[f.severity])} ${esc2(f.title)}</h3>
+    <div class="meta">
+      <code>${esc2(f.id)}</code>
+      ${f.cwe ? `\xB7 ${esc2(f.cwe)}` : ""} \xB7 ${esc2(f.category)}
+      \xB7 status ${badge(f.status, f.status === "confirmed" ? "#b91c1c" : f.status === "needs-human" ? "#b45309" : f.status === "dismissed" ? "#64748b" : "#475569")}
+      \xB7 confidence ${esc2(f.confidence)}
+      ${f.verdict ? `\xB7 verdict ${esc2(f.verdict)}` : ""}
+      ${f.tool !== "ultrasec" ? `\xB7 via ${esc2(f.tool)}` : ""}
+    </div>
+    ${pathHtml(f)}
+    <p class="msg">${esc2(f.message)}</p>
+    ${f.exploitPath ? `<p class="exploit"><strong>Exploit path:</strong> ${esc2(f.exploitPath)}</p>` : ""}
+    ${refs ? `<p class="refs">${refs}</p>` : ""}
+  </section>`;
+}
+function renderHtml(d) {
+  const c = d.manifest.counts.bySeverity;
+  const fs = d.findings.slice().sort((a, b) => sevRank2(a.severity) - sevRank2(b.severity) || byStr(a.id, b.id));
+  const shown = fs.filter((f) => f.status !== "dismissed");
+  const dismissed = fs.filter((f) => f.status === "dismissed");
+  const counts = SEVERITIES.map((s) => `${badge(`${s} ${c[s]}`, SEV_COLOR[s])}`).join(" ");
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ultrasec \u2014 security audit</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; color: #111; background: #fff; }
+  @media (prefers-color-scheme: dark) { body { color: #e5e7eb; background: #0b0f17; } a { color: #93c5fd; } code { background: #1f2937; } .node { background: #111827; border-color:#374151; } .finding{border-color:#1f2937;} }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  .sub { color: #6b7280; margin-bottom: 16px; }
+  .badge { display:inline-block; color:#fff; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; }
+  code { background:#f3f4f6; padding:1px 5px; border-radius:4px; font-size:13px; }
+  .finding { border:1px solid #e5e7eb; border-radius:10px; padding:14px 16px; margin:14px 0; }
+  .finding h3 { margin:0 0 6px; font-size:17px; }
+  .meta { color:#6b7280; font-size:13px; margin-bottom:10px; }
+  .flow { display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; margin:10px 0; }
+  .node { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:6px 10px; min-width:120px; }
+  .node.source { border-color:#b45309; } .node.sink { border-color:#b91c1c; }
+  .node .loc { font-family: ui-monospace, monospace; font-size:12px; font-weight:600; }
+  .node .sym { font-family: ui-monospace, monospace; font-size:11px; color:#6b7280; }
+  .node .why { font-size:11px; color:#6b7280; margin-top:2px; max-width:220px; }
+  .arrow { align-self:center; color:#9ca3af; font-size:18px; }
+  .msg { margin:8px 0; }
+  .exploit { background:#fef2f2; border-left:3px solid #b91c1c; padding:6px 10px; border-radius:4px; }
+  @media (prefers-color-scheme: dark){ .exploit{ background:#1f1315; } }
+  .refs { font-size:12px; color:#6b7280; word-break:break-all; }
+  details { margin-top:18px; }
+</style></head>
+<body>
+  <h1>Security audit</h1>
+  <div class="sub">repo <code>${esc2(d.manifest.repo)}</code> \xB7 ultrasec ${esc2(d.manifest.version)} \xB7 tools: ${esc2(d.manifest.toolsRun.join(", ") || "none")}</div>
+  <div>${counts}</div>
+  ${shown.length ? shown.map(findingHtml).join("\n") : "<p>No actionable findings.</p>"}
+  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map(findingHtml).join("\n")}</details>` : ""}
+</body></html>
+`;
+}
+
+// src/commands/render.ts
+function runRender(args) {
+  const run = resolve6(flagStr(args, "run") ?? ".ultrasec");
+  let dossier;
+  try {
+    dossier = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec render: ${e.message}`);
+    return 2;
+  }
+  const outputs = [
+    ["SUMMARY.md", renderSummary(dossier)],
+    ["REPORT.md", renderReport(dossier)],
+    ["FULL.md", renderFull(dossier)],
+    ["index.html", renderHtml(dossier)]
+  ];
+  for (const [name, body] of outputs) writeFileSync3(join7(run, name), body);
+  println(`ultrasec render \u2192 ${run}`);
+  for (const [name] of outputs) println(`  ${join7(run, name)}`);
+  return 0;
+}
+
 // src/cli.ts
 var HELP = `ultrasec ${VERSION} \u2014 cross-file security audit (taint + AI + tool orchestration)
 
@@ -1743,11 +2255,6 @@ GLOBAL
 
 Run \`ultrasec <command> --help\` for command-specific options.
 `;
-var NOT_YET = {
-  verify: "M5",
-  render: "M5",
-  check: "M5"
-};
 async function dispatch(cmd, args) {
   switch (cmd) {
     case void 0:
@@ -1767,11 +2274,13 @@ async function dispatch(cmd, args) {
       return runDossier(args);
     case "paths":
       return runPaths(args);
+    case "verify":
+      return runVerify(args);
+    case "check":
+      return runCheck(args);
+    case "render":
+      return runRender(args);
     default:
-      if (cmd in NOT_YET) {
-        eprintln(`ultrasec: \`${cmd}\` is not implemented yet (planned in ${NOT_YET[cmd]}).`);
-        return 2;
-      }
       eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
       return 2;
   }
