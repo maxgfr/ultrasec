@@ -1056,17 +1056,17 @@ function exec(name, args, cwd) {
     return { stdout: "", failed: true, err: err.message };
   }
 }
-function unmountLoc(loc) {
-  if (loc.file.startsWith(MOUNT + "/")) return { ...loc, file: loc.file.slice(MOUNT.length + 1) };
-  if (loc.file === MOUNT) return { ...loc, file: "." };
+function relLoc(loc, base) {
+  if (base && loc.file.startsWith(base + "/")) return { ...loc, file: loc.file.slice(base.length + 1) };
+  if (base && loc.file === base) return { ...loc, file: "." };
   return loc;
 }
-function unmountFindings(findings) {
+function relativizeFindings(findings, base) {
   return findings.map((f) => ({
     ...f,
-    source: f.source ? unmountLoc(f.source) : f.source,
-    sink: f.sink ? unmountLoc(f.sink) : f.sink,
-    path: f.path ? f.path.map(unmountLoc) : f.path
+    source: f.source ? relLoc(f.source, base) : f.source,
+    sink: f.sink ? relLoc(f.sink, base) : f.sink,
+    path: f.path ? f.path.map((p) => relLoc(p, base)) : f.path
   }));
 }
 function runNative(adapter, repo) {
@@ -1086,7 +1086,8 @@ function runDocker(adapter, repo) {
 function finish(adapter, repo, stdout, failed, err, docker) {
   if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
   try {
-    const findings = docker ? unmountFindings(adapter.parse(stdout, repo)) : adapter.parse(stdout, repo);
+    const base = docker ? MOUNT : repo;
+    const findings = relativizeFindings(adapter.parse(stdout, repo), base);
     return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker ? " (docker)" : ""}` };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };

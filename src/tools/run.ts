@@ -56,18 +56,25 @@ function exec(name: string, args: string[], cwd: string): { stdout: string; fail
   }
 }
 
-/** Rewrite a /work-mounted path back to repo-relative (docker mode). */
-function unmountLoc<T extends CodeLoc>(loc: T): T {
-  if (loc.file.startsWith(MOUNT + "/")) return { ...loc, file: loc.file.slice(MOUNT.length + 1) };
-  if (loc.file === MOUNT) return { ...loc, file: "." };
+/**
+ * Rewrite a location's file to repo-relative by stripping a leading base dir.
+ * `base` is the repo path (native runs) or the /work mount (docker runs). Tools
+ * variously emit absolute (`/work/x`, `/home/me/proj/x`) or already-relative
+ * paths; this normalizes them all so findings are consistent and the report is
+ * clean. Paths outside `base` (e.g. a dependency in the module cache) are left
+ * as-is (they're external references, handled by the grounding gate).
+ */
+function relLoc<T extends CodeLoc>(loc: T, base: string): T {
+  if (base && loc.file.startsWith(base + "/")) return { ...loc, file: loc.file.slice(base.length + 1) };
+  if (base && loc.file === base) return { ...loc, file: "." };
   return loc;
 }
-export function unmountFindings(findings: Finding[]): Finding[] {
+export function relativizeFindings(findings: Finding[], base: string): Finding[] {
   return findings.map((f) => ({
     ...f,
-    source: f.source ? unmountLoc(f.source) : f.source,
-    sink: f.sink ? unmountLoc(f.sink) : f.sink,
-    path: f.path ? (f.path.map(unmountLoc) as PathStep[]) : f.path,
+    source: f.source ? relLoc(f.source, base) : f.source,
+    sink: f.sink ? relLoc(f.sink, base) : f.sink,
+    path: f.path ? (f.path.map((p) => relLoc(p, base)) as PathStep[]) : f.path,
   }));
 }
 
@@ -92,7 +99,9 @@ function runDocker(adapter: ToolAdapter, repo: string): ToolRunResult {
 function finish(adapter: ToolAdapter, repo: string, stdout: string, failed: boolean, err: string | undefined, docker: boolean): ToolRunResult {
   if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
   try {
-    const findings = docker ? unmountFindings(adapter.parse(stdout, repo)) : adapter.parse(stdout, repo);
+    // Normalize paths to repo-relative: strip /work (docker) or the repo dir (native).
+    const base = docker ? MOUNT : repo;
+    const findings = relativizeFindings(adapter.parse(stdout, repo), base);
     return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker ? " (docker)" : ""}` };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${(e as Error).message}` };
