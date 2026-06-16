@@ -1,6 +1,7 @@
 import { VERSION } from "./types.js";
 import { parseArgs, flagBool, println, eprintln, type ParsedArgs } from "./util.js";
 import { runTools } from "./commands/tools.js";
+import { runGraph } from "./commands/graph.js";
 
 const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
 
@@ -34,7 +35,6 @@ Run \`ultrasec <command> --help\` for command-specific options.
 
 const NOT_YET: Record<string, string> = {
   scan: "M2/M3",
-  graph: "M2",
   paths: "M3",
   dossier: "M3",
   verify: "M5",
@@ -53,6 +53,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return 0;
     case "tools":
       return runTools(args);
+    case "graph":
+      return runGraph(args);
     default:
       if (cmd in NOT_YET) {
         eprintln(`ultrasec: \`${cmd}\` is not implemented yet (planned in ${NOT_YET[cmd]}).`);

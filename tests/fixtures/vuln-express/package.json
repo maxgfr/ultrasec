@@ -1,0 +1,10 @@
+{
+  "name": "vuln-express",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "dependencies": {
+    "express": "4.17.1",
+    "lodash": "4.17.11"
+  }
+}
