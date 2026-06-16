@@ -1,0 +1,16 @@
+[
+  {
+    "Description": "AWS Access Key",
+    "StartLine": 70,
+    "EndLine": 70,
+    "StartColumn": 19,
+    "EndColumn": 38,
+    "Match": "REDACTED",
+    "Secret": "REDACTED",
+    "File": "README.md",
+    "Commit": "5c4782a83541baa26e98f8c162d2eede1744d316",
+    "Entropy": 3.587164,
+    "RuleID": "aws-access-token",
+    "Fingerprint": "5c4782a83541baa26e98f8c162d2eede1744d316:README.md:aws-access-token:70"
+  }
+]

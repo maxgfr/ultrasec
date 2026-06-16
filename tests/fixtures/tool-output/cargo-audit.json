@@ -1,0 +1,39 @@
+{
+  "database": { "advisory-count": 1132 },
+  "lockfile": { "dependency-count": 4 },
+  "settings": { "severity": null },
+  "vulnerabilities": {
+    "found": true,
+    "count": 1,
+    "list": [
+      {
+        "advisory": {
+          "id": "RUSTSEC-2020-0071",
+          "package": "time",
+          "title": "Potential segfault in the time crate",
+          "description": "The affected functions set environment variables without synchronization.",
+          "aliases": ["CVE-2020-26235", "GHSA-wcg3-cvx6-7396"],
+          "categories": ["code-execution", "memory-corruption"],
+          "cvss": "CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
+          "url": "https://github.com/time-rs/time/issues/293"
+        },
+        "versions": { "patched": [">=0.2.23"], "unaffected": ["=0.2.0"] },
+        "package": { "name": "time", "version": "0.1.43" }
+      }
+    ]
+  },
+  "warnings": {
+    "unmaintained": [
+      {
+        "kind": "unmaintained",
+        "package": { "name": "ansi_term", "version": "0.12.1" },
+        "advisory": {
+          "id": "RUSTSEC-2021-0139",
+          "package": "ansi_term",
+          "title": "ansi_term is Unmaintained",
+          "url": "https://github.com/ogham/rust-ansi-term/issues/72"
+        }
+      }
+    ]
+  }
+}

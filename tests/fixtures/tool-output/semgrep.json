@@ -1,0 +1,25 @@
+{
+  "version": "1.130.0",
+  "results": [
+    {
+      "check_id": "python.lang.security.audit.dangerous-subprocess-use.dangerous-subprocess-use",
+      "path": "src/app.py",
+      "start": { "line": 42, "col": 5 },
+      "end": { "line": 42, "col": 60 },
+      "extra": {
+        "message": "Detected subprocess function 'call' with user-controlled input. This can lead to OS command injection.",
+        "severity": "ERROR",
+        "metadata": {
+          "category": "security",
+          "cwe": ["CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"],
+          "owasp": ["A03:2021 - Injection"],
+          "references": ["https://semgrep.dev/docs/cheat-sheets/python-command-injection/"]
+        },
+        "lines": "    subprocess.call(user_input, shell=True)",
+        "engine_kind": "OSS"
+      }
+    }
+  ],
+  "errors": [],
+  "paths": { "scanned": ["src/app.py"] }
+}

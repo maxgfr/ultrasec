@@ -1031,6 +1031,453 @@ function enumerateTaint(scan, graph) {
   return findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || byStr(a.id, b.id));
 }
 
+// src/tools/run.ts
+import { execFileSync as execFileSync2 } from "child_process";
+var TIMEOUT_MS = 18e4;
+var MAX_BUFFER = 64 * 1024 * 1024;
+function exec(name, args, cwd) {
+  try {
+    const stdout = execFileSync2(name, args, {
+      cwd,
+      encoding: "utf8",
+      timeout: TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    return { stdout, failed: false };
+  } catch (e) {
+    const err = e;
+    const stdout = err.stdout ? err.stdout.toString() : "";
+    if (stdout.trim()) return { stdout, failed: false };
+    return { stdout: "", failed: true, err: err.message };
+  }
+}
+function runAdapter(adapter, repo) {
+  if (!detect(adapter.name).installed) {
+    return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
+  }
+  const { stdout, failed, err } = exec(adapter.name, adapter.argv(repo), repo);
+  if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
+  try {
+    const findings = adapter.parse(stdout, repo);
+    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)` };
+  } catch (e) {
+    return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };
+  }
+}
+function orchestrate(adapters, repo, which) {
+  const selected = which && which.length ? adapters.filter((a) => which.includes(a.name)) : adapters;
+  const results = [];
+  const merged = /* @__PURE__ */ new Map();
+  for (const a of selected) {
+    const r = runAdapter(a, repo);
+    results.push(r);
+    for (const f of r.findings) if (!merged.has(f.id)) merged.set(f.id, f);
+  }
+  const findings = [...merged.values()].sort((a, b) => byStr(a.id, b.id));
+  const toolsRun = results.filter((r) => r.ran && r.ok).map((r) => r.name);
+  return { findings, toolsRun, results };
+}
+
+// src/tools/normalize.ts
+var SEVERITY_ALIASES = {
+  critical: "critical",
+  high: "high",
+  error: "high",
+  moderate: "medium",
+  medium: "medium",
+  warning: "medium",
+  low: "low",
+  minor: "low",
+  note: "low",
+  info: "info",
+  informational: "info",
+  unknown: "info",
+  none: "info"
+};
+function normalizeSeverity(raw, fallback = "medium") {
+  if (!raw) return fallback;
+  return SEVERITY_ALIASES[String(raw).trim().toLowerCase()] ?? fallback;
+}
+function makeToolFinding(i) {
+  const id = shortHash(`${i.tool}:${i.ident}:${i.file ?? ""}:${i.line ?? ""}`);
+  const f = {
+    id,
+    category: i.category,
+    title: i.title || i.ident,
+    severity: i.severity,
+    confidence: i.confidence ?? "medium",
+    message: i.message,
+    tool: i.tool,
+    status: "open"
+  };
+  if (i.cwe) f.cwe = i.cwe;
+  if (i.references && i.references.length) f.references = i.references;
+  if (i.file) {
+    const loc = { file: i.file, line: i.line ?? 1 };
+    f.sink = loc;
+  }
+  return f;
+}
+function parseJsonStream(raw) {
+  const out = [];
+  let depth = 0;
+  let inStr = false;
+  let esc = false;
+  let start = -1;
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') {
+      inStr = true;
+      continue;
+    }
+    if (ch === "{" || ch === "[") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}" || ch === "]") {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        try {
+          out.push(JSON.parse(raw.slice(start, i + 1)));
+        } catch {
+        }
+        start = -1;
+      }
+    }
+  }
+  return out;
+}
+function firstCwe(input) {
+  const text = Array.isArray(input) ? input.join(" ") : typeof input === "string" ? input : "";
+  const m = /CWE[-_ ]?(\d+)/i.exec(text);
+  return m ? `CWE-${m[1]}` : void 0;
+}
+
+// src/tools/trivy.ts
+var trivy = {
+  name: "trivy",
+  category: "dep",
+  argv: (repo) => ["fs", "--scanners", "vuln,secret,misconfig", "--format", "json", "--quiet", repo],
+  parse(raw) {
+    const data = JSON.parse(raw || "{}");
+    const out = [];
+    for (const r of data.Results ?? []) {
+      const target = r.Target ?? "";
+      for (const v of r.Vulnerabilities ?? []) {
+        out.push(
+          makeToolFinding({
+            tool: "trivy",
+            category: "dep",
+            ident: v.VulnerabilityID,
+            title: v.Title || `${v.PkgName}: ${v.VulnerabilityID}`,
+            severity: normalizeSeverity(v.Severity, "medium"),
+            message: `${v.PkgName}@${v.InstalledVersion}: ${v.Title || v.Description || v.VulnerabilityID}` + (v.FixedVersion ? ` (fixed in ${v.FixedVersion})` : ""),
+            file: target,
+            cwe: firstCwe(v.CweIDs),
+            references: [v.PrimaryURL, ...v.References ?? []].filter(Boolean)
+          })
+        );
+      }
+      for (const s of r.Secrets ?? []) {
+        out.push(
+          makeToolFinding({
+            tool: "trivy",
+            category: "secret",
+            ident: `${s.RuleID}:${s.StartLine}`,
+            title: s.Title || s.RuleID,
+            severity: normalizeSeverity(s.Severity, "high"),
+            message: `Hardcoded secret (${s.Title || s.RuleID}) at ${target}:${s.StartLine}`,
+            file: target,
+            line: s.StartLine,
+            cwe: "CWE-798"
+          })
+        );
+      }
+      for (const mc of r.Misconfigurations ?? []) {
+        const line = mc.CauseMetadata?.StartLine;
+        out.push(
+          makeToolFinding({
+            tool: "trivy",
+            category: "config",
+            ident: mc.AVDID || mc.ID,
+            title: mc.Title || mc.ID,
+            severity: normalizeSeverity(mc.Severity, "medium"),
+            message: `${mc.ID} ${mc.Title}: ${mc.Message || mc.Description || ""}`.trim(),
+            file: target,
+            line: typeof line === "number" ? line : void 0,
+            references: [mc.PrimaryURL, ...mc.References ?? []].filter(Boolean)
+          })
+        );
+      }
+    }
+    return out;
+  }
+};
+
+// src/tools/gitleaks.ts
+var gitleaks = {
+  name: "gitleaks",
+  category: "secret",
+  argv: (repo) => ["detect", "--no-git", "--source", repo, "--report-format", "json", "--report-path", "/dev/stdout", "--no-banner", "--redact"],
+  parse(raw) {
+    const arr = JSON.parse(raw || "[]");
+    if (!Array.isArray(arr)) return [];
+    return arr.map(
+      (f) => makeToolFinding({
+        tool: "gitleaks",
+        category: "secret",
+        ident: `${f.RuleID}:${f.File}:${f.StartLine}`,
+        title: f.Description || f.RuleID,
+        severity: "high",
+        message: `Hardcoded secret (${f.Description || f.RuleID}) at ${f.File}:${f.StartLine}`,
+        file: f.File,
+        line: f.StartLine,
+        cwe: "CWE-798"
+      })
+    );
+  }
+};
+
+// src/tools/cvss.ts
+var AV = { N: 0.85, A: 0.62, L: 0.55, P: 0.2 };
+var AC = { L: 0.77, H: 0.44 };
+var UI = { N: 0.85, R: 0.62 };
+var CIA = { H: 0.56, L: 0.22, N: 0 };
+var PR_U = { N: 0.85, L: 0.62, H: 0.27 };
+var PR_C = { N: 0.85, L: 0.68, H: 0.5 };
+function roundup(x) {
+  return Math.ceil(x * 10) / 10;
+}
+function cvssBaseScore(vector) {
+  if (!vector || !/CVSS:3/i.test(vector)) return null;
+  const m = {};
+  for (const part of vector.split("/")) {
+    const [k, v] = part.split(":");
+    if (k && v) m[k] = v;
+  }
+  const scope = m.S;
+  const av = AV[m.AV ?? ""];
+  const ac = AC[m.AC ?? ""];
+  const ui = UI[m.UI ?? ""];
+  const pr = (scope === "C" ? PR_C : PR_U)[m.PR ?? ""];
+  const c = CIA[m.C ?? ""];
+  const in_ = CIA[m.I ?? ""];
+  const a = CIA[m.A ?? ""];
+  if ([av, ac, ui, pr, c, in_, a].some((x) => x === void 0)) return null;
+  const iss = 1 - (1 - c) * (1 - in_) * (1 - a);
+  const impact = scope === "C" ? 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15) : 6.42 * iss;
+  if (impact <= 0) return 0;
+  const exploitability = 8.22 * av * ac * pr * ui;
+  const raw = scope === "C" ? 1.08 * (impact + exploitability) : impact + exploitability;
+  return roundup(Math.min(raw, 10));
+}
+function scoreToSeverity(score) {
+  if (score == null) return "medium";
+  if (score >= 9) return "critical";
+  if (score >= 7) return "high";
+  if (score >= 4) return "medium";
+  if (score >= 0.1) return "low";
+  return "info";
+}
+function deriveSeverity(input, fallback = "medium") {
+  if (!input) return fallback;
+  const s = input.trim();
+  const asNum = Number(s);
+  if (!Number.isNaN(asNum) && s !== "") return scoreToSeverity(asNum);
+  if (/CVSS:3/i.test(s)) return scoreToSeverity(cvssBaseScore(s));
+  return normalizeSeverity(s, fallback);
+}
+
+// src/tools/osv.ts
+var osvScanner = {
+  name: "osv-scanner",
+  category: "dep",
+  argv: (repo) => ["--format", "json", "--output", "-", "-r", repo],
+  parse(raw) {
+    const data = JSON.parse(raw || "{}");
+    const out = [];
+    for (const res of data.results ?? []) {
+      const src = res.source?.path ?? "";
+      for (const pkg of res.packages ?? []) {
+        const name = pkg.package?.name;
+        const version = pkg.package?.version;
+        const groupSev = /* @__PURE__ */ new Map();
+        for (const g of pkg.groups ?? []) for (const id of g.ids ?? []) groupSev.set(id, g.max_severity);
+        for (const v of pkg.vulnerabilities ?? []) {
+          const db = v.database_specific ?? {};
+          const sevStr = groupSev.get(v.id) ?? db.severity ?? "";
+          const fixed = (v.affected ?? []).flatMap((a) => (a.ranges ?? []).flatMap((r) => (r.events ?? []).map((e) => e.fixed))).filter(Boolean)[0];
+          out.push(
+            makeToolFinding({
+              tool: "osv-scanner",
+              category: "dep",
+              ident: v.id,
+              title: v.summary || v.id,
+              severity: deriveSeverity(sevStr, "medium"),
+              message: `${name}@${version}: ${v.summary || v.id}` + (fixed ? ` (fixed in ${fixed})` : ""),
+              file: src,
+              cwe: firstCwe(db.cwe_ids),
+              references: (v.references ?? []).map((r) => r.url).filter(Boolean)
+            })
+          );
+        }
+      }
+    }
+    return out;
+  }
+};
+
+// src/tools/semgrep.ts
+var SEV = {
+  ERROR: "high",
+  WARNING: "medium",
+  INFO: "low",
+  CRITICAL: "critical",
+  HIGH: "high",
+  MEDIUM: "medium",
+  LOW: "low"
+};
+function parseSemgrep(tool, raw) {
+  const data = JSON.parse(raw || "{}");
+  const out = [];
+  for (const r of data.results ?? []) {
+    const md = r.extra?.metadata ?? {};
+    if (r.extra?.sca_info) continue;
+    out.push(
+      makeToolFinding({
+        tool,
+        category: "sast",
+        ident: `${r.check_id}:${r.path}:${r.start?.line ?? ""}`,
+        title: r.check_id,
+        severity: SEV[String(r.extra?.severity ?? "").toUpperCase()] ?? "medium",
+        message: r.extra?.message || r.check_id,
+        file: r.path,
+        line: r.start?.line,
+        cwe: firstCwe(md.cwe),
+        references: md.references ?? []
+      })
+    );
+  }
+  return out;
+}
+var semgrep = {
+  name: "semgrep",
+  category: "sast",
+  argv: (repo) => ["scan", "--json", "--quiet", "--config", "auto", repo],
+  parse: (raw) => parseSemgrep("semgrep", raw)
+};
+var opengrep = {
+  name: "opengrep",
+  category: "sast",
+  argv: (repo) => ["scan", "--json", "--quiet", "--config", "auto", repo],
+  parse: (raw) => parseSemgrep("opengrep", raw)
+};
+
+// src/tools/cargo-audit.ts
+var cargoAudit = {
+  name: "cargo-audit",
+  category: "dep",
+  argv: () => ["audit", "--format", "json"],
+  parse(raw) {
+    const data = JSON.parse(raw || "{}");
+    const out = [];
+    for (const item of data.vulnerabilities?.list ?? []) {
+      const adv = item.advisory ?? {};
+      const pkg = item.package ?? {};
+      const patched = (item.versions?.patched ?? []).join(", ");
+      out.push(
+        makeToolFinding({
+          tool: "cargo-audit",
+          category: "dep",
+          ident: adv.id,
+          title: adv.title || adv.id,
+          severity: deriveSeverity(adv.cvss, "high"),
+          message: `${pkg.name}@${pkg.version}: ${adv.title || adv.id}` + (patched ? ` (patched: ${patched})` : ""),
+          file: "Cargo.lock",
+          references: [adv.url, ...adv.aliases ?? []].filter(Boolean)
+        })
+      );
+    }
+    const warnings = data.warnings ?? {};
+    for (const kind of Object.keys(warnings)) {
+      for (const w of warnings[kind] ?? []) {
+        const adv = w.advisory ?? {};
+        const pkg = w.package ?? {};
+        out.push(
+          makeToolFinding({
+            tool: "cargo-audit",
+            category: "dep",
+            ident: adv.id || `${kind}:${pkg.name}`,
+            title: adv.title || `${pkg.name} is ${kind}`,
+            severity: "low",
+            confidence: "low",
+            message: `${pkg.name}@${pkg.version}: ${kind}${adv.title ? ` \u2014 ${adv.title}` : ""}`,
+            file: "Cargo.lock",
+            references: adv.url ? [adv.url] : []
+          })
+        );
+      }
+    }
+    return out;
+  }
+};
+
+// src/tools/govulncheck.ts
+var govulncheck = {
+  name: "govulncheck",
+  category: "dep",
+  streaming: true,
+  argv: () => ["-json", "./..."],
+  parse(raw) {
+    const msgs = parseJsonStream(raw);
+    const osvById = /* @__PURE__ */ new Map();
+    for (const m of msgs) if (m?.osv?.id) osvById.set(m.osv.id, m.osv);
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    for (const m of msgs) {
+      const f = m?.finding;
+      if (!f?.osv) continue;
+      if (seen.has(f.osv)) continue;
+      seen.add(f.osv);
+      const osv = osvById.get(f.osv) ?? {};
+      const top = (f.trace ?? [])[0] ?? {};
+      const reachable = Boolean(top.function && top.position);
+      out.push(
+        makeToolFinding({
+          tool: "govulncheck",
+          category: "dep",
+          ident: f.osv,
+          title: osv.summary || f.osv,
+          severity: reachable ? "high" : "medium",
+          confidence: reachable ? "high" : "low",
+          message: `${osv.summary || f.osv}` + (f.fixed_version ? ` (fixed in ${f.fixed_version})` : "") + (reachable ? ` \u2014 reachable via ${top.package}.${top.function}` : " \u2014 imported, reachability not proven"),
+          file: top.position?.filename,
+          line: top.position?.line,
+          references: (osv.references ?? []).map((r) => r.url).filter(Boolean)
+        })
+      );
+    }
+    return out;
+  }
+};
+
+// src/tools/index.ts
+var ADAPTERS = [
+  trivy,
+  opengrep,
+  semgrep,
+  gitleaks,
+  osvScanner,
+  cargoAudit,
+  govulncheck
+];
+
 // src/store.ts
 import { mkdirSync, writeFileSync, readFileSync as readFileSync2, existsSync } from "fs";
 import { join as join3 } from "path";
@@ -1105,28 +1552,35 @@ function runScan(args) {
   const out = resolve(flagStr(args, "out") ?? ".ultrasec");
   const scan = scanRepo(repo);
   const graph = buildGraph(scan);
-  const findings = enumerateTaint(scan, graph);
+  const taintFindings = enumerateTaint(scan, graph);
+  const toolsFlag = flagStr(args, "tools");
+  const skipTools = flagBool(args, "no-tools") || toolsFlag === "none";
+  const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
+  const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, which);
+  const findings = [...taintFindings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
   const languages = [...new Set(scan.files.map((f) => f.lang))].sort();
   const manifest = {
     version: VERSION,
     schemaVersion: SCHEMA_VERSION,
     repo,
-    generatedNote: "Deterministic: re-scanning an unchanged repo yields the same findings.",
+    generatedNote: "Taint candidates are deterministic; external-tool results depend on installed scanners.",
     languages,
-    toolsRun: [],
-    // external tools are added in M4
+    toolsRun: tool.toolsRun,
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) }
   };
   const dossier = { manifest, findings, graph };
   writeDossier(out, dossier);
   if (flagBool(args, "json")) {
-    println(JSON.stringify({ out, counts: manifest.counts, languages, files: scan.files.length }, null, 2));
+    println(JSON.stringify({ out, counts: manifest.counts, languages, files: scan.files.length, toolsRun: tool.toolsRun }, null, 2));
     return 0;
   }
   const c = manifest.counts.bySeverity;
   println(`ultrasec scan \u2192 ${out}`);
   println(`  files scanned: ${scan.files.length}  \xB7  languages: ${languages.join(", ") || "\u2014"}`);
-  println(`  candidate findings: ${findings.length}  (crit ${c.critical} \xB7 high ${c.high} \xB7 med ${c.medium} \xB7 low ${c.low})`);
+  if (!skipTools) {
+    println(`  external tools run: ${tool.toolsRun.join(", ") || "none"}  (\`ultrasec tools\` to see/install more)`);
+  }
+  println(`  candidate findings: ${findings.length}  (crit ${c.critical} \xB7 high ${c.high} \xB7 med ${c.medium} \xB7 low ${c.low})  \xB7  ${taintFindings.length} taint + ${tool.findings.length} tool`);
   if (!findings.length) {
     println(`  no taint candidates \u2014 still review the DOSSIER and run external tools (\`ultrasec tools\`).`);
   } else {
