@@ -1,0 +1,61 @@
+{
+  "name": "ultrasec",
+  "version": "0.0.0-development",
+  "description": "Audit a whole repo for security vulnerabilities by tracing untrusted data across functions and files (cross-file source→sink taint), orchestrating best-in-class OSS scanners (Trivy, OpenGrep/Semgrep, gitleaks, osv-scanner…), and adversarially verifying every finding into a cited, tiered report. A deterministic zero-dependency engine builds the link-graph and evidence packets; the AI does the security reasoning. A skills.sh agent skill.",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "bin": {
+    "ultrasec": "scripts/ultrasec.mjs"
+  },
+  "files": [
+    "SKILL.md",
+    "scripts",
+    "references",
+    "assets",
+    "src"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check:build": "tsup && git diff --exit-code -- scripts/ultrasec.mjs",
+    "demo": "node scripts/ultrasec.mjs scan --repo tests/fixtures/vuln-express --out /tmp/ultrasec-demo && node scripts/ultrasec.mjs check --run /tmp/ultrasec-demo",
+    "release": "semantic-release"
+  },
+  "keywords": [
+    "skills",
+    "agent-skill",
+    "skills.sh",
+    "security",
+    "sast",
+    "taint-analysis",
+    "vulnerability",
+    "code-audit",
+    "ai-agent"
+  ],
+  "license": "MIT",
+  "author": "maxgfr",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/maxgfr/ultrasec"
+  },
+  "devDependencies": {
+    "@semantic-release/changelog": "^6.0.3",
+    "@semantic-release/exec": "^6.0.3",
+    "@semantic-release/git": "^10.0.1",
+    "@types/node": "^20.14.0",
+    "semantic-release": "^24.2.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

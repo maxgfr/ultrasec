@@ -1,0 +1,86 @@
+import { VERSION } from "./types.js";
+import { parseArgs, flagBool, println, eprintln, type ParsedArgs } from "./util.js";
+import { runTools } from "./commands/tools.js";
+
+const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
+
+A deterministic, zero-dependency engine builds a cross-file/function link-graph,
+enumerates candidate source→sink taint paths, orchestrates best-in-class OSS
+scanners, and prepares evidence packets; the AI does the security reasoning and
+adversarially verifies each finding into a cited, tiered report.
+
+USAGE
+  ultrasec <command> [options]
+
+COMMANDS
+  scan       Scan a repo: detect stack, run available tools, build the link-graph,
+             enumerate candidate taint paths, write the audit dossier.
+  tools      List known external scanners, which are installed, and how to get them.
+  graph      Show the links into/out of a file or symbol.
+  paths      List candidate cross-file source→sink chains.
+  dossier    Print the grounding packet for one finding (real code + neighbours).
+  verify     Emit / apply the adversarial finding↔evidence worklist.
+  render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
+  check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
+             --semantic also folds in the verify verdicts.
+
+GLOBAL
+  --help, -h     Show this help.
+  --version, -v  Print the version.
+  --json         Machine-readable output (where supported).
+
+Run \`ultrasec <command> --help\` for command-specific options.
+`;
+
+const NOT_YET: Record<string, string> = {
+  scan: "M2/M3",
+  graph: "M2",
+  paths: "M3",
+  dossier: "M3",
+  verify: "M5",
+  render: "M5",
+  check: "M5",
+};
+
+async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<number> {
+  switch (cmd) {
+    case undefined:
+    case "help":
+      println(HELP);
+      return 0;
+    case "version":
+      println(VERSION);
+      return 0;
+    case "tools":
+      return runTools(args);
+    default:
+      if (cmd in NOT_YET) {
+        eprintln(`ultrasec: \`${cmd}\` is not implemented yet (planned in ${NOT_YET[cmd]}).`);
+        return 2;
+      }
+      eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
+      return 2;
+  }
+}
+
+async function main(): Promise<void> {
+  const argv = process.argv.slice(2);
+  const args = parseArgs(argv);
+
+  if (flagBool(args, "help") || args.flags.h === true) {
+    println(HELP);
+    process.exit(0);
+  }
+  if (flagBool(args, "version") || args.flags.v === true) {
+    println(VERSION);
+    process.exit(0);
+  }
+
+  const code = await dispatch(args._[0], args);
+  process.exit(code);
+}
+
+main().catch((err) => {
+  eprintln(`ultrasec: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+  process.exit(1);
+});
