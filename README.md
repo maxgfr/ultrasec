@@ -58,6 +58,7 @@ External scanners are optional and auto-detected (see [Docker](#analysis-tools-v
 
 ```bash
 node scripts/ultrasec.mjs tools                       # installed scanners + how to get the rest
+node scripts/ultrasec.mjs map --repo .                # cheap attack-surface recon (no taint/tools/network)
 node scripts/ultrasec.mjs scan --repo . --out .ultrasec   # graph + cross-file taint + tools → dossier
 node scripts/ultrasec.mjs paths --run .ultrasec       # the candidate source→sink chains
 node scripts/ultrasec.mjs dossier <id> --run .ultrasec    # one finding's real code + path (adjudicate)
@@ -78,6 +79,22 @@ CISA KEV + CVSS). Risk scoring uses cached, offline-friendly feeds — add
 See [`assets/example-audit/`](assets/example-audit/) for a complete run, and
 [`SKILL.md`](SKILL.md) + [`references/`](references/) for the agent workflow
 (including the [deep-audit playbook](references/deep-audit-playbook.md)).
+
+### Large repos (millions–billions of LOC)
+
+Don't scan the whole tree — **map the attack surface, then drill in under a budget**:
+
+```bash
+node scripts/ultrasec.mjs map  --repo . --out .ultrasec                       # rank targets by sink density
+node scripts/ultrasec.mjs scan --repo . --scope <dir> --merge --resume --out .ultrasec   # drill one target into the same run
+node scripts/ultrasec.mjs scan --repo . --diff origin/main --merge --resume --out .ultrasec  # incremental: only changed files + reverse-deps
+```
+
+`--scope`/`--include`/`--exclude`/`--max-files`/`--gitignore` prune the walk;
+`--budget quick|standard|thorough` (and `--max-candidates`/`--max-depth`)
+rank-then-cap candidates (truncation is reported, never silent); `--merge` folds a
+scoped pass into one dossier (preserving prior verdicts); `--resume` reuses a
+content-hashed scan cache. Full loop: [scale-audit playbook](references/scale-audit-playbook.md).
 
 ## Analysis tools via Docker
 

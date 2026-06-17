@@ -25,7 +25,7 @@ describe("catalog", () => {
 describe("enumerateTaint (cross-file)", () => {
   const scan = scanRepo(FIXTURE);
   const graph = buildGraph(scan);
-  const findings = enumerateTaint(scan, graph);
+  const { findings } = enumerateTaint(scan, graph);
 
   it("finds a cross-file SQL injection: server.js req.query -> db.js query()", () => {
     const sqli = findings.find((f) => f.cwe === "CWE-89");
@@ -63,5 +63,34 @@ describe("enumerateTaint (cross-file)", () => {
       expect(f.status).toBe("open");
       expect(f.tool).toBe("ultrasec");
     }
+  });
+});
+
+describe("enumerateTaint (budget-aware ranking + no silent caps)", () => {
+  const scan = scanRepo(FIXTURE);
+  const graph = buildGraph(scan);
+
+  it("reports total and zero truncation under the default cap", () => {
+    const r = enumerateTaint(scan, graph);
+    expect(r.truncated).toBe(0);
+    expect(r.total).toBe(r.findings.length);
+    expect(r.total).toBeGreaterThanOrEqual(2);
+  });
+
+  it("rank-then-cap keeps the highest-ranked candidate and reports the remainder", () => {
+    const full = enumerateTaint(scan, graph);
+    const capped = enumerateTaint(scan, graph, { maxCandidates: 1 });
+    expect(capped.findings.length).toBe(1);
+    expect(capped.total).toBe(full.total);
+    expect(capped.truncated).toBe(full.total - 1);
+    // critical command-injection outranks the high SQLi → it survives the cap
+    expect(capped.findings[0]!.severity).toBe("critical");
+    expect(capped.findings[0]!.cwe).toBe("CWE-78");
+  });
+
+  it("maxDepth=0 yields no cross-file candidates (depth gate is honoured)", () => {
+    const r = enumerateTaint(scan, graph, { maxDepth: 0 });
+    // with no backward hops, a sink can only close on a source in its own file
+    expect(r.findings.every((f) => new Set(f.path!.map((p) => p.file)).size === 1)).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 ---
 name: ultrasec
-description: "Use when the user wants a SECURITY AUDIT of a codebase — to find real, exploitable vulnerabilities by reasoning about how untrusted data flows ACROSS functions and files, not just linting one file at a time. A deterministic zero-dependency engine (no API keys, no npm install) scans the whole repo, builds a cross-file/function link-graph, enumerates candidate source→sink taint paths (SQLi, command/code injection, path traversal, SSRF, XSS, insecure deserialization, weak crypto, open redirect), and orchestrates whatever best-in-class OSS scanners are installed (Trivy, OpenGrep/Semgrep, gitleaks, osv-scanner, cargo-audit, govulncheck, bandit, gosec, checkov, hadolint, kingfisher…), correlating their findings across tools and ranking everything by composite EPSS/CISA-KEV/CVSS risk; YOU then read the real code along each path, judge whether the flow is genuinely reachable and exploitable (incl. authz/business-logic bugs the tools miss), and adversarially verify every finding into a cited, tiered report. Anti-hallucination: every finding must cite resolvable [file:line] hops (`check` fails otherwise). Conservative: an uncertain high-severity finding is flagged needs-human, never silently dropped. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review of this codebase', 'is this code vulnerable to SQL injection/XSS/SSRF/command injection', 'taint analysis', 'where does user input reach a dangerous sink', 'check my dependencies for CVEs', 'scan for secrets'. The code-facing security sibling of ultraindex/ultrasearch."
+description: "Use when the user wants a SECURITY AUDIT of a codebase — to find real, exploitable vulnerabilities by reasoning about how untrusted data flows ACROSS functions and files, not just linting one file at a time. A deterministic zero-dependency engine (no API keys, no npm install) scans the whole repo, builds a cross-file/function link-graph, enumerates candidate source→sink taint paths (SQLi, NoSQL injection, command/code injection, path traversal & zip-slip, SSRF, XSS, SSTI, XXE, LDAP injection, header/CRLF injection, prototype pollution, insecure deserialization, weak crypto, open redirect), and orchestrates whatever best-in-class OSS scanners are installed (Trivy, OpenGrep/Semgrep, gitleaks, osv-scanner, cargo-audit, govulncheck, bandit, gosec, checkov, hadolint, kingfisher…), correlating their findings across tools and ranking everything by composite EPSS/CISA-KEV/CVSS risk; YOU then read the real code along each path, judge whether the flow is genuinely reachable and exploitable (incl. authz/business-logic bugs the tools miss), and adversarially verify every finding into a cited, tiered report. Anti-hallucination: every finding must cite resolvable [file:line] hops (`check` fails otherwise). Conservative: an uncertain high-severity finding is flagged needs-human, never silently dropped. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review of this codebase', 'is this code vulnerable to SQL injection/XSS/SSRF/command injection', 'taint analysis', 'where does user input reach a dangerous sink', 'check my dependencies for CVEs', 'scan for secrets'. The code-facing security sibling of ultraindex/ultrasearch."
 license: MIT
 metadata:
   version: 1.2.0
@@ -38,7 +38,12 @@ Most commands accept `--json` — prefer it when you branch on the result.
 
 One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
 
-- `scan --repo <dir> [--out .ultrasec] [--tools auto|none|<list>] [--docker] [--no-enrich|--offline] [--include/--exclude <glob>]`
+- `map --repo <dir> [--scope <glob>] [--out <run>] [--json]` — the **cheap recon
+  pass**: enumerate the attack surface (entry points by kind, sinks by CWE class,
+  per-dir density) with **no taint BFS, no tools, no network** — fast even on a
+  billion-line repo. Emits `MAP.md`/`attack-surface.json` and a deterministic
+  **suggested-target** list to drill into. Run this first on a huge repo.
+- `scan --repo <dir> [--out .ultrasec] [--tools auto|none|<list>] [--docker] [--no-enrich|--offline]`
   Scan → build the link-graph → enumerate cross-file taint candidates → run the
   installed external scanners → **correlate** their findings across tools (one
   issue, not three; `sources[]` records every producer) → **risk-rank** every
@@ -46,6 +51,15 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   `graph.json`, `manifest.json`, `DOSSIER.md`, ordered by risk). `--tools`
   defaults to **auto** (every installed scanner); `none` for graph+taint only.
   `--no-enrich`/`--offline` skips the EPSS/KEV network fetch (ranks by severity).
+  - **Focus (large repos):** `--scope <subdir|glob>` (prune the walk),
+    `--include`/`--exclude <glob>`, `--max-files <n>`, `--gitignore`.
+  - **Budget:** `--budget quick|standard|thorough` or `--max-candidates`/`--max-depth`
+    — candidates are **rank-then-capped** (kept = the important ones), and any cap is
+    reported in the dossier, **never silent**.
+  - **Incremental:** `--diff <ref>`/`--since <commit>` (changed files + their
+    reverse-dependents), `--merge` (fold into an existing run, preserving verdicts),
+    `--resume` (content-hash scan cache). A scoped/diff pass skips external scanners
+    unless you pass `--tools auto`.
 - `tools [--json]` — the external-scanner catalog: which are installed, what they
   cover, how to install the rest. ultrasec runs what's present; none are required.
 - `graph <file|symbol> [--depth n]` — the cross-file links into/out of a node.
@@ -67,10 +81,14 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
 
 1. **No audit yet** — run `scan`, then work the dossier. For a standard audit read
    [references/audit-playbook.md](references/audit-playbook.md).
-2. **High-assurance / "be thorough" / a large repo** — decompose by vulnerability
-   class and entry point, fan out analyzer + skeptic subagents, loop until dry:
+2. **High-assurance / "be thorough"** — decompose by vulnerability class and entry
+   point, fan out analyzer + skeptic subagents, loop until dry:
    [references/deep-audit-playbook.md](references/deep-audit-playbook.md).
-3. **Tune coverage** — sink/source/sanitizer catalog + CWE map:
+3. **Billion-line / monorepo / "audit the whole platform"** — too big to scan whole:
+   `map` the attack surface, then drill in target-by-target under a budget, merging
+   into one run: [references/scale-audit-playbook.md](references/scale-audit-playbook.md).
+   Same loop for incremental `--diff` re-audits in CI.
+4. **Tune coverage** — sink/source/sanitizer catalog + CWE map:
    [references/catalog.md](references/catalog.md); external tools:
    [references/tools.md](references/tools.md).
 

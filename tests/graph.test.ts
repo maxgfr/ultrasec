@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import { scanRepo } from "../src/scan.js";
-import { buildGraph } from "../src/graph.js";
+import { buildGraph, reverseDependents } from "../src/graph.js";
 import { neighbors } from "../src/neighbors.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
@@ -61,6 +61,25 @@ describe("buildGraph", () => {
 
   it("indexes unique exported symbol definitions", () => {
     expect(graph.symbolDefs["getUser"]).toEqual(["src/db.js"]);
+  });
+
+  it("builds a reverse call-index (callersBySymbol)", () => {
+    const callers = graph.callersBySymbol?.["getUser"];
+    expect(callers, "expected getUser to have recorded callers").toBeTruthy();
+    expect(callers!.some((c) => c.file === "src/server.js")).toBe(true);
+    // sorted by (file, line) for deterministic BFS order
+    const sorted = callers!.slice().sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line));
+    expect(callers).toEqual(sorted);
+  });
+});
+
+describe("reverseDependents", () => {
+  const graph = buildGraph(scanRepo(FIXTURE));
+
+  it("includes the seed and files that call into it", () => {
+    const deps = reverseDependents(graph, ["src/db.js"], 3);
+    expect(deps).toContain("src/db.js"); // seed included
+    expect(deps).toContain("src/server.js"); // server imports/calls db
   });
 });
 

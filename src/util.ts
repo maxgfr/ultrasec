@@ -48,6 +48,22 @@ export function flagBool(args: ParsedArgs, name: string): boolean {
   return v === true || v === "true";
 }
 
+/** Read a comma-separated flag as a trimmed string list (or `undefined` if absent). */
+export function listFlag(args: ParsedArgs, name: string): string[] | undefined {
+  const v = flagStr(args, name);
+  if (!v) return undefined;
+  const parts = v.split(",").map((s) => s.trim()).filter(Boolean);
+  return parts.length ? parts : undefined;
+}
+
+/** Read a flag as a finite number (or `undefined` if absent / unparseable). */
+export function numFlag(args: ParsedArgs, name: string): number | undefined {
+  const v = flagStr(args, name);
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 /** Short, stable content hash for deriving idempotent ids. */
 export function shortHash(input: string, len = 12): string {
   return createHash("sha256").update(input).digest("hex").slice(0, len);
