@@ -877,14 +877,16 @@ function mergeGraphs(a, b) {
   const symbolDefs = {};
   for (const src of [a.symbolDefs, b.symbolDefs]) {
     for (const [name, defFiles] of Object.entries(src)) {
-      symbolDefs[name] = [.../* @__PURE__ */ new Set([...symbolDefs[name] ?? [], ...defFiles])].sort(byStr);
+      const prev = Array.isArray(symbolDefs[name]) ? symbolDefs[name] : [];
+      symbolDefs[name] = [.../* @__PURE__ */ new Set([...prev, ...defFiles])].sort(byStr);
     }
   }
   const callersBySymbol = {};
   for (const src of [a.callersBySymbol ?? {}, b.callersBySymbol ?? {}]) {
     for (const [name, refs] of Object.entries(src)) {
-      const seen = new Set((callersBySymbol[name] ?? []).map((r) => `${r.file}:${r.line}:${r.symbol ?? ""}`));
-      const merged = [...callersBySymbol[name] ?? []];
+      const existing = Array.isArray(callersBySymbol[name]) ? callersBySymbol[name] : [];
+      const seen = new Set(existing.map((r) => `${r.file}:${r.line}:${r.symbol ?? ""}`));
+      const merged = [...existing];
       for (const r of refs) {
         const k = `${r.file}:${r.line}:${r.symbol ?? ""}`;
         if (!seen.has(k)) {
@@ -1493,8 +1495,9 @@ function enumerateTaint(scan, graph, opts = {}) {
         }
         if (fr.depth >= MAX_DEPTH || !fr.sym) continue;
         const defs = graph.symbolDefs[fr.sym];
-        if (!defs || !defs.includes(fr.file)) continue;
-        for (const caller of graph.callersBySymbol?.[fr.sym] ?? []) {
+        if (!Array.isArray(defs) || !defs.includes(fr.file)) continue;
+        const callerList = graph.callersBySymbol?.[fr.sym];
+        for (const caller of Array.isArray(callerList) ? callerList : []) {
           if (caller.file === fr.file) continue;
           const key = `${caller.file}#${caller.symbol ?? caller.line}`;
           if (visited.has(key)) continue;
@@ -2758,7 +2761,8 @@ async function runScan(args) {
       const prev = loadDossier(out);
       final = mergeDossier(prev, nextDossier);
       mergedNote = ` \xB7 merged into ${prev.findings.length} prior finding(s)`;
-    } catch {
+    } catch (e) {
+      eprintln(`ultrasec: could not merge into the existing dossier at ${out} (${e instanceof Error ? e.message : String(e)}); writing a fresh dossier instead.`);
     }
   }
   writeDossier(out, final);

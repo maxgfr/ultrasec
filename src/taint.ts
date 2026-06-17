@@ -157,13 +157,17 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
         // from this file. (We don't require it to be the *only* definition — a
         // name shared across files shouldn't silently drop a real taint path;
         // recall-oriented, the AI adjudicates.)
+        // Array.isArray guards: symbol names can collide with Object.prototype
+        // members ("toString", "constructor", …), so plain-object lookups by name
+        // may return inherited functions instead of undefined.
         const defs = graph.symbolDefs[fr.sym];
-        if (!defs || !defs.includes(fr.file)) continue;
+        if (!Array.isArray(defs) || !defs.includes(fr.file)) continue;
 
         // Step back to callers via the precomputed reverse index — O(callers),
         // not O(files) per frame. The index is pre-sorted by (file, line), so the
         // BFS visits callers in exactly the order the old double loop did.
-        for (const caller of graph.callersBySymbol?.[fr.sym] ?? []) {
+        const callerList = graph.callersBySymbol?.[fr.sym];
+        for (const caller of Array.isArray(callerList) ? callerList : []) {
           if (caller.file === fr.file) continue;
           const key = `${caller.file}#${caller.symbol ?? caller.line}`;
           if (visited.has(key)) continue;

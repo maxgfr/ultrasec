@@ -129,8 +129,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
       const prev = loadDossier(out);
       final = mergeDossier(prev, nextDossier);
       mergedNote = ` · merged into ${prev.findings.length} prior finding(s)`;
-    } catch {
-      /* no readable prior dossier — treat as a fresh pass */
+    } catch (e) {
+      // Surface rather than hide — a present-but-unreadable dossier is a real problem.
+      eprintln(`ultrasec: could not merge into the existing dossier at ${out} (${e instanceof Error ? e.message : String(e)}); writing a fresh dossier instead.`);
     }
   }
   writeDossier(out, final);
