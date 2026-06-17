@@ -10,22 +10,31 @@ var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 import { createHash } from "crypto";
 function parseArgs(argv) {
   const _ = [];
-  const flags = {};
+  const flags = /* @__PURE__ */ Object.create(null);
+  const set = (key, val) => {
+    if (Object.prototype.hasOwnProperty.call(flags, key)) {
+      const cur = flags[key];
+      if (Array.isArray(cur)) cur.push(val);
+      else flags[key] = [cur, val];
+    } else {
+      flags[key] = val;
+    }
+  };
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i];
     if (tok.startsWith("--")) {
       const body = tok.slice(2);
       const eq = body.indexOf("=");
       if (eq >= 0) {
-        flags[body.slice(0, eq)] = body.slice(eq + 1);
+        set(body.slice(0, eq), body.slice(eq + 1));
         continue;
       }
       const next = argv[i + 1];
       if (next !== void 0 && !next.startsWith("--")) {
-        flags[body] = next;
+        set(body, next);
         i++;
       } else {
-        flags[body] = true;
+        set(body, true);
       }
     } else {
       _.push(tok);
@@ -35,16 +44,22 @@ function parseArgs(argv) {
 }
 function flagStr(args, name) {
   const v = args.flags[name];
+  if (Array.isArray(v)) {
+    for (let i = v.length - 1; i >= 0; i--) if (typeof v[i] === "string") return v[i];
+    return void 0;
+  }
   return typeof v === "string" ? v : void 0;
 }
 function flagBool(args, name) {
   const v = args.flags[name];
+  if (Array.isArray(v)) return v.some((x) => x === true || x === "true");
   return v === true || v === "true";
 }
 function listFlag(args, name) {
-  const v = flagStr(args, name);
-  if (!v) return void 0;
-  const parts = v.split(",").map((s) => s.trim()).filter(Boolean);
+  const v = args.flags[name];
+  if (v === void 0) return void 0;
+  const raw = Array.isArray(v) ? v : [v];
+  const parts = raw.flatMap((x) => typeof x === "string" ? x.split(",") : []).map((s) => s.trim()).filter(Boolean);
   return parts.length ? parts : void 0;
 }
 function numFlag(args, name) {
@@ -52,6 +67,9 @@ function numFlag(args, name) {
   if (v === void 0) return void 0;
   const n = Number(v);
   return Number.isFinite(n) ? n : void 0;
+}
+function own(obj, key) {
+  return obj != null && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : void 0;
 }
 function shortHash(input, len = 12) {
   return createHash("sha256").update(input).digest("hex").slice(0, len);
@@ -255,7 +273,7 @@ function runTools(args) {
 }
 
 // src/walk.ts
-import { readFileSync, readdirSync, statSync } from "fs";
+import { readFileSync, readdirSync, lstatSync } from "fs";
 import { join, relative, sep } from "path";
 var DEFAULT_IGNORE_DIRS = /* @__PURE__ */ new Set([
   ".git",
@@ -342,21 +360,25 @@ function fileInScope(rel, scopes) {
   return false;
 }
 function gitignoreToGlobs(content) {
-  const globs = [];
+  const excludes = [];
+  const reincludes = [];
   for (const raw of content.split(/\r?\n/)) {
     const line = raw.trim();
-    if (!line || line.startsWith("#") || line.startsWith("!")) continue;
-    const rooted = line.startsWith("/");
-    let pat = rooted ? line.slice(1) : line;
+    if (!line || line.startsWith("#")) continue;
+    const negated = line.startsWith("!");
+    let body = negated ? line.slice(1) : line;
+    const rooted = body.startsWith("/");
+    let pat = rooted ? body.slice(1) : body;
     const dirOnly = pat.endsWith("/");
     if (dirOnly) pat = pat.replace(/\/+$/, "");
     if (!pat) continue;
     const anchored = rooted || pat.includes("/");
     const g = anchored ? pat : "**/" + pat;
-    globs.push(g + "/");
-    globs.push(g);
+    const sink = negated ? reincludes : excludes;
+    sink.push(g + "/");
+    if (!dirOnly) sink.push(g);
   }
-  return globs;
+  return { excludes, reincludes };
 }
 function walk(root, opts = {}) {
   return walkWithMeta(root, opts).files;
@@ -368,13 +390,18 @@ function walkWithMeta(root, opts = {}) {
   const scopes = opts.scope && opts.scope.length ? toScopeEntries(opts.scope) : void 0;
   const includeRes = opts.include && opts.include.length ? opts.include.map(globToRe) : void 0;
   const excludeGlobs = [...opts.exclude ?? []];
+  const reincludeGlobs = [];
   if (opts.gitignore) {
     try {
-      excludeGlobs.push(...gitignoreToGlobs(readFileSync(join(root, ".gitignore"), "utf8")));
+      const gi = gitignoreToGlobs(readFileSync(join(root, ".gitignore"), "utf8"));
+      excludeGlobs.push(...gi.excludes);
+      reincludeGlobs.push(...gi.reincludes);
     } catch {
     }
   }
   const excludeRes = excludeGlobs.length ? excludeGlobs.map(globToRe) : void 0;
+  const reincludeRes = reincludeGlobs.length ? reincludeGlobs.map(globToRe) : void 0;
+  const isExcluded = (rel) => !!excludeRes && excludeRes.some((re) => re.test(rel)) && !(reincludeRes && reincludeRes.some((re) => re.test(rel)));
   const out = [];
   let truncated = false;
   const visit = (dir) => {
@@ -390,21 +417,22 @@ function walkWithMeta(root, opts = {}) {
       const abs = join(dir, name);
       let st;
       try {
-        st = statSync(abs);
+        st = lstatSync(abs);
       } catch {
         continue;
       }
+      if (st.isSymbolicLink()) continue;
       const rel = relative(root, abs).split(sep).join("/");
       if (st.isDirectory()) {
         if (ignore.has(name)) continue;
         if (scopes && !dirInScope(rel, scopes)) continue;
-        if (excludeRes && excludeRes.some((re) => re.test(rel))) continue;
+        if (isExcluded(rel)) continue;
         visit(abs);
       } else if (st.isFile()) {
         if (st.size > maxBytes) continue;
         if (scopes && !fileInScope(rel, scopes)) continue;
         if (includeRes && !includeRes.some((re) => re.test(rel))) continue;
-        if (excludeRes && excludeRes.some((re) => re.test(rel))) continue;
+        if (isExcluded(rel)) continue;
         if (out.length >= maxFiles) {
           truncated = true;
           return;
@@ -963,8 +991,8 @@ function runGraph(args) {
   let node = target;
   if (!graph.files.includes(target)) {
     const defs = graph.symbolDefs[target];
-    if (defs && defs.length === 1) node = defs[0];
-    else if (defs && defs.length > 1) {
+    if (Array.isArray(defs) && defs.length === 1) node = defs[0];
+    else if (Array.isArray(defs) && defs.length > 1) {
       eprintln(`ultrasec graph: symbol "${target}" is defined in ${defs.length} files: ${defs.join(", ")}`);
       return 2;
     } else {
@@ -1391,7 +1419,7 @@ wrote ${join3(resolve(out), "MAP.md")} + attack-surface.json`);
 }
 
 // src/commands/scan.ts
-import { resolve as resolve2, join as join9 } from "path";
+import { resolve as resolve2, join as join9, relative as relative2 } from "path";
 import { existsSync as existsSync5 } from "fs";
 
 // src/taint.ts
@@ -1580,7 +1608,7 @@ function saveScanCache(run, cache) {
 import { execFileSync as execFileSync3 } from "child_process";
 
 // src/tools/normalize.ts
-var SEVERITY_ALIASES = {
+var SEVERITY_ALIASES = Object.assign(/* @__PURE__ */ Object.create(null), {
   critical: "critical",
   high: "high",
   error: "high",
@@ -1594,7 +1622,7 @@ var SEVERITY_ALIASES = {
   informational: "info",
   unknown: "info",
   none: "info"
-};
+});
 function normalizeSeverity(raw, fallback = "medium") {
   if (!raw) return fallback;
   return SEVERITY_ALIASES[String(raw).trim().toLowerCase()] ?? fallback;
@@ -1868,7 +1896,7 @@ function orchestrate(adapters, repo, opts = {}) {
 }
 
 // src/tools/scoring.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, statSync as statSync2, writeFileSync as writeFileSync3 } from "fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, statSync, writeFileSync as writeFileSync3 } from "fs";
 import { gunzipSync } from "zlib";
 import { homedir } from "os";
 import { join as join6 } from "path";
@@ -1937,7 +1965,7 @@ function cacheDir() {
 }
 function fresh(path) {
   try {
-    return existsSync2(path) && Date.now() - statSync2(path).mtimeMs < TTL_MS;
+    return existsSync2(path) && Date.now() - statSync(path).mtimeMs < TTL_MS;
   } catch {
     return false;
   }
@@ -2105,12 +2133,13 @@ var gitleaks = {
 };
 
 // src/tools/cvss.ts
-var AV = { N: 0.85, A: 0.62, L: 0.55, P: 0.2 };
-var AC = { L: 0.77, H: 0.44 };
-var UI = { N: 0.85, R: 0.62 };
-var CIA = { H: 0.56, L: 0.22, N: 0 };
-var PR_U = { N: 0.85, L: 0.62, H: 0.27 };
-var PR_C = { N: 0.85, L: 0.68, H: 0.5 };
+var nullObj = (o) => Object.assign(/* @__PURE__ */ Object.create(null), o);
+var AV = nullObj({ N: 0.85, A: 0.62, L: 0.55, P: 0.2 });
+var AC = nullObj({ L: 0.77, H: 0.44 });
+var UI = nullObj({ N: 0.85, R: 0.62 });
+var CIA = nullObj({ H: 0.56, L: 0.22, N: 0 });
+var PR_U = nullObj({ N: 0.85, L: 0.62, H: 0.27 });
+var PR_C = nullObj({ N: 0.85, L: 0.68, H: 0.5 });
 function roundup(x) {
   return Math.ceil(x * 10) / 10;
 }
@@ -2597,11 +2626,19 @@ function mergeDossier(prev, next) {
   const findings = [...byId.values()].sort((a, b) => byStr(a.id, b.id));
   const graph = mergeGraphs(prev.graph, next.graph);
   const scopes = [.../* @__PURE__ */ new Set([...prev.manifest.scopes ?? [], ...next.manifest.scopes ?? []])].sort(byStr);
+  const pt = prev.manifest.truncation;
+  const nt = next.manifest.truncation;
+  const truncation = pt || nt ? {
+    candidates: Math.max(pt?.candidates ?? 0, nt?.candidates ?? 0),
+    total: Math.max(pt?.total ?? 0, nt?.total ?? 0),
+    ...pt?.files || nt?.files ? { files: true } : {}
+  } : void 0;
   const manifest = {
     ...next.manifest,
     languages: [.../* @__PURE__ */ new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
     toolsRun: [.../* @__PURE__ */ new Set([...prev.manifest.toolsRun, ...next.manifest.toolsRun])].sort(),
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
+    ...truncation ? { truncation } : { truncation: void 0 },
     ...scopes.length ? { scopes } : {}
   };
   return { manifest, findings, graph };
@@ -2693,18 +2730,20 @@ async function runScan(args) {
   const maxFiles = numFlag(args, "max-files");
   const gitignore = flagBool(args, "gitignore");
   const budgetName = flagStr(args, "budget");
-  const preset = BUDGETS[budgetName ?? "standard"] ?? BUDGETS.standard;
+  const preset = own(BUDGETS, budgetName ?? "standard") ?? BUDGETS.standard;
   const maxDepth = numFlag(args, "max-depth") ?? preset.maxDepth;
   const maxCandidates = numFlag(args, "max-candidates") ?? preset.maxCandidates;
   const diffRef = flagStr(args, "diff") ?? flagStr(args, "since");
   let effectiveScope = scope;
   let diffNote;
   if (diffRef) {
-    const changed = changedFiles(repo, diffRef);
-    if (changed === null) {
+    const changedRaw = changedFiles(repo, diffRef);
+    if (changedRaw === null) {
       eprintln(`ultrasec: --diff/--since needs a git work tree and a resolvable ref (got '${diffRef}'). Aborting \u2014 no silent full scan.`);
       return 2;
     }
+    const relOut = relative2(repo, out);
+    const changed = relOut && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
     if (existsSync5(join9(out, "graph.json"))) {
       try {
@@ -2929,7 +2968,7 @@ function runPaths(args) {
 }
 
 // src/commands/verify.ts
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, readdirSync as readdirSync2, statSync as statSync2 } from "fs";
 import { join as join11, resolve as resolve5 } from "path";
 
 // src/verify.ts
@@ -3064,7 +3103,7 @@ function collectVerdictFiles(applyPath) {
   if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve5(s.trim()));
   const abs = resolve5(applyPath);
   try {
-    if (statSync3(abs).isDirectory()) {
+    if (statSync2(abs).isDirectory()) {
       return readdirSync2(abs).filter((n) => /verdict.*\.json$/i.test(n)).map((n) => join11(abs, n));
     }
   } catch {

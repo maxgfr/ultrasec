@@ -1,6 +1,6 @@
-import { resolve, join } from "node:path";
+import { resolve, join, relative } from "node:path";
 import { existsSync } from "node:fs";
-import { flagStr, flagBool, listFlag, numFlag, println, eprintln, byStr, type ParsedArgs } from "../util.js";
+import { flagStr, flagBool, listFlag, numFlag, own, println, eprintln, byStr, type ParsedArgs } from "../util.js";
 import { scanRepo, scanRepoCached } from "../scan.js";
 import { buildGraph, reverseDependents } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
@@ -39,8 +39,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const gitignore = flagBool(args, "gitignore");
 
   // Budget knobs: rank-then-cap taint candidates; explicit flags override the preset.
+  // own() guards against a `--budget constructor`-style prototype-member name.
   const budgetName = flagStr(args, "budget");
-  const preset = BUDGETS[budgetName ?? "standard"] ?? BUDGETS.standard!;
+  const preset = own(BUDGETS, budgetName ?? "standard") ?? BUDGETS.standard!;
   const maxDepth = numFlag(args, "max-depth") ?? preset.maxDepth;
   const maxCandidates = numFlag(args, "max-candidates") ?? preset.maxCandidates;
 
@@ -50,11 +51,16 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   let effectiveScope = scope;
   let diffNote: string | undefined;
   if (diffRef) {
-    const changed = changedFiles(repo, diffRef);
-    if (changed === null) {
+    const changedRaw = changedFiles(repo, diffRef);
+    if (changedRaw === null) {
       eprintln(`ultrasec: --diff/--since needs a git work tree and a resolvable ref (got '${diffRef}'). Aborting — no silent full scan.`);
       return 2;
     }
+    // Drop the audit's own output dir from the changed set (it shows up as untracked
+    // when --out lives inside the repo) so a diff scan never re-scans its own dossier.
+    const relOut = relative(repo, out);
+    const changed =
+      relOut && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
     if (existsSync(join(out, "graph.json"))) {
       try {

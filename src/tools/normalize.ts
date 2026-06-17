@@ -5,7 +5,10 @@ import type { Category, Confidence, Finding, Severity } from "../types.js";
 // ultrasec's, and assemble a normalized Finding with a stable, content-derived id
 // (so re-runs and merges are idempotent).
 
-const SEVERITY_ALIASES: Record<string, Severity> = {
+// Null-prototype: a tool-supplied severity string could equal an Object.prototype
+// member ("constructor"…), which on a plain object would return an inherited
+// function and defeat the `?? fallback` below — leaking a non-Severity value.
+const SEVERITY_ALIASES: Record<string, Severity> = Object.assign(Object.create(null) as Record<string, Severity>, {
   critical: "critical",
   high: "high",
   error: "high",
@@ -19,7 +22,7 @@ const SEVERITY_ALIASES: Record<string, Severity> = {
   informational: "info",
   unknown: "info",
   none: "info",
-};
+});
 
 export function normalizeSeverity(raw: string | undefined | null, fallback: Severity = "medium"): Severity {
   if (!raw) return fallback;

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseArgs, flagStr, flagBool, shortHash, byStr } from "../src/util.js";
+import { parseArgs, flagStr, flagBool, listFlag, own, shortHash, byStr } from "../src/util.js";
 
 describe("parseArgs", () => {
   it("collects positionals", () => {
@@ -30,6 +30,30 @@ describe("parseArgs", () => {
 
   it("flagBool accepts explicit =true", () => {
     expect(flagBool(parseArgs(["--semantic=true"]), "semantic")).toBe(true);
+  });
+
+  it("accumulates a repeated flag instead of last-wins (listFlag merges)", () => {
+    const a = parseArgs(["scan", "--scope", "a", "--scope", "b", "--scope", "c,d"]);
+    expect(listFlag(a, "scope")).toEqual(["a", "b", "c", "d"]);
+    expect(flagStr(a, "scope")).toBe("c,d"); // single-value consumers get the last
+  });
+
+  it("is prototype-safe: a flag named like a prototype member is not inherited", () => {
+    const a = parseArgs(["scan"]);
+    expect(flagStr(a, "constructor")).toBeUndefined();
+    expect(flagBool(a, "toString")).toBe(false);
+    expect(listFlag(a, "hasOwnProperty")).toBeUndefined();
+  });
+});
+
+describe("own", () => {
+  it("returns own values but never inherited prototype members", () => {
+    const m = { high: 0.8 } as Record<string, number>;
+    expect(own(m, "high")).toBe(0.8);
+    expect(own(m, "missing")).toBeUndefined();
+    expect(own(m, "constructor")).toBeUndefined(); // would be a function on a raw lookup
+    expect(own(m, "toString")).toBeUndefined();
+    expect(own(undefined, "x")).toBeUndefined();
   });
 });
 

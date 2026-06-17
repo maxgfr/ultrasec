@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, lstatSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { byStr } from "./util.js";
 
@@ -144,25 +144,40 @@ function fileInScope(rel: string, scopes: ScopeEntry[]): boolean {
   return false;
 }
 
-/** Best-effort parse of a repo-root `.gitignore` into exclude globs our matcher
- *  understands. Negations (`!…`) are skipped (conservative — never un-excludes). */
-export function gitignoreToGlobs(content: string): string[] {
-  const globs: string[] = [];
+export interface GitignoreGlobs {
+  /** Patterns that exclude paths. */
+  excludes: string[];
+  /** `!`-negation patterns that RE-INCLUDE paths a broader exclude would drop. */
+  reincludes: string[];
+}
+
+/** Best-effort parse of a repo-root `.gitignore` into our glob vocabulary. Common
+ *  patterns only: comments, anchored (`/x`) vs any-depth, directory-only (trailing
+ *  `/`), and `!`-negations (honoured as re-includes so we don't UNDER-scan files
+ *  git would actually see). */
+export function gitignoreToGlobs(content: string): GitignoreGlobs {
+  const excludes: string[] = [];
+  const reincludes: string[] = [];
   for (const raw of content.split(/\r?\n/)) {
     const line = raw.trim();
-    if (!line || line.startsWith("#") || line.startsWith("!")) continue;
-    const rooted = line.startsWith("/");
-    let pat = rooted ? line.slice(1) : line;
+    if (!line || line.startsWith("#")) continue;
+    const negated = line.startsWith("!");
+    let body = negated ? line.slice(1) : line;
+    const rooted = body.startsWith("/");
+    let pat = rooted ? body.slice(1) : body;
     const dirOnly = pat.endsWith("/");
     if (dirOnly) pat = pat.replace(/\/+$/, "");
     if (!pat) continue;
     const anchored = rooted || pat.includes("/");
     const g = anchored ? pat : "**/" + pat;
-    // A gitignore entry matches the path itself and (for dirs) everything under it.
-    globs.push(g + "/");
-    globs.push(g);
+    const sink = negated ? reincludes : excludes;
+    // Always match the path + (for a dir) its contents. Only a NON-dir-only pattern
+    // also matches a bare file of that name — a `build/` entry must not exclude a
+    // file literally named `build` elsewhere.
+    sink.push(g + "/");
+    if (!dirOnly) sink.push(g);
   }
-  return globs;
+  return { excludes, reincludes };
 }
 
 /** Recursively list files under `root`, skipping ignored dirs. Deterministic. */
@@ -179,14 +194,21 @@ export function walkWithMeta(root: string, opts: WalkOptions = {}): WalkResult {
   const includeRes = opts.include && opts.include.length ? opts.include.map(globToRe) : undefined;
 
   const excludeGlobs = [...(opts.exclude ?? [])];
+  const reincludeGlobs: string[] = [];
   if (opts.gitignore) {
     try {
-      excludeGlobs.push(...gitignoreToGlobs(readFileSync(join(root, ".gitignore"), "utf8")));
+      const gi = gitignoreToGlobs(readFileSync(join(root, ".gitignore"), "utf8"));
+      excludeGlobs.push(...gi.excludes);
+      reincludeGlobs.push(...gi.reincludes);
     } catch {
       /* no .gitignore — fine */
     }
   }
   const excludeRes = excludeGlobs.length ? excludeGlobs.map(globToRe) : undefined;
+  const reincludeRes = reincludeGlobs.length ? reincludeGlobs.map(globToRe) : undefined;
+  // Excluded UNLESS a gitignore `!`-negation re-includes it (git's last-match-wins).
+  const isExcluded = (rel: string): boolean =>
+    !!excludeRes && excludeRes.some((re) => re.test(rel)) && !(reincludeRes && reincludeRes.some((re) => re.test(rel)));
 
   const out: WalkedFile[] = [];
   let truncated = false;
@@ -204,21 +226,24 @@ export function walkWithMeta(root: string, opts: WalkOptions = {}): WalkResult {
       const abs = join(dir, name);
       let st;
       try {
-        st = statSync(abs);
+        // lstat (not stat): never follow symlinks — a directory symlink to an
+        // ancestor would otherwise loop and multiply the file set. Matches git.
+        st = lstatSync(abs);
       } catch {
         continue;
       }
+      if (st.isSymbolicLink()) continue;
       const rel = relative(root, abs).split(sep).join("/");
       if (st.isDirectory()) {
         if (ignore.has(name)) continue;
         if (scopes && !dirInScope(rel, scopes)) continue;
-        if (excludeRes && excludeRes.some((re) => re.test(rel))) continue;
+        if (isExcluded(rel)) continue;
         visit(abs);
       } else if (st.isFile()) {
         if (st.size > maxBytes) continue;
         if (scopes && !fileInScope(rel, scopes)) continue;
         if (includeRes && !includeRes.some((re) => re.test(rel))) continue;
-        if (excludeRes && excludeRes.some((re) => re.test(rel))) continue;
+        if (isExcluded(rel)) continue;
         if (out.length >= maxFiles) {
           truncated = true;
           return;

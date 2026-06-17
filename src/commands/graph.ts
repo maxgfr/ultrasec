@@ -19,9 +19,12 @@ export function runGraph(args: ParsedArgs): number {
   // Resolve a symbol name to its defining file if the target isn't a file node.
   let node = target;
   if (!graph.files.includes(target)) {
+    // Array.isArray guard: a symbol name can collide with an Object.prototype member
+    // ("constructor"/"toString"/…), so this plain-object lookup may return an
+    // inherited function — treat anything non-array as "not a known symbol".
     const defs = graph.symbolDefs[target];
-    if (defs && defs.length === 1) node = defs[0]!;
-    else if (defs && defs.length > 1) {
+    if (Array.isArray(defs) && defs.length === 1) node = defs[0]!;
+    else if (Array.isArray(defs) && defs.length > 1) {
       eprintln(`ultrasec graph: symbol "${target}" is defined in ${defs.length} files: ${defs.join(", ")}`);
       return 2;
     } else {

@@ -64,11 +64,24 @@ export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
   const graph = mergeGraphs(prev.graph, next.graph);
 
   const scopes = [...new Set([...(prev.manifest.scopes ?? []), ...(next.manifest.scopes ?? [])])].sort(byStr);
+  // Carry truncation forward: if EITHER pass was coverage-capped, the merged run is
+  // still incomplete — never let a merge silently present a capped run as complete.
+  const pt = prev.manifest.truncation;
+  const nt = next.manifest.truncation;
+  const truncation =
+    pt || nt
+      ? {
+          candidates: Math.max(pt?.candidates ?? 0, nt?.candidates ?? 0),
+          total: Math.max(pt?.total ?? 0, nt?.total ?? 0),
+          ...(pt?.files || nt?.files ? { files: true as const } : {}),
+        }
+      : undefined;
   const manifest: Manifest = {
     ...next.manifest,
     languages: [...new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
     toolsRun: [...new Set([...prev.manifest.toolsRun, ...next.manifest.toolsRun])].sort(),
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
+    ...(truncation ? { truncation } : { truncation: undefined }),
     ...(scopes.length ? { scopes } : {}),
   };
 
