@@ -143,10 +143,43 @@ var TOOLS = [
   {
     name: "checkov",
     category: "config",
-    description: "IaC/misconfig scanner (Terraform, k8s, Dockerfile, CloudFormation\u2026).",
+    description: "IaC/misconfig with a cross-resource graph (Terraform, k8s, Dockerfile, CloudFormation\u2026) \u2014 deeper than per-block scanning.",
     languages: ["*"],
-    install: { pip: "pipx install checkov", url: "https://www.checkov.io/" },
-    runHint: "checkov -d <repo> -o json"
+    install: { pip: "pipx install checkov", docker: "bridgecrew/checkov", url: "https://www.checkov.io/" },
+    runHint: "checkov -d <repo> -o json --compact --quiet --soft-fail",
+    primary: true
+  },
+  {
+    name: "bandit",
+    category: "sast",
+    description: "Python AST security linter \u2014 dangerous idioms (shell=True, eval, weak crypto, pickle/yaml.load) a taint engine can't see.",
+    languages: ["python"],
+    install: { pip: "pipx install bandit", docker: "ghcr.io/pycqa/bandit", url: "https://bandit.readthedocs.io/" },
+    runHint: "bandit -r <repo> -f json -ll -ii -q"
+  },
+  {
+    name: "gosec",
+    category: "sast",
+    description: "Go security checker, stdlib-aware (math/rand, InsecureSkipVerify, exec with tainted args, SQL concat).",
+    languages: ["go"],
+    install: { brew: "brew install gosec", go: "go install github.com/securego/gosec/v2/cmd/gosec@latest", docker: "ghcr.io/securego/gosec", url: "https://github.com/securego/gosec" },
+    runHint: "gosec -fmt json -quiet -no-fail ./..."
+  },
+  {
+    name: "hadolint",
+    category: "config",
+    description: "Dockerfile linter with ShellCheck embedded \u2014 audits the bash inside RUN, which trivy/checkov don't.",
+    languages: ["docker"],
+    install: { brew: "brew install hadolint", docker: "hadolint/hadolint", url: "https://github.com/hadolint/hadolint" },
+    runHint: "hadolint --format json --no-fail <Dockerfile\u2026>"
+  },
+  {
+    name: "kingfisher",
+    category: "secret",
+    description: "Secret scanner: offline checksum+entropy+language-aware pre-filter (fewer FPs), 950+ rules, git history, SARIF.",
+    languages: ["*"],
+    install: { brew: "brew install kingfisher", docker: "ghcr.io/mongodb/kingfisher", url: "https://github.com/mongodb/kingfisher" },
+    runHint: "kingfisher scan <repo> --format sarif --no-validate"
   }
 ];
 function detect(name) {
@@ -1036,80 +1069,6 @@ function enumerateTaint(scan, graph) {
 
 // src/tools/run.ts
 import { execFileSync as execFileSync2 } from "child_process";
-var TIMEOUT_MS = 3e5;
-var MAX_BUFFER = 64 * 1024 * 1024;
-var MOUNT = "/work";
-function exec(name, args, cwd) {
-  try {
-    const stdout = execFileSync2(name, args, {
-      cwd,
-      encoding: "utf8",
-      timeout: TIMEOUT_MS,
-      maxBuffer: MAX_BUFFER,
-      stdio: ["ignore", "pipe", "ignore"]
-    });
-    return { stdout, failed: false };
-  } catch (e) {
-    const err = e;
-    const stdout = err.stdout ? err.stdout.toString() : "";
-    if (stdout.trim()) return { stdout, failed: false };
-    return { stdout: "", failed: true, err: err.message };
-  }
-}
-function relLoc(loc, base) {
-  if (base && loc.file.startsWith(base + "/")) return { ...loc, file: loc.file.slice(base.length + 1) };
-  if (base && loc.file === base) return { ...loc, file: "." };
-  return loc;
-}
-function relativizeFindings(findings, base) {
-  return findings.map((f) => ({
-    ...f,
-    source: f.source ? relLoc(f.source, base) : f.source,
-    sink: f.sink ? relLoc(f.sink, base) : f.sink,
-    path: f.path ? f.path.map((p) => relLoc(p, base)) : f.path
-  }));
-}
-function runNative(adapter, repo) {
-  if (!detect(adapter.name).installed) {
-    return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
-  }
-  const { stdout, failed, err } = exec(adapter.name, adapter.argv(repo), repo);
-  return finish(adapter, repo, stdout, failed, err, false);
-}
-function runDocker(adapter, repo) {
-  if (!adapter.dockerImage) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no docker image" };
-  const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(adapter.argv(MOUNT));
-  const args = ["run", "--rm", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
-  const { stdout, failed, err } = exec("docker", args, repo);
-  return finish(adapter, repo, stdout, failed, err, true);
-}
-function finish(adapter, repo, stdout, failed, err, docker2) {
-  if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
-  try {
-    const base = docker2 ? MOUNT : repo;
-    const findings = relativizeFindings(adapter.parse(stdout, repo), base);
-    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker2 ? " (docker)" : ""}` };
-  } catch (e) {
-    return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };
-  }
-}
-function runAdapter(adapter, repo, useDocker = false) {
-  return useDocker ? runDocker(adapter, repo) : runNative(adapter, repo);
-}
-function orchestrate(adapters, repo, opts = {}) {
-  let selected = opts.which && opts.which.length ? adapters.filter((a) => opts.which.includes(a.name)) : adapters;
-  if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
-  const results = [];
-  const merged = /* @__PURE__ */ new Map();
-  for (const a of selected) {
-    const r = runAdapter(a, repo, opts.useDocker);
-    results.push(r);
-    for (const f of r.findings) if (!merged.has(f.id)) merged.set(f.id, f);
-  }
-  const findings = [...merged.values()].sort((a, b) => byStr(a.id, b.id));
-  const toolsRun = results.filter((r) => r.ran && r.ok).map((r) => r.name);
-  return { findings, toolsRun, results };
-}
 
 // src/tools/normalize.ts
 var SEVERITY_ALIASES = {
@@ -1131,6 +1090,21 @@ function normalizeSeverity(raw, fallback = "medium") {
   if (!raw) return fallback;
   return SEVERITY_ALIASES[String(raw).trim().toLowerCase()] ?? fallback;
 }
+function pickCve(ids) {
+  for (const id of ids) {
+    const m = /^CVE-\d{4}-\d{4,}$/i.exec(String(id ?? "").trim());
+    if (m) return m[0].toUpperCase();
+  }
+  return void 0;
+}
+function cvesIn(...inputs) {
+  const text = inputs.flat(Infinity).map((x) => typeof x === "string" ? x : "").join(" ");
+  const out = /* @__PURE__ */ new Set();
+  const re = /CVE-\d{4}-\d{4,}/gi;
+  let m;
+  while (m = re.exec(text)) out.add(m[0].toUpperCase());
+  return [...out];
+}
 function makeToolFinding(i) {
   const id = shortHash(`${i.tool}:${i.ident}:${i.file ?? ""}:${i.line ?? ""}`);
   const f = {
@@ -1141,10 +1115,21 @@ function makeToolFinding(i) {
     confidence: i.confidence ?? "medium",
     message: i.message,
     tool: i.tool,
+    sources: [i.tool],
     status: "open"
   };
   if (i.cwe) f.cwe = i.cwe;
   if (i.references && i.references.length) f.references = i.references;
+  const aliases = [i.ident, ...i.aliases ?? []].filter((x) => Boolean(x));
+  const uniqAliases = [...new Set(aliases)];
+  if (i.aliases !== void 0 || /^(CVE|GHSA|RUSTSEC|GO|PYSEC|OSV)-/i.test(i.ident)) {
+    if (uniqAliases.length) f.aliases = uniqAliases;
+    const cve = pickCve(uniqAliases);
+    if (cve) f.cve = cve;
+  }
+  if (i.pkg) f.pkg = i.pkg;
+  if (i.version) f.version = i.version;
+  if (i.verified !== void 0) f.verified = i.verified;
   if (i.file) {
     const loc = { file: i.file, line: i.line ?? 1 };
     f.sink = loc;
@@ -1191,6 +1176,324 @@ function firstCwe(input) {
   return m ? `CWE-${m[1]}` : void 0;
 }
 
+// src/tools/correlate.ts
+function sevRank(s) {
+  return SEVERITIES.indexOf(s);
+}
+function maxSeverity(a, b) {
+  return sevRank(a) <= sevRank(b) ? a : b;
+}
+function pkgKey(f) {
+  return `${(f.pkg ?? "").toLowerCase()}@${(f.version ?? "").toLowerCase()}`;
+}
+function depIds(f) {
+  const ids = /* @__PURE__ */ new Set();
+  if (f.cve) ids.add(f.cve.toUpperCase());
+  for (const a of f.aliases ?? []) ids.add(a.toUpperCase());
+  if (!ids.size) ids.add(f.title.toUpperCase());
+  return [...ids];
+}
+var DSU = class {
+  p;
+  constructor(n) {
+    this.p = Array.from({ length: n }, (_, i) => i);
+  }
+  find(x) {
+    while (this.p[x] !== x) x = this.p[x] = this.p[this.p[x]];
+    return x;
+  }
+  union(a, b) {
+    this.p[this.find(a)] = this.find(b);
+  }
+};
+function bumpConfidence(c, agree) {
+  return agree >= 2 ? "high" : c;
+}
+function mergeCluster(group) {
+  const rep = group.slice().sort(
+    (a, b) => sevRank(a.severity) - sevRank(b.severity) || (b.risk ?? 0) - (a.risk ?? 0) || byStr(a.id, b.id)
+  )[0];
+  const sources = [...new Set(group.flatMap((f) => f.sources ?? [f.tool]))].sort(byStr);
+  const references = [...new Set(group.flatMap((f) => f.references ?? []))];
+  const aliases = [...new Set(group.flatMap((f) => f.aliases ?? []).map((a) => a.toUpperCase()))].sort(byStr);
+  const severity = group.reduce((s, f) => maxSeverity(s, f.severity), "info");
+  const cve = group.map((f) => f.cve).find(Boolean) ?? pickCve(aliases);
+  const cwe = group.map((f) => f.cwe).find(Boolean);
+  const verified = group.some((f) => f.verified === true);
+  const out = {
+    ...rep,
+    severity,
+    sources,
+    confidence: bumpConfidence(rep.confidence, sources.length)
+  };
+  if (references.length) out.references = references;
+  else delete out.references;
+  if (aliases.length) out.aliases = aliases;
+  if (cve) out.cve = cve;
+  if (cwe) out.cwe = cwe;
+  if (verified) out.verified = true;
+  return out;
+}
+function correlate(findings) {
+  const taint = findings.filter((f) => f.tool === "ultrasec");
+  const tool = findings.filter((f) => f.tool !== "ultrasec");
+  const out = [...taint];
+  const nonDep = tool.filter((f) => f.category !== "dep");
+  const byKey = /* @__PURE__ */ new Map();
+  for (const f of nonDep) {
+    const where = f.sink ? `${f.sink.file}:${f.sink.line}` : "";
+    const ident = (f.cwe ?? f.title).trim().toLowerCase();
+    const key = `${f.category}::${ident}::${where}`;
+    (byKey.get(key) ?? byKey.set(key, []).get(key)).push(f);
+  }
+  for (const group of byKey.values()) out.push(group.length === 1 ? withSources(group[0]) : mergeCluster(group));
+  const dep = tool.filter((f) => f.category === "dep");
+  const dsu = new DSU(dep.length);
+  const seen = /* @__PURE__ */ new Map();
+  dep.forEach((f, i) => {
+    const pk = pkgKey(f);
+    for (const id of depIds(f)) {
+      const k = `${pk}|${id}`;
+      const prev = seen.get(k);
+      if (prev === void 0) seen.set(k, i);
+      else dsu.union(prev, i);
+    }
+  });
+  const clusters = /* @__PURE__ */ new Map();
+  dep.forEach((f, i) => {
+    const r = dsu.find(i);
+    (clusters.get(r) ?? clusters.set(r, []).get(r)).push(f);
+  });
+  for (const group of clusters.values()) out.push(group.length === 1 ? withSources(group[0]) : mergeCluster(group));
+  return out.sort((a, b) => byStr(a.id, b.id));
+}
+function withSources(f) {
+  return f.sources && f.sources.length ? f : { ...f, sources: [f.tool] };
+}
+
+// src/tools/run.ts
+var TIMEOUT_MS = 3e5;
+var MAX_BUFFER = 64 * 1024 * 1024;
+var MOUNT = "/work";
+function exec(name, args, cwd) {
+  try {
+    const stdout = execFileSync2(name, args, {
+      cwd,
+      encoding: "utf8",
+      timeout: TIMEOUT_MS,
+      maxBuffer: MAX_BUFFER,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    return { stdout, failed: false };
+  } catch (e) {
+    const err = e;
+    const stdout = err.stdout ? err.stdout.toString() : "";
+    if (stdout.trim()) return { stdout, failed: false };
+    return { stdout: "", failed: true, err: err.message };
+  }
+}
+function relLoc(loc, base) {
+  if (base && loc.file.startsWith(base + "/")) return { ...loc, file: loc.file.slice(base.length + 1) };
+  if (base && loc.file === base) return { ...loc, file: "." };
+  return loc;
+}
+function relativizeFindings(findings, base) {
+  return findings.map((f) => ({
+    ...f,
+    source: f.source ? relLoc(f.source, base) : f.source,
+    sink: f.sink ? relLoc(f.sink, base) : f.sink,
+    path: f.path ? f.path.map((p) => relLoc(p, base)) : f.path
+  }));
+}
+function buildArgv(adapter, repo, target) {
+  const base = adapter.argv(target);
+  if (!adapter.enumerate) return base;
+  const files = adapter.enumerate(repo);
+  if (!files.length) return null;
+  return [...base, ...files];
+}
+function runNative(adapter, repo) {
+  if (!detect(adapter.name).installed) {
+    return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
+  }
+  const argv = buildArgv(adapter, repo, repo);
+  if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
+  const { stdout, failed, err } = exec(adapter.name, argv, repo);
+  return finish(adapter, repo, stdout, failed, err, false);
+}
+function runDocker(adapter, repo) {
+  if (!adapter.dockerImage) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no docker image" };
+  const argv = buildArgv(adapter, repo, MOUNT);
+  if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
+  const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
+  const args = ["run", "--rm", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
+  const { stdout, failed, err } = exec("docker", args, repo);
+  return finish(adapter, repo, stdout, failed, err, true);
+}
+function finish(adapter, repo, stdout, failed, err, docker2) {
+  if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
+  try {
+    const base = docker2 ? MOUNT : repo;
+    const findings = relativizeFindings(adapter.parse(stdout, repo), base);
+    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker2 ? " (docker)" : ""}` };
+  } catch (e) {
+    return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };
+  }
+}
+function runAdapter(adapter, repo, useDocker = false) {
+  return useDocker ? runDocker(adapter, repo) : runNative(adapter, repo);
+}
+function orchestrate(adapters, repo, opts = {}) {
+  let selected = opts.which && opts.which.length ? adapters.filter((a) => opts.which.includes(a.name)) : adapters;
+  if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
+  const results = [];
+  const all = [];
+  for (const a of selected) {
+    const r = runAdapter(a, repo, opts.useDocker);
+    results.push(r);
+    all.push(...r.findings);
+  }
+  const findings = correlate(all);
+  const toolsRun = results.filter((r) => r.ran && r.ok).map((r) => r.name);
+  return { findings, toolsRun, results };
+}
+
+// src/tools/scoring.ts
+import { existsSync, mkdirSync, readFileSync as readFileSync2, statSync as statSync2, writeFileSync } from "fs";
+import { gunzipSync } from "zlib";
+import { homedir } from "os";
+import { join as join3 } from "path";
+var SEVERITY_WEIGHT = {
+  critical: 1,
+  high: 0.8,
+  medium: 0.5,
+  low: 0.25,
+  info: 0.1
+};
+function riskScore({ severity, epss, kev }) {
+  const base = 0.6 * SEVERITY_WEIGHT[severity] + 0.4 * Math.min(Math.max(epss ?? 0, 0), 1);
+  let score = Math.round(100 * base);
+  if (kev) score = Math.max(score, 95);
+  return Math.min(Math.max(score, 0), 100);
+}
+function parseEpssCsv(csv) {
+  const out = /* @__PURE__ */ new Map();
+  for (const line of csv.split("\n")) {
+    const row = line.trim();
+    if (!row || row.startsWith("#")) continue;
+    const [cve, epss, pct] = row.split(",");
+    if (!cve || !/^CVE-/i.test(cve)) continue;
+    const e = Number(epss);
+    if (Number.isNaN(e)) continue;
+    out.set(cve.toUpperCase(), { epss: e, percentile: pct !== void 0 ? Number(pct) : void 0 });
+  }
+  return out;
+}
+function parseKev(json) {
+  const out = /* @__PURE__ */ new Map();
+  let data;
+  try {
+    data = JSON.parse(json || "{}");
+  } catch {
+    return out;
+  }
+  for (const v of data?.vulnerabilities ?? []) {
+    if (v?.cveID) out.set(String(v.cveID).toUpperCase(), v.dateAdded);
+  }
+  return out;
+}
+function applyEnrichment(findings, feeds) {
+  return findings.map((f) => {
+    const out = { ...f };
+    const cve = f.cve?.toUpperCase();
+    if (cve) {
+      const e = feeds.epss.get(cve);
+      if (e) out.epss = e.epss;
+      if (feeds.kev.has(cve)) {
+        out.kev = true;
+        const d = feeds.kev.get(cve);
+        if (d) out.kevDateAdded = d;
+      }
+    }
+    out.risk = riskScore({ severity: out.severity, epss: out.epss, kev: out.kev });
+    return out;
+  });
+}
+var EPSS_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz";
+var KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
+var TTL_MS = 24 * 60 * 60 * 1e3;
+var FETCH_TIMEOUT_MS = 2e4;
+function cacheDir() {
+  return process.env.ULTRASEC_CACHE_DIR || join3(homedir(), ".cache", "ultrasec");
+}
+function fresh(path) {
+  try {
+    return existsSync(path) && Date.now() - statSync2(path).mtimeMs < TTL_MS;
+  } catch {
+    return false;
+  }
+}
+async function fetchBuf(url) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, redirect: "follow" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  } finally {
+    clearTimeout(t);
+  }
+}
+async function loadCached(url, file, gz) {
+  const dir = cacheDir();
+  const path = join3(dir, file);
+  if (fresh(path)) {
+    try {
+      return readFileSync2(path, "utf8");
+    } catch {
+    }
+  }
+  try {
+    const buf = await fetchBuf(url);
+    const text = (gz ? gunzipSync(buf) : buf).toString("utf8");
+    try {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path, text);
+    } catch {
+    }
+    return text;
+  } catch {
+    try {
+      if (existsSync(path)) return readFileSync2(path, "utf8");
+    } catch {
+    }
+    return "";
+  }
+}
+async function loadFeeds() {
+  const [epssCsv, kevJson] = await Promise.all([
+    loadCached(EPSS_URL, "epss.csv", true),
+    loadCached(KEV_URL, "kev.json", false)
+  ]);
+  return { epss: parseEpssCsv(epssCsv), kev: parseKev(kevJson) };
+}
+async function enrichFindings(findings, opts = {}) {
+  if (opts.enabled === false) {
+    return { findings: applyEnrichment(findings, { epss: /* @__PURE__ */ new Map(), kev: /* @__PURE__ */ new Map() }), note: "risk: severity-only (enrichment off)" };
+  }
+  let feeds;
+  try {
+    feeds = await loadFeeds();
+  } catch {
+    feeds = { epss: /* @__PURE__ */ new Map(), kev: /* @__PURE__ */ new Map() };
+  }
+  const enriched = applyEnrichment(findings, feeds);
+  const withCve = enriched.filter((f) => f.cve);
+  const kevHits = enriched.filter((f) => f.kev).length;
+  const note = feeds.epss.size || feeds.kev.size ? `risk: EPSS ${feeds.epss.size} CVEs \xB7 KEV ${feeds.kev.size} \xB7 ${withCve.length} finding(s) with CVE${kevHits ? ` \xB7 ${kevHits} in KEV` : ""}` : "risk: severity-only (feeds unavailable offline)";
+  return { findings: enriched, note };
+}
+
 // src/tools/trivy.ts
 var trivy = {
   name: "trivy",
@@ -1213,7 +1516,12 @@ var trivy = {
             message: `${v.PkgName}@${v.InstalledVersion}: ${v.Title || v.Description || v.VulnerabilityID}` + (v.FixedVersion ? ` (fixed in ${v.FixedVersion})` : ""),
             file: target,
             cwe: firstCwe(v.CweIDs),
-            references: [v.PrimaryURL, ...v.References ?? []].filter(Boolean)
+            references: [v.PrimaryURL, ...v.References ?? []].filter(Boolean),
+            pkg: v.PkgName,
+            version: v.InstalledVersion,
+            // VulnerabilityID may be a GHSA; surface any CVE in the refs so the
+            // cross-tool correlator can match it against osv/grype on the CVE.
+            aliases: [v.VulnerabilityID, ...cvesIn(v.PrimaryURL, v.References)]
           })
         );
       }
@@ -1254,13 +1562,20 @@ var trivy = {
 };
 
 // src/tools/gitleaks.ts
+import { existsSync as existsSync2 } from "fs";
+import { join as join4 } from "path";
 var gitleaks = {
   name: "gitleaks",
   category: "secret",
   dockerImage: "ghcr.io/gitleaks/gitleaks:v8.30.1",
   // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);
   // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
-  argv: (target) => ["detect", "--no-git", "--source", target, "--report-format", "json", "--report-path", "-", "--no-banner", "--redact", "--exit-code", "0"],
+  argv: (target) => {
+    const onHost = existsSync2(target);
+    const hasGit = onHost && existsSync2(join4(target, ".git"));
+    const base = ["detect", "--source", target, "--report-format", "json", "--report-path", "-", "--no-banner", "--redact", "--exit-code", "0"];
+    return hasGit ? base : [...base, "--no-git"];
+  },
   parse(raw) {
     const arr = JSON.parse(raw || "[]");
     if (!Array.isArray(arr)) return [];
@@ -1351,6 +1666,7 @@ var osvScanner = {
           const db = v.database_specific ?? {};
           const sevStr = groupSev.get(v.id) ?? db.severity ?? "";
           const fixed = (v.affected ?? []).flatMap((a) => (a.ranges ?? []).flatMap((r) => (r.events ?? []).map((e) => e.fixed))).filter(Boolean)[0];
+          const refs = (v.references ?? []).map((r) => r.url).filter(Boolean);
           out.push(
             makeToolFinding({
               tool: "osv-scanner",
@@ -1361,7 +1677,11 @@ var osvScanner = {
               message: `${name}@${version}: ${v.summary || v.id}` + (fixed ? ` (fixed in ${fixed})` : ""),
               file: src,
               cwe: firstCwe(db.cwe_ids),
-              references: (v.references ?? []).map((r) => r.url).filter(Boolean)
+              references: refs,
+              pkg: name,
+              version,
+              // v.id is usually a GHSA; v.aliases carries the CVE — the join key.
+              aliases: [...v.aliases ?? [], ...cvesIn(refs)]
             })
           );
         }
@@ -1442,7 +1762,11 @@ var cargoAudit = {
           severity: deriveSeverity(adv.cvss, "high"),
           message: `${pkg.name}@${pkg.version}: ${adv.title || adv.id}` + (patched ? ` (patched: ${patched})` : ""),
           file: "Cargo.lock",
-          references: [adv.url, ...adv.aliases ?? []].filter(Boolean)
+          references: [adv.url, ...adv.aliases ?? []].filter(Boolean),
+          pkg: pkg.name,
+          version: pkg.version,
+          aliases: adv.aliases ?? []
+          // RUSTSEC id is the ident; aliases carry the CVE
         })
       );
     }
@@ -1491,6 +1815,8 @@ var govulncheck = {
       if (seen.has(key)) continue;
       seen.add(key);
       const reachable = Boolean(top.function && top.position);
+      const refs = (osv.references ?? []).map((r) => r.url).filter(Boolean);
+      const mod = osv.affected?.[0]?.package?.name;
       out.push(
         makeToolFinding({
           tool: "govulncheck",
@@ -1502,12 +1828,209 @@ var govulncheck = {
           message: `${osv.summary || f.osv}` + (f.fixed_version ? ` (fixed in ${f.fixed_version})` : "") + (reachable ? ` \u2014 reachable via ${top.package}.${top.function}` : " \u2014 imported, reachability not proven"),
           file: top.position?.filename,
           line: top.position?.line,
-          references: (osv.references ?? []).map((r) => r.url).filter(Boolean)
+          references: refs,
+          pkg: mod || top.package,
+          // GO-id is the ident; osv.aliases carries the CVE/GHSA — the join key.
+          aliases: [...osv.aliases ?? [], ...cvesIn(refs, osv.summary)]
         })
       );
     }
     return out;
   }
+};
+
+// src/tools/bandit.ts
+var bandit = {
+  name: "bandit",
+  category: "sast",
+  dockerImage: "ghcr.io/pycqa/bandit:1.8.6",
+  argv: (target) => ["-r", target, "-f", "json", "-ll", "-ii", "-q"],
+  parse(raw) {
+    const data = JSON.parse(raw || "{}");
+    const out = [];
+    for (const r of data.results ?? []) {
+      const cweId = r.issue_cwe?.id;
+      const conf = String(r.issue_confidence ?? "").toLowerCase();
+      out.push(
+        makeToolFinding({
+          tool: "bandit",
+          category: "sast",
+          ident: `${r.test_id}:${r.filename}:${r.line_number}`,
+          title: `${r.test_id} ${r.test_name ?? ""}`.trim(),
+          severity: normalizeSeverity(r.issue_severity, "medium"),
+          confidence: conf === "high" ? "high" : conf === "low" ? "low" : "medium",
+          message: r.issue_text || r.test_name || r.test_id,
+          file: r.filename,
+          line: r.line_number,
+          cwe: cweId != null ? `CWE-${cweId}` : void 0,
+          references: [r.more_info, r.issue_cwe?.link].filter(Boolean)
+        })
+      );
+    }
+    return out;
+  }
+};
+
+// src/tools/gosec.ts
+var gosec = {
+  name: "gosec",
+  category: "sast",
+  dockerImage: "ghcr.io/securego/gosec:v2.21.4",
+  argv: () => ["-fmt", "json", "-quiet", "-no-fail", "./..."],
+  parse(raw) {
+    const data = JSON.parse(raw || "{}");
+    const out = [];
+    for (const i of data.Issues ?? []) {
+      const line = parseInt(String(i.line).split("-")[0] ?? "", 10);
+      const cweId = i.cwe?.id;
+      out.push(
+        makeToolFinding({
+          tool: "gosec",
+          category: "sast",
+          ident: `${i.rule_id}:${i.file}:${i.line}`,
+          title: `${i.rule_id} ${i.details ?? ""}`.trim(),
+          severity: normalizeSeverity(i.severity, "medium"),
+          confidence: String(i.confidence ?? "").toLowerCase() === "high" ? "high" : "medium",
+          message: `${i.details || i.rule_id}`,
+          file: i.file,
+          line: Number.isNaN(line) ? void 0 : line,
+          cwe: cweId ? `CWE-${cweId}` : void 0,
+          references: [i.cwe?.url].filter(Boolean)
+        })
+      );
+    }
+    return out;
+  }
+};
+
+// src/tools/checkov.ts
+var checkov = {
+  name: "checkov",
+  category: "config",
+  dockerImage: "bridgecrew/checkov:3.2.0",
+  argv: (target) => ["-d", target, "-o", "json", "--compact", "--quiet", "--soft-fail"],
+  parse(raw) {
+    const data = JSON.parse(raw || "{}");
+    const blocks = Array.isArray(data) ? data : [data];
+    const out = [];
+    for (const b of blocks) {
+      for (const c of b?.results?.failed_checks ?? []) {
+        const file = String(c.file_path ?? "").replace(/^\/+/, "");
+        const line = Array.isArray(c.file_line_range) ? c.file_line_range[0] : void 0;
+        out.push(
+          makeToolFinding({
+            tool: "checkov",
+            category: "config",
+            ident: `${c.check_id}:${file}:${line ?? ""}`,
+            title: `${c.check_id} ${c.check_name ?? ""}`.trim(),
+            severity: normalizeSeverity(c.severity, "medium"),
+            message: `${c.check_name || c.check_id}${c.resource ? ` (${c.resource})` : ""}`,
+            file: file || void 0,
+            line: typeof line === "number" ? line : void 0,
+            references: [c.guideline].filter(Boolean)
+          })
+        );
+      }
+    }
+    return out;
+  }
+};
+
+// src/tools/hadolint.ts
+import { basename } from "path";
+var LEVEL = { error: "high", warning: "medium", info: "low", style: "info" };
+function isDockerfile(rel) {
+  const b = basename(rel).toLowerCase();
+  return b === "dockerfile" || b === "containerfile" || b.startsWith("dockerfile.") || b.endsWith(".dockerfile");
+}
+var hadolint = {
+  name: "hadolint",
+  category: "config",
+  dockerImage: "hadolint/hadolint:v2.12.0",
+  argv: () => ["--format", "json", "--no-fail"],
+  enumerate: (repo) => walk(repo).map((f) => f.rel).filter(isDockerfile),
+  parse(raw) {
+    const arr = JSON.parse(raw || "[]");
+    if (!Array.isArray(arr)) return [];
+    return arr.map(
+      (d) => makeToolFinding({
+        tool: "hadolint",
+        category: "config",
+        ident: `${d.code}:${d.file}:${d.line}`,
+        title: `${d.code} ${d.message ?? ""}`.trim(),
+        severity: LEVEL[String(d.level ?? "").toLowerCase()] ?? "low",
+        message: `${d.code}: ${d.message ?? ""}`.trim(),
+        file: d.file,
+        line: d.line,
+        references: String(d.code ?? "").startsWith("DL") ? [`https://github.com/hadolint/hadolint/wiki/${d.code}`] : []
+      })
+    );
+  }
+};
+
+// src/tools/sarif.ts
+function levelSeverity(level, fallback) {
+  if (!level) return fallback;
+  return normalizeSeverity(level, fallback);
+}
+function cweFromTags(tags) {
+  const arr = Array.isArray(tags) ? tags : [];
+  for (const t of arr) {
+    const cwe = firstCwe(typeof t === "string" ? t : "");
+    if (cwe) return cwe;
+  }
+  return void 0;
+}
+function parseSarif(raw, opts) {
+  let data;
+  try {
+    data = JSON.parse(raw || "{}");
+  } catch {
+    return [];
+  }
+  const out = [];
+  const fallbackSev = opts.defaultSeverity ?? "medium";
+  for (const run of data?.runs ?? []) {
+    const rules = run?.tool?.driver?.rules ?? [];
+    const byId = /* @__PURE__ */ new Map();
+    rules.forEach((r) => r?.id && byId.set(r.id, r));
+    for (const res of run?.results ?? []) {
+      const ruleId = res.ruleId ?? (typeof res.ruleIndex === "number" ? rules[res.ruleIndex]?.id : void 0) ?? "rule";
+      const rule = byId.get(ruleId) ?? (typeof res.ruleIndex === "number" ? rules[res.ruleIndex] : void 0) ?? {};
+      const loc = res.locations?.[0]?.physicalLocation ?? {};
+      const file = loc.artifactLocation?.uri;
+      const line = loc.region?.startLine;
+      const secSev = res.properties?.["security-severity"] ?? rule.properties?.["security-severity"];
+      const level = res.level ?? rule.defaultConfiguration?.level;
+      const severity = secSev !== void 0 && secSev !== null && String(secSev).trim() !== "" ? deriveSeverity(String(secSev), fallbackSev) : levelSeverity(level, fallbackSev);
+      const cwe = cweFromTags(rule.properties?.tags) ?? cweFromTags(res.properties?.tags) ?? firstCwe(rule.properties?.cwe) ?? opts.defaultCwe;
+      const message = res.message?.text ?? rule.shortDescription?.text ?? rule.fullDescription?.text ?? ruleId;
+      const refs = [rule.helpUri, res.hostedViewerUri].filter((x) => Boolean(x));
+      out.push(
+        makeToolFinding({
+          tool: opts.tool,
+          category: opts.category,
+          ident: `${ruleId}:${file ?? ""}:${line ?? ""}`,
+          title: ruleId,
+          severity,
+          message: file ? `${message} [${ruleId}] at ${file}:${line ?? "?"}` : `${message} [${ruleId}]`,
+          file,
+          line,
+          cwe,
+          references: refs.length ? refs : void 0
+        })
+      );
+    }
+  }
+  return out;
+}
+
+// src/tools/kingfisher.ts
+var kingfisher = {
+  name: "kingfisher",
+  category: "secret",
+  argv: (target) => ["scan", target, "--format", "sarif", "--no-validate"],
+  parse: (raw) => parseSarif(raw, { tool: "kingfisher", category: "secret", defaultCwe: "CWE-798", defaultSeverity: "high" })
 };
 
 // src/tools/index.ts
@@ -1518,12 +2041,17 @@ var ADAPTERS = [
   gitleaks,
   osvScanner,
   cargoAudit,
-  govulncheck
+  govulncheck,
+  bandit,
+  gosec,
+  checkov,
+  hadolint,
+  kingfisher
 ];
 
 // src/store.ts
-import { mkdirSync, writeFileSync, readFileSync as readFileSync2, existsSync } from "fs";
-import { join as join3 } from "path";
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync3, existsSync as existsSync3 } from "fs";
+import { join as join5 } from "path";
 function emptySeverityCounts() {
   return { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
 }
@@ -1533,15 +2061,15 @@ function countBySeverity(findings) {
   return c;
 }
 function writeDossier(outDir, d) {
-  mkdirSync(outDir, { recursive: true });
-  writeFileSync(join3(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
-  writeFileSync(join3(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
-  writeFileSync(join3(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
-  writeFileSync(join3(outDir, "DOSSIER.md"), renderDossierMd(d));
+  mkdirSync2(outDir, { recursive: true });
+  writeFileSync2(join5(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
+  writeFileSync2(join5(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
+  writeFileSync2(join5(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
+  writeFileSync2(join5(outDir, "DOSSIER.md"), renderDossierMd(d));
 }
 function loadDossier(outDir) {
-  const read = (name) => JSON.parse(readFileSync2(join3(outDir, name), "utf8"));
-  if (!existsSync(join3(outDir, "findings.json"))) {
+  const read = (name) => JSON.parse(readFileSync3(join5(outDir, name), "utf8"));
+  if (!existsSync3(join5(outDir, "findings.json"))) {
     throw new Error(`no audit dossier at ${outDir} (run \`ultrasec scan --out ${outDir}\` first)`);
   }
   return { manifest: read("manifest.json"), findings: read("findings.json"), graph: read("graph.json") };
@@ -1572,10 +2100,18 @@ function renderDossierMd(d) {
   }
   L.push(`## Candidates`);
   L.push("");
-  for (const f of findings) {
+  const ordered = findings.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
+  for (const f of ordered) {
     L.push(`### ${f.id} \u2014 ${severityBadge(f.severity)} ${f.title}`);
     L.push("");
-    L.push(`- category: ${f.category}${f.cwe ? ` \xB7 ${f.cwe}` : ""} \xB7 confidence ${f.confidence} \xB7 status ${f.status}${f.tool !== "ultrasec" ? ` \xB7 via ${f.tool}` : ""}`);
+    const src = f.sources && f.sources.length > 1 ? ` \xB7 agreed by ${f.sources.join(", ")}` : f.tool !== "ultrasec" ? ` \xB7 via ${f.tool}` : "";
+    L.push(`- category: ${f.category}${f.cwe ? ` \xB7 ${f.cwe}` : ""} \xB7 confidence ${f.confidence} \xB7 status ${f.status}${src}`);
+    const risk = [];
+    if (typeof f.risk === "number") risk.push(`risk ${f.risk}`);
+    if (typeof f.epss === "number") risk.push(`EPSS ${(f.epss * 100).toFixed(1)}%`);
+    if (f.kev) risk.push(`\u{1F6A8} CISA KEV${f.kevDateAdded ? ` (${f.kevDateAdded})` : ""}`);
+    if (f.verified) risk.push(`\u2705 verified secret`);
+    if (risk.length) L.push(`- ${risk.join(" \xB7 ")}`);
     if (f.path && f.path.length) {
       L.push(`- path: ${f.path.map((p) => `\`${p.file}:${p.line}\``).join(" \u2192 ")}`);
     } else if (f.sink) {
@@ -1590,7 +2126,7 @@ function renderDossierMd(d) {
 }
 
 // src/commands/scan.ts
-function runScan(args) {
+async function runScan(args) {
   const repo = resolve(flagStr(args, "repo") ?? ".");
   const out = resolve(flagStr(args, "out") ?? ".ultrasec");
   const scan = scanRepo(repo);
@@ -1601,7 +2137,9 @@ function runScan(args) {
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
   const useDocker = flagBool(args, "docker");
   const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
-  const findings = [...taintFindings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
+  const merged = [...taintFindings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
+  const enrich = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
+  const { findings, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
   const languages = [...new Set(scan.files.map((f) => f.lang))].sort();
   const manifest = {
     version: VERSION,
@@ -1615,7 +2153,8 @@ function runScan(args) {
   const dossier = { manifest, findings, graph };
   writeDossier(out, dossier);
   if (flagBool(args, "json")) {
-    println(JSON.stringify({ out, counts: manifest.counts, languages, files: scan.files.length, toolsRun: tool.toolsRun }, null, 2));
+    const kev = findings.filter((f) => f.kev).length;
+    println(JSON.stringify({ out, counts: manifest.counts, languages, files: scan.files.length, toolsRun: tool.toolsRun, kev, risk: riskNote }, null, 2));
     return 0;
   }
   const c = manifest.counts.bySeverity;
@@ -1625,6 +2164,7 @@ function runScan(args) {
     println(`  external tools run: ${tool.toolsRun.join(", ") || "none"}  (\`ultrasec tools\` to see/install more)`);
   }
   println(`  candidate findings: ${findings.length}  (crit ${c.critical} \xB7 high ${c.high} \xB7 med ${c.medium} \xB7 low ${c.low})  \xB7  ${taintFindings.length} taint + ${tool.findings.length} tool`);
+  println(`  ${riskNote}`);
   if (!findings.length) {
     println(`  no taint candidates \u2014 still review the DOSSIER and run external tools (\`ultrasec tools\`).`);
   } else {
@@ -1637,9 +2177,9 @@ function runScan(args) {
 import { resolve as resolve2 } from "path";
 
 // src/dossier.ts
-import { join as join4 } from "path";
+import { join as join6 } from "path";
 function excerpt(repo, step, ctx = 3) {
-  const lines = readText(join4(repo, step.file)).split(/\r?\n/);
+  const lines = readText(join6(repo, step.file)).split(/\r?\n/);
   const lo = Math.max(1, step.line - ctx);
   const hi = Math.min(lines.length, step.line + ctx);
   const out = [];
@@ -1758,8 +2298,8 @@ function runPaths(args) {
 }
 
 // src/commands/verify.ts
-import { readFileSync as readFileSync3, writeFileSync as writeFileSync2, readdirSync as readdirSync2, statSync as statSync2 } from "fs";
-import { join as join5, resolve as resolve4 } from "path";
+import { readFileSync as readFileSync4, writeFileSync as writeFileSync3, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
+import { join as join7, resolve as resolve4 } from "path";
 
 // src/verify.ts
 function pending(findings) {
@@ -1878,13 +2418,13 @@ function runVerify(args) {
   const shardIdx = Number(flagStr(args, "shard") ?? "0") || 0;
   if (shards > 1) items = shard(items, shards, shardIdx);
   const todoName = shards > 1 ? `VERIFY.todo.${shardIdx}.json` : "VERIFY.todo.json";
-  writeFileSync2(join5(run, todoName), JSON.stringify(items, null, 2));
-  writeFileSync2(join5(run, "VERIFY.md"), renderWorklistMd(buildWorklist(dossier)));
+  writeFileSync3(join7(run, todoName), JSON.stringify(items, null, 2));
+  writeFileSync3(join7(run, "VERIFY.md"), renderWorklistMd(buildWorklist(dossier)));
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
-  println(`ultrasec verify \u2192 ${join5(run, todoName)} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
+  println(`ultrasec verify \u2192 ${join7(run, todoName)} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
   println(`  adjudicate each (\`ultrasec dossier <id> --run ${run}\`), save verdicts.json, then:`);
   println(`  ultrasec verify --apply verdicts.json --run ${run}`);
   return 0;
@@ -1893,8 +2433,8 @@ function collectVerdictFiles(applyPath) {
   if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve4(s.trim()));
   const abs = resolve4(applyPath);
   try {
-    if (statSync2(abs).isDirectory()) {
-      return readdirSync2(abs).filter((n) => /verdict.*\.json$/i.test(n)).map((n) => join5(abs, n));
+    if (statSync3(abs).isDirectory()) {
+      return readdirSync2(abs).filter((n) => /verdict.*\.json$/i.test(n)).map((n) => join7(abs, n));
     }
   } catch {
   }
@@ -1905,7 +2445,7 @@ function applyMode(run, dossier, applyPath, args) {
   const verdicts = [];
   for (const f of files) {
     try {
-      verdicts.push(...parseVerdicts(readFileSync3(f, "utf8")));
+      verdicts.push(...parseVerdicts(readFileSync4(f, "utf8")));
     } catch (e) {
       eprintln(`ultrasec verify: cannot read verdicts at ${f}: ${e.message}`);
       return 2;
@@ -1931,8 +2471,8 @@ function applyMode(run, dossier, applyPath, args) {
 import { resolve as resolve6 } from "path";
 
 // src/check.ts
-import { existsSync as existsSync2, readFileSync as readFileSync4 } from "fs";
-import { join as join6, resolve as resolve5, sep as sep2 } from "path";
+import { existsSync as existsSync4, readFileSync as readFileSync5 } from "fs";
+import { join as join8, resolve as resolve5, sep as sep2 } from "path";
 function insideRepo(repo, file) {
   const base = resolve5(repo);
   const abs = resolve5(base, file);
@@ -1940,10 +2480,10 @@ function insideRepo(repo, file) {
 }
 function lineCount(repo, file) {
   if (!insideRepo(repo, file)) return null;
-  const abs = join6(repo, file);
-  if (!existsSync2(abs)) return null;
+  const abs = join8(repo, file);
+  if (!existsSync4(abs)) return null;
   try {
-    return readFileSync4(abs, "utf8").split(/\r?\n/).length;
+    return readFileSync5(abs, "utf8").split(/\r?\n/).length;
   } catch {
     return null;
   }
@@ -2025,8 +2565,8 @@ function runCheck(args) {
 }
 
 // src/commands/render.ts
-import { writeFileSync as writeFileSync3 } from "fs";
-import { join as join7, resolve as resolve7 } from "path";
+import { writeFileSync as writeFileSync4 } from "fs";
+import { join as join9, resolve as resolve7 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -2056,11 +2596,24 @@ var BADGE = {
   low: "\u{1F7E9} LOW",
   info: "\u2B1C INFO"
 };
-function sevRank(s) {
+function sevRank2(s) {
   return SEVERITIES.indexOf(s);
 }
 function sortFindings(fs) {
-  return fs.slice().sort((a, b) => sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
+  return fs.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank2(a.severity) - sevRank2(b.severity) || byStr(a.id, b.id));
+}
+function riskTag(f) {
+  const parts = [];
+  if (typeof f.risk === "number") parts.push(`risk ${f.risk}`);
+  if (typeof f.epss === "number") parts.push(`EPSS ${(f.epss * 100).toFixed(1)}%`);
+  if (f.kev) parts.push(`\u{1F6A8} CISA KEV${f.kevDateAdded ? ` (${f.kevDateAdded})` : ""}`);
+  if (f.verified) parts.push(`\u2705 verified secret`);
+  return parts.join(" \xB7 ");
+}
+function sourcesTag(f) {
+  const s = f.sources && f.sources.length ? f.sources : f.tool !== "ultrasec" ? [f.tool] : [];
+  if (s.length > 1) return `agreed by ${s.join(", ")}`;
+  return f.tool !== "ultrasec" ? `via ${f.tool}` : "";
 }
 function pathLine(f) {
   if (f.path?.length) return f.path.map((p) => `\`${p.file}:${p.line}\``).join(" \u2192 ");
@@ -2069,11 +2622,15 @@ function pathLine(f) {
 }
 function header(d) {
   const c = d.manifest.counts.bySeverity;
-  return [
+  const kev = d.findings.filter((f) => f.kev).length;
+  const ranked = d.findings.some((f) => typeof f.risk === "number");
+  const lines = [
     `repo \`${d.manifest.repo}\` \xB7 ultrasec ${d.manifest.version}`,
-    `findings: **${d.manifest.counts.findings}** \u2014 ${SEVERITIES.map((s) => `${BADGE[s]} ${c[s]}`).join(" \xB7 ")}`,
+    `findings: **${d.manifest.counts.findings}** \u2014 ${SEVERITIES.map((s) => `${BADGE[s]} ${c[s]}`).join(" \xB7 ")}${kev ? ` \xB7 \u{1F6A8} ${kev} in CISA KEV` : ""}`,
     `tools: ${d.manifest.toolsRun.join(", ") || "none (graph + taint only)"}`
-  ].join("  \n");
+  ];
+  if (ranked) lines.push(`_ranked by composite risk (severity \u2295 EPSS \u2295 KEV)_`);
+  return lines.join("  \n");
 }
 function statusTag(f) {
   const v = f.verdict ? ` \xB7 verdict ${f.verdict}` : "";
@@ -2088,14 +2645,18 @@ function renderSummary(d) {
     L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) \u2014 see REPORT.md.` : `No findings.`);
     return L.join("\n") + "\n";
   }
+  const tail = (f) => {
+    const rt = riskTag(f);
+    return ` (${f.cwe ?? f.category})${rt ? ` \xB7 ${rt}` : ""}`;
+  };
   if (confirmed.length) {
     L.push(`## Confirmed (${confirmed.length})`);
-    for (const f of confirmed) L.push(`- ${BADGE[f.severity]} **${f.title}** \u2014 ${pathLine(f)} (${f.cwe ?? f.category})`);
+    for (const f of confirmed) L.push(`- ${BADGE[f.severity]} **${f.title}** \u2014 ${pathLine(f)}${tail(f)}`);
     L.push("");
   }
   if (needs.length) {
     L.push(`## Needs human review (${needs.length})`);
-    for (const f of needs) L.push(`- ${BADGE[f.severity]} ${f.title} \u2014 ${pathLine(f)} (${f.cwe ?? f.category})`);
+    for (const f of needs) L.push(`- ${BADGE[f.severity]} ${f.title} \u2014 ${pathLine(f)}${tail(f)}`);
   }
   return L.join("\n") + "\n";
 }
@@ -2103,7 +2664,13 @@ function renderFinding(f, opts = {}) {
   const L = [];
   L.push(`### ${BADGE[f.severity]} ${f.title}`);
   L.push("");
-  L.push(`\`${f.id}\` \xB7 ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) \xB7 ` : ""}${f.category} \xB7 ${statusTag(f)}${f.tool !== "ultrasec" ? ` \xB7 via ${f.tool}` : ""}`);
+  const src = sourcesTag(f);
+  L.push(`\`${f.id}\` \xB7 ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) \xB7 ` : ""}${f.category} \xB7 ${statusTag(f)}${src ? ` \xB7 ${src}` : ""}`);
+  const rt = riskTag(f);
+  if (rt) {
+    L.push("");
+    L.push(`**Risk:** ${rt}`);
+  }
   L.push("");
   L.push(`**Path:** ${pathLine(f)}`);
   L.push("");
@@ -2178,7 +2745,7 @@ var SEV_COLOR = {
   low: "#15803d",
   info: "#64748b"
 };
-function sevRank2(s) {
+function sevRank3(s) {
   return SEVERITIES.indexOf(s);
 }
 function badge(text, color) {
@@ -2193,6 +2760,19 @@ function pathHtml(f) {
   }).join('<div class="arrow">\u2192</div>');
   return `<div class="flow">${nodes}</div>`;
 }
+function riskHtml(f) {
+  const out = [];
+  if (typeof f.risk === "number") out.push(badge(`risk ${f.risk}`, f.risk >= 95 ? "#7f1d1d" : f.risk >= 70 ? "#b91c1c" : f.risk >= 40 ? "#b45309" : "#475569"));
+  if (typeof f.epss === "number") out.push(`<span class="kv">EPSS ${(f.epss * 100).toFixed(1)}%</span>`);
+  if (f.kev) out.push(badge(`CISA KEV${f.kevDateAdded ? ` ${f.kevDateAdded}` : ""}`, "#7f1d1d"));
+  if (f.verified) out.push(badge("verified secret", "#7f1d1d"));
+  return out.length ? `<div class="risk">${out.join(" ")}</div>` : "";
+}
+function sourcesHtml(f) {
+  const s = f.sources && f.sources.length ? f.sources : f.tool !== "ultrasec" ? [f.tool] : [];
+  if (s.length > 1) return `\xB7 agreed by ${esc2(s.join(", "))}`;
+  return f.tool !== "ultrasec" ? `\xB7 via ${esc2(f.tool)}` : "";
+}
 function findingHtml(f) {
   const refs = (f.references ?? []).slice(0, 5).map((r) => `<a href="${esc2(r)}" rel="noreferrer noopener">${esc2(r.replace(/^https?:\/\//, ""))}</a>`).join(" \xB7 ");
   return `
@@ -2204,8 +2784,9 @@ function findingHtml(f) {
       \xB7 status ${badge(f.status, f.status === "confirmed" ? "#b91c1c" : f.status === "needs-human" ? "#b45309" : f.status === "dismissed" ? "#64748b" : "#475569")}
       \xB7 confidence ${esc2(f.confidence)}
       ${f.verdict ? `\xB7 verdict ${esc2(f.verdict)}` : ""}
-      ${f.tool !== "ultrasec" ? `\xB7 via ${esc2(f.tool)}` : ""}
+      ${sourcesHtml(f)}
     </div>
+    ${riskHtml(f)}
     ${pathHtml(f)}
     <p class="msg">${esc2(f.message)}</p>
     ${f.exploitPath ? `<p class="exploit"><strong>Exploit path:</strong> ${esc2(f.exploitPath)}</p>` : ""}
@@ -2214,7 +2795,7 @@ function findingHtml(f) {
 }
 function renderHtml(d) {
   const c = d.manifest.counts.bySeverity;
-  const fs = d.findings.slice().sort((a, b) => sevRank2(a.severity) - sevRank2(b.severity) || byStr(a.id, b.id));
+  const fs = d.findings.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank3(a.severity) - sevRank3(b.severity) || byStr(a.id, b.id));
   const shown = fs.filter((f) => f.status !== "dismissed");
   const dismissed = fs.filter((f) => f.status === "dismissed");
   const counts = SEVERITIES.map((s) => `${badge(`${s} ${c[s]}`, SEV_COLOR[s])}`).join(" ");
@@ -2244,6 +2825,8 @@ function renderHtml(d) {
   .exploit { background:#fef2f2; border-left:3px solid #b91c1c; padding:6px 10px; border-radius:4px; }
   @media (prefers-color-scheme: dark){ .exploit{ background:#1f1315; } }
   .refs { font-size:12px; color:#6b7280; word-break:break-all; }
+  .risk { margin:6px 0 4px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .kv { font-size:12px; font-weight:600; color:#6b7280; }
   details { margin-top:18px; }
 </style></head>
 <body>
@@ -2272,15 +2855,15 @@ function runRender(args) {
     ["FULL.md", renderFull(dossier)],
     ["index.html", renderHtml(dossier)]
   ];
-  for (const [name, body] of outputs) writeFileSync3(join7(run, name), body);
+  for (const [name, body] of outputs) writeFileSync4(join9(run, name), body);
   println(`ultrasec render \u2192 ${run}`);
-  for (const [name] of outputs) println(`  ${join7(run, name)}`);
+  for (const [name] of outputs) println(`  ${join9(run, name)}`);
   return 0;
 }
 
 // src/commands/clean.ts
 import { execFileSync as execFileSync3 } from "child_process";
-import { existsSync as existsSync3, rmSync } from "fs";
+import { existsSync as existsSync5, rmSync } from "fs";
 import { resolve as resolve8 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
@@ -2309,7 +2892,7 @@ function runClean(args) {
   const withDocker = flagBool(args, "docker");
   const keepOutput = flagBool(args, "keep-output");
   const removed = [];
-  if (!keepOutput && existsSync3(run)) {
+  if (!keepOutput && existsSync5(run)) {
     if (!dry) rmSync(run, { recursive: true, force: true });
     removed.push(`output  ${run}`);
   }
@@ -2357,8 +2940,10 @@ USAGE
   ultrasec <command> [options]
 
 COMMANDS
-  scan       Scan a repo: detect stack, run available tools, build the link-graph,
-             enumerate candidate taint paths, write the audit dossier.
+  scan       Scan a repo: detect stack, run available tools (correlated across
+             scanners), build the link-graph, enumerate candidate taint paths,
+             rank by EPSS/KEV/CVSS risk, write the audit dossier.
+             Flags: --tools auto|none|a,b \xB7 --docker \xB7 --no-enrich/--offline.
   tools      List known external scanners, which are installed, and how to get them.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source\u2192sink chains.

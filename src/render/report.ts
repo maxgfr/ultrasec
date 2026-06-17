@@ -18,8 +18,27 @@ function sevRank(s: Severity): number {
   return SEVERITIES.indexOf(s);
 }
 
+// Primary sort key is the composite risk score (EPSS/KEV-aware); severity then
+// id break ties and order pre-enrichment dossiers sensibly.
 function sortFindings(fs: Finding[]): Finding[] {
-  return fs.slice().sort((a, b) => sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
+  return fs.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
+}
+
+/** Risk / EPSS / KEV / verified annotations, when present. */
+function riskTag(f: Finding): string {
+  const parts: string[] = [];
+  if (typeof f.risk === "number") parts.push(`risk ${f.risk}`);
+  if (typeof f.epss === "number") parts.push(`EPSS ${(f.epss * 100).toFixed(1)}%`);
+  if (f.kev) parts.push(`🚨 CISA KEV${f.kevDateAdded ? ` (${f.kevDateAdded})` : ""}`);
+  if (f.verified) parts.push(`✅ verified secret`);
+  return parts.join(" · ");
+}
+
+/** "agreed by a, b" when multiple scanners corroborate; else "via <tool>". */
+function sourcesTag(f: Finding): string {
+  const s = f.sources && f.sources.length ? f.sources : f.tool !== "ultrasec" ? [f.tool] : [];
+  if (s.length > 1) return `agreed by ${s.join(", ")}`;
+  return f.tool !== "ultrasec" ? `via ${f.tool}` : "";
 }
 
 function pathLine(f: Finding): string {
@@ -30,11 +49,15 @@ function pathLine(f: Finding): string {
 
 function header(d: Dossier): string {
   const c = d.manifest.counts.bySeverity;
-  return [
+  const kev = d.findings.filter((f) => f.kev).length;
+  const ranked = d.findings.some((f) => typeof f.risk === "number");
+  const lines = [
     `repo \`${d.manifest.repo}\` · ultrasec ${d.manifest.version}`,
-    `findings: **${d.manifest.counts.findings}** — ${SEVERITIES.map((s) => `${BADGE[s]} ${c[s]}`).join(" · ")}`,
+    `findings: **${d.manifest.counts.findings}** — ${SEVERITIES.map((s) => `${BADGE[s]} ${c[s]}`).join(" · ")}${kev ? ` · 🚨 ${kev} in CISA KEV` : ""}`,
     `tools: ${d.manifest.toolsRun.join(", ") || "none (graph + taint only)"}`,
-  ].join("  \n");
+  ];
+  if (ranked) lines.push(`_ranked by composite risk (severity ⊕ EPSS ⊕ KEV)_`);
+  return lines.join("  \n");
 }
 
 function statusTag(f: Finding): string {
@@ -51,14 +74,18 @@ export function renderSummary(d: Dossier): string {
     L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) — see REPORT.md.` : `No findings.`);
     return L.join("\n") + "\n";
   }
+  const tail = (f: Finding) => {
+    const rt = riskTag(f);
+    return ` (${f.cwe ?? f.category})${rt ? ` · ${rt}` : ""}`;
+  };
   if (confirmed.length) {
     L.push(`## Confirmed (${confirmed.length})`);
-    for (const f of confirmed) L.push(`- ${BADGE[f.severity]} **${f.title}** — ${pathLine(f)} (${f.cwe ?? f.category})`);
+    for (const f of confirmed) L.push(`- ${BADGE[f.severity]} **${f.title}** — ${pathLine(f)}${tail(f)}`);
     L.push("");
   }
   if (needs.length) {
     L.push(`## Needs human review (${needs.length})`);
-    for (const f of needs) L.push(`- ${BADGE[f.severity]} ${f.title} — ${pathLine(f)} (${f.cwe ?? f.category})`);
+    for (const f of needs) L.push(`- ${BADGE[f.severity]} ${f.title} — ${pathLine(f)}${tail(f)}`);
   }
   return L.join("\n") + "\n";
 }
@@ -67,7 +94,13 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean } = {}): string {
   const L: string[] = [];
   L.push(`### ${BADGE[f.severity]} ${f.title}`);
   L.push("");
-  L.push(`\`${f.id}\` · ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) · ` : ""}${f.category} · ${statusTag(f)}${f.tool !== "ultrasec" ? ` · via ${f.tool}` : ""}`);
+  const src = sourcesTag(f);
+  L.push(`\`${f.id}\` · ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) · ` : ""}${f.category} · ${statusTag(f)}${src ? ` · ${src}` : ""}`);
+  const rt = riskTag(f);
+  if (rt) {
+    L.push("");
+    L.push(`**Risk:** ${rt}`);
+  }
   L.push("");
   L.push(`**Path:** ${pathLine(f)}`);
   L.push("");

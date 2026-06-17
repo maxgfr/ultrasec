@@ -10,10 +10,15 @@ always-on core. `node scripts/ultrasec.mjs tools` shows status + install hints.
 | **trivy** | dep + secret + config | CVEs (SCA), hardcoded secrets, IaC/misconfig across most ecosystems — highest leverage | `brew install trivy` |
 | **opengrep** | sast | free Semgrep fork with cross-function taint | see opengrep.dev |
 | semgrep | sast | rule + dataflow SAST (cross-file taint is Pro) | `brew install semgrep` |
-| gitleaks | secret | hardcoded secrets (working tree) | `brew install gitleaks` |
+| gitleaks | secret | hardcoded secrets (git history when present, else working tree) | `brew install gitleaks` |
 | osv-scanner | dep | OSV.dev lockfile CVEs | `brew install osv-scanner` |
 | cargo-audit | dep | RustSec advisories (Cargo.lock) | `cargo install cargo-audit` |
 | govulncheck | dep | reachability-aware Go vulns | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
+| **bandit** | sast | Python idioms a taint engine can't see (shell=True, eval, weak crypto, pickle) | `pipx install bandit` |
+| **gosec** | sast | Go stdlib-aware (math/rand, InsecureSkipVerify, exec w/ tainted args) | `brew install gosec` |
+| **checkov** | config | IaC misconfig with a cross-resource graph (deeper than per-block) | `pipx install checkov` |
+| **hadolint** | config | Dockerfile lint + ShellCheck on the bash inside `RUN` | `brew install hadolint` |
+| **kingfisher** | secret | offline checksum/entropy/lang-aware secret pre-filter, git history, SARIF | `brew install kingfisher` |
 
 ## How it runs
 
@@ -27,6 +32,30 @@ Severity is normalized to critical/high/medium/low/info: label vocabularies are
 aliased; tools that emit only a CVSS vector or score (cargo-audit, osv-scanner)
 are bucketed via the CVSS v3 base-score calculator in `src/tools/cvss.ts`.
 
+## Correlation, risk scoring & SARIF
+
+Three deterministic layers turn raw scanner output into a ranked, de-duplicated
+worklist (all keyless, no LLM calls):
+
+- **Cross-tool correlation** (`src/tools/correlate.ts`). The same issue reported
+  by several scanners collapses into one finding whose `sources[]` lists every
+  producer — and "N scanners agree" bumps confidence to `high`. dep findings
+  merge on *package@version + a shared advisory id* (CVE/GHSA/RUSTSEC, one alias
+  hop, so distinct vulns never merge); everything else merges on
+  *category + CWE/title + file:line*. Taint candidates are left untouched.
+- **EPSS + KEV + CVSS risk** (`src/tools/scoring.ts`). Every CVE-bearing finding
+  is enriched with FIRST.org **EPSS** (exploit probability) and CISA **KEV**
+  (exploited in the wild → floored to risk 95). A composite `risk` 0–100
+  (severity ⊕ EPSS ⊕ KEV) is computed on *every* finding and is the report's
+  primary sort key. Feeds are cached under `~/.cache/ultrasec` (daily TTL,
+  `ULTRASEC_CACHE_DIR` to override); the math is 100% offline. `--no-enrich` /
+  `--offline` skips the network and ranks by severity alone. Network failure
+  degrades gracefully (stale cache, then severity-only) — never fatal, no keys.
+- **Generic SARIF parser** (`src/tools/sarif.ts`). Any SARIF-emitting scanner
+  becomes a thin adapter (argv + a CWE default): severity from
+  `security-severity` or `level`, CWE from rule tags, location from the first
+  result region. Used by the kingfisher adapter and ready for the next ones.
+
 ## Via Docker (no native install)
 
 Two ways to get the scanners without installing them on the host:
@@ -39,18 +68,24 @@ Two ways to get the scanners without installing them on the host:
   `semgrep/semgrep:1.166.0` (its entrypoint isn't the tool, so the runner prepends
   `semgrep`). OpenGrep has no official image yet → native-only.
 - **Toolbox image** (`docker/Dockerfile` + `docker-compose.yml`) bakes the engine +
-  all four scanners into one image (`docker compose build`), so the whole audit
-  runs in-container with everything on PATH. Versions are pinned build-args; arch
+  the scanners into one image (`docker compose build`), so the whole audit runs
+  in-container with everything on PATH. Baked in: trivy, gitleaks, osv-scanner,
+  semgrep, gosec, hadolint, bandit, checkov. Versions are pinned build-args; arch
   (amd64/arm64) is auto-detected.
+
+Adapters with an official image for on-demand `--docker`: trivy, gitleaks,
+osv-scanner, semgrep, bandit (`ghcr.io/pycqa/bandit`), gosec
+(`ghcr.io/securego/gosec`), checkov (`bridgecrew/checkov`), hadolint
+(`hadolint/hadolint`). opengrep, kingfisher → native-only for now.
 
 ## Recommended additions (researched, not yet adapters)
 
-High-value, non-overlapping scanners worth adding next (official image / install):
-**trufflehog** — secret *verification* (authenticates candidates, cuts FP noise)
-`ghcr.io/trufflesecurity/trufflehog`; **checkov** — deep IaC/misconfig
-`bridgecrew/checkov` / `pip install checkov`; **syft** — SBOM (SPDX/CycloneDX)
-`anchore/syft`; **bandit** — Python AST security `pip install bandit`; **brakeman**
-— Rails-aware taint `gem install brakeman`. Add one by following "Adding an
+Net-new coverage worth adding next (none overlap trivy): **GuardDog**
+(`ghcr.io/datadog/guarddog`) — malicious-package / typosquat detection, a class
+no CVE scanner sees (opt-in network); **TruffleHog** — *live* secret verification
+(verified/unverified) to feed the `verified` field; **cppcheck** — C/C++
+memory-safety via SARIF (needs stderr capture). Brakeman and CodeQL were screened
+out (non-commercial / private-repo licence). Add one by following "Adding an
 adapter" below.
 
 ## Triaging tool findings
@@ -67,3 +102,14 @@ Implement `ToolAdapter` (`{ name, category, argv(repo), parse(raw) }`) in
 `src/tools/<tool>.ts`, register it in `src/tools/index.ts`, add it to the registry
 in `src/tools/registry.ts`, and add a parse test against a frozen sample of the
 tool's real JSON under `tests/fixtures/tool-output/`.
+
+Notes:
+- **SARIF output?** Skip a bespoke parser — delegate to
+  `parseSarif(raw, { tool, category, defaultCwe })` (see `kingfisher.ts`).
+- **dep/SCA adapter?** Pass `pkg`, `version`, and `aliases` (every advisory id —
+  the CVE is auto-picked) so cross-tool correlation and EPSS/KEV scoring work.
+- **Scans files, not a directory** (e.g. hadolint)? Add `enumerate(repo)`
+  returning the repo-relative paths to scan; the runner appends them to argv and
+  skips the run cleanly when none are found.
+- `makeToolFinding` sets `sources: [tool]`; the correlator unions them — don't set
+  `sources` by hand.

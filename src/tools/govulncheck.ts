@@ -1,6 +1,6 @@
 import type { Finding } from "../types.js";
 import type { ToolAdapter } from "./run.js";
-import { makeToolFinding, parseJsonStream } from "./normalize.js";
+import { makeToolFinding, parseJsonStream, cvesIn } from "./normalize.js";
 
 // govulncheck → reachability-aware Go vulnerabilities. Output is a STREAM of
 // concatenated JSON objects, each holding one of {config,progress,osv,finding}.
@@ -29,6 +29,8 @@ export const govulncheck: ToolAdapter = {
       if (seen.has(key)) continue;
       seen.add(key);
       const reachable = Boolean(top.function && top.position);
+      const refs = (osv.references ?? []).map((r: any) => r.url).filter(Boolean);
+      const mod = osv.affected?.[0]?.package?.name;
       out.push(
         makeToolFinding({
           tool: "govulncheck",
@@ -43,7 +45,10 @@ export const govulncheck: ToolAdapter = {
             (reachable ? ` — reachable via ${top.package}.${top.function}` : " — imported, reachability not proven"),
           file: top.position?.filename,
           line: top.position?.line,
-          references: (osv.references ?? []).map((r: any) => r.url).filter(Boolean),
+          references: refs,
+          pkg: mod || top.package,
+          // GO-id is the ident; osv.aliases carries the CVE/GHSA — the join key.
+          aliases: [...(osv.aliases ?? []), ...cvesIn(refs, osv.summary)],
         }),
       );
     }

@@ -1,0 +1,19 @@
+{
+  "errors": [],
+  "generated_at": "2025-01-01T00:00:00Z",
+  "results": [
+    {
+      "code": "11 subprocess.call(cmd, shell=True)\n",
+      "filename": "app/run.py",
+      "issue_confidence": "HIGH",
+      "issue_cwe": { "id": 78, "link": "https://cwe.mitre.org/data/definitions/78.html" },
+      "issue_severity": "HIGH",
+      "issue_text": "subprocess call with shell=True identified, security issue.",
+      "line_number": 12,
+      "line_range": [12],
+      "more_info": "https://bandit.readthedocs.io/en/latest/plugins/b602_subprocess_popen_with_shell_equals_true.html",
+      "test_id": "B602",
+      "test_name": "subprocess_popen_with_shell_equals_true"
+    }
+  ]
+}

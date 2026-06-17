@@ -75,8 +75,34 @@ export interface Finding {
   message: string;
   /** Producer: "ultrasec" for engine-enumerated, else the external tool name. */
   tool: string;
+  /**
+   * Every tool that independently reported this finding (incl. `tool`), sorted
+   * and de-duplicated. Length > 1 means corroboration — a confidence prior for
+   * the verify gate ("N scanners agree"). Set by the cross-tool correlator.
+   */
+  sources?: string[];
   /** CWE / advisory / docs URLs. */
   references?: string[];
+  // ── Dependency identity (dep findings) — used for cross-tool dedup + scoring ─
+  /** Canonical CVE id when known (e.g. "CVE-2021-23337"); the EPSS/KEV join key. */
+  cve?: string;
+  /** Every advisory id for this vuln (primary + aliases: CVE / GHSA / RUSTSEC / GO-…). */
+  aliases?: string[];
+  /** Affected package name (e.g. "lodash"). */
+  pkg?: string;
+  /** Installed/affected version. */
+  version?: string;
+  // ── Enrichment (deterministic, post-scan) ───────────────────────────────────
+  /** EPSS exploitation-probability in [0,1] (FIRST.org), when the CVE is scored. */
+  epss?: number;
+  /** True when the CVE is in CISA's Known Exploited Vulnerabilities catalog. */
+  kev?: boolean;
+  /** Date the CVE was added to CISA KEV (ISO yyyy-mm-dd), when applicable. */
+  kevDateAdded?: string;
+  /** Composite risk 0–100 (severity ⊕ EPSS ⊕ KEV) — the primary sort key. */
+  risk?: number;
+  /** Secret findings: whether a scanner actively validated the credential is live. */
+  verified?: boolean;
   /** Adversarial-verification outcome, once adjudicated. */
   verdict?: Verdict;
   /** Concrete trigger path / proof-of-exploit sketch, once reasoned. */

@@ -40,6 +40,34 @@ export interface ToolFindingInput {
   references?: string[];
   /** Default confidence for tool findings is "medium" — a real scanner flagged it. */
   confidence?: Confidence;
+  // ── Optional dependency identity (dep adapters) — powers dedup + EPSS/KEV ─────
+  /** Every advisory id for this vuln (primary + aliases). The CVE is auto-picked. */
+  aliases?: string[];
+  /** Affected package name. */
+  pkg?: string;
+  /** Installed/affected version. */
+  version?: string;
+  /** Secret adapters: whether the credential was actively validated as live. */
+  verified?: boolean;
+}
+
+/** Pull the canonical CVE id out of a set of advisory ids, if any. */
+export function pickCve(ids: (string | undefined | null)[]): string | undefined {
+  for (const id of ids) {
+    const m = /^CVE-\d{4}-\d{4,}$/i.exec(String(id ?? "").trim());
+    if (m) return m[0].toUpperCase();
+  }
+  return undefined;
+}
+
+/** Every distinct CVE id mentioned anywhere in the given strings/arrays. */
+export function cvesIn(...inputs: unknown[]): string[] {
+  const text = inputs.flat(Infinity).map((x) => (typeof x === "string" ? x : "")).join(" ");
+  const out = new Set<string>();
+  const re = /CVE-\d{4}-\d{4,}/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) out.add(m[0].toUpperCase());
+  return [...out];
 }
 
 export function makeToolFinding(i: ToolFindingInput): Finding {
@@ -52,10 +80,22 @@ export function makeToolFinding(i: ToolFindingInput): Finding {
     confidence: i.confidence ?? "medium",
     message: i.message,
     tool: i.tool,
+    sources: [i.tool],
     status: "open",
   };
   if (i.cwe) f.cwe = i.cwe;
   if (i.references && i.references.length) f.references = i.references;
+  // Dependency identity: gather all advisory ids, pick the CVE as the join key.
+  const aliases = [i.ident, ...(i.aliases ?? [])].filter((x): x is string => Boolean(x));
+  const uniqAliases = [...new Set(aliases)];
+  if (i.aliases !== undefined || /^(CVE|GHSA|RUSTSEC|GO|PYSEC|OSV)-/i.test(i.ident)) {
+    if (uniqAliases.length) f.aliases = uniqAliases;
+    const cve = pickCve(uniqAliases);
+    if (cve) f.cve = cve;
+  }
+  if (i.pkg) f.pkg = i.pkg;
+  if (i.version) f.version = i.version;
+  if (i.verified !== undefined) f.verified = i.verified;
   if (i.file) {
     const loc = { file: i.file, line: i.line ?? 1 };
     f.sink = loc; // for SAST/secret/config the flagged location is the "sink"

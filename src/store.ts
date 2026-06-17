@@ -67,10 +67,21 @@ export function renderDossierMd(d: Dossier): string {
 
   L.push(`## Candidates`);
   L.push("");
-  for (const f of findings) {
+  // Highest composite risk first so the AI adjudicates what matters most early.
+  const ordered = findings
+    .slice()
+    .sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
+  for (const f of ordered) {
     L.push(`### ${f.id} — ${severityBadge(f.severity)} ${f.title}`);
     L.push("");
-    L.push(`- category: ${f.category}${f.cwe ? ` · ${f.cwe}` : ""} · confidence ${f.confidence} · status ${f.status}${f.tool !== "ultrasec" ? ` · via ${f.tool}` : ""}`);
+    const src = f.sources && f.sources.length > 1 ? ` · agreed by ${f.sources.join(", ")}` : f.tool !== "ultrasec" ? ` · via ${f.tool}` : "";
+    L.push(`- category: ${f.category}${f.cwe ? ` · ${f.cwe}` : ""} · confidence ${f.confidence} · status ${f.status}${src}`);
+    const risk: string[] = [];
+    if (typeof f.risk === "number") risk.push(`risk ${f.risk}`);
+    if (typeof f.epss === "number") risk.push(`EPSS ${(f.epss * 100).toFixed(1)}%`);
+    if (f.kev) risk.push(`🚨 CISA KEV${f.kevDateAdded ? ` (${f.kevDateAdded})` : ""}`);
+    if (f.verified) risk.push(`✅ verified secret`);
+    if (risk.length) L.push(`- ${risk.join(" · ")}`);
     if (f.path && f.path.length) {
       L.push(`- path: ${f.path.map((p) => `\`${p.file}:${p.line}\``).join(" → ")}`);
     } else if (f.sink) {

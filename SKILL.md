@@ -1,6 +1,6 @@
 ---
 name: ultrasec
-description: "Use when the user wants a SECURITY AUDIT of a codebase — to find real, exploitable vulnerabilities by reasoning about how untrusted data flows ACROSS functions and files, not just linting one file at a time. A deterministic zero-dependency engine (no API keys, no npm install) scans the whole repo, builds a cross-file/function link-graph, enumerates candidate source→sink taint paths (SQLi, command/code injection, path traversal, SSRF, XSS, insecure deserialization, weak crypto, open redirect), and orchestrates whatever best-in-class OSS scanners are installed (Trivy, OpenGrep/Semgrep, gitleaks, osv-scanner, cargo-audit, govulncheck…); YOU then read the real code along each path, judge whether the flow is genuinely reachable and exploitable (incl. authz/business-logic bugs the tools miss), and adversarially verify every finding into a cited, tiered report. Anti-hallucination: every finding must cite resolvable [file:line] hops (`check` fails otherwise). Conservative: an uncertain high-severity finding is flagged needs-human, never silently dropped. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review of this codebase', 'is this code vulnerable to SQL injection/XSS/SSRF/command injection', 'taint analysis', 'where does user input reach a dangerous sink', 'check my dependencies for CVEs', 'scan for secrets'. The code-facing security sibling of ultraindex/ultrasearch."
+description: "Use when the user wants a SECURITY AUDIT of a codebase — to find real, exploitable vulnerabilities by reasoning about how untrusted data flows ACROSS functions and files, not just linting one file at a time. A deterministic zero-dependency engine (no API keys, no npm install) scans the whole repo, builds a cross-file/function link-graph, enumerates candidate source→sink taint paths (SQLi, command/code injection, path traversal, SSRF, XSS, insecure deserialization, weak crypto, open redirect), and orchestrates whatever best-in-class OSS scanners are installed (Trivy, OpenGrep/Semgrep, gitleaks, osv-scanner, cargo-audit, govulncheck, bandit, gosec, checkov, hadolint, kingfisher…), correlating their findings across tools and ranking everything by composite EPSS/CISA-KEV/CVSS risk; YOU then read the real code along each path, judge whether the flow is genuinely reachable and exploitable (incl. authz/business-logic bugs the tools miss), and adversarially verify every finding into a cited, tiered report. Anti-hallucination: every finding must cite resolvable [file:line] hops (`check` fails otherwise). Conservative: an uncertain high-severity finding is flagged needs-human, never silently dropped. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review of this codebase', 'is this code vulnerable to SQL injection/XSS/SSRF/command injection', 'taint analysis', 'where does user input reach a dangerous sink', 'check my dependencies for CVEs', 'scan for secrets'. The code-facing security sibling of ultraindex/ultrasearch."
 license: MIT
 metadata:
   version: 1.2.0
@@ -38,11 +38,14 @@ Most commands accept `--json` — prefer it when you branch on the result.
 
 One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
 
-- `scan --repo <dir> [--out .ultrasec] [--tools auto|none|<list>] [--include/--exclude <glob>]`
+- `scan --repo <dir> [--out .ultrasec] [--tools auto|none|<list>] [--docker] [--no-enrich|--offline] [--include/--exclude <glob>]`
   Scan → build the link-graph → enumerate cross-file taint candidates → run the
-  installed external scanners → write the **audit dossier** (`findings.json`,
-  `graph.json`, `manifest.json`, `DOSSIER.md`). `--tools` defaults to **auto**
-  (every installed scanner); `none` for graph+taint only.
+  installed external scanners → **correlate** their findings across tools (one
+  issue, not three; `sources[]` records every producer) → **risk-rank** every
+  finding by EPSS · CISA KEV · CVSS → write the **audit dossier** (`findings.json`,
+  `graph.json`, `manifest.json`, `DOSSIER.md`, ordered by risk). `--tools`
+  defaults to **auto** (every installed scanner); `none` for graph+taint only.
+  `--no-enrich`/`--offline` skips the EPSS/KEV network fetch (ranks by severity).
 - `tools [--json]` — the external-scanner catalog: which are installed, what they
   cover, how to install the rest. ultrasec runs what's present; none are required.
 - `graph <file|symbol> [--depth n]` — the cross-file links into/out of a node.
@@ -110,6 +113,11 @@ You are invoked to return a grounded, cited audit. Don't hand back control mid-r
 - **Deterministic core, optional tools.** Two scans of an unchanged repo yield the
   same taint candidates; external-tool results depend on what's installed and may
   hit the network (Trivy/cargo-audit fetch advisory DBs). Nothing external is required.
+- **Risk ranking & correlation are deterministic.** Findings from multiple tools are
+  merged (dep: package@version + shared advisory id; else category+CWE+file:line)
+  and ranked by a composite EPSS/KEV/CVSS `risk`. EPSS/KEV feeds are cached under
+  `~/.cache/ultrasec` (daily TTL); the scoring math is offline. `--no-enrich`/
+  `--offline` makes it fully network-free (severity-only ranking).
 - **~15 languages** for the link-graph (JS/TS, Python, Go, Java, Ruby, PHP, Rust,
   C/C++, C#, Kotlin, Swift, Scala, shell, Lua, Elixir); the sink/source catalog is
   deepest for the web stacks and grows over time.

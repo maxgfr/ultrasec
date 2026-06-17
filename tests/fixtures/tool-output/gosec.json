@@ -1,0 +1,17 @@
+{
+  "Golang errors": {},
+  "Issues": [
+    {
+      "severity": "HIGH",
+      "confidence": "HIGH",
+      "cwe": { "id": "78", "url": "https://cwe.mitre.org/data/definitions/78.html" },
+      "rule_id": "G204",
+      "details": "Subprocess launched with a potential tainted input or cmd arguments",
+      "file": "cmd/main.go",
+      "code": "27: exec.Command(\"sh\", \"-c\", userInput)",
+      "line": "27",
+      "column": "10"
+    }
+  ],
+  "Stats": { "files": 1, "lines": 120, "nosec": 0, "found": 1 }
+}

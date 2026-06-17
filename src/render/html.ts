@@ -38,6 +38,21 @@ function pathHtml(f: Finding): string {
   return `<div class="flow">${nodes}</div>`;
 }
 
+function riskHtml(f: Finding): string {
+  const out: string[] = [];
+  if (typeof f.risk === "number") out.push(badge(`risk ${f.risk}`, f.risk >= 95 ? "#7f1d1d" : f.risk >= 70 ? "#b91c1c" : f.risk >= 40 ? "#b45309" : "#475569"));
+  if (typeof f.epss === "number") out.push(`<span class="kv">EPSS ${(f.epss * 100).toFixed(1)}%</span>`);
+  if (f.kev) out.push(badge(`CISA KEV${f.kevDateAdded ? ` ${f.kevDateAdded}` : ""}`, "#7f1d1d"));
+  if (f.verified) out.push(badge("verified secret", "#7f1d1d"));
+  return out.length ? `<div class="risk">${out.join(" ")}</div>` : "";
+}
+
+function sourcesHtml(f: Finding): string {
+  const s = f.sources && f.sources.length ? f.sources : f.tool !== "ultrasec" ? [f.tool] : [];
+  if (s.length > 1) return `· agreed by ${esc(s.join(", "))}`;
+  return f.tool !== "ultrasec" ? `· via ${esc(f.tool)}` : "";
+}
+
 function findingHtml(f: Finding): string {
   const refs = (f.references ?? [])
     .slice(0, 5)
@@ -52,8 +67,9 @@ function findingHtml(f: Finding): string {
       · status ${badge(f.status, f.status === "confirmed" ? "#b91c1c" : f.status === "needs-human" ? "#b45309" : f.status === "dismissed" ? "#64748b" : "#475569")}
       · confidence ${esc(f.confidence)}
       ${f.verdict ? `· verdict ${esc(f.verdict)}` : ""}
-      ${f.tool !== "ultrasec" ? `· via ${esc(f.tool)}` : ""}
+      ${sourcesHtml(f)}
     </div>
+    ${riskHtml(f)}
     ${pathHtml(f)}
     <p class="msg">${esc(f.message)}</p>
     ${f.exploitPath ? `<p class="exploit"><strong>Exploit path:</strong> ${esc(f.exploitPath)}</p>` : ""}
@@ -65,7 +81,7 @@ export function renderHtml(d: Dossier): string {
   const c = d.manifest.counts.bySeverity;
   const fs = d.findings
     .slice()
-    .sort((a, b) => sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
+    .sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
   const shown = fs.filter((f) => f.status !== "dismissed");
   const dismissed = fs.filter((f) => f.status === "dismissed");
 
@@ -97,6 +113,8 @@ export function renderHtml(d: Dossier): string {
   .exploit { background:#fef2f2; border-left:3px solid #b91c1c; padding:6px 10px; border-radius:4px; }
   @media (prefers-color-scheme: dark){ .exploit{ background:#1f1315; } }
   .refs { font-size:12px; color:#6b7280; word-break:break-all; }
+  .risk { margin:6px 0 4px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .kv { font-size:12px; font-weight:600; color:#6b7280; }
   details { margin-top:18px; }
 </style></head>
 <body>

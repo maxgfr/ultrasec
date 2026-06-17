@@ -1,0 +1,26 @@
+{
+  "version": "2.1.0",
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "kingfisher",
+          "informationUri": "https://github.com/mongodb/kingfisher",
+          "rules": [
+            { "id": "aws.access_key_id", "name": "AWS Access Key ID", "properties": { "tags": ["secret", "aws"] }, "helpUri": "https://github.com/mongodb/kingfisher" }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "aws.access_key_id",
+          "message": { "text": "Detected an AWS Access Key ID" },
+          "locations": [
+            { "physicalLocation": { "artifactLocation": { "uri": "config/prod.env" }, "region": { "startLine": 4 } } }
+          ]
+        }
+      ]
+    }
+  ]
+}

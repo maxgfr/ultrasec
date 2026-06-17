@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import type { Category, Finding, PathStep, CodeLoc } from "../types.js";
 import { detect } from "./registry.js";
-import { byStr } from "../util.js";
+import { correlate } from "./correlate.js";
 
 // Adapter contract: each scanner provides how to invoke it and how to parse its
 // JSON into normalized Findings. The runner detects presence, runs the installed
@@ -16,6 +16,13 @@ export interface ToolAdapter {
   argv(target: string): string[];
   /** Normalize raw stdout (JSON) into findings. Must not throw on empty input. */
   parse(raw: string, repo: string): Finding[];
+  /**
+   * Some tools (hadolint) scan explicit files, not a directory. When present,
+   * the returned repo-relative paths are appended to argv (they resolve under
+   * both the native cwd and the /work docker mount). An empty list ⇒ skip the
+   * run with a "no target files" note (nothing to scan).
+   */
+  enumerate?(repo: string): string[];
   /** Some tools (govulncheck) stream NDJSON; default reads one JSON blob. */
   streaming?: boolean;
   /** Pinned official image enabling `--docker` mode (omitted ⇒ native-only). */
@@ -78,19 +85,36 @@ export function relativizeFindings(findings: Finding[], base: string): Finding[]
   }));
 }
 
+/**
+ * Build the args for an adapter, appending enumerated file targets when the
+ * adapter scans explicit files. Returns null when enumeration yields nothing
+ * (the runner then records a graceful "no target files" skip).
+ */
+function buildArgv(adapter: ToolAdapter, repo: string, target: string): string[] | null {
+  const base = adapter.argv(target);
+  if (!adapter.enumerate) return base;
+  const files = adapter.enumerate(repo);
+  if (!files.length) return null;
+  return [...base, ...files];
+}
+
 /** Run one adapter natively if its binary is present. Never throws. */
 function runNative(adapter: ToolAdapter, repo: string): ToolRunResult {
   if (!detect(adapter.name).installed) {
     return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
   }
-  const { stdout, failed, err } = exec(adapter.name, adapter.argv(repo), repo);
+  const argv = buildArgv(adapter, repo, repo);
+  if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
+  const { stdout, failed, err } = exec(adapter.name, argv, repo);
   return finish(adapter, repo, stdout, failed, err, false);
 }
 
 /** Run one adapter via its official Docker image. Never throws. */
 function runDocker(adapter: ToolAdapter, repo: string): ToolRunResult {
   if (!adapter.dockerImage) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no docker image" };
-  const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(adapter.argv(MOUNT));
+  const argv = buildArgv(adapter, repo, MOUNT);
+  if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
+  const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
   const args = ["run", "--rm", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
   const { stdout, failed, err } = exec("docker", args, repo);
   return finish(adapter, repo, stdout, failed, err, true);
@@ -124,22 +148,24 @@ export interface OrchestrateOptions {
 }
 
 /**
- * Run a set of adapters and merge their findings, de-duplicated by id. `which`
- * selects adapters by name; default = all. In docker mode only adapters with an
- * official image run. Missing tools are skipped gracefully (recorded, not fatal).
+ * Run a set of adapters and merge their findings via cross-tool correlation
+ * (`correlate`): the same issue reported by multiple scanners collapses into one
+ * finding whose `sources` lists every producer. `which` selects adapters by
+ * name; default = all. In docker mode only adapters with an official image run.
+ * Missing tools are skipped gracefully (recorded, not fatal).
  */
 export function orchestrate(adapters: ToolAdapter[], repo: string, opts: OrchestrateOptions = {}): OrchestrateResult {
   let selected = opts.which && opts.which.length ? adapters.filter((a) => opts.which!.includes(a.name)) : adapters;
   if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
 
   const results: ToolRunResult[] = [];
-  const merged = new Map<string, Finding>();
+  const all: Finding[] = [];
   for (const a of selected) {
     const r = runAdapter(a, repo, opts.useDocker);
     results.push(r);
-    for (const f of r.findings) if (!merged.has(f.id)) merged.set(f.id, f);
+    all.push(...r.findings);
   }
-  const findings = [...merged.values()].sort((a, b) => byStr(a.id, b.id));
+  const findings = correlate(all);
   const toolsRun = results.filter((r) => r.ran && r.ok).map((r) => r.name);
   return { findings, toolsRun, results };
 }

@@ -21,8 +21,10 @@ USAGE
   ultrasec <command> [options]
 
 COMMANDS
-  scan       Scan a repo: detect stack, run available tools, build the link-graph,
-             enumerate candidate taint paths, write the audit dossier.
+  scan       Scan a repo: detect stack, run available tools (correlated across
+             scanners), build the link-graph, enumerate candidate taint paths,
+             rank by EPSS/KEV/CVSS risk, write the audit dossier.
+             Flags: --tools auto|none|a,b · --docker · --no-enrich/--offline.
   tools      List known external scanners, which are installed, and how to get them.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source→sink chains.

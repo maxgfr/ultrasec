@@ -28,6 +28,9 @@ export const cargoAudit: ToolAdapter = {
           message: `${pkg.name}@${pkg.version}: ${adv.title || adv.id}` + (patched ? ` (patched: ${patched})` : ""),
           file: "Cargo.lock",
           references: [adv.url, ...(adv.aliases ?? [])].filter(Boolean),
+          pkg: pkg.name,
+          version: pkg.version,
+          aliases: adv.aliases ?? [], // RUSTSEC id is the ident; aliases carry the CVE
         }),
       );
     }

@@ -4,14 +4,16 @@ import { scanRepo } from "../scan.js";
 import { buildGraph } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
 import { orchestrate } from "../tools/run.js";
+import { enrichFindings } from "../tools/scoring.js";
 import { ADAPTERS } from "../tools/index.js";
 import { writeDossier, countBySeverity, type Dossier } from "../store.js";
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest } from "../types.js";
 
 // `ultrasec scan --repo <dir> [--out .ultrasec] [--json]`
 // The mechanical pass: scan → build link-graph → enumerate cross-file taint
-// candidates → write the audit dossier. (External tools wired in M4.)
-export function runScan(args: ParsedArgs): number {
+// candidates → run external scanners (correlated across tools) → enrich CVEs
+// with EPSS/KEV risk → write the audit dossier.
+export async function runScan(args: ParsedArgs): Promise<number> {
   const repo = resolve(flagStr(args, "repo") ?? ".");
   const out = resolve(flagStr(args, "out") ?? ".ultrasec");
 
@@ -28,7 +30,12 @@ export function runScan(args: ParsedArgs): number {
   const tool = skipTools ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
 
   // Merge taint candidates with tool findings (ids are disjoint by construction).
-  const findings = [...taintFindings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
+  const merged = [...taintFindings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
+
+  // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
+  // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
+  const enrich = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
+  const { findings, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
 
   const languages = [...new Set(scan.files.map((f) => f.lang))].sort();
   const manifest: Manifest = {
@@ -45,7 +52,8 @@ export function runScan(args: ParsedArgs): number {
   writeDossier(out, dossier);
 
   if (flagBool(args, "json")) {
-    println(JSON.stringify({ out, counts: manifest.counts, languages, files: scan.files.length, toolsRun: tool.toolsRun }, null, 2));
+    const kev = findings.filter((f) => f.kev).length;
+    println(JSON.stringify({ out, counts: manifest.counts, languages, files: scan.files.length, toolsRun: tool.toolsRun, kev, risk: riskNote }, null, 2));
     return 0;
   }
 
@@ -56,6 +64,7 @@ export function runScan(args: ParsedArgs): number {
     println(`  external tools run: ${tool.toolsRun.join(", ") || "none"}  (\`ultrasec tools\` to see/install more)`);
   }
   println(`  candidate findings: ${findings.length}  (crit ${c.critical} · high ${c.high} · med ${c.medium} · low ${c.low})  ·  ${taintFindings.length} taint + ${tool.findings.length} tool`);
+  println(`  ${riskNote}`);
   if (!findings.length) {
     println(`  no taint candidates — still review the DOSSIER and run external tools (\`ultrasec tools\`).`);
   } else {

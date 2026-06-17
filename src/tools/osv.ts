@@ -1,6 +1,6 @@
 import type { Finding } from "../types.js";
 import type { ToolAdapter } from "./run.js";
-import { makeToolFinding, firstCwe } from "./normalize.js";
+import { makeToolFinding, firstCwe, cvesIn } from "./normalize.js";
 import { deriveSeverity } from "./cvss.js";
 
 // osv-scanner → dependency vulnerabilities (lockfile-driven). Deeply nested:
@@ -28,6 +28,7 @@ export const osvScanner: ToolAdapter = {
           const fixed = (v.affected ?? [])
             .flatMap((a: any) => (a.ranges ?? []).flatMap((r: any) => (r.events ?? []).map((e: any) => e.fixed)))
             .filter(Boolean)[0];
+          const refs = (v.references ?? []).map((r: any) => r.url).filter(Boolean);
           out.push(
             makeToolFinding({
               tool: "osv-scanner",
@@ -38,7 +39,11 @@ export const osvScanner: ToolAdapter = {
               message: `${name}@${version}: ${v.summary || v.id}` + (fixed ? ` (fixed in ${fixed})` : ""),
               file: src,
               cwe: firstCwe(db.cwe_ids),
-              references: (v.references ?? []).map((r: any) => r.url).filter(Boolean),
+              references: refs,
+              pkg: name,
+              version,
+              // v.id is usually a GHSA; v.aliases carries the CVE — the join key.
+              aliases: [...(v.aliases ?? []), ...cvesIn(refs)],
             }),
           );
         }

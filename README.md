@@ -13,7 +13,9 @@ division of labour:
   `node`, no `npm install`, no API keys) does the mechanical work — scan the
   repo, build a **cross-file/function link-graph**, enumerate candidate
   **source→sink taint paths**, run + normalize whatever external scanners are
-  installed, and assemble per-finding **evidence packets**;
+  installed, **correlate** their findings across tools (one issue, not three),
+  **rank** every finding by composite **EPSS · CISA KEV · CVSS risk**, and
+  assemble per-finding **evidence packets**;
 - the **AI** does the security reasoning — judge which candidate flows are real
   and exploitable across files, find the subtle authz/business-logic bugs the
   tools miss, and **adversarially verify** each finding (conservatively — an
@@ -67,8 +69,11 @@ node scripts/ultrasec.mjs render --run .ultrasec      # SUMMARY/REPORT/FULL.md +
 
 Nothing external is required — the link-graph and taint reasoning are the
 always-on core. Installed scanners (Trivy, OpenGrep/Semgrep, gitleaks,
-osv-scanner, cargo-audit, govulncheck, …) are an automatic bonus, normalized into
-one finding model.
+osv-scanner, cargo-audit, govulncheck, **bandit, gosec, checkov, hadolint,
+kingfisher**, …) are an automatic bonus, normalized into one finding model,
+**de-duplicated across tools**, and **risk-ranked** (EPSS exploit-probability +
+CISA KEV + CVSS). Risk scoring uses cached, offline-friendly feeds — add
+`--no-enrich`/`--offline` to skip the network and rank by severity alone.
 
 See [`assets/example-audit/`](assets/example-audit/) for a complete run, and
 [`SKILL.md`](SKILL.md) + [`references/`](references/) for the agent workflow
@@ -84,14 +89,17 @@ version-pinned image on demand, with your repo bind-mounted at `/work`:
 
 ```bash
 node scripts/ultrasec.mjs scan --repo . --out .ultrasec --docker
-# runs, via docker: trivy, gitleaks, osv-scanner, semgrep — whatever has an image
+# runs, via docker: trivy, gitleaks, osv-scanner, semgrep, bandit, gosec,
+# checkov, hadolint — whatever has an official image
 node scripts/ultrasec.mjs scan --repo . --docker --tools trivy,gitleaks   # pick a subset
 ```
 
 Only Docker is required. Reported paths are rewritten from `/work` back to
 repo-relative automatically. Pinned images: `ghcr.io/aquasecurity/trivy:0.71.1`,
 `ghcr.io/gitleaks/gitleaks:v8.30.1`, `ghcr.io/google/osv-scanner:v2.3.8`,
-`semgrep/semgrep:1.166.0`.
+`semgrep/semgrep:1.166.0`, `ghcr.io/pycqa/bandit:1.8.6`,
+`ghcr.io/securego/gosec:v2.21.4`, `bridgecrew/checkov:3.2.0`,
+`hadolint/hadolint:v2.12.0`.
 
 **2. Toolbox image (everything baked in).** Build one image with the engine + all
 bundled scanners and run the whole audit inside it:
@@ -102,8 +110,9 @@ TARGET=/path/to/repo docker compose run --rm ultrasec scan --repo /work --out /w
 TARGET=/path/to/repo docker compose run --rm ultrasec tools     # all show ✓ installed
 ```
 
-See [`references/tools.md`](references/tools.md) for the full scanner matrix and
-recommended additions (trufflehog, checkov, syft, bandit, brakeman).
+See [`references/tools.md`](references/tools.md) for the full scanner matrix,
+the correlation/risk-scoring layers, and recommended additions (GuardDog for
+malicious packages, TruffleHog for live secret verification, cppcheck for C/C++).
 
 ## Cleanup
 
@@ -143,7 +152,7 @@ TARGET=/path/to/repo docker compose run --rm ultrasec scan --repo /work --out /w
 
 | stage | who | what |
 |-------|-----|------|
-| scan | engine | walk repo → cross-file/function link-graph (~15 langs) → enumerate candidate source→sink taint paths → run installed scanners → evidence packets |
+| scan | engine | walk repo → cross-file/function link-graph (~15 langs) → enumerate candidate source→sink taint paths → run installed scanners → correlate across tools → EPSS/KEV/CVSS risk-rank → evidence packets |
 | adjudicate | **AI** | read the real code along each path; confirm reachability + exploitability; find authz/business-logic bugs the tools miss |
 | verify | **AI** + engine | adversarial worklist, conservative gate (uncertain high-severity → `needs-human`, never auto-dropped) |
 | report | engine | grounded, cited, tiered Markdown + self-contained HTML |
