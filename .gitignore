@@ -8,3 +8,5 @@ coverage/
 *.tgz
 .ultrasec/
 **/.ultrasec/
+.ult/
+**/.ult/
