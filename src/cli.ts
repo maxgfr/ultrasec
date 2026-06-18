@@ -16,6 +16,7 @@ import { runNarrative } from "./commands/narrative.js";
 import { runCheck } from "./commands/check.js";
 import { runRender } from "./commands/render.js";
 import { runClean } from "./commands/clean.js";
+import { runRun } from "./commands/run.js";
 
 const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
 
@@ -73,6 +74,13 @@ COMMANDS
              --semantic also folds in the verify verdicts.
   clean      Remove the audit dossier and, with --docker, the scanner images +
              toolbox image + trivy cache volume (--dry-run to preview).
+  run        Orchestrate the AI stages (context → triage → investigate → verify →
+             revalidate → narrative → check → render). DEFAULT makes ZERO external
+             calls: scans + emits every worklist + prints the agent TODO. --powered
+             drives an agent CLI per worklist (keys live in that CLI, not ultrasec);
+             --cross-check <cli> escalates high/critical verify/revalidate
+             disagreement to needs-human. Flags: --repo · --out · --powered ·
+             --agent <name|tpl> · --cross-check <name|tpl> · --stages · --no-scan.
 
 GLOBAL
   --help, -h     Show this help.
@@ -123,6 +131,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runRender(args);
     case "clean":
       return runClean(args);
+    case "run":
+      return runRun(args);
     default:
       eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
       return 2;
