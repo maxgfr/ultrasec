@@ -34,7 +34,7 @@ describe("run command — stage selection & order", () => {
     expect(code).toBe(0);
     const res = JSON.parse(cap.out.join(""));
     expect(res.externalCalls).toBe(0);
-    expect(res.emitted.map((e: any) => e.stage)).toEqual(["context", "triage", "investigate", "verify", "revalidate", "narrative"]);
+    expect(res.emitted.map((e: any) => e.stage)).toEqual(["context", "triage", "investigate", "verify", "revalidate", "narrative", "implement"]);
   });
 
   it("--stages keeps canonical order regardless of the order given", () => {

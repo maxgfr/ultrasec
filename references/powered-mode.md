@@ -55,3 +55,7 @@ node scripts/ultrasec.mjs run --repo . --powered --agent "mytool exec {prompt} -
   worklists, not *how they're applied*: `verify`/`revalidate`/`triage` apply under
   the same `nextStatus`/`isHigh` policy, and `check` still gates grounding. An
   uncertain high-severity finding stays needs-human.
+- **No outward-facing side effects.** The final `implement` stage authors a remediation
+  PRD as a **local file** (`REMEDIATION_PRD.md`) — never a tracker publish. ultrasec holds
+  no tracker credentials; handing the draft to the `to-prd` skill (which owns publishing)
+  is a separate, human-initiated step. See [implement-playbook.md](implement-playbook.md).

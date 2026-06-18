@@ -88,6 +88,7 @@ class MockRunner implements AgentRunner {
     else if (stage === "triage") writeFileSync(task.outPath, "[]");
     else if (stage === "investigate") writeFileSync(task.outPath, "[]");
     else if (stage === "narrative") writeFileSync(task.outPath, "{}");
+    else if (stage === "implement") writeFileSync(task.outPath, "# Remediation PRD\n");
     else if (stage === "verify") {
       const items = JSON.parse(readFileSync(join(task.run, "VERIFY.todo.json"), "utf8")) as { id: string }[];
       writeFileSync(task.outPath, JSON.stringify(items.map((i) => ({ id: i.id, verdict: this.verifyVerdict }))));
@@ -125,7 +126,7 @@ describe("runPipeline — powered", () => {
     const run = tmpRun();
     const mock = new MockRunner();
     const res = runPipeline({ repo: FIXTURE, run, powered: true, stages: [...ALL_STAGES] as StageName[], runner: mock });
-    // context + narrative have no apply; the rest do
+    // context + narrative + implement have no apply; the rest do
     expect(res.actions).toEqual([
       "scan",
       "emit:context", "fill:context",
@@ -134,10 +135,11 @@ describe("runPipeline — powered", () => {
       "emit:verify", "fill:verify", "apply:verify",
       "emit:revalidate", "fill:revalidate", "apply:revalidate",
       "emit:narrative", "fill:narrative",
+      "emit:implement", "fill:implement",
       "check", "render",
     ]);
     expect(mock.calls).toContain("verify");
-    expect(res.externalCalls).toBe(6); // one per stage
+    expect(res.externalCalls).toBe(7); // one per stage
   });
 
   it("cross-check: a high/critical disagreement on verify escalates to needs-human", () => {

@@ -17,6 +17,7 @@ ultrasec revalidate --apply REVALIDATE.json --run .
 ultrasec check      --run . --semantic      # exit gate: grounded + adjudicated
 ultrasec narrative  --run .                 # → author NARRATIVE.json (exec summary, fixes, chains)
 ultrasec render     --run . --narrative NARRATIVE.json   # → SUMMARY/REPORT/FULL.md + index.html
+ultrasec implement  --run . --narrative NARRATIVE.json   # → IMPLEMENT.md (remediation-PRD draft) + IMPLEMENT.todo.json
 ```
 
 Files:
@@ -35,9 +36,16 @@ Files:
 | `NARRATIVE.json` | the AI-authored report narrative (exec summary, per-fix, attack chains, root causes) |
 | `SUMMARY.md` / `REPORT.md` / `FULL.md` | the tiered report (with clearly-marked AI sections) |
 | `index.html` | self-contained report (open in a browser) |
+| `IMPLEMENT.md` | the remediation-PRD draft (fix story per confirmed finding, grouped by root cause) — feed to the `to-prd` skill |
+| `IMPLEMENT.todo.json` | the structured remediation worklist (fixes, investigations, root causes) |
 
 Three cross-file flows were **confirmed** (OS command injection, SQL injection,
 reflected XSS), all judged **still-valid** by the git-history revalidation pass —
 and the report carries an AI-authored executive summary, per-finding fixes, an
 attack chain, and a root-cause grouping (each marked "AI-authored", grounding-
 checked against the confirmed findings).
+
+`IMPLEMENT.md` then turns those three confirmed flows into a remediation-PRD draft —
+one fix story each (grounded in its `[file:line]`, with the suggested fix folded from
+the narrative and an acceptance-criteria scaffold), grouped under their shared root
+cause — ready to feed to the `to-prd` skill.

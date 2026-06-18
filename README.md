@@ -69,9 +69,10 @@ node scripts/ultrasec.mjs revalidate --run .ultrasec  # git-history false-positi
 node scripts/ultrasec.mjs check --run .ultrasec --semantic   # exit gate: grounded + adjudicated
 node scripts/ultrasec.mjs narrative --run .ultrasec   # author NARRATIVE.json (exec summary, fixes, chains)
 node scripts/ultrasec.mjs render --run .ultrasec --narrative NARRATIVE.json   # SUMMARY/REPORT/FULL.md + index.html
+node scripts/ultrasec.mjs implement --run .ultrasec   # remediation-PRD draft (IMPLEMENT.md) → feed to the to-prd skill
 ```
 
-`context`, `triage`, `investigate`, `revalidate`, `narrative` are additive — a quick
+`context`, `triage`, `investigate`, `revalidate`, `narrative`, `implement` are additive — a quick
 audit can skip them. To sequence the whole pipeline (and, opt-in, drive your own agent
 CLI to fill the worklists), use `run`:
 

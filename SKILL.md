@@ -117,6 +117,13 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
 - `narrative --run <dir>` — emit the **report-narrative** worklist (reportable findings +
   a `Narrative` scaffold). You author `NARRATIVE.json` (executive summary, per-confirmed
   remediations, attack chains, root-cause groups); it is folded in by `render --narrative`.
+- `implement --run <dir> [--narrative NARRATIVE.json]` — emit a **remediation-PRD draft**
+  (`IMPLEMENT.md`) + a structured worklist (`IMPLEMENT.todo.json`): confirmed findings → fix
+  work items (each grounded in its `[file:line]` with an acceptance-criteria scaffold),
+  needs-human → investigation items, grouped by root cause; folds in `NARRATIVE.json`
+  (suggested fixes/patches/root causes) when present. **Emit-only — never changes a finding's
+  status; persists nothing.** Feed `IMPLEMENT.md` to the local `to-prd` skill to author the
+  PRD, or hand it to an implementer/AI.
 - `render --run <dir> [--narrative NARRATIVE.json]` — `SUMMARY/REPORT/FULL.md` + a
   self-contained `index.html` (severity/status badges, the Mermaid taint-path, exploit
   paths). `--narrative` adds clearly-marked **AI-authored** sections (grounding-checked:
@@ -124,7 +131,7 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   **No `--narrative` ⇒ byte-identical to today.**
 - `run --repo <dir> [--out <run>] [--powered] [--agent <name|tpl>] [--cross-check <name|tpl>]
   [--stages …] [--no-scan]` — **orchestrate the AI stages** (context → triage →
-  investigate → verify → revalidate → narrative → check → render). The **default
+  investigate → verify → revalidate → narrative → implement → check → render). The **default
   (no `--powered`)** scans + emits every worklist + prints the agent TODO, making
   **ZERO external calls**. `--powered` drives an external agent CLI per worklist (the
   keys live in **that CLI**, not ultrasec); `--cross-check <cli>` runs a second agent
@@ -156,9 +163,9 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
 
 You are invoked to return a grounded, cited audit. Don't hand back control mid-run.
 The full pipeline is `context → scan → triage → dossier → investigate → verify →
-revalidate → check → narrative → render` — every stage is additive and old runs
+revalidate → check → narrative → implement → render` — every stage is additive and old runs
 still work, so use the subset the task needs (a quick audit can skip triage/
-investigate/narrative). Each AI stage follows the same shape: the engine **emits**
+investigate/narrative/implement). Each AI stage follows the same shape: the engine **emits**
 a worklist → you **fill** it → `--apply` folds it back in under a conservative rule.
 
 1. **Prime the context** *(highest leverage)*. `context --repo <dir> --out <run>`,
@@ -207,6 +214,13 @@ a worklist → you **fill** it → `--apply` folds it back in under a conservati
     and grounding-checked). Without a narrative, plain `render`. Present the SUMMARY,
     the confirmed findings with their cross-file + exploit paths, the needs-human list,
     and the dossier path.
+
+11. **Plan the fixes (optional).** `implement --run <run>` emits a remediation-PRD draft
+    (`IMPLEMENT.md`): confirmed → fix stories (each grounded in its `[file:line]` with an
+    acceptance-criteria scaffold), needs-human → investigation items, grouped by root cause
+    and folding the just-authored `NARRATIVE.json`. Feed `IMPLEMENT.md` to the local `to-prd`
+    skill to author the PRD, or hand it to an implementer/AI. It never changes a finding's
+    status. See [references/implement-playbook.md](references/implement-playbook.md).
 
 **Autonomy (opt-in).** `run --repo <dir>` sequences all of the above; the default emits
 every worklist and prints a TODO (zero external calls). With your own agent CLI,
