@@ -3308,8 +3308,47 @@ function runPaths(args) {
 }
 
 // src/commands/verify.ts
-import { readFileSync as readFileSync8, writeFileSync as writeFileSync5, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
+import { join as join15, resolve as resolve8 } from "path";
+
+// src/stage.ts
+import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync5, readFileSync as readFileSync8, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
 import { join as join14, resolve as resolve7 } from "path";
+function stageFiles(stem) {
+  return { todo: `${stem}.todo.json`, md: `${stem}.md` };
+}
+function emitWorklist(run, files, items, md) {
+  mkdirSync5(run, { recursive: true });
+  const todoPath = join14(run, files.todo);
+  writeFileSync5(todoPath, JSON.stringify(items, null, 2));
+  writeFileSync5(join14(run, files.md), md);
+  return todoPath;
+}
+function collectApplyFiles(applyPath, dirRegex) {
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve7(s.trim()));
+  const abs = resolve7(applyPath);
+  try {
+    if (statSync3(abs).isDirectory()) {
+      return readdirSync2(abs).filter((n) => dirRegex.test(n)).map((n) => join14(abs, n));
+    }
+  } catch {
+  }
+  return [abs];
+}
+function readApply(applyPath, dirRegex, parse) {
+  const out = [];
+  for (const f of collectApplyFiles(applyPath, dirRegex)) {
+    try {
+      out.push(...parse(readFileSync8(f, "utf8")));
+    } catch (e) {
+      throw new Error(`${f}: ${e.message}`);
+    }
+  }
+  return out;
+}
+function persistFindings(run, dossier, findings) {
+  const manifest = { ...dossier.manifest, counts: { findings: findings.length, bySeverity: countBySeverity(findings) } };
+  writeDossier(run, { manifest, findings, graph: dossier.graph });
+}
 
 // src/verify.ts
 function pending(findings) {
@@ -3413,7 +3452,7 @@ function parseVerdicts(raw) {
 
 // src/commands/verify.ts
 function runVerify(args) {
-  const run = resolve7(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve8(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3427,48 +3466,32 @@ function runVerify(args) {
   const shards = Number(flagStr(args, "shards") ?? "0") || 0;
   const shardIdx = Number(flagStr(args, "shard") ?? "0") || 0;
   if (shards > 1) items = shard(items, shards, shardIdx);
-  const todoName = shards > 1 ? `VERIFY.todo.${shardIdx}.json` : "VERIFY.todo.json";
-  writeFileSync5(join14(run, todoName), JSON.stringify(items, null, 2));
-  writeFileSync5(join14(run, "VERIFY.md"), renderWorklistMd(buildWorklist(dossier)));
+  const files = shards > 1 ? { todo: `VERIFY.todo.${shardIdx}.json`, md: "VERIFY.md" } : stageFiles("VERIFY");
+  const todoPath = emitWorklist(run, files, items, renderWorklistMd(buildWorklist(dossier)));
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
-  println(`ultrasec verify \u2192 ${join14(run, todoName)} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
+  println(`ultrasec verify \u2192 ${todoPath} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
   println(`  adjudicate each (\`ultrasec dossier <id> --run ${run}\`), save verdicts.json, then:`);
   println(`  ultrasec verify --apply verdicts.json --run ${run}`);
   return 0;
 }
-function collectVerdictFiles(applyPath) {
-  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve7(s.trim()));
-  const abs = resolve7(applyPath);
-  try {
-    if (statSync3(abs).isDirectory()) {
-      return readdirSync2(abs).filter((n) => /verdict.*\.json$/i.test(n)).map((n) => join14(abs, n));
-    }
-  } catch {
-  }
-  return [abs];
-}
 function applyMode(run, dossier, applyPath, args) {
-  const files = collectVerdictFiles(applyPath);
-  const verdicts = [];
-  for (const f of files) {
-    try {
-      verdicts.push(...parseVerdicts(readFileSync8(f, "utf8")));
-    } catch (e) {
-      eprintln(`ultrasec verify: cannot read verdicts at ${f}: ${e.message}`);
-      return 2;
-    }
+  let verdicts;
+  try {
+    verdicts = readApply(applyPath, /verdict.*\.json$/i, parseVerdicts);
+  } catch (e) {
+    eprintln(`ultrasec verify: cannot read verdicts at ${e.message}`);
+    return 2;
   }
   const res = applyVerdicts(dossier, verdicts);
-  const manifest = { ...dossier.manifest, counts: { findings: res.findings.length, bySeverity: countBySeverity(res.findings) } };
-  writeDossier(run, { manifest, findings: res.findings, graph: dossier.graph });
+  persistFindings(run, dossier, res.findings);
   if (flagBool(args, "json")) {
     println(JSON.stringify({ applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman }, null, 2));
     return 0;
   }
-  println(`ultrasec verify --apply \u2192 updated ${run}/findings.json`);
+  println(`ultrasec verify --apply \u2192 updated ${join15(run, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
   if (res.keptForHuman.length) {
     println(`  kept for human (high-severity, only 'unsupported' \u2014 not auto-dismissed):`);
@@ -3478,19 +3501,19 @@ function applyMode(run, dossier, applyPath, args) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve9 } from "path";
+import { resolve as resolve10 } from "path";
 
 // src/check.ts
 import { existsSync as existsSync8, readFileSync as readFileSync9 } from "fs";
-import { join as join15, resolve as resolve8, sep as sep2 } from "path";
+import { join as join16, resolve as resolve9, sep as sep2 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve8(repo);
-  const abs = resolve8(base, file);
+  const base = resolve9(repo);
+  const abs = resolve9(base, file);
   return abs === base || abs.startsWith(base + sep2);
 }
 function lineCount(repo, file) {
   if (!insideRepo(repo, file)) return null;
-  const abs = join15(repo, file);
+  const abs = join16(repo, file);
   if (!existsSync8(abs)) return null;
   try {
     return readFileSync9(abs, "utf8").split(/\r?\n/).length;
@@ -3550,7 +3573,7 @@ function check(dossier, opts = {}) {
 
 // src/commands/check.ts
 function runCheck(args) {
-  const run = resolve9(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
   const minSevRaw = flagStr(args, "min-severity");
@@ -3576,7 +3599,7 @@ function runCheck(args) {
 
 // src/commands/render.ts
 import { writeFileSync as writeFileSync6 } from "fs";
-import { join as join16, resolve as resolve10 } from "path";
+import { join as join17, resolve as resolve11 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -3862,7 +3885,7 @@ function renderHtml(d) {
 
 // src/commands/render.ts
 function runRender(args) {
-  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3876,16 +3899,16 @@ function runRender(args) {
     ["FULL.md", renderFull(dossier)],
     ["index.html", renderHtml(dossier)]
   ];
-  for (const [name, body] of outputs) writeFileSync6(join16(run, name), body);
+  for (const [name, body] of outputs) writeFileSync6(join17(run, name), body);
   println(`ultrasec render \u2192 ${run}`);
-  for (const [name] of outputs) println(`  ${join16(run, name)}`);
+  for (const [name] of outputs) println(`  ${join17(run, name)}`);
   return 0;
 }
 
 // src/commands/clean.ts
 import { execFileSync as execFileSync4 } from "child_process";
 import { existsSync as existsSync9, rmSync } from "fs";
-import { resolve as resolve11 } from "path";
+import { resolve as resolve12 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 function dockerImages() {
@@ -3908,7 +3931,7 @@ function docker(args) {
   }
 }
 function runClean(args) {
-  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve12(flagStr(args, "run") ?? ".ultrasec");
   const dry = flagBool(args, "dry-run");
   const withDocker = flagBool(args, "docker");
   const keepOutput = flagBool(args, "keep-output");

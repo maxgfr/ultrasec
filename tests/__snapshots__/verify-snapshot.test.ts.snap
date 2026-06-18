@@ -1,0 +1,184 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`verify command — byte-identical output (Phase 0 harness refactor guard) > apply folds verdicts back into findings.json under the conservative policy > findings.json 1`] = `
+"[
+  {
+    "id": "a",
+    "category": "taint",
+    "cwe": "CWE-89",
+    "title": "finding a",
+    "severity": "high",
+    "confidence": "high",
+    "message": "candidate",
+    "tool": "ultrasec",
+    "status": "confirmed",
+    "sink": {
+      "file": "src/db.js",
+      "line": 6
+    },
+    "path": [
+      {
+        "file": "src/server.js",
+        "line": 10,
+        "why": "source"
+      },
+      {
+        "file": "src/db.js",
+        "line": 6,
+        "why": "sink"
+      }
+    ],
+    "verdict": "supported",
+    "exploitPath": "POST /x"
+  },
+  {
+    "id": "b",
+    "category": "taint",
+    "cwe": "CWE-89",
+    "title": "finding b",
+    "severity": "low",
+    "confidence": "low",
+    "message": "candidate\\n\\nVerdict (unsupported): no source",
+    "tool": "ultrasec",
+    "status": "dismissed",
+    "sink": {
+      "file": "src/db.js",
+      "line": 6
+    },
+    "path": [
+      {
+        "file": "src/server.js",
+        "line": 10,
+        "why": "source"
+      },
+      {
+        "file": "src/db.js",
+        "line": 6,
+        "why": "sink"
+      }
+    ],
+    "verdict": "unsupported"
+  }
+]"
+`;
+
+exports[`verify command — byte-identical output (Phase 0 harness refactor guard) > emit --shards writes a sharded todo + the full MD > VERIFY.md-shard 1`] = `
+"# ultrasec verification worklist (3)
+
+For each item: open the cited code (\`ultrasec dossier <id>\`), decide whether
+the flow is **real and exploitable**, and set a verdict:
+\`supported\` · \`partial\` · \`unsupported\` · \`refuted\` (+ a short note, and an
+\`exploitPath\` when supported). Save as verdicts.json (array of
+{id, verdict, note, exploitPath}) and run \`ultrasec verify --apply verdicts.json\`.
+
+> Be skeptical, but do NOT dismiss a high/critical finding unless you can
+> positively **refute** it. Uncertain ⇒ leave it for a human.
+
+## a — [high] finding a
+- CWE-89 · taint
+- files: \`src/server.js:10\`, \`src/db.js:6\`
+- claim: candidate
+
+## b — [low] finding b
+- CWE-89 · taint
+- files: \`src/server.js:10\`, \`src/db.js:6\`
+- claim: candidate
+
+## c — [medium] finding c
+- CWE-89 · taint
+- files: \`src/server.js:10\`, \`src/db.js:6\`
+- claim: candidate
+
+"
+`;
+
+exports[`verify command — byte-identical output (Phase 0 harness refactor guard) > emit --shards writes a sharded todo + the full MD > VERIFY.todo.0.json 1`] = `
+"[
+  {
+    "id": "a",
+    "severity": "high",
+    "cwe": "CWE-89",
+    "title": "finding a",
+    "category": "taint",
+    "claim": "candidate",
+    "files": [
+      "src/server.js:10",
+      "src/db.js:6"
+    ],
+    "verdict": null,
+    "note": ""
+  },
+  {
+    "id": "c",
+    "severity": "medium",
+    "cwe": "CWE-89",
+    "title": "finding c",
+    "category": "taint",
+    "claim": "candidate",
+    "files": [
+      "src/server.js:10",
+      "src/db.js:6"
+    ],
+    "verdict": null,
+    "note": ""
+  }
+]"
+`;
+
+exports[`verify command — byte-identical output (Phase 0 harness refactor guard) > emit writes a stable VERIFY.todo.json + VERIFY.md > VERIFY.md 1`] = `
+"# ultrasec verification worklist (2)
+
+For each item: open the cited code (\`ultrasec dossier <id>\`), decide whether
+the flow is **real and exploitable**, and set a verdict:
+\`supported\` · \`partial\` · \`unsupported\` · \`refuted\` (+ a short note, and an
+\`exploitPath\` when supported). Save as verdicts.json (array of
+{id, verdict, note, exploitPath}) and run \`ultrasec verify --apply verdicts.json\`.
+
+> Be skeptical, but do NOT dismiss a high/critical finding unless you can
+> positively **refute** it. Uncertain ⇒ leave it for a human.
+
+## a — [high] finding a
+- CWE-89 · taint
+- files: \`src/server.js:10\`, \`src/db.js:6\`
+- claim: candidate
+
+## b — [low] finding b
+- CWE-89 · taint
+- files: \`src/server.js:10\`, \`src/db.js:6\`
+- claim: candidate
+
+"
+`;
+
+exports[`verify command — byte-identical output (Phase 0 harness refactor guard) > emit writes a stable VERIFY.todo.json + VERIFY.md > VERIFY.todo.json 1`] = `
+"[
+  {
+    "id": "a",
+    "severity": "high",
+    "cwe": "CWE-89",
+    "title": "finding a",
+    "category": "taint",
+    "claim": "candidate",
+    "files": [
+      "src/server.js:10",
+      "src/db.js:6"
+    ],
+    "verdict": null,
+    "note": ""
+  },
+  {
+    "id": "b",
+    "severity": "low",
+    "cwe": "CWE-89",
+    "title": "finding b",
+    "category": "taint",
+    "claim": "candidate",
+    "files": [
+      "src/server.js:10",
+      "src/db.js:6"
+    ],
+    "verdict": null,
+    "note": ""
+  }
+]"
+`;

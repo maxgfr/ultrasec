@@ -99,12 +99,16 @@ export interface ApplyResult {
   keptForHuman: { id: string; verdict: Verdict; severity: string }[];
 }
 
-function isHigh(sev: string): boolean {
+/** Critical/high — the tier the conservative policy refuses to auto-dismiss on
+ *  anything short of an explicit refutation. Exported so every adjudicating stage
+ *  (triage, revalidate, powered cross-check) shares the EXACT same boundary. */
+export function isHigh(sev: string): boolean {
   return sev === "critical" || sev === "high";
 }
 
-/** Map a verdict onto a finding status under the conservative policy. */
-function nextStatus(verdict: Verdict, severity: string): Status {
+/** Map a verdict onto a finding status under the conservative policy. Exported so
+ *  every stage that adjudicates findings reuses the single source of truth. */
+export function nextStatus(verdict: Verdict, severity: string): Status {
   switch (verdict) {
     case "supported":
       return "confirmed";
