@@ -3578,43 +3578,12 @@ function runDossier(args) {
   return 0;
 }
 
-// src/commands/paths.ts
-import { resolve as resolve7 } from "path";
-function runPaths(args) {
-  const run = resolve7(flagStr(args, "run") ?? ".ultrasec");
-  const kind = flagStr(args, "kind");
-  const sev = flagStr(args, "severity");
-  let d;
-  try {
-    d = loadDossier(run);
-  } catch (e) {
-    eprintln(`ultrasec paths: ${e.message}`);
-    return 2;
-  }
-  let findings = d.findings.filter((f) => f.path && f.path.length);
-  if (kind) findings = findings.filter((f) => f.sink?.kind === kind);
-  if (sev) findings = findings.filter((f) => f.severity === sev);
-  if (flagBool(args, "json")) {
-    println(JSON.stringify(findings.map((f) => ({ id: f.id, severity: f.severity, cwe: f.cwe, path: f.path })), null, 2));
-    return 0;
-  }
-  if (!findings.length) {
-    println("no candidate taint paths match.");
-    return 0;
-  }
-  for (const f of findings) {
-    println(`${f.id}  ${f.severity.padEnd(8)} ${f.cwe ?? ""}  ${f.title}`);
-    println(`        ${f.path.map((p) => `${p.file}:${p.line}`).join(" \u2192 ")}`);
-  }
-  return 0;
-}
-
-// src/commands/verify.ts
-import { join as join17, resolve as resolve9 } from "path";
+// src/commands/triage.ts
+import { resolve as resolve8 } from "path";
 
 // src/stage.ts
 import { mkdirSync as mkdirSync6, writeFileSync as writeFileSync6, readFileSync as readFileSync9, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
-import { join as join16, resolve as resolve8 } from "path";
+import { join as join16, resolve as resolve7 } from "path";
 function stageFiles(stem) {
   return { todo: `${stem}.todo.json`, md: `${stem}.md` };
 }
@@ -3626,8 +3595,8 @@ function emitWorklist(run, files, items, md) {
   return todoPath;
 }
 function collectApplyFiles(applyPath, dirRegex) {
-  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve8(s.trim()));
-  const abs = resolve8(applyPath);
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve7(s.trim()));
+  const abs = resolve7(applyPath);
   try {
     if (statSync3(abs).isDirectory()) {
       return readdirSync2(abs).filter((n) => dirRegex.test(n)).map((n) => join16(abs, n));
@@ -3759,9 +3728,156 @@ function parseVerdicts(raw) {
   return arr.filter((v) => v && typeof v.id === "string" && VERDICTS.includes(v.verdict)).map((v) => ({ id: v.id, verdict: v.verdict, note: v.note, exploitPath: v.exploitPath }));
 }
 
-// src/commands/verify.ts
-function runVerify(args) {
+// src/triage.ts
+var TRIAGE_VERDICTS = ["noise", "keep"];
+function citedAt(f) {
+  if (f.sink) return `${f.sink.file}:${f.sink.line}`;
+  const last = f.path?.[f.path.length - 1];
+  if (last) return `${last.file}:${last.line}`;
+  if (f.source) return `${f.source.file}:${f.source.line}`;
+  return "\u2014";
+}
+function buildTriageWorklist(dossier) {
+  return dossier.findings.filter((f) => f.status === "open").slice().sort((a, b) => byStr(a.id, b.id)).map((f) => ({ id: f.id, severity: f.severity, category: f.category, title: f.title, at: citedAt(f), verdict: null }));
+}
+function renderTriageMd(items, context) {
+  const L = [];
+  L.push(`# ultrasec triage worklist (${items.length})`);
+  L.push("");
+  L.push(`A fast, code-free first pass over OPEN candidates. For each, set a \`verdict\`:`);
+  L.push(`\`noise\` (obvious false positive, not worth a full read) or \`keep\` (worth verifying).`);
+  L.push(`Save as TRIAGE.json (array of {id, verdict}) and run \`ultrasec triage --apply TRIAGE.json\`.`);
+  L.push("");
+  L.push(`> Conservative: \`noise\` dismisses only **low/medium/info**. On a **high/critical**`);
+  L.push(`> finding a \`noise\` verdict is **ignored** \u2014 it stays open for full \`verify\`. Anything`);
+  L.push(`> you're unsure about \u2192 \`keep\`.`);
+  L.push("");
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\`._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
+  for (const it of items) {
+    L.push(`- \`${it.id}\` \u2014 [${it.severity}] ${it.category}: ${it.title} \xB7 at \`${it.at}\``);
+  }
+  L.push("");
+  return L.join("\n") + "\n";
+}
+function applyTriage(dossier, inputs) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const v of inputs) byId.set(v.id, v);
+  let applied = 0, dismissed = 0;
+  const kept = [];
+  const findings = dossier.findings.map((f) => {
+    const v = byId.get(f.id);
+    if (!v || f.status !== "open") return f;
+    applied++;
+    if (v.verdict === "noise") {
+      if (isHigh(f.severity)) {
+        kept.push({ id: f.id, severity: f.severity });
+        return f;
+      }
+      dismissed++;
+      return { ...f, status: "dismissed", message: `${f.message}
+
+Triage: dismissed as noise.` };
+    }
+    return f;
+  });
+  return { findings, applied, dismissed, kept };
+}
+function parseTriage(raw) {
+  const data = JSON.parse(raw);
+  const arr = Array.isArray(data) ? data : Array.isArray(data?.triage) ? data.triage : [];
+  return arr.filter((v) => v && typeof v.id === "string" && TRIAGE_VERDICTS.includes(v.verdict)).map((v) => ({ id: v.id, verdict: v.verdict }));
+}
+
+// src/commands/triage.ts
+function runTriage(args) {
+  const run = resolve8(flagStr(args, "run") ?? ".ultrasec");
+  let dossier;
+  try {
+    dossier = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec triage: ${e.message}`);
+    return 2;
+  }
+  const applyPath = flagStr(args, "apply");
+  if (applyPath) {
+    let inputs;
+    try {
+      inputs = readApply(applyPath, /triage.*\.json$/i, parseTriage);
+    } catch (e) {
+      eprintln(`ultrasec triage: cannot read triage verdicts at ${e.message}`);
+      return 2;
+    }
+    const res = applyTriage(dossier, inputs);
+    persistFindings(run, dossier, res.findings);
+    if (flagBool(args, "json")) {
+      println(JSON.stringify({ applied: res.applied, dismissed: res.dismissed, kept: res.kept }, null, 2));
+      return 0;
+    }
+    println(`ultrasec triage --apply \u2192 updated ${run}/findings.json`);
+    println(`  applied ${res.applied} verdict(s): ${res.dismissed} dismissed as noise`);
+    if (res.kept.length) {
+      println(`  kept open (high/critical 'noise' ignored \u2014 must go through verify):`);
+      for (const k of res.kept) println(`    - ${k.id} [${k.severity}]`);
+    }
+    return 0;
+  }
+  const items = buildTriageWorklist(dossier);
+  const todoPath = emitWorklist(run, stageFiles("TRIAGE"), items, renderTriageMd(items, loadContextDoc(run)));
+  if (flagBool(args, "json")) {
+    println(JSON.stringify(items, null, 2));
+    return 0;
+  }
+  println(`ultrasec triage \u2192 ${todoPath} (${items.length} open candidate${items.length === 1 ? "" : "s"})`);
+  if (!items.length) {
+    println(`  no open candidates to triage.`);
+  } else {
+    println(`  mark each noise/keep, save TRIAGE.json, then:`);
+    println(`  ultrasec triage --apply TRIAGE.json --run ${run}`);
+  }
+  return 0;
+}
+
+// src/commands/paths.ts
+import { resolve as resolve9 } from "path";
+function runPaths(args) {
   const run = resolve9(flagStr(args, "run") ?? ".ultrasec");
+  const kind = flagStr(args, "kind");
+  const sev = flagStr(args, "severity");
+  let d;
+  try {
+    d = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec paths: ${e.message}`);
+    return 2;
+  }
+  let findings = d.findings.filter((f) => f.path && f.path.length);
+  if (kind) findings = findings.filter((f) => f.sink?.kind === kind);
+  if (sev) findings = findings.filter((f) => f.severity === sev);
+  if (flagBool(args, "json")) {
+    println(JSON.stringify(findings.map((f) => ({ id: f.id, severity: f.severity, cwe: f.cwe, path: f.path })), null, 2));
+    return 0;
+  }
+  if (!findings.length) {
+    println("no candidate taint paths match.");
+    return 0;
+  }
+  for (const f of findings) {
+    println(`${f.id}  ${f.severity.padEnd(8)} ${f.cwe ?? ""}  ${f.title}`);
+    println(`        ${f.path.map((p) => `${p.file}:${p.line}`).join(" \u2192 ")}`);
+  }
+  return 0;
+}
+
+// src/commands/verify.ts
+import { join as join17, resolve as resolve10 } from "path";
+function runVerify(args) {
+  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3810,7 +3926,7 @@ function applyMode(run, dossier, applyPath, args) {
 }
 
 // src/commands/revalidate.ts
-import { resolve as resolve10 } from "path";
+import { resolve as resolve11 } from "path";
 
 // src/revalidate.ts
 var REVALIDATION_VERDICTS = ["still-valid", "fixed", "false-positive", "uncertain"];
@@ -3955,7 +4071,7 @@ function revalFactsFromWorklist(items) {
 
 // src/commands/revalidate.ts
 function runRevalidate(args) {
-  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3963,7 +4079,7 @@ function runRevalidate(args) {
     eprintln(`ultrasec revalidate: ${e.message}`);
     return 2;
   }
-  const repo = resolve10(flagStr(args, "repo") ?? dossier.manifest.repo);
+  const repo = resolve11(flagStr(args, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
     let inputs;
@@ -4002,11 +4118,11 @@ function runRevalidate(args) {
 }
 
 // src/commands/narrative.ts
-import { resolve as resolve11 } from "path";
+import { resolve as resolve12 } from "path";
 
 // src/narrative.ts
 var AI_DISCLAIMER = "AI-authored \u2014 verify against the cited findings before acting.";
-function citedAt(f) {
+function citedAt2(f) {
   if (f.path?.length) return f.path.map((p) => `${p.file}:${p.line}`).join(" \u2192 ");
   if (f.sink) return `${f.sink.file}:${f.sink.line}`;
   if (f.source) return `${f.source.file}:${f.source.line}`;
@@ -4020,7 +4136,7 @@ function buildNarrativeWorklist(dossier) {
     title: f.title,
     category: f.category,
     ...f.cwe ? { cwe: f.cwe } : {},
-    at: citedAt(f),
+    at: citedAt2(f),
     status: f.status,
     ...f.provenance?.owner ? { owner: f.provenance.owner } : {}
   }));
@@ -4140,7 +4256,7 @@ function rootCausesMd(n) {
 
 // src/commands/narrative.ts
 function runNarrative(args) {
-  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve12(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -4165,14 +4281,14 @@ function runNarrative(args) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve13 } from "path";
+import { resolve as resolve14 } from "path";
 
 // src/check.ts
 import { existsSync as existsSync9, readFileSync as readFileSync10 } from "fs";
-import { join as join18, resolve as resolve12, sep as sep2 } from "path";
+import { join as join18, resolve as resolve13, sep as sep2 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve12(repo);
-  const abs = resolve12(base, file);
+  const base = resolve13(repo);
+  const abs = resolve13(base, file);
   return abs === base || abs.startsWith(base + sep2);
 }
 function lineCount(repo, file) {
@@ -4237,7 +4353,7 @@ function check(dossier, opts = {}) {
 
 // src/commands/check.ts
 function runCheck(args) {
-  const run = resolve13(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve14(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
   const minSevRaw = flagStr(args, "min-severity");
@@ -4263,7 +4379,7 @@ function runCheck(args) {
 
 // src/commands/render.ts
 import { readFileSync as readFileSync11, writeFileSync as writeFileSync7 } from "fs";
-import { join as join19, resolve as resolve14 } from "path";
+import { join as join19, resolve as resolve15 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -4590,7 +4706,7 @@ function renderHtml(d, narrative) {
 
 // src/commands/render.ts
 function runRender(args) {
-  const run = resolve14(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve15(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -4604,7 +4720,7 @@ function runRender(args) {
   if (narrativePath) {
     let parsed;
     try {
-      parsed = parseNarrative(readFileSync11(resolve14(narrativePath), "utf8"));
+      parsed = parseNarrative(readFileSync11(resolve15(narrativePath), "utf8"));
     } catch (e) {
       eprintln(`ultrasec render: cannot read narrative at ${narrativePath}: ${e.message}`);
       return 2;
@@ -4629,7 +4745,7 @@ function runRender(args) {
 // src/commands/clean.ts
 import { execFileSync as execFileSync4 } from "child_process";
 import { existsSync as existsSync10, rmSync } from "fs";
-import { resolve as resolve15 } from "path";
+import { resolve as resolve16 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 function dockerImages() {
@@ -4652,7 +4768,7 @@ function docker(args) {
   }
 }
 function runClean(args) {
-  const run = resolve15(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve16(flagStr(args, "run") ?? ".ultrasec");
   const dry = flagBool(args, "dry-run");
   const withDocker = flagBool(args, "docker");
   const keepOutput = flagBool(args, "keep-output");
@@ -4728,6 +4844,9 @@ COMMANDS
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source\u2192sink chains.
   dossier    Print the grounding packet for one finding (real code + neighbours).
+  triage     Fast, code-free first pass over OPEN candidates: emit / apply
+             noise|keep. 'noise' dismisses only low/med/info; on high/critical
+             it is ignored (kept open for verify). Flags: --run \xB7 --apply.
   verify     Emit / apply the adversarial finding\u2194evidence worklist.
   revalidate Git-history false-positive cut: emit compact git facts (does the
              cited line still exist? when did it last change?) for confirmed /
@@ -4774,6 +4893,8 @@ async function dispatch(cmd, args) {
       return runImport(args);
     case "dossier":
       return runDossier(args);
+    case "triage":
+      return runTriage(args);
     case "paths":
       return runPaths(args);
     case "verify":

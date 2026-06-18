@@ -7,6 +7,7 @@ import { runScan } from "./commands/scan.js";
 import { runContext } from "./commands/context.js";
 import { runImport } from "./commands/import.js";
 import { runDossier } from "./commands/dossier.js";
+import { runTriage } from "./commands/triage.js";
 import { runPaths } from "./commands/paths.js";
 import { runVerify } from "./commands/verify.js";
 import { runRevalidate } from "./commands/revalidate.js";
@@ -49,6 +50,9 @@ COMMANDS
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source→sink chains.
   dossier    Print the grounding packet for one finding (real code + neighbours).
+  triage     Fast, code-free first pass over OPEN candidates: emit / apply
+             noise|keep. 'noise' dismisses only low/med/info; on high/critical
+             it is ignored (kept open for verify). Flags: --run · --apply.
   verify     Emit / apply the adversarial finding↔evidence worklist.
   revalidate Git-history false-positive cut: emit compact git facts (does the
              cited line still exist? when did it last change?) for confirmed /
@@ -96,6 +100,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runImport(args);
     case "dossier":
       return runDossier(args);
+    case "triage":
+      return runTriage(args);
     case "paths":
       return runPaths(args);
     case "verify":
