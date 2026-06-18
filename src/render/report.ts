@@ -1,7 +1,8 @@
 import type { Dossier } from "../store.js";
-import { SEVERITIES, type Finding, type Severity } from "../types.js";
+import { SEVERITIES, type Finding, type Narrative, type Remediation, type Severity } from "../types.js";
 import { pathMermaid } from "./mermaid.js";
 import { byStr } from "../util.js";
+import { executiveSummaryMd, suggestedFixMd, attackChainsMd, rootCausesMd, remediationMap } from "../narrative.js";
 
 // The tiered Markdown report: SUMMARY (TL;DR), REPORT (confirmed + needs-human,
 // actionable), FULL (everything incl. dismissed, with the reasoning trail).
@@ -73,11 +74,11 @@ function statusTag(f: Finding): string {
   return `status **${f.status}**${v} · confidence ${f.confidence}`;
 }
 
-export function renderSummary(d: Dossier): string {
+export function renderSummary(d: Dossier, narrative?: Narrative): string {
   const fs = sortFindings(d.findings);
   const confirmed = fs.filter((f) => f.status === "confirmed");
   const needs = fs.filter((f) => f.status === "needs-human");
-  const L: string[] = [`# Security audit — summary`, "", header(d), ""];
+  const L: string[] = [`# Security audit — summary`, "", header(d), "", ...executiveSummaryMd(narrative)];
   if (!confirmed.length && !needs.length) {
     L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) — see REPORT.md.` : `No findings.`);
     return L.join("\n") + "\n";
@@ -98,7 +99,7 @@ export function renderSummary(d: Dossier): string {
   return L.join("\n") + "\n";
 }
 
-function renderFinding(f: Finding, opts: { mermaid?: boolean } = {}): string {
+function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Remediation } = {}): string {
   const L: string[] = [];
   L.push(`### ${BADGE[f.severity]} ${f.title}`);
   L.push("");
@@ -122,6 +123,9 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean } = {}): string {
     L.push("");
     L.push(`**Exploit path:** ${f.exploitPath}`);
   }
+  // AI-authored suggested fix (presence-gated): only when a remediation for this
+  // finding was provided via --narrative; absent ⇒ no change to today's output.
+  L.push(...suggestedFixMd(opts.remediation));
   if (opts.mermaid) {
     const mm = pathMermaid(f);
     if (mm) {
@@ -138,9 +142,10 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean } = {}): string {
   return L.join("\n");
 }
 
-export function renderReport(d: Dossier): string {
+export function renderReport(d: Dossier, narrative?: Narrative): string {
   const fs = sortFindings(d.findings).filter((f) => f.status === "confirmed" || f.status === "needs-human" || f.status === "open");
-  const L: string[] = [`# Security audit — report`, "", header(d), ""];
+  const rem = remediationMap(narrative);
+  const L: string[] = [`# Security audit — report`, "", header(d), "", ...executiveSummaryMd(narrative)];
   if (!fs.length) {
     L.push(`No actionable findings. (See FULL.md for dismissed candidates.)`);
     return L.join("\n") + "\n";
@@ -148,17 +153,19 @@ export function renderReport(d: Dossier): string {
   L.push(`Confirmed and to-review findings, most severe first. Dismissed candidates are in FULL.md.`);
   L.push("");
   for (const f of fs) {
-    L.push(renderFinding(f, { mermaid: true }));
+    L.push(renderFinding(f, { mermaid: true, remediation: rem.get(f.id) }));
     L.push("");
     L.push("---");
     L.push("");
   }
+  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative));
   return L.join("\n") + "\n";
 }
 
-export function renderFull(d: Dossier): string {
+export function renderFull(d: Dossier, narrative?: Narrative): string {
   const fs = sortFindings(d.findings);
-  const L: string[] = [`# Security audit — full`, "", header(d), ""];
+  const rem = remediationMap(narrative);
+  const L: string[] = [`# Security audit — full`, "", header(d), "", ...executiveSummaryMd(narrative)];
   const groups: [string, Finding[]][] = [
     ["Confirmed", fs.filter((f) => f.status === "confirmed")],
     ["Needs human review", fs.filter((f) => f.status === "needs-human")],
@@ -170,10 +177,11 @@ export function renderFull(d: Dossier): string {
     L.push(`## ${name} (${list.length})`);
     L.push("");
     for (const f of list) {
-      L.push(renderFinding(f, { mermaid: name !== "Dismissed" }));
+      L.push(renderFinding(f, { mermaid: name !== "Dismissed", remediation: rem.get(f.id) }));
       L.push("");
     }
   }
+  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative));
   L.push(`---`);
   L.push(`Engine: ultrasec ${d.manifest.version}. ${d.manifest.generatedNote}`);
   return L.join("\n") + "\n";

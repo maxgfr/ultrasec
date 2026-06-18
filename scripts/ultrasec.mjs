@@ -4001,15 +4001,178 @@ function runRevalidate(args) {
   return 0;
 }
 
+// src/commands/narrative.ts
+import { resolve as resolve11 } from "path";
+
+// src/narrative.ts
+var AI_DISCLAIMER = "AI-authored \u2014 verify against the cited findings before acting.";
+function citedAt(f) {
+  if (f.path?.length) return f.path.map((p) => `${p.file}:${p.line}`).join(" \u2192 ");
+  if (f.sink) return `${f.sink.file}:${f.sink.line}`;
+  if (f.source) return `${f.source.file}:${f.source.line}`;
+  return "\u2014";
+}
+function buildNarrativeWorklist(dossier) {
+  const reportable = dossier.findings.filter((f) => f.status === "confirmed" || f.status === "needs-human").slice().sort((a, b) => byStr(a.id, b.id));
+  const findings = reportable.map((f) => ({
+    id: f.id,
+    severity: f.severity,
+    title: f.title,
+    category: f.category,
+    ...f.cwe ? { cwe: f.cwe } : {},
+    at: citedAt(f),
+    status: f.status,
+    ...f.provenance?.owner ? { owner: f.provenance.owner } : {}
+  }));
+  const scaffold = {
+    executiveSummary: "",
+    remediations: reportable.filter((f) => f.status === "confirmed").map((f) => ({ id: f.id, fix: "", ...f.provenance?.owner ? { owner: f.provenance.owner } : {} })),
+    attackChains: [],
+    rootCauses: []
+  };
+  return { findings, scaffold };
+}
+function renderNarrativeWorklistMd(wl, context) {
+  const L = [];
+  L.push(`# ultrasec report-narrative worklist (${wl.findings.length})`);
+  L.push("");
+  L.push(`Author **NARRATIVE.json** (a Narrative object), then fold it into the report with`);
+  L.push(`\`ultrasec render --narrative NARRATIVE.json --run <run>\`. Fields (all optional, all additive):`);
+  L.push(`- \`executiveSummary\`: a few sentences for non-experts atop the report.`);
+  L.push(`- \`remediations\`: \`{id, fix, patch?, owner?}\` \u2014 a concrete fix per **confirmed** finding.`);
+  L.push(`- \`attackChains\`: \`{title, findingIds[], narrative}\` \u2014 how findings combine into an exploit.`);
+  L.push(`- \`rootCauses\`: \`{cause, findingIds[], note}\` \u2014 group findings by shared underlying cause.`);
+  L.push("");
+  L.push(`> Grounding is strict: any section citing an **unknown or non-confirmed** finding id is`);
+  L.push(`> dropped on merge. Narrative prose **never** changes a finding's status, severity, or set.`);
+  L.push("");
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\`._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
+  L.push(`## Reportable findings (cite these ids)`);
+  L.push("");
+  for (const f of wl.findings) {
+    L.push(`- \`${f.id}\` \u2014 [${f.severity}] ${f.title} (${f.cwe ?? f.category}) \xB7 status ${f.status} \xB7 at ${f.at}${f.owner ? ` \xB7 owner ${f.owner}` : ""}`);
+  }
+  L.push("");
+  L.push(`## Scaffold (starting point for NARRATIVE.json)`);
+  L.push("```json");
+  L.push(JSON.stringify(wl.scaffold, null, 2));
+  L.push("```");
+  return L.join("\n") + "\n";
+}
+function parseNarrative(raw) {
+  const d = JSON.parse(raw);
+  const n = {};
+  if (typeof d?.executiveSummary === "string") n.executiveSummary = d.executiveSummary;
+  if (Array.isArray(d?.remediations)) {
+    const rem = d.remediations.filter((r) => r && typeof r.id === "string" && typeof r.fix === "string").map((r) => ({ id: r.id, fix: r.fix, ...typeof r.patch === "string" ? { patch: r.patch } : {}, ...typeof r.owner === "string" ? { owner: r.owner } : {} }));
+    if (rem.length) n.remediations = rem;
+  }
+  if (Array.isArray(d?.attackChains)) {
+    const ch = d.attackChains.filter((c) => c && typeof c.title === "string" && Array.isArray(c.findingIds) && typeof c.narrative === "string").map((c) => ({ title: c.title, findingIds: c.findingIds.filter((x) => typeof x === "string"), narrative: c.narrative }));
+    if (ch.length) n.attackChains = ch;
+  }
+  if (Array.isArray(d?.rootCauses)) {
+    const rc = d.rootCauses.filter((g) => g && typeof g.cause === "string" && Array.isArray(g.findingIds) && typeof g.note === "string").map((g) => ({ cause: g.cause, findingIds: g.findingIds.filter((x) => typeof x === "string"), note: g.note }));
+    if (rc.length) n.rootCauses = rc;
+  }
+  return n;
+}
+function mergeNarrative(n, dossier) {
+  const confirmed = new Set(dossier.findings.filter((f) => f.status === "confirmed").map((f) => f.id));
+  const out = {};
+  if (n.executiveSummary && n.executiveSummary.trim()) out.executiveSummary = n.executiveSummary.trim();
+  const rem = (n.remediations ?? []).filter((r) => confirmed.has(r.id));
+  if (rem.length) out.remediations = rem;
+  const chains = (n.attackChains ?? []).filter((c) => c.findingIds.length > 0 && c.findingIds.every((id) => confirmed.has(id)));
+  if (chains.length) out.attackChains = chains;
+  const rc = (n.rootCauses ?? []).filter((g) => g.findingIds.length > 0 && g.findingIds.every((id) => confirmed.has(id)));
+  if (rc.length) out.rootCauses = rc;
+  return out;
+}
+function hasNarrativeContent(n) {
+  return !!n && !!(n.executiveSummary || n.remediations?.length || n.attackChains?.length || n.rootCauses?.length);
+}
+function remediationMap(n) {
+  const m = /* @__PURE__ */ new Map();
+  for (const r of n?.remediations ?? []) m.set(r.id, r);
+  return m;
+}
+function executiveSummaryMd(n) {
+  if (!n?.executiveSummary) return [];
+  return [`## Executive summary (AI-authored)`, `_${AI_DISCLAIMER}_`, "", n.executiveSummary, ""];
+}
+function suggestedFixMd(r) {
+  if (!r) return [];
+  const L = ["", `**Suggested fix (AI):** ${r.fix}${r.owner ? ` \xB7 owner ${r.owner}` : ""}`];
+  if (r.patch) L.push("", "```diff", r.patch, "```");
+  return L;
+}
+function attackChainsMd(n) {
+  if (!n?.attackChains?.length) return [];
+  const L = [`## Attack chains (AI-authored)`, `_${AI_DISCLAIMER}_`, ""];
+  for (const c of n.attackChains) {
+    L.push(`### ${c.title}`);
+    L.push(`- findings: ${c.findingIds.map((id) => `\`${id}\``).join(" \u2192 ")}`);
+    L.push("");
+    L.push(c.narrative);
+    L.push("");
+  }
+  return L;
+}
+function rootCausesMd(n) {
+  if (!n?.rootCauses?.length) return [];
+  const L = [`## Root-cause groups (AI-authored)`, `_${AI_DISCLAIMER}_`, ""];
+  for (const g of n.rootCauses) {
+    L.push(`### ${g.cause}`);
+    L.push(`- findings: ${g.findingIds.map((id) => `\`${id}\``).join(", ")}`);
+    L.push("");
+    L.push(g.note);
+    L.push("");
+  }
+  return L;
+}
+
+// src/commands/narrative.ts
+function runNarrative(args) {
+  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
+  let dossier;
+  try {
+    dossier = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec narrative: ${e.message}`);
+    return 2;
+  }
+  const wl = buildNarrativeWorklist(dossier);
+  const todoPath = emitWorklist(run, stageFiles("NARRATIVE"), wl, renderNarrativeWorklistMd(wl, loadContextDoc(run)));
+  if (flagBool(args, "json")) {
+    println(JSON.stringify(wl, null, 2));
+    return 0;
+  }
+  println(`ultrasec narrative \u2192 ${todoPath} (${wl.findings.length} reportable finding${wl.findings.length === 1 ? "" : "s"})`);
+  if (!wl.findings.length) {
+    println(`  nothing confirmed/needs-human yet \u2014 run \`verify --apply\` first.`);
+  } else {
+    println(`  author NARRATIVE.json (see NARRATIVE.md), then:`);
+    println(`  ultrasec render --narrative NARRATIVE.json --run ${run}`);
+  }
+  return 0;
+}
+
 // src/commands/check.ts
-import { resolve as resolve12 } from "path";
+import { resolve as resolve13 } from "path";
 
 // src/check.ts
 import { existsSync as existsSync9, readFileSync as readFileSync10 } from "fs";
-import { join as join18, resolve as resolve11, sep as sep2 } from "path";
+import { join as join18, resolve as resolve12, sep as sep2 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve11(repo);
-  const abs = resolve11(base, file);
+  const base = resolve12(repo);
+  const abs = resolve12(base, file);
   return abs === base || abs.startsWith(base + sep2);
 }
 function lineCount(repo, file) {
@@ -4074,7 +4237,7 @@ function check(dossier, opts = {}) {
 
 // src/commands/check.ts
 function runCheck(args) {
-  const run = resolve12(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve13(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
   const minSevRaw = flagStr(args, "min-severity");
@@ -4099,8 +4262,8 @@ function runCheck(args) {
 }
 
 // src/commands/render.ts
-import { writeFileSync as writeFileSync7 } from "fs";
-import { join as join19, resolve as resolve13 } from "path";
+import { readFileSync as readFileSync11, writeFileSync as writeFileSync7 } from "fs";
+import { join as join19, resolve as resolve14 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -4176,11 +4339,11 @@ function statusTag(f) {
   const v = f.verdict ? ` \xB7 verdict ${f.verdict}` : "";
   return `status **${f.status}**${v} \xB7 confidence ${f.confidence}`;
 }
-function renderSummary(d) {
+function renderSummary(d, narrative) {
   const fs = sortFindings(d.findings);
   const confirmed = fs.filter((f) => f.status === "confirmed");
   const needs = fs.filter((f) => f.status === "needs-human");
-  const L = [`# Security audit \u2014 summary`, "", header(d), ""];
+  const L = [`# Security audit \u2014 summary`, "", header(d), "", ...executiveSummaryMd(narrative)];
   if (!confirmed.length && !needs.length) {
     L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) \u2014 see REPORT.md.` : `No findings.`);
     return L.join("\n") + "\n";
@@ -4224,6 +4387,7 @@ function renderFinding(f, opts = {}) {
     L.push("");
     L.push(`**Exploit path:** ${f.exploitPath}`);
   }
+  L.push(...suggestedFixMd(opts.remediation));
   if (opts.mermaid) {
     const mm = pathMermaid(f);
     if (mm) {
@@ -4239,9 +4403,10 @@ function renderFinding(f, opts = {}) {
   }
   return L.join("\n");
 }
-function renderReport(d) {
+function renderReport(d, narrative) {
   const fs = sortFindings(d.findings).filter((f) => f.status === "confirmed" || f.status === "needs-human" || f.status === "open");
-  const L = [`# Security audit \u2014 report`, "", header(d), ""];
+  const rem = remediationMap(narrative);
+  const L = [`# Security audit \u2014 report`, "", header(d), "", ...executiveSummaryMd(narrative)];
   if (!fs.length) {
     L.push(`No actionable findings. (See FULL.md for dismissed candidates.)`);
     return L.join("\n") + "\n";
@@ -4249,16 +4414,18 @@ function renderReport(d) {
   L.push(`Confirmed and to-review findings, most severe first. Dismissed candidates are in FULL.md.`);
   L.push("");
   for (const f of fs) {
-    L.push(renderFinding(f, { mermaid: true }));
+    L.push(renderFinding(f, { mermaid: true, remediation: rem.get(f.id) }));
     L.push("");
     L.push("---");
     L.push("");
   }
+  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative));
   return L.join("\n") + "\n";
 }
-function renderFull(d) {
+function renderFull(d, narrative) {
   const fs = sortFindings(d.findings);
-  const L = [`# Security audit \u2014 full`, "", header(d), ""];
+  const rem = remediationMap(narrative);
+  const L = [`# Security audit \u2014 full`, "", header(d), "", ...executiveSummaryMd(narrative)];
   const groups = [
     ["Confirmed", fs.filter((f) => f.status === "confirmed")],
     ["Needs human review", fs.filter((f) => f.status === "needs-human")],
@@ -4270,10 +4437,11 @@ function renderFull(d) {
     L.push(`## ${name} (${list.length})`);
     L.push("");
     for (const f of list) {
-      L.push(renderFinding(f, { mermaid: name !== "Dismissed" }));
+      L.push(renderFinding(f, { mermaid: name !== "Dismissed", remediation: rem.get(f.id) }));
       L.push("");
     }
   }
+  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative));
   L.push(`---`);
   L.push(`Engine: ultrasec ${d.manifest.version}. ${d.manifest.generatedNote}`);
   return L.join("\n") + "\n";
@@ -4318,7 +4486,13 @@ function sourcesHtml(f) {
   if (s.length > 1) return `\xB7 agreed by ${esc2(s.join(", "))}`;
   return f.tool !== "ultrasec" ? `\xB7 via ${esc2(f.tool)}` : "";
 }
-function findingHtml(f) {
+function fixHtml(r) {
+  if (!r) return "";
+  const patch = r.patch ? `<pre class="ai-patch">${esc2(r.patch)}</pre>` : "";
+  return `
+    <div class="ai-fix"><strong>Suggested fix (AI):</strong> ${esc2(r.fix)}${r.owner ? ` \xB7 owner ${esc2(r.owner)}` : ""}${patch}</div>`;
+}
+function findingHtml(f, rem) {
   const refs = (f.references ?? []).slice(0, 5).map((r) => `<a href="${esc2(r)}" rel="noreferrer noopener">${esc2(r.replace(/^https?:\/\//, ""))}</a>`).join(" \xB7 ");
   return `
   <section class="finding" id="${esc2(f.id)}">
@@ -4334,15 +4508,45 @@ function findingHtml(f) {
     ${riskHtml(f)}
     ${pathHtml(f)}
     <p class="msg">${esc2(f.message)}</p>
-    ${f.exploitPath ? `<p class="exploit"><strong>Exploit path:</strong> ${esc2(f.exploitPath)}</p>` : ""}
+    ${f.exploitPath ? `<p class="exploit"><strong>Exploit path:</strong> ${esc2(f.exploitPath)}</p>` : ""}${fixHtml(rem)}
     ${refs ? `<p class="refs">${refs}</p>` : ""}
   </section>`;
 }
-function renderHtml(d) {
+function aiSectionHtml(title, items) {
+  return `
+  <section class="ai-narrative"><h2>${esc2(title)} <span class="ai-tag">AI</span></h2><p class="ai-note">${esc2(AI_DISCLAIMER)}</p>${items}</section>`;
+}
+function execSummaryHtml(n) {
+  if (!n?.executiveSummary) return "";
+  return aiSectionHtml("Executive summary", `<p>${esc2(n.executiveSummary)}</p>`);
+}
+function chainsHtml(n) {
+  if (!n?.attackChains?.length) return "";
+  const items = n.attackChains.map((c) => `<div class="ai-block"><h3>${esc2(c.title)}</h3><div class="meta">${c.findingIds.map((id) => `<code>${esc2(id)}</code>`).join(" \u2192 ")}</div><p>${esc2(c.narrative)}</p></div>`).join("");
+  return aiSectionHtml("Attack chains", items);
+}
+function rootCausesHtml(n) {
+  if (!n?.rootCauses?.length) return "";
+  const items = n.rootCauses.map((g) => `<div class="ai-block"><h3>${esc2(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<code>${esc2(id)}</code>`).join(", ")}</div><p>${esc2(g.note)}</p></div>`).join("");
+  return aiSectionHtml("Root-cause groups", items);
+}
+function aiCss(narrative) {
+  if (!hasNarrativeContent(narrative)) return "";
+  return `
+  .ai-narrative { border:1px solid #6d28d9; background:#faf5ff; border-radius:10px; padding:10px 16px; margin:14px 0; }
+  @media (prefers-color-scheme: dark){ .ai-narrative{ background:#1e1b2e; border-color:#7c3aed; } .ai-fix{ background:#1e1b2e; } }
+  .ai-tag { background:#6d28d9; color:#fff; font-size:11px; padding:1px 6px; border-radius:8px; vertical-align:middle; }
+  .ai-note { color:#6b7280; font-size:12px; font-style:italic; margin:2px 0 8px; }
+  .ai-fix { border-left:3px solid #6d28d9; background:#faf5ff; padding:6px 10px; border-radius:4px; margin:8px 0; }
+  .ai-patch { background:#0b0f17; color:#e5e7eb; padding:8px; border-radius:6px; overflow:auto; font-size:12px; }
+  .ai-block { margin:8px 0; }`;
+}
+function renderHtml(d, narrative) {
   const c = d.manifest.counts.bySeverity;
   const fs = d.findings.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank3(a.severity) - sevRank3(b.severity) || byStr(a.id, b.id));
   const shown = fs.filter((f) => f.status !== "dismissed");
   const dismissed = fs.filter((f) => f.status === "dismissed");
+  const rem = remediationMap(narrative);
   const counts = SEVERITIES.map((s) => `${badge(`${s} ${c[s]}`, SEV_COLOR[s])}`).join(" ");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -4372,21 +4576,21 @@ function renderHtml(d) {
   .refs { font-size:12px; color:#6b7280; word-break:break-all; }
   .risk { margin:6px 0 4px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .kv { font-size:12px; font-weight:600; color:#6b7280; }
-  details { margin-top:18px; }
+  details { margin-top:18px; }${aiCss(narrative)}
 </style></head>
 <body>
   <h1>Security audit</h1>
   <div class="sub">repo <code>${esc2(d.manifest.repo)}</code> \xB7 ultrasec ${esc2(d.manifest.version)} \xB7 tools: ${esc2(d.manifest.toolsRun.join(", ") || "none")}</div>
-  <div>${counts}</div>
-  ${shown.length ? shown.map(findingHtml).join("\n") : "<p>No actionable findings.</p>"}
-  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map(findingHtml).join("\n")}</details>` : ""}
+  <div>${counts}</div>${execSummaryHtml(narrative)}
+  ${shown.length ? shown.map((f) => findingHtml(f, rem.get(f.id))).join("\n") : "<p>No actionable findings.</p>"}
+  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map((f) => findingHtml(f, rem.get(f.id))).join("\n")}</details>` : ""}${chainsHtml(narrative)}${rootCausesHtml(narrative)}
 </body></html>
 `;
 }
 
 // src/commands/render.ts
 function runRender(args) {
-  const run = resolve13(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve14(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -4394,22 +4598,38 @@ function runRender(args) {
     eprintln(`ultrasec render: ${e.message}`);
     return 2;
   }
+  let narrative;
+  let narrativeNote = "";
+  const narrativePath = flagStr(args, "narrative");
+  if (narrativePath) {
+    let parsed;
+    try {
+      parsed = parseNarrative(readFileSync11(resolve14(narrativePath), "utf8"));
+    } catch (e) {
+      eprintln(`ultrasec render: cannot read narrative at ${narrativePath}: ${e.message}`);
+      return 2;
+    }
+    const merged = mergeNarrative(parsed, dossier);
+    narrative = merged;
+    narrativeNote = hasNarrativeContent(merged) ? `  + AI narrative folded in (${merged.remediations?.length ?? 0} fix(es), ${merged.attackChains?.length ?? 0} chain(s), ${merged.rootCauses?.length ?? 0} root-cause group(s)${merged.executiveSummary ? ", exec summary" : ""})` : `  \u26A0\uFE0F  narrative had no sections grounded on confirmed findings \u2014 report rendered without it`;
+  }
   const outputs = [
-    ["SUMMARY.md", renderSummary(dossier)],
-    ["REPORT.md", renderReport(dossier)],
-    ["FULL.md", renderFull(dossier)],
-    ["index.html", renderHtml(dossier)]
+    ["SUMMARY.md", renderSummary(dossier, narrative)],
+    ["REPORT.md", renderReport(dossier, narrative)],
+    ["FULL.md", renderFull(dossier, narrative)],
+    ["index.html", renderHtml(dossier, narrative)]
   ];
   for (const [name, body] of outputs) writeFileSync7(join19(run, name), body);
   println(`ultrasec render \u2192 ${run}`);
   for (const [name] of outputs) println(`  ${join19(run, name)}`);
+  if (narrativeNote) println(narrativeNote);
   return 0;
 }
 
 // src/commands/clean.ts
 import { execFileSync as execFileSync4 } from "child_process";
 import { existsSync as existsSync10, rmSync } from "fs";
-import { resolve as resolve14 } from "path";
+import { resolve as resolve15 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 function dockerImages() {
@@ -4432,7 +4652,7 @@ function docker(args) {
   }
 }
 function runClean(args) {
-  const run = resolve14(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve15(flagStr(args, "run") ?? ".ultrasec");
   const dry = flagBool(args, "dry-run");
   const withDocker = flagBool(args, "docker");
   const keepOutput = flagBool(args, "keep-output");
@@ -4514,7 +4734,11 @@ COMMANDS
              needs-human findings; --apply folds in still-valid/fixed/
              false-positive/uncertain (fixed \u2192 dismissed + fixed-in commit;
              high-sev false-positive \u2192 needs-human). Flags: --run \xB7 --repo \xB7 --apply.
+  narrative  Emit the report-narrative worklist (reportable findings + a Narrative
+             scaffold); you author NARRATIVE.json, folded in via 'render --narrative'.
   render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
+             --narrative <file> folds in AI-authored sections (exec summary, fixes,
+             attack chains, root causes), clearly marked + grounding-checked.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
              --semantic also folds in the verify verdicts.
   clean      Remove the audit dossier and, with --docker, the scanner images +
@@ -4556,6 +4780,8 @@ async function dispatch(cmd, args) {
       return runVerify(args);
     case "revalidate":
       return runRevalidate(args);
+    case "narrative":
+      return runNarrative(args);
     case "check":
       return runCheck(args);
     case "render":

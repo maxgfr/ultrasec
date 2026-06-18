@@ -149,6 +149,34 @@ export interface ContextScaffold {
   trustBoundaries: string[];
 }
 
+// ── AI-authored report narrative (Phase 3) ───────────────────────────────────
+// Additive, clearly-marked report sections the agent authors and `render
+// --narrative` folds in. NEVER changes a finding's status/severity/set — it's
+// prose layered on top of the deterministic report; sections citing unknown or
+// non-confirmed finding ids are dropped on merge (grounding stays strict).
+export interface Remediation {
+  id: string;
+  fix: string;
+  patch?: string;
+  owner?: string;
+}
+export interface AttackChain {
+  title: string;
+  findingIds: string[];
+  narrative: string;
+}
+export interface RootCauseGroup {
+  cause: string;
+  findingIds: string[];
+  note: string;
+}
+export interface Narrative {
+  executiveSummary?: string;
+  remediations?: Remediation[];
+  attackChains?: AttackChain[];
+  rootCauses?: RootCauseGroup[];
+}
+
 // ── Audit dossier (on-disk run folder) ───────────────────────────────────────
 export interface Manifest {
   version: string;

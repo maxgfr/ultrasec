@@ -10,6 +10,7 @@ import { runDossier } from "./commands/dossier.js";
 import { runPaths } from "./commands/paths.js";
 import { runVerify } from "./commands/verify.js";
 import { runRevalidate } from "./commands/revalidate.js";
+import { runNarrative } from "./commands/narrative.js";
 import { runCheck } from "./commands/check.js";
 import { runRender } from "./commands/render.js";
 import { runClean } from "./commands/clean.js";
@@ -54,7 +55,11 @@ COMMANDS
              needs-human findings; --apply folds in still-valid/fixed/
              false-positive/uncertain (fixed → dismissed + fixed-in commit;
              high-sev false-positive → needs-human). Flags: --run · --repo · --apply.
+  narrative  Emit the report-narrative worklist (reportable findings + a Narrative
+             scaffold); you author NARRATIVE.json, folded in via 'render --narrative'.
   render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
+             --narrative <file> folds in AI-authored sections (exec summary, fixes,
+             attack chains, root causes), clearly marked + grounding-checked.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
              --semantic also folds in the verify verdicts.
   clean      Remove the audit dossier and, with --docker, the scanner images +
@@ -97,6 +102,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runVerify(args);
     case "revalidate":
       return runRevalidate(args);
+    case "narrative":
+      return runNarrative(args);
     case "check":
       return runCheck(args);
     case "render":
