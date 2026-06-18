@@ -4,6 +4,7 @@ import { runTools } from "./commands/tools.js";
 import { runGraph } from "./commands/graph.js";
 import { runMap } from "./commands/map.js";
 import { runScan } from "./commands/scan.js";
+import { runImport } from "./commands/import.js";
 import { runDossier } from "./commands/dossier.js";
 import { runPaths } from "./commands/paths.js";
 import { runVerify } from "./commands/verify.js";
@@ -29,9 +30,14 @@ COMMANDS
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
              Flags: --tools auto|none|a,b · --docker · --no-enrich/--offline ·
+             --sinks (orphan-sink recall) · --blame (git-blame/CODEOWNERS provenance) ·
              --scope/--include/--exclude/--max-files/--gitignore (focus) ·
              --budget quick|standard|thorough · --max-candidates · --max-depth ·
              --diff <ref>/--since <commit> · --merge · --resume (incremental).
+  import     Ingest an upstream AI scanner's exported findings (deepsec) into the
+             dossier: map → correlate → risk-rank → fold in (preserving verdicts).
+             ultrasec never runs it — data ingest only. Flags: --run · --format
+             deepsec-json · --no-enrich/--offline · --blame.
   tools      List known external scanners, which are installed, and how to get them.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source→sink chains.
@@ -68,6 +74,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runMap(args);
     case "scan":
       return runScan(args);
+    case "import":
+      return runImport(args);
     case "dossier":
       return runDossier(args);
     case "paths":
