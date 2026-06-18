@@ -4,7 +4,9 @@ import { flagStr, flagBool, listFlag, numFlag, own, println, eprintln, byStr, ty
 import { scanRepo, scanRepoCached } from "../scan.js";
 import { buildGraph, reverseDependents } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
+import { enumerateSinkCandidates } from "../sinks.js";
 import { changedFiles } from "../git.js";
+import { addProvenance } from "../provenance.js";
 import { loadScanCache, saveScanCache } from "../cache.js";
 import { orchestrate } from "../tools/run.js";
 import { enrichFindings } from "../tools/scoring.js";
@@ -95,6 +97,14 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates });
   const taintFindings = taint.findings;
 
+  // Orphan-sink recall (opt-in `--sinks`): dangerous sinks the source-gated taint
+  // BFS can't connect to a source still warrant a look. Emitted as low-confidence
+  // `sast` candidates, de-duped against the taint findings, capped + reported.
+  const sinksOn = flagBool(args, "sinks");
+  const sinkCand = sinksOn
+    ? enumerateSinkCandidates(scan, taintFindings, { maxCandidates })
+    : { findings: [] as Finding[], truncated: 0, total: 0 };
+
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
   // pass `--tools auto` to force them.
@@ -106,19 +116,29 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const useDocker = flagBool(args, "docker");
   const tool = skipTools ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
 
-  // Merge taint candidates with tool findings (ids are disjoint by construction).
-  const merged = [...taintFindings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
+  // Merge taint candidates, orphan-sink candidates, and tool findings (ids are
+  // disjoint by construction).
+  const merged = [...taintFindings, ...sinkCand.findings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
   const enrich = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
-  const { findings, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
+  const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
+
+  // Provenance (opt-in `--blame`/`--provenance`): deterministic git-blame author/
+  // date + CODEOWNERS owner per finding — a triage signal, never a suppression
+  // rule. Offline-tolerant: no git / no CODEOWNERS ⇒ findings pass through as-is.
+  const blameOn = flagBool(args, "blame") || flagBool(args, "provenance");
+  const findings = blameOn ? addProvenance(enriched, repo, { blame: true }) : enriched;
 
   const languages = [...new Set(scan.files.map((f) => f.lang))].sort();
   // Never hide a capped run as a full one: record candidate + file-walk truncation.
+  // Candidate truncation folds the taint and orphan-sink caps together.
+  const truncatedCount = taint.truncated + sinkCand.truncated;
+  const totalCandidates = taint.total + sinkCand.total;
   const truncation =
-    taint.truncated > 0 || scan.truncated
-      ? { candidates: taint.truncated, total: taint.total, ...(scan.truncated ? { files: true as const } : {}) }
+    truncatedCount > 0 || scan.truncated
+      ? { candidates: truncatedCount, total: totalCandidates, ...(scan.truncated ? { files: true as const } : {}) }
       : undefined;
   const recordedScopes = [...(scope ?? []), ...(diffRef ? [`diff:${diffRef}`] : [])].sort(byStr);
   const manifest: Manifest = {
@@ -155,7 +175,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     const kev = final.findings.filter((f) => f.kev).length;
     println(
       JSON.stringify(
-        { out, counts: fm.counts, languages: fm.languages, files: scan.files.length, toolsRun: fm.toolsRun, kev, risk: riskNote, truncation, scopes: fm.scopes, diff: diffNote, merged: mergedNote.trim() || undefined },
+        { out, counts: fm.counts, languages: fm.languages, files: scan.files.length, toolsRun: fm.toolsRun, kev, risk: riskNote, truncation, scopes: fm.scopes, diff: diffNote, sinks: sinksOn ? sinkCand.findings.length : undefined, merged: mergedNote.trim() || undefined },
         null,
         2,
       ),
@@ -171,10 +191,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   } else if (!skipTools) {
     println(`  external tools run: ${tool.toolsRun.join(", ") || "none"}  (\`ultrasec tools\` to see/install more)`);
   }
-  println(`  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint + ${tool.findings.length} tool this pass`);
+  println(`  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""} + ${tool.findings.length} tool this pass`);
   println(`  ${riskNote}`);
   if (truncation?.candidates) {
-    println(`  ⚠️  showing top ${maxCandidates} of ${truncation.total} taint candidates — ${truncation.candidates} not shown. Raise --max-candidates or narrow --scope.`);
+    println(`  ⚠️  showing top ${maxCandidates} of ${truncation.total} candidates — ${truncation.candidates} not shown. Raise --max-candidates or narrow --scope.`);
   }
   if (truncation?.files) {
     println(`  ⚠️  file walk hit --max-files (${maxFiles}) — some files were NOT scanned. Raise --max-files or narrow --scope.`);

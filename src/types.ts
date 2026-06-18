@@ -4,7 +4,9 @@
 export const VERSION = "1.4.0";
 // 2: graph.json gained `callersBySymbol` (reverse call-index); manifest gained
 // optional `truncation`/`scopes` (large-repo scaling). Older dossiers omit them.
-export const SCHEMA_VERSION = 2;
+// 3: findings gained optional `provenance` (git-blame author/commit/date +
+// CODEOWNERS owner), populated only under `scan --blame`. Older dossiers omit it.
+export const SCHEMA_VERSION = 3;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -59,6 +61,25 @@ export interface PathStep extends CodeLoc {
   why: string;
 }
 
+/**
+ * Deterministic committer/ownership provenance for a finding's primary line —
+ * a triage signal ("introduced last week by X, owned by team Y"), populated only
+ * under `scan --blame`. Every field is derived from git history / CODEOWNERS, so
+ * the dossier stays reproducible (the date is the commit's AUTHOR-date, never
+ * wall-clock "now"). Evidence only — it NEVER gates a verdict (ultrasec must not
+ * cull findings by age the way a pure-LLM scanner might).
+ */
+export interface Provenance {
+  /** Last author to touch the line (git blame). */
+  author?: string;
+  /** Short commit sha of that change. */
+  commit?: string;
+  /** Author-date, ISO yyyy-mm-dd — deterministic from history. */
+  date?: string;
+  /** CODEOWNERS owner(s) for the file, joined when several. */
+  owner?: string;
+}
+
 export interface Finding {
   /** Stable id, content-derived (so re-scans and merges are idempotent). */
   id: string;
@@ -109,6 +130,8 @@ export interface Finding {
   verdict?: Verdict;
   /** Concrete trigger path / proof-of-exploit sketch, once reasoned. */
   exploitPath?: string;
+  /** Deterministic git-blame / CODEOWNERS provenance (opt-in `--blame`). Evidence only. */
+  provenance?: Provenance;
   status: Status;
 }
 

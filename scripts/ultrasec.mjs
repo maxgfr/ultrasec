@@ -2,8 +2,9 @@
 
 // src/types.ts
 var VERSION = "1.4.0";
-var SCHEMA_VERSION = 2;
+var SCHEMA_VERSION = 3;
 var SEVERITIES = ["critical", "high", "medium", "low", "info"];
+var CONFIDENCES = ["high", "medium", "low"];
 var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 
 // src/util.ts
@@ -1463,8 +1464,8 @@ wrote ${join3(resolve2(out), "MAP.md")} + attack-surface.json`);
 }
 
 // src/commands/scan.ts
-import { resolve as resolve3, join as join9, relative as relative2 } from "path";
-import { existsSync as existsSync5 } from "fs";
+import { resolve as resolve3, join as join11, relative as relative2 } from "path";
+import { existsSync as existsSync6 } from "fs";
 
 // src/taint.ts
 import { join as join4 } from "path";
@@ -1590,6 +1591,59 @@ function enumerateTaint(scan, graph, opts = {}) {
   return { findings: kept, truncated: total - kept.length, total };
 }
 
+// src/sinks.ts
+import { join as join5 } from "path";
+var DEFAULT_MAX_CANDIDATES2 = 1e3;
+function severityRank2(s) {
+  return SEVERITIES.indexOf(s);
+}
+function enclosingSymbol3(file, line) {
+  let best;
+  for (const s of file.symbols) if (s.line <= line && (!best || s.line > best.line)) best = s;
+  return best?.name;
+}
+function enumerateSinkCandidates(scan, covered, opts = {}) {
+  const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES2;
+  const taken = /* @__PURE__ */ new Set();
+  for (const f of covered) if (f.sink) taken.add(`${f.sink.file}:${f.sink.line}:${f.sink.kind ?? ""}`);
+  const lineCache = /* @__PURE__ */ new Map();
+  const lines = (rel) => {
+    let l = lineCache.get(rel);
+    if (!l) lineCache.set(rel, l = readText(join5(scan.repo, rel)).split(/\r?\n/));
+    return l;
+  };
+  const findings = [];
+  for (const file of scan.files) {
+    const lang = langForFile(file.rel);
+    if (!lang) continue;
+    for (const sink of findSinks(lang, file.calls)) {
+      const key = `${file.rel}:${sink.line}:${sink.kind}`;
+      if (taken.has(key)) continue;
+      taken.add(key);
+      const sinkLine = lines(file.rel)[sink.line - 1] ?? "";
+      const sanitizers = findSanitizers(lang, sinkLine, sink.kind);
+      const note = sanitizers.length ? ` A possible sanitizer is present on the line (${sanitizers.join("; ")}) \u2014 confirm it neutralizes any untrusted input.` : "";
+      findings.push({
+        id: shortHash(`sink:${file.rel}:${sink.line}:${sink.kind}`),
+        category: "sast",
+        cwe: sink.cwe,
+        title: `${sink.title}: ${sink.callee}() sink (no source path found)`,
+        severity: sink.severity,
+        confidence: "low",
+        sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbol3(file, sink.line) },
+        message: `Dangerous ${sink.kind} sink ${sink.callee}() at ${file.rel}:${sink.line} that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look \u2014 the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). ${sink.note}${note} Confirm whether attacker-controlled data can reach it before trusting it.`,
+        tool: "ultrasec",
+        references: [cweUrl(sink.cwe)],
+        status: "open"
+      });
+    }
+  }
+  findings.sort((a, b) => severityRank2(a.severity) - severityRank2(b.severity) || byStr(a.id, b.id));
+  const total = findings.length;
+  const kept = total > maxCandidates ? findings.slice(0, maxCandidates) : findings;
+  return { findings: kept, truncated: total - kept.length, total };
+}
+
 // src/git.ts
 import { execFileSync as execFileSync2 } from "child_process";
 function git(repo, args) {
@@ -1623,17 +1677,110 @@ function changedFiles(repo, ref) {
   }
   return [...out].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
 }
+function parseBlamePorcelain(raw) {
+  if (!raw) return null;
+  const lines = raw.split(/\r?\n/);
+  const m = /^([0-9a-f]{40})\b/.exec((lines[0] ?? "").trim());
+  if (!m) return null;
+  const info = { commit: m[1].slice(0, 10) };
+  for (const line of lines) {
+    if (line.startsWith("author ")) info.author = line.slice(7).trim();
+    else if (line.startsWith("author-time ")) {
+      const t = Number(line.slice(12).trim());
+      if (Number.isFinite(t)) info.date = new Date(t * 1e3).toISOString().slice(0, 10);
+    }
+  }
+  return info;
+}
+function blameLine(repo, file, line) {
+  if (!Number.isInteger(line) || line < 1) return null;
+  const out = git(repo, ["blame", "-L", `${line},${line}`, "--porcelain", "--", file]);
+  return out === null ? null : parseBlamePorcelain(out);
+}
+
+// src/provenance.ts
+import { existsSync as existsSync2, readFileSync as readFileSync3 } from "fs";
+import { join as join6 } from "path";
+function compileCodeowner(pattern) {
+  const dirOnly = pattern.endsWith("/") && pattern.length > 1;
+  let core = dirOnly ? pattern.slice(0, -1) : pattern;
+  const leadingSlash = core.startsWith("/");
+  if (leadingSlash) core = core.slice(1);
+  const anchored = leadingSlash || core.includes("/");
+  const glob = (anchored ? core : "**/" + core) + (dirOnly ? "/" : "");
+  return globToRe(glob);
+}
+function parseCodeowners(content) {
+  const rules = [];
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.replace(/#.*$/, "").trim();
+    if (!line) continue;
+    const parts = line.split(/\s+/);
+    const pattern = parts[0];
+    const owners = parts.slice(1).filter(Boolean);
+    if (!pattern || !owners.length) continue;
+    rules.push({ re: compileCodeowner(pattern), owners });
+  }
+  return rules;
+}
+function ownerFor(rules, file) {
+  let owners;
+  for (const r of rules) if (r.re.test(file)) owners = r.owners;
+  return owners;
+}
+var CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
+function loadCodeowners(repo) {
+  for (const p of CODEOWNERS_PATHS) {
+    const abs = join6(repo, p);
+    if (existsSync2(abs)) {
+      try {
+        return parseCodeowners(readFileSync3(abs, "utf8"));
+      } catch {
+        return [];
+      }
+    }
+  }
+  return [];
+}
+function primaryLoc(f) {
+  if (f.sink) return f.sink;
+  if (f.source) return f.source;
+  if (f.path && f.path.length) return f.path[f.path.length - 1];
+  return void 0;
+}
+function addProvenance(findings, repo, opts = {}) {
+  const owners = loadCodeowners(repo);
+  const blameCache = /* @__PURE__ */ new Map();
+  return findings.map((f) => {
+    const loc = primaryLoc(f);
+    if (!loc) return f;
+    const prov = {};
+    const own2 = ownerFor(owners, loc.file);
+    if (own2 && own2.length) prov.owner = own2.join(", ");
+    if (opts.blame) {
+      const key = `${loc.file}:${loc.line}`;
+      let b = blameCache.get(key);
+      if (b === void 0) blameCache.set(key, b = blameLine(repo, loc.file, loc.line));
+      if (b) {
+        if (b.author) prov.author = b.author;
+        if (b.commit) prov.commit = b.commit;
+        if (b.date) prov.date = b.date;
+      }
+    }
+    return Object.keys(prov).length ? { ...f, provenance: prov } : f;
+  });
+}
 
 // src/cache.ts
-import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync3 } from "fs";
-import { join as join5 } from "path";
+import { mkdirSync as mkdirSync2, writeFileSync as writeFileSync2, readFileSync as readFileSync4 } from "fs";
+import { join as join7 } from "path";
 var CACHE_VERSION = 1;
 function cachePath(run) {
-  return join5(run, "cache", "scan-cache.json");
+  return join7(run, "cache", "scan-cache.json");
 }
 function loadScanCache(run) {
   try {
-    const data = JSON.parse(readFileSync3(cachePath(run), "utf8"));
+    const data = JSON.parse(readFileSync4(cachePath(run), "utf8"));
     if (!data || data.cacheVersion !== CACHE_VERSION || typeof data.entries !== "object") return /* @__PURE__ */ new Map();
     return new Map(Object.entries(data.entries));
   } catch {
@@ -1641,7 +1788,7 @@ function loadScanCache(run) {
   }
 }
 function saveScanCache(run, cache) {
-  const dir = join5(run, "cache");
+  const dir = join7(run, "cache");
   mkdirSync2(dir, { recursive: true });
   const entries = {};
   for (const [k, v] of [...cache.entries()].sort((a, b) => byStr(a[0], b[0]))) entries[k] = v;
@@ -1662,6 +1809,10 @@ var SEVERITY_ALIASES = Object.assign(/* @__PURE__ */ Object.create(null), {
   low: "low",
   minor: "low",
   note: "low",
+  // deepsec's non-security bug tiers — alias explicitly so they don't silently
+  // collapse to the fallback (HIGH_BUG = a high-priority bug; BUG = an ordinary one).
+  high_bug: "high",
+  bug: "low",
   info: "info",
   informational: "info",
   unknown: "info",
@@ -1940,10 +2091,10 @@ function orchestrate(adapters, repo, opts = {}) {
 }
 
 // src/tools/scoring.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, statSync as statSync2, writeFileSync as writeFileSync3 } from "fs";
+import { existsSync as existsSync3, mkdirSync as mkdirSync3, readFileSync as readFileSync5, statSync as statSync2, writeFileSync as writeFileSync3 } from "fs";
 import { gunzipSync } from "zlib";
 import { homedir } from "os";
-import { join as join6 } from "path";
+import { join as join8 } from "path";
 var SEVERITY_WEIGHT = {
   critical: 1,
   high: 0.8,
@@ -2005,11 +2156,11 @@ var KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vu
 var TTL_MS = 24 * 60 * 60 * 1e3;
 var FETCH_TIMEOUT_MS = 2e4;
 function cacheDir() {
-  return process.env.ULTRASEC_CACHE_DIR || join6(homedir(), ".cache", "ultrasec");
+  return process.env.ULTRASEC_CACHE_DIR || join8(homedir(), ".cache", "ultrasec");
 }
 function fresh(path) {
   try {
-    return existsSync2(path) && Date.now() - statSync2(path).mtimeMs < TTL_MS;
+    return existsSync3(path) && Date.now() - statSync2(path).mtimeMs < TTL_MS;
   } catch {
     return false;
   }
@@ -2027,10 +2178,10 @@ async function fetchBuf(url) {
 }
 async function loadCached(url, file, gz) {
   const dir = cacheDir();
-  const path = join6(dir, file);
+  const path = join8(dir, file);
   if (fresh(path)) {
     try {
-      return readFileSync4(path, "utf8");
+      return readFileSync5(path, "utf8");
     } catch {
     }
   }
@@ -2045,7 +2196,7 @@ async function loadCached(url, file, gz) {
     return text;
   } catch {
     try {
-      if (existsSync2(path)) return readFileSync4(path, "utf8");
+      if (existsSync3(path)) return readFileSync5(path, "utf8");
     } catch {
     }
     return "";
@@ -2143,8 +2294,8 @@ var trivy = {
 };
 
 // src/tools/gitleaks.ts
-import { existsSync as existsSync3 } from "fs";
-import { join as join7 } from "path";
+import { existsSync as existsSync4 } from "fs";
+import { join as join9 } from "path";
 var gitleaks = {
   name: "gitleaks",
   category: "secret",
@@ -2152,8 +2303,8 @@ var gitleaks = {
   // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);
   // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
   argv: (target) => {
-    const onHost = existsSync3(target);
-    const hasGit = onHost && existsSync3(join7(target, ".git"));
+    const onHost = existsSync4(target);
+    const hasGit = onHost && existsSync4(join9(target, ".git"));
     const base = ["detect", "--source", target, "--report-format", "json", "--report-path", "-", "--no-banner", "--redact", "--exit-code", "0"];
     return hasGit ? base : [...base, "--no-git"];
   },
@@ -2632,8 +2783,8 @@ var ADAPTERS = [
 ];
 
 // src/store.ts
-import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync4, readFileSync as readFileSync5, existsSync as existsSync4 } from "fs";
-import { join as join8 } from "path";
+import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync4, readFileSync as readFileSync6, existsSync as existsSync5 } from "fs";
+import { join as join10 } from "path";
 function emptySeverityCounts() {
   return { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
 }
@@ -2644,10 +2795,10 @@ function countBySeverity(findings) {
 }
 function writeDossier(outDir, d) {
   mkdirSync4(outDir, { recursive: true });
-  writeFileSync4(join8(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
-  writeFileSync4(join8(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
-  writeFileSync4(join8(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
-  writeFileSync4(join8(outDir, "DOSSIER.md"), renderDossierMd(d));
+  writeFileSync4(join10(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
+  writeFileSync4(join10(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
+  writeFileSync4(join10(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
+  writeFileSync4(join10(outDir, "DOSSIER.md"), renderDossierMd(d));
 }
 function mergeDossier(prev, next) {
   const byId = /* @__PURE__ */ new Map();
@@ -2689,14 +2840,21 @@ function mergeDossier(prev, next) {
   return { manifest, findings, graph };
 }
 function loadDossier(outDir) {
-  const read = (name) => JSON.parse(readFileSync5(join8(outDir, name), "utf8"));
-  if (!existsSync4(join8(outDir, "findings.json"))) {
+  const read = (name) => JSON.parse(readFileSync6(join10(outDir, name), "utf8"));
+  if (!existsSync5(join10(outDir, "findings.json"))) {
     throw new Error(`no audit dossier at ${outDir} (run \`ultrasec scan --out ${outDir}\` first)`);
   }
   return { manifest: read("manifest.json"), findings: read("findings.json"), graph: read("graph.json") };
 }
 function severityBadge(s) {
   return { critical: "\u{1F7E5} CRIT", high: "\u{1F7E7} HIGH", medium: "\u{1F7E8} MED", low: "\u{1F7E9} LOW", info: "\u2B1C INFO" }[s];
+}
+function provenanceLine(f) {
+  const p = f.provenance;
+  if (!p) return "";
+  const who = [p.author, p.date].filter(Boolean).join(" \xB7 ");
+  const bits = [who, p.commit ? `@${p.commit}` : "", p.owner ? `owner ${p.owner}` : ""].filter(Boolean);
+  return bits.length ? `provenance: ${bits.join(" \xB7 ")}` : "";
 }
 function renderDossierMd(d) {
   const { manifest: m, findings } = d;
@@ -2716,7 +2874,7 @@ function renderDossierMd(d) {
   L.push(`> **needs-human** \u2014 never silently dropped.`);
   L.push("");
   if (m.truncation?.candidates) {
-    L.push(`> \u26A0\uFE0F **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** taint candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
+    L.push(`> \u26A0\uFE0F **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
     L.push("");
   }
   if (m.truncation?.files) {
@@ -2750,6 +2908,8 @@ function renderDossierMd(d) {
     } else if (f.sink) {
       L.push(`- at: \`${f.sink.file}:${f.sink.line}\``);
     }
+    const prov = provenanceLine(f);
+    if (prov) L.push(`- ${prov}`);
     L.push(`- ${f.message}`);
     L.push("");
   }
@@ -2789,7 +2949,7 @@ async function runScan(args) {
     const relOut = relative2(repo, out);
     const changed = relOut && relOut !== "." && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
-    if (existsSync5(join9(out, "graph.json"))) {
+    if (existsSync6(join11(out, "graph.json"))) {
       try {
         targets = reverseDependents(loadDossier(out).graph, changed, REVDEP_DEPTH);
         diffNote = `--diff ${diffRef}: ${changed.length} changed \u2192 ${targets.length} file(s) incl. reverse-deps`;
@@ -2812,6 +2972,8 @@ async function runScan(args) {
   const graph = buildGraph(scan);
   const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates });
   const taintFindings = taint.findings;
+  const sinksOn = flagBool(args, "sinks");
+  const sinkCand = sinksOn ? enumerateSinkCandidates(scan, taintFindings, { maxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const scopedScan = !!(effectiveScope && effectiveScope.length || include?.length || exclude?.length || diffRef);
   const toolsFlag = flagStr(args, "tools");
   const toolsAutoSkipped = scopedScan && toolsFlag === void 0 && !flagBool(args, "no-tools");
@@ -2819,11 +2981,15 @@ async function runScan(args) {
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
   const useDocker = flagBool(args, "docker");
   const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
-  const merged = [...taintFindings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
+  const merged = [...taintFindings, ...sinkCand.findings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
   const enrich = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
-  const { findings, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
+  const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
+  const blameOn = flagBool(args, "blame") || flagBool(args, "provenance");
+  const findings = blameOn ? addProvenance(enriched, repo, { blame: true }) : enriched;
   const languages = [...new Set(scan.files.map((f) => f.lang))].sort();
-  const truncation = taint.truncated > 0 || scan.truncated ? { candidates: taint.truncated, total: taint.total, ...scan.truncated ? { files: true } : {} } : void 0;
+  const truncatedCount = taint.truncated + sinkCand.truncated;
+  const totalCandidates = taint.total + sinkCand.total;
+  const truncation = truncatedCount > 0 || scan.truncated ? { candidates: truncatedCount, total: totalCandidates, ...scan.truncated ? { files: true } : {} } : void 0;
   const recordedScopes = [...scope ?? [], ...diffRef ? [`diff:${diffRef}`] : []].sort(byStr);
   const manifest = {
     version: VERSION,
@@ -2839,7 +3005,7 @@ async function runScan(args) {
   const nextDossier = { manifest, findings, graph };
   let final = nextDossier;
   let mergedNote = "";
-  if (flagBool(args, "merge") && existsSync5(join9(out, "findings.json"))) {
+  if (flagBool(args, "merge") && existsSync6(join11(out, "findings.json"))) {
     try {
       const prev = loadDossier(out);
       final = mergeDossier(prev, nextDossier);
@@ -2856,7 +3022,7 @@ async function runScan(args) {
     const kev = final.findings.filter((f) => f.kev).length;
     println(
       JSON.stringify(
-        { out, counts: fm.counts, languages: fm.languages, files: scan.files.length, toolsRun: fm.toolsRun, kev, risk: riskNote, truncation, scopes: fm.scopes, diff: diffNote, merged: mergedNote.trim() || void 0 },
+        { out, counts: fm.counts, languages: fm.languages, files: scan.files.length, toolsRun: fm.toolsRun, kev, risk: riskNote, truncation, scopes: fm.scopes, diff: diffNote, sinks: sinksOn ? sinkCand.findings.length : void 0, merged: mergedNote.trim() || void 0 },
         null,
         2
       )
@@ -2871,10 +3037,10 @@ async function runScan(args) {
   } else if (!skipTools) {
     println(`  external tools run: ${tool.toolsRun.join(", ") || "none"}  (\`ultrasec tools\` to see/install more)`);
   }
-  println(`  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} \xB7 high ${fc.high} \xB7 med ${fc.medium} \xB7 low ${fc.low})  \xB7  ${taintFindings.length} taint + ${tool.findings.length} tool this pass`);
+  println(`  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} \xB7 high ${fc.high} \xB7 med ${fc.medium} \xB7 low ${fc.low})  \xB7  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""} + ${tool.findings.length} tool this pass`);
   println(`  ${riskNote}`);
   if (truncation?.candidates) {
-    println(`  \u26A0\uFE0F  showing top ${maxCandidates} of ${truncation.total} taint candidates \u2014 ${truncation.candidates} not shown. Raise --max-candidates or narrow --scope.`);
+    println(`  \u26A0\uFE0F  showing top ${maxCandidates} of ${truncation.total} candidates \u2014 ${truncation.candidates} not shown. Raise --max-candidates or narrow --scope.`);
   }
   if (truncation?.files) {
     println(`  \u26A0\uFE0F  file walk hit --max-files (${maxFiles}) \u2014 some files were NOT scanned. Raise --max-files or narrow --scope.`);
@@ -2887,13 +3053,143 @@ async function runScan(args) {
   return 0;
 }
 
+// src/commands/import.ts
+import { resolve as resolve4, join as join12 } from "path";
+import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
+
+// src/tools/deepsec.ts
+function slugToCategory(slug) {
+  const s = slug.toLowerCase();
+  if (/(auth|idor|access[-_]?control|privilege|authz|ssrf)/.test(s)) {
+    return /ssrf/.test(s) ? "sast" : "authz";
+  }
+  if (/(crypto|hash|cipher|weak[-_]?(rng|random)|tls|ssl)/.test(s)) return "crypto";
+  if (/(secret|hardcoded|credential|api[-_]?key|token|password)/.test(s)) return "secret";
+  if (/(dockerfile|terraform|gh[-_]?actions|github[-_]?actions|iac|misconfig|config)/.test(s)) return "config";
+  if (/(dependency|outdated|vuln[-_]?dep|cve|\bsca\b)/.test(s)) return "dep";
+  return "sast";
+}
+function mapConfidence(raw) {
+  const c = String(raw ?? "").trim().toLowerCase();
+  return CONFIDENCES.includes(c) ? c : "medium";
+}
+function importDeepsec(raw) {
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  const out = [];
+  for (const entry of parsed) {
+    if (!entry || typeof entry !== "object") continue;
+    const md = entry.metadata;
+    if (!md || typeof md !== "object" || !md.filePath) continue;
+    const slug = String(md.vulnSlug ?? "finding");
+    const line = Array.isArray(md.lineNumbers) && md.lineNumbers.length && typeof md.lineNumbers[0] === "number" ? md.lineNumbers[0] : void 0;
+    const reval = md.revalidation;
+    const revalNote = reval && reval.reasoning ? ` \u2014 deepsec revalidation (${reval.verdict ?? "?"}): ${reval.reasoning}` : "";
+    out.push(
+      makeToolFinding({
+        tool: "deepsec",
+        category: slugToCategory(slug),
+        // ident carries file:line so the content-hash id is stable across re-imports.
+        ident: `${slug}:${md.filePath}:${line ?? ""}`,
+        title: entry.title || slug,
+        severity: normalizeSeverity(md.severity ?? entry.severity),
+        message: `${entry.title || slug}${revalNote}`,
+        file: md.filePath,
+        line,
+        cwe: firstCwe([entry.description ?? "", ...entry.labels ?? []].join(" ")),
+        confidence: mapConfidence(md.confidence),
+        references: md.githubUrl ? [md.githubUrl] : void 0
+      })
+    );
+  }
+  return out;
+}
+
+// src/commands/import.ts
+async function runImport(args) {
+  const file = args._[1] ?? flagStr(args, "file");
+  if (!file) {
+    eprintln("ultrasec import: need a findings file \u2014 `ultrasec import <findings.json> --run <dir>`.");
+    return 2;
+  }
+  const run = resolve4(flagStr(args, "run") ?? ".ultrasec");
+  const format = flagStr(args, "format") ?? "deepsec-json";
+  if (format !== "deepsec-json") {
+    eprintln(`ultrasec import: unknown --format '${format}' (supported: deepsec-json).`);
+    return 2;
+  }
+  let raw;
+  try {
+    raw = readFileSync7(resolve4(file), "utf8");
+  } catch (e) {
+    eprintln(`ultrasec import: cannot read ${file} (${e instanceof Error ? e.message : String(e)}).`);
+    return 2;
+  }
+  const imported = importDeepsec(raw);
+  if (!imported.length) {
+    eprintln(`ultrasec import: no findings parsed from ${file} (empty or unrecognized deepsec export).`);
+    return 1;
+  }
+  let prev;
+  if (existsSync7(join12(run, "findings.json"))) {
+    try {
+      prev = loadDossier(run);
+    } catch (e) {
+      eprintln(`ultrasec import: existing dossier at ${run} is unreadable (${e instanceof Error ? e.message : String(e)}).`);
+      return 2;
+    }
+  }
+  const prevFindings = prev?.findings ?? [];
+  const correlated = correlate([...prevFindings, ...imported]);
+  const repo = prev?.manifest.repo ?? resolve4(flagStr(args, "repo") ?? ".");
+  const enrichOn = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
+  const { findings: enriched, note: riskNote } = await enrichFindings(correlated, { enabled: enrichOn });
+  const blameOn = flagBool(args, "blame") || flagBool(args, "provenance");
+  const withProv = blameOn ? addProvenance(enriched, repo, { blame: true }) : enriched;
+  const prevById = new Map(prevFindings.map((f) => [f.id, f]));
+  const findings = withProv.map((f) => {
+    const old = prevById.get(f.id);
+    return old && old.status !== "open" ? { ...f, status: old.status, verdict: old.verdict, exploitPath: old.exploitPath, confidence: old.confidence, message: old.message } : f;
+  }).sort((a, b) => byStr(a.id, b.id));
+  const graph = prev?.graph ?? buildGraph({ repo, files: [] });
+  const toolsRun = [.../* @__PURE__ */ new Set([...prev?.manifest.toolsRun ?? [], "deepsec"])].sort();
+  const manifest = {
+    version: VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    repo,
+    generatedNote: prev?.manifest.generatedNote ?? "Imported deepsec findings, correlated + risk-ranked by ultrasec. Adjudicate each before trusting it.",
+    languages: prev?.manifest.languages ?? [],
+    toolsRun,
+    counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
+    ...prev?.manifest.truncation ? { truncation: prev.manifest.truncation } : {},
+    ...prev?.manifest.scopes && prev.manifest.scopes.length ? { scopes: prev.manifest.scopes } : {}
+  };
+  writeDossier(run, { manifest, findings, graph });
+  const added = findings.length - prevFindings.length;
+  if (flagBool(args, "json")) {
+    println(JSON.stringify({ run, parsed: imported.length, totalFindings: findings.length, added, toolsRun, risk: riskNote }, null, 2));
+    return 0;
+  }
+  println(`ultrasec import \u2192 ${run}`);
+  println(`  parsed ${imported.length} deepsec finding(s); dossier now holds ${findings.length} (${added >= 0 ? "+" : ""}${added} after correlation)`);
+  println(`  ${riskNote}`);
+  println(`  deepsec output is non-deterministic \u2014 each imported finding starts \`open\` and is yours to adjudicate.`);
+  println(`  next: read ${run}/DOSSIER.md, \`ultrasec dossier <id>\`, then \`ultrasec verify\` + \`ultrasec check --semantic\`.`);
+  return 0;
+}
+
 // src/commands/dossier.ts
-import { resolve as resolve4 } from "path";
+import { resolve as resolve5 } from "path";
 
 // src/dossier.ts
-import { join as join10 } from "path";
+import { join as join13 } from "path";
 function excerpt(repo, step, ctx = 3) {
-  const lines = readText(join10(repo, step.file)).split(/\r?\n/);
+  const lines = readText(join13(repo, step.file)).split(/\r?\n/);
   const lo = Math.max(1, step.line - ctx);
   const hi = Math.min(lines.length, step.line + ctx);
   const out = [];
@@ -2957,7 +3253,7 @@ function renderFindingDossier(repo, graph, f) {
 
 // src/commands/dossier.ts
 function runDossier(args) {
-  const run = resolve4(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve5(flagStr(args, "run") ?? ".ultrasec");
   const id = args._[1];
   if (!id) {
     eprintln("ultrasec dossier: need a <finding-id>. List them in DOSSIER.md or with `paths`.");
@@ -2981,9 +3277,9 @@ function runDossier(args) {
 }
 
 // src/commands/paths.ts
-import { resolve as resolve5 } from "path";
+import { resolve as resolve6 } from "path";
 function runPaths(args) {
-  const run = resolve5(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve6(flagStr(args, "run") ?? ".ultrasec");
   const kind = flagStr(args, "kind");
   const sev = flagStr(args, "severity");
   let d;
@@ -3012,8 +3308,8 @@ function runPaths(args) {
 }
 
 // src/commands/verify.ts
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
-import { join as join11, resolve as resolve6 } from "path";
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync5, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
+import { join as join14, resolve as resolve7 } from "path";
 
 // src/verify.ts
 function pending(findings) {
@@ -3117,7 +3413,7 @@ function parseVerdicts(raw) {
 
 // src/commands/verify.ts
 function runVerify(args) {
-  const run = resolve6(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve7(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3132,23 +3428,23 @@ function runVerify(args) {
   const shardIdx = Number(flagStr(args, "shard") ?? "0") || 0;
   if (shards > 1) items = shard(items, shards, shardIdx);
   const todoName = shards > 1 ? `VERIFY.todo.${shardIdx}.json` : "VERIFY.todo.json";
-  writeFileSync5(join11(run, todoName), JSON.stringify(items, null, 2));
-  writeFileSync5(join11(run, "VERIFY.md"), renderWorklistMd(buildWorklist(dossier)));
+  writeFileSync5(join14(run, todoName), JSON.stringify(items, null, 2));
+  writeFileSync5(join14(run, "VERIFY.md"), renderWorklistMd(buildWorklist(dossier)));
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
-  println(`ultrasec verify \u2192 ${join11(run, todoName)} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
+  println(`ultrasec verify \u2192 ${join14(run, todoName)} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
   println(`  adjudicate each (\`ultrasec dossier <id> --run ${run}\`), save verdicts.json, then:`);
   println(`  ultrasec verify --apply verdicts.json --run ${run}`);
   return 0;
 }
 function collectVerdictFiles(applyPath) {
-  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve6(s.trim()));
-  const abs = resolve6(applyPath);
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve7(s.trim()));
+  const abs = resolve7(applyPath);
   try {
     if (statSync3(abs).isDirectory()) {
-      return readdirSync2(abs).filter((n) => /verdict.*\.json$/i.test(n)).map((n) => join11(abs, n));
+      return readdirSync2(abs).filter((n) => /verdict.*\.json$/i.test(n)).map((n) => join14(abs, n));
     }
   } catch {
   }
@@ -3159,7 +3455,7 @@ function applyMode(run, dossier, applyPath, args) {
   const verdicts = [];
   for (const f of files) {
     try {
-      verdicts.push(...parseVerdicts(readFileSync6(f, "utf8")));
+      verdicts.push(...parseVerdicts(readFileSync8(f, "utf8")));
     } catch (e) {
       eprintln(`ultrasec verify: cannot read verdicts at ${f}: ${e.message}`);
       return 2;
@@ -3182,22 +3478,22 @@ function applyMode(run, dossier, applyPath, args) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve8 } from "path";
+import { resolve as resolve9 } from "path";
 
 // src/check.ts
-import { existsSync as existsSync6, readFileSync as readFileSync7 } from "fs";
-import { join as join12, resolve as resolve7, sep as sep2 } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync9 } from "fs";
+import { join as join15, resolve as resolve8, sep as sep2 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve7(repo);
-  const abs = resolve7(base, file);
+  const base = resolve8(repo);
+  const abs = resolve8(base, file);
   return abs === base || abs.startsWith(base + sep2);
 }
 function lineCount(repo, file) {
   if (!insideRepo(repo, file)) return null;
-  const abs = join12(repo, file);
-  if (!existsSync6(abs)) return null;
+  const abs = join15(repo, file);
+  if (!existsSync8(abs)) return null;
   try {
-    return readFileSync7(abs, "utf8").split(/\r?\n/).length;
+    return readFileSync9(abs, "utf8").split(/\r?\n/).length;
   } catch {
     return null;
   }
@@ -3254,7 +3550,7 @@ function check(dossier, opts = {}) {
 
 // src/commands/check.ts
 function runCheck(args) {
-  const run = resolve8(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve9(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
   const minSevRaw = flagStr(args, "min-severity");
@@ -3280,7 +3576,7 @@ function runCheck(args) {
 
 // src/commands/render.ts
 import { writeFileSync as writeFileSync6 } from "fs";
-import { join as join13, resolve as resolve9 } from "path";
+import { join as join16, resolve as resolve10 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -3323,6 +3619,12 @@ function riskTag(f) {
   if (f.kev) parts.push(`\u{1F6A8} CISA KEV${f.kevDateAdded ? ` (${f.kevDateAdded})` : ""}`);
   if (f.verified) parts.push(`\u2705 verified secret`);
   return parts.join(" \xB7 ");
+}
+function provTag(f) {
+  const p = f.provenance;
+  if (!p) return "";
+  const who = [p.author, p.date].filter(Boolean).join(" \xB7 ");
+  return [who, p.commit ? `@${p.commit}` : "", p.owner ? `owner ${p.owner}` : ""].filter(Boolean).join(" \xB7 ");
 }
 function sourcesTag(f) {
   const s = f.sources && f.sources.length ? f.sources : f.tool !== "ultrasec" ? [f.tool] : [];
@@ -3387,6 +3689,11 @@ function renderFinding(f, opts = {}) {
   }
   L.push("");
   L.push(`**Path:** ${pathLine(f)}`);
+  const pv = provTag(f);
+  if (pv) {
+    L.push("");
+    L.push(`**Provenance:** ${pv}`);
+  }
   L.push("");
   L.push(f.message);
   if (f.exploitPath) {
@@ -3555,7 +3862,7 @@ function renderHtml(d) {
 
 // src/commands/render.ts
 function runRender(args) {
-  const run = resolve9(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3569,16 +3876,16 @@ function runRender(args) {
     ["FULL.md", renderFull(dossier)],
     ["index.html", renderHtml(dossier)]
   ];
-  for (const [name, body] of outputs) writeFileSync6(join13(run, name), body);
+  for (const [name, body] of outputs) writeFileSync6(join16(run, name), body);
   println(`ultrasec render \u2192 ${run}`);
-  for (const [name] of outputs) println(`  ${join13(run, name)}`);
+  for (const [name] of outputs) println(`  ${join16(run, name)}`);
   return 0;
 }
 
 // src/commands/clean.ts
 import { execFileSync as execFileSync4 } from "child_process";
-import { existsSync as existsSync7, rmSync } from "fs";
-import { resolve as resolve10 } from "path";
+import { existsSync as existsSync9, rmSync } from "fs";
+import { resolve as resolve11 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 function dockerImages() {
@@ -3601,12 +3908,12 @@ function docker(args) {
   }
 }
 function runClean(args) {
-  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
   const dry = flagBool(args, "dry-run");
   const withDocker = flagBool(args, "docker");
   const keepOutput = flagBool(args, "keep-output");
   const removed = [];
-  if (!keepOutput && existsSync7(run)) {
+  if (!keepOutput && existsSync9(run)) {
     if (!dry) rmSync(run, { recursive: true, force: true });
     removed.push(`output  ${run}`);
   }
@@ -3661,9 +3968,14 @@ COMMANDS
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
              Flags: --tools auto|none|a,b \xB7 --docker \xB7 --no-enrich/--offline \xB7
+             --sinks (orphan-sink recall) \xB7 --blame (git-blame/CODEOWNERS provenance) \xB7
              --scope/--include/--exclude/--max-files/--gitignore (focus) \xB7
              --budget quick|standard|thorough \xB7 --max-candidates \xB7 --max-depth \xB7
              --diff <ref>/--since <commit> \xB7 --merge \xB7 --resume (incremental).
+  import     Ingest an upstream AI scanner's exported findings (deepsec) into the
+             dossier: map \u2192 correlate \u2192 risk-rank \u2192 fold in (preserving verdicts).
+             ultrasec never runs it \u2014 data ingest only. Flags: --run \xB7 --format
+             deepsec-json \xB7 --no-enrich/--offline \xB7 --blame.
   tools      List known external scanners, which are installed, and how to get them.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source\u2192sink chains.
@@ -3699,6 +4011,8 @@ async function dispatch(cmd, args) {
       return runMap(args);
     case "scan":
       return runScan(args);
+    case "import":
+      return runImport(args);
     case "dossier":
       return runDossier(args);
     case "paths":

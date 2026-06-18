@@ -34,6 +34,14 @@ function riskTag(f: Finding): string {
   return parts.join(" · ");
 }
 
+/** Deterministic blame/owner provenance, when present (opt-in `--blame`). */
+function provTag(f: Finding): string {
+  const p = f.provenance;
+  if (!p) return "";
+  const who = [p.author, p.date].filter(Boolean).join(" · ");
+  return [who, p.commit ? `@${p.commit}` : "", p.owner ? `owner ${p.owner}` : ""].filter(Boolean).join(" · ");
+}
+
 /** "agreed by a, b" when multiple scanners corroborate; else "via <tool>". */
 function sourcesTag(f: Finding): string {
   const s = f.sources && f.sources.length ? f.sources : f.tool !== "ultrasec" ? [f.tool] : [];
@@ -103,6 +111,11 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean } = {}): string {
   }
   L.push("");
   L.push(`**Path:** ${pathLine(f)}`);
+  const pv = provTag(f);
+  if (pv) {
+    L.push("");
+    L.push(`**Provenance:** ${pv}`);
+  }
   L.push("");
   L.push(f.message);
   if (f.exploitPath) {

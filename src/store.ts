@@ -105,6 +105,15 @@ function severityBadge(s: Severity): string {
   return { critical: "🟥 CRIT", high: "🟧 HIGH", medium: "🟨 MED", low: "🟩 LOW", info: "⬜ INFO" }[s];
 }
 
+/** "provenance: <author> · <date> · owner <team>" — only the fields present. */
+export function provenanceLine(f: Finding): string {
+  const p = f.provenance;
+  if (!p) return "";
+  const who = [p.author, p.date].filter(Boolean).join(" · ");
+  const bits = [who, p.commit ? `@${p.commit}` : "", p.owner ? `owner ${p.owner}` : ""].filter(Boolean);
+  return bits.length ? `provenance: ${bits.join(" · ")}` : "";
+}
+
 /** A compact, always-loadable index of the run — the AI reads THIS, not graph.json. */
 export function renderDossierMd(d: Dossier): string {
   const { manifest: m, findings } = d;
@@ -127,7 +136,7 @@ export function renderDossierMd(d: Dossier): string {
   if (m.truncation?.candidates) {
     // Report the OMITTED count (accurate to what the cap dropped) rather than a
     // "shown = total − candidates" that can drift from the merged finding set.
-    L.push(`> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** taint candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
+    L.push(`> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
     L.push("");
   }
   if (m.truncation?.files) {
@@ -166,6 +175,8 @@ export function renderDossierMd(d: Dossier): string {
     } else if (f.sink) {
       L.push(`- at: \`${f.sink.file}:${f.sink.line}\``);
     }
+    const prov = provenanceLine(f);
+    if (prov) L.push(`- ${prov}`);
     L.push(`- ${f.message}`);
     L.push("");
   }

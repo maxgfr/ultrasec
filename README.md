@@ -96,6 +96,34 @@ rank-then-cap candidates (truncation is reported, never silent); `--merge` folds
 scoped pass into one dossier (preserving prior verdicts); `--resume` reuses a
 content-hashed scan cache. Full loop: [scale-audit playbook](references/scale-audit-playbook.md).
 
+## Extra recall, provenance & deepsec interop
+
+Three opt-in additions, all keeping the zero-dependency / no-API-key core intact:
+
+```bash
+node scripts/ultrasec.mjs scan --repo . --sinks --out .ultrasec   # orphan-sink recall
+node scripts/ultrasec.mjs scan --repo . --blame --out .ultrasec   # git-blame + CODEOWNERS provenance
+node scripts/ultrasec.mjs import findings.json --run .ultrasec    # ingest a deepsec export
+```
+
+- **`--sinks` (orphan-sink recall).** The taint pass only emits a finding when it can
+  connect a dangerous sink *back* to an untrusted source. `--sinks` adds every sink it
+  **can't** connect (single-file scripts, framework dispatch the summary-graph misses,
+  config-fed sinks) as a low-confidence `sast` candidate — capped and truncation-reported
+  like taint, adjudicated the same way.
+- **`--blame` (provenance).** Attaches deterministic git-blame author/commit/author-date +
+  CODEOWNERS owner to each finding — a triage signal ("introduced last week by X, owned by
+  team Y"). Reproducible (author-date, not wall-clock) and **evidence only**: it never culls
+  a finding by age.
+- **`import` (deepsec interop).** [vercel-labs/deepsec](https://github.com/vercel-labs/deepsec)
+  is an agent-powered scanner that drives its *own* LLM. Rather than vendor it (it needs API
+  keys + an Apache-2.0 dependency, against ultrasec's grain), ultrasec **ingests its output**:
+  run `deepsec export --format json` yourself, then `ultrasec import` maps each finding into
+  the unified model, correlates it against the engine/scanner findings, risk-ranks it, and
+  runs it through the same `[file:line]` grounding gate and conservative verify flow — making
+  ultrasec the deterministic referee over deepsec's non-deterministic agent output. No keys,
+  no Vercel, no deepsec process spawned by ultrasec.
+
 ## Analysis tools via Docker
 
 ultrasec orchestrates best-in-class OSS scanners and normalizes their output into

@@ -60,6 +60,19 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
     reverse-dependents), `--merge` (fold into an existing run, preserving verdicts),
     `--resume` (content-hash scan cache). A scoped/diff pass skips external scanners
     unless you pass `--tools auto`.
+  - **Recall & provenance (opt-in):** `--sinks` adds an **orphan-sink** pass — every
+    dangerous sink the source-gated taint BFS can't connect to a source (single-file
+    script, framework dispatch, config-fed sink) is emitted as a low-confidence
+    `sast` candidate to adjudicate (capped + truncation-reported like taint).
+    `--blame` attaches deterministic **provenance** (git-blame author/commit/author-date
+    + CODEOWNERS owner) to each finding — a triage signal, **never** a suppression rule.
+- `import <findings.json> --run <dir> [--format deepsec-json] [--no-enrich|--offline] [--blame]`
+  Ingest an **upstream AI scanner's** exported findings (vercel-labs/**deepsec** today:
+  `deepsec export --format json`) into the dossier — map each into the Finding model,
+  **correlate** against engine/scanner findings (corroboration unions `sources[]`),
+  **risk-rank**, and fold in **preserving prior verdicts**. ultrasec never runs deepsec
+  (no keys, no Vercel) — pure data ingest; each imported finding lands `open` and is
+  yours to adjudicate, gated by the same `[file:line]` grounding `check` as everything else.
 - `tools [--json]` — the external-scanner catalog: which are installed, what they
   cover, how to install the rest. ultrasec runs what's present; none are required.
 - `graph <file|symbol> [--depth n]` — the cross-file links into/out of a node.
