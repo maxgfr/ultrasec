@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/types.ts
-var VERSION = "1.4.0";
+var VERSION = "1.5.0";
 var SCHEMA_VERSION = 3;
 var SEVERITIES = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
