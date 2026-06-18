@@ -2,7 +2,7 @@
 
 // src/types.ts
 var VERSION = "1.5.0";
-var SCHEMA_VERSION = 3;
+var SCHEMA_VERSION = 4;
 var SEVERITIES = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
 var CATEGORIES = [
@@ -2023,10 +2023,17 @@ function mergeCluster(group) {
   if (verified) out.verified = true;
   return out;
 }
+function taintNodes(f) {
+  const locs = /* @__PURE__ */ new Set();
+  for (const p of f.path ?? []) locs.add(`${p.file}:${p.line}`);
+  if (f.sink) locs.add(`${f.sink.file}:${f.sink.line}`);
+  if (f.source) locs.add(`${f.source.file}:${f.source.line}`);
+  return locs;
+}
 function correlate(findings) {
   const taint = findings.filter((f) => f.tool === "ultrasec");
   const tool = findings.filter((f) => f.tool !== "ultrasec");
-  const out = [...taint];
+  const corr = [];
   const nonDep = tool.filter((f) => f.category !== "dep");
   const byKey = /* @__PURE__ */ new Map();
   for (const f of nonDep) {
@@ -2035,7 +2042,7 @@ function correlate(findings) {
     const key = `${f.category}::${ident}::${where}`;
     (byKey.get(key) ?? byKey.set(key, []).get(key)).push(f);
   }
-  for (const group of byKey.values()) out.push(group.length === 1 ? withSources(group[0]) : mergeCluster(group));
+  for (const group of byKey.values()) corr.push(group.length === 1 ? withSources(group[0]) : mergeCluster(group));
   const dep = tool.filter((f) => f.category === "dep");
   const dsu = new DSU(dep.length);
   const seen = /* @__PURE__ */ new Map();
@@ -2053,8 +2060,37 @@ function correlate(findings) {
     const r = dsu.find(i);
     (clusters.get(r) ?? clusters.set(r, []).get(r)).push(f);
   });
-  for (const group of clusters.values()) out.push(group.length === 1 ? withSources(group[0]) : mergeCluster(group));
-  return out.sort((a, b) => byStr(a.id, b.id));
+  for (const group of clusters.values()) corr.push(group.length === 1 ? withSources(group[0]) : mergeCluster(group));
+  const nodesByLoc = /* @__PURE__ */ new Map();
+  taint.forEach((t, i) => {
+    for (const loc of taintNodes(t)) (nodesByLoc.get(loc) ?? nodesByLoc.set(loc, []).get(loc)).push(i);
+  });
+  const extraSources = /* @__PURE__ */ new Map();
+  const extraPrior = /* @__PURE__ */ new Map();
+  const survivors = [];
+  for (const f of corr) {
+    const where = f.sink ? `${f.sink.file}:${f.sink.line}` : null;
+    const hits = where ? nodesByLoc.get(where) : void 0;
+    if (hits && hits.length) {
+      for (const idx of hits) {
+        const set = extraSources.get(idx) ?? extraSources.set(idx, /* @__PURE__ */ new Set()).get(idx);
+        for (const s of f.sources ?? [f.tool]) set.add(s);
+        if (f.priorAnalysis && !extraPrior.has(idx)) extraPrior.set(idx, f.priorAnalysis);
+      }
+      continue;
+    }
+    survivors.push(f);
+  }
+  const taintOut = taint.map((t, i) => {
+    const extra = extraSources.get(i);
+    if (!extra || !extra.size) return t;
+    const sources = [.../* @__PURE__ */ new Set([...t.sources ?? [t.tool], ...extra])].sort(byStr);
+    const next = { ...t, sources, confidence: bumpConfidence(t.confidence, sources.length) };
+    const prior = next.priorAnalysis ?? extraPrior.get(i);
+    if (prior) next.priorAnalysis = prior;
+    return next;
+  });
+  return [...taintOut, ...survivors].sort((a, b) => byStr(a.id, b.id));
 }
 function withSources(f) {
   return f.sources && f.sources.length ? f : { ...f, sources: [f.tool] };
@@ -3394,23 +3430,32 @@ function importDeepsec(raw) {
     const slug = String(md.vulnSlug ?? "finding");
     const line = Array.isArray(md.lineNumbers) && md.lineNumbers.length && typeof md.lineNumbers[0] === "number" ? md.lineNumbers[0] : void 0;
     const reval = md.revalidation;
-    const revalNote = reval && reval.reasoning ? ` \u2014 deepsec revalidation (${reval.verdict ?? "?"}): ${reval.reasoning}` : "";
-    out.push(
-      makeToolFinding({
-        tool: "deepsec",
-        category: slugToCategory(slug),
-        // ident carries file:line so the content-hash id is stable across re-imports.
-        ident: `${slug}:${md.filePath}:${line ?? ""}`,
-        title: entry.title || slug,
-        severity: normalizeSeverity(md.severity ?? entry.severity),
-        message: `${entry.title || slug}${revalNote}`,
-        file: md.filePath,
-        line,
-        cwe: firstCwe([entry.description ?? "", ...entry.labels ?? []].join(" ")),
-        confidence: mapConfidence(md.confidence),
-        references: md.githubUrl ? [md.githubUrl] : void 0
-      })
-    );
+    const f = makeToolFinding({
+      tool: "deepsec",
+      category: slugToCategory(slug),
+      // ident carries file:line so the content-hash id is stable across re-imports.
+      ident: `${slug}:${md.filePath}:${line ?? ""}`,
+      title: entry.title || slug,
+      severity: normalizeSeverity(md.severity ?? entry.severity),
+      // Keep the message clean — deepsec's reasoning is a SIGNAL on priorAnalysis,
+      // never folded into the finding text (so it can't read as ultrasec's verdict).
+      message: entry.title || slug,
+      file: md.filePath,
+      line,
+      cwe: firstCwe([entry.description ?? "", ...entry.labels ?? []].join(" ")),
+      confidence: mapConfidence(md.confidence),
+      references: md.githubUrl ? [md.githubUrl] : void 0
+    });
+    const prior = { tool: "deepsec" };
+    const reasoning = reval?.reasoning ?? entry.description;
+    if (reasoning) prior.reasoning = reasoning;
+    if (Array.isArray(md.mitigationsChecked)) {
+      const m = md.mitigationsChecked.filter((x) => typeof x === "string");
+      if (m.length) prior.mitigationsChecked = m;
+    }
+    if (reval?.verdict) prior.revalidationVerdict = reval.verdict;
+    if (prior.reasoning || prior.mitigationsChecked || prior.revalidationVerdict) f.priorAnalysis = prior;
+    out.push(f);
   }
   return out;
 }
@@ -3522,6 +3567,18 @@ function renderFindingDossier(repo, graph, f, context) {
   L.push(`## What to decide`);
   L.push(f.message);
   L.push("");
+  if (f.priorAnalysis) {
+    const pa = f.priorAnalysis;
+    L.push(`## Prior analysis (signal, not a verdict)`);
+    L.push(`_From \`${pa.tool}\` \u2014 background only; ultrasec's verify gate, not this, decides the status._`);
+    if (pa.revalidationVerdict) L.push(`- ${pa.tool} revalidation verdict: **${pa.revalidationVerdict}** (a hint \u2014 confirm it yourself)`);
+    if (pa.mitigationsChecked && pa.mitigationsChecked.length) L.push(`- mitigations ${pa.tool} checked: ${pa.mitigationsChecked.join(", ")}`);
+    if (pa.reasoning) {
+      L.push("");
+      L.push(pa.reasoning);
+    }
+    L.push("");
+  }
   if (f.path && f.path.length) {
     L.push(`## Cross-file path (source \u2192 sink)`);
     L.push("");
@@ -3641,7 +3698,7 @@ function buildWorklist(dossier) {
     for (const p of f.path ?? []) files.add(`${p.file}:${p.line}`);
     if (f.sink) files.add(`${f.sink.file}:${f.sink.line}`);
     if (f.source) files.add(`${f.source.file}:${f.source.line}`);
-    return {
+    const item = {
       id: f.id,
       severity: f.severity,
       cwe: f.cwe,
@@ -3652,6 +3709,9 @@ function buildWorklist(dossier) {
       verdict: null,
       note: ""
     };
+    const pa = f.priorAnalysis;
+    if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
+    return item;
   });
 }
 function shard(items, n, i) {
@@ -3682,6 +3742,7 @@ function renderWorklistMd(items, context) {
     if (it.cwe) L.push(`- ${it.cwe} \xB7 ${it.category}`);
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
     L.push(`- claim: ${it.claim}`);
+    if (it.priorSignal) L.push(`- signal (not a verdict \u2014 adjudicate yourself): ${it.priorSignal}`);
     L.push("");
   }
   return L.join("\n") + "\n";

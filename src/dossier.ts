@@ -42,6 +42,21 @@ export function renderFindingDossier(repo: string, graph: Graph, f: Finding, con
   L.push(f.message);
   L.push("");
 
+  // Prior analysis (presence-gated): upstream-agent reasoning ingested as a SIGNAL.
+  // Clearly labelled as NOT a verdict — the adjudicator still decides from the code.
+  if (f.priorAnalysis) {
+    const pa = f.priorAnalysis;
+    L.push(`## Prior analysis (signal, not a verdict)`);
+    L.push(`_From \`${pa.tool}\` — background only; ultrasec's verify gate, not this, decides the status._`);
+    if (pa.revalidationVerdict) L.push(`- ${pa.tool} revalidation verdict: **${pa.revalidationVerdict}** (a hint — confirm it yourself)`);
+    if (pa.mitigationsChecked && pa.mitigationsChecked.length) L.push(`- mitigations ${pa.tool} checked: ${pa.mitigationsChecked.join(", ")}`);
+    if (pa.reasoning) {
+      L.push("");
+      L.push(pa.reasoning);
+    }
+    L.push("");
+  }
+
   if (f.path && f.path.length) {
     L.push(`## Cross-file path (source → sink)`);
     L.push("");

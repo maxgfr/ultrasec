@@ -48,13 +48,36 @@ describe("correlate — non-dep merge by category+cwe+location", () => {
   });
 });
 
+// A taint finding with a real cross-file path (source → sink).
+function taintFinding(id: string, severity: Finding["severity"] = "high"): Finding {
+  return {
+    id,
+    category: "taint",
+    cwe: "CWE-89",
+    title: "flow",
+    severity,
+    confidence: "medium",
+    message: "m",
+    tool: "ultrasec",
+    status: "open",
+    source: { file: "src/server.js", line: 10 },
+    sink: { file: "src/db.js", line: 6 },
+    path: [
+      { file: "src/server.js", line: 10, why: "source" },
+      { file: "src/db.js", line: 6, why: "sink" },
+    ],
+  };
+}
+
 describe("correlate — invariants", () => {
-  it("leaves taint candidates (tool=ultrasec) untouched", () => {
+  it("leaves an un-corroborated taint candidate's fields untouched", () => {
     const taint: Finding = { id: "t1", category: "taint", title: "flow", severity: "high", confidence: "medium", message: "m", tool: "ultrasec", status: "open" };
     const out = correlate([taint]);
     expect(out).toHaveLength(1);
     expect(out[0]!.tool).toBe("ultrasec");
-    expect(out[0]).toBe(taint); // untouched, not reconstructed
+    expect(out[0]!.category).toBe("taint");
+    expect(out[0]!.severity).toBe("high");
+    expect(out[0]).toEqual(taint); // fields untouched (identity preserved when no corroboration)
   });
 
   it("is idempotent", () => {
@@ -68,5 +91,63 @@ describe("correlate — invariants", () => {
 
   it("returns [] for no input", () => {
     expect(correlate([])).toEqual([]);
+  });
+});
+
+describe("correlate — taint corroboration (Phase 6 relaxation)", () => {
+  it("folds a standalone tool finding on a taint sink node into the taint finding's sources + bumps confidence, and consumes it", () => {
+    const taint = taintFinding("t1");
+    const ds = sast("deepsec", "CWE-89", "src/db.js", 6, "high"); // exact sink line of t1
+    const out = correlate([taint, ds]);
+    expect(out).toHaveLength(1); // standalone consumed
+    const t = out[0]!;
+    expect(t.tool).toBe("ultrasec"); // still the taint finding
+    expect(t.sources).toEqual(["deepsec", "ultrasec"]);
+    expect(t.confidence).toBe("high"); // ≥2 sources → corroborated
+  });
+
+  it("CORRUPTION GUARD: path/source/sink/title/severity are byte-identical after corroboration", () => {
+    const taint = taintFinding("t1");
+    const before = JSON.parse(JSON.stringify({ path: taint.path, source: taint.source, sink: taint.sink, title: taint.title, severity: taint.severity }));
+    const out = correlate([taint, sast("deepsec", "CWE-89", "src/db.js", 6, "critical")]);
+    const t = out[0]!;
+    expect(t.path).toEqual(before.path);
+    expect(t.source).toEqual(before.source);
+    expect(t.sink).toEqual(before.sink);
+    expect(t.title).toBe(before.title);
+    expect(t.severity).toBe(before.severity); // a higher-sev tool finding does NOT raise the taint severity
+  });
+
+  it("carries a consumed finding's priorAnalysis onto the taint finding (signal preserved)", () => {
+    const taint = taintFinding("t1");
+    const ds = sast("deepsec", "CWE-89", "src/db.js", 6, "high");
+    ds.priorAnalysis = { tool: "deepsec", revalidationVerdict: "true-positive", reasoning: "reaches the DB unsanitized" };
+    const out = correlate([taint, ds]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.priorAnalysis).toEqual(ds.priorAnalysis);
+    expect(out[0]!.sources).toContain("deepsec");
+  });
+
+  it("corroborates on a SOURCE or HOP node, not only the sink", () => {
+    const taint = taintFinding("t1");
+    const out = correlate([taint, sast("deepsec", "CWE-89", "src/server.js", 10, "high")]); // the source node
+    expect(out).toHaveLength(1);
+    expect(out[0]!.sources).toContain("deepsec");
+  });
+
+  it("leaves a tool finding STANDALONE when it is NOT on any taint path node", () => {
+    const taint = taintFinding("t1");
+    const elsewhere = sast("deepsec", "CWE-79", "src/other.js", 99, "medium");
+    const out = correlate([taint, elsewhere]);
+    expect(out).toHaveLength(2); // both kept
+    expect(out.find((f) => f.tool === "ultrasec")!.sources ?? ["ultrasec"]).toEqual(["ultrasec"]);
+  });
+
+  it("is idempotent across the corroboration relaxation", () => {
+    const once = correlate([taintFinding("t1"), sast("deepsec", "CWE-89", "src/db.js", 6, "high")]);
+    const twice = correlate(once);
+    expect(twice).toHaveLength(once.length);
+    expect(twice[0]!.sources).toEqual(once[0]!.sources);
+    expect(twice[0]!.path).toEqual(once[0]!.path);
   });
 });

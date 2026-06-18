@@ -24,6 +24,9 @@ export interface VerifyItem {
   verdict: Verdict | null;
   note: string;
   exploitPath?: string;
+  /** Upstream-agent signal (e.g. deepsec revalidation verdict) — a HINT shown to
+   *  the adjudicator, never auto-applied. Absent unless `priorAnalysis` exists. */
+  priorSignal?: string;
 }
 
 export interface VerdictInput {
@@ -47,7 +50,7 @@ export function buildWorklist(dossier: Dossier): VerifyItem[] {
       for (const p of f.path ?? []) files.add(`${p.file}:${p.line}`);
       if (f.sink) files.add(`${f.sink.file}:${f.sink.line}`);
       if (f.source) files.add(`${f.source.file}:${f.source.line}`);
-      return {
+      const item: VerifyItem = {
         id: f.id,
         severity: f.severity,
         cwe: f.cwe,
@@ -58,6 +61,9 @@ export function buildWorklist(dossier: Dossier): VerifyItem[] {
         verdict: null,
         note: "",
       };
+      const pa = f.priorAnalysis;
+      if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
+      return item;
     });
 }
 
@@ -93,6 +99,7 @@ export function renderWorklistMd(items: VerifyItem[], context?: string): string 
     if (it.cwe) L.push(`- ${it.cwe} · ${it.category}`);
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
     L.push(`- claim: ${it.claim}`);
+    if (it.priorSignal) L.push(`- signal (not a verdict — adjudicate yourself): ${it.priorSignal}`);
     L.push("");
   }
   return L.join("\n") + "\n";

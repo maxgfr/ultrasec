@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Dossier } from "../src/store.js";
 import type { Finding, Severity } from "../src/types.js";
-import { buildWorklist, shard, applyVerdicts, parseVerdicts } from "../src/verify.js";
+import { buildWorklist, shard, applyVerdicts, parseVerdicts, renderWorklistMd } from "../src/verify.js";
 
 function finding(id: string, severity: Severity, status: Finding["status"] = "open"): Finding {
   return {
@@ -84,6 +84,31 @@ describe("applyVerdicts — conservative policy", () => {
   it("partial → needs-human", () => {
     const r = applyVerdicts(dossier([finding("a", "medium")]), [{ id: "a", verdict: "partial" }]);
     expect(r.findings[0]!.status).toBe("needs-human");
+  });
+});
+
+describe("priorAnalysis signal (deepsec revalidation) — shown, never auto-applied", () => {
+  function withPrior(): Finding {
+    const f = finding("a", "high");
+    f.priorAnalysis = { tool: "deepsec", revalidationVerdict: "true-positive", reasoning: "reaches the DB unsanitized" };
+    return f;
+  }
+
+  it("surfaces the revalidation verdict as a labelled signal in the worklist + MD", () => {
+    const d = dossier([withPrior()]);
+    const item = buildWorklist(d)[0]!;
+    expect(item.priorSignal).toBe("deepsec revalidation: true-positive");
+    expect(renderWorklistMd(buildWorklist(d))).toContain("signal (not a verdict — adjudicate yourself): deepsec revalidation: true-positive");
+  });
+
+  it("does NOT change status: a finding with a 'true-positive' signal stays open until verified", () => {
+    const r = applyVerdicts(dossier([withPrior()]), []); // no verdict supplied
+    expect(r.findings[0]!.status).toBe("open");
+    expect(r.applied).toBe(0);
+  });
+
+  it("items without priorAnalysis carry no signal (back-compat)", () => {
+    expect(buildWorklist(dossier([finding("b", "high")]))[0]!.priorSignal).toBeUndefined();
   });
 });
 
