@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { flagStr, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { renderFindingDossier } from "../dossier.js";
+import { loadContextDoc } from "../context.js";
 
 // `ultrasec dossier <finding-id> [--run .ultrasec] [--repo <dir>]`
 // Print the grounding packet (real code + cross-file path + neighbours) for one
@@ -29,6 +30,6 @@ export function runDossier(args: ParsedArgs): number {
   }
 
   const repo = flagStr(args, "repo") ?? d.manifest.repo;
-  println(renderFindingDossier(repo, d.graph, f));
+  println(renderFindingDossier(repo, d.graph, f, loadContextDoc(run)));
   return 0;
 }

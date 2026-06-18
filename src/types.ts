@@ -135,6 +135,17 @@ export interface Finding {
   status: Status;
 }
 
+// ── Project-context primer (Phase 1) ─────────────────────────────────────────
+// A deterministic scaffold of the project's trust model the agent turns into a
+// prose CONTEXT.md. ADDITIVE EVIDENCE ONLY — it never gates a verdict.
+export interface ContextScaffold {
+  frameworks: string[];
+  entryPoints: { file: string; line: number; kind: string }[];
+  authMiddleware: { file: string; line: number; hint: string }[];
+  sanitizers: { file: string; line: number; kind: string }[];
+  trustBoundaries: string[];
+}
+
 // ── Audit dossier (on-disk run folder) ───────────────────────────────────────
 export interface Manifest {
   version: string;

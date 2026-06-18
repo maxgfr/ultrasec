@@ -66,7 +66,7 @@ export function shard<T>(items: T[], n: number, i: number): T[] {
   return items.filter((_, idx) => idx % n === i);
 }
 
-export function renderWorklistMd(items: VerifyItem[]): string {
+export function renderWorklistMd(items: VerifyItem[], context?: string): string {
   const L: string[] = [];
   L.push(`# ultrasec verification worklist (${items.length})`);
   L.push("");
@@ -79,6 +79,15 @@ export function renderWorklistMd(items: VerifyItem[]): string {
   L.push(`> Be skeptical, but do NOT dismiss a high/critical finding unless you can`);
   L.push(`> positively **refute** it. Uncertain ⇒ leave it for a human.`);
   L.push("");
+  // Project context (presence-gated): the agent-authored CONTEXT.md frames every
+  // judgment below. Absent CONTEXT.md ⇒ omitted (output byte-identical to today).
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` — the project's trust model; background, never a verdict._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
   for (const it of items) {
     L.push(`## ${it.id} — [${it.severity}] ${it.title}`);
     if (it.cwe) L.push(`- ${it.cwe} · ${it.category}`);

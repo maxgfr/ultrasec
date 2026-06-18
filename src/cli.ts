@@ -4,6 +4,7 @@ import { runTools } from "./commands/tools.js";
 import { runGraph } from "./commands/graph.js";
 import { runMap } from "./commands/map.js";
 import { runScan } from "./commands/scan.js";
+import { runContext } from "./commands/context.js";
 import { runImport } from "./commands/import.js";
 import { runDossier } from "./commands/dossier.js";
 import { runPaths } from "./commands/paths.js";
@@ -26,6 +27,10 @@ COMMANDS
   map        Cheap attack-surface recon: where untrusted input enters + what sinks
              exist, with suggested scoped targets. No taint BFS, no tools, no
              network — fast on huge repos. Flags: --scope · --out · --json.
+  context    Project-context primer: emit a deterministic scaffold (frameworks,
+             entry points, auth middleware, sanitizers) + a brief; you author
+             CONTEXT.md, which is injected into every dossier + verify worklist.
+             Highest-leverage first step. Flags: --repo · --out · --scope · --json.
   scan       Scan a repo: detect stack, run available tools (correlated across
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
@@ -74,6 +79,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runMap(args);
     case "scan":
       return runScan(args);
+    case "context":
+      return runContext(args);
     case "import":
       return runImport(args);
     case "dossier":

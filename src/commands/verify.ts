@@ -3,6 +3,7 @@ import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.j
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
 import { buildWorklist, renderWorklistMd, shard, applyVerdicts, parseVerdicts } from "../verify.js";
+import { loadContextDoc } from "../context.js";
 
 // `ultrasec verify --run <dir> [--shards n --shard i]`  → emit the worklist
 // `ultrasec verify --apply <file|dir|a,b,c> --run <dir>` → fold verdicts back in
@@ -26,8 +27,10 @@ export function runVerify(args: ParsedArgs): number {
   if (shards > 1) items = shard(items, shards, shardIdx);
 
   // The MD brief always reflects the FULL worklist; only the JSON todo is sharded.
+  // CONTEXT.md (if authored) is injected into the brief — presence-gated, so a run
+  // without one is byte-identical to today (guarded by verify-snapshot.test.ts).
   const files = shards > 1 ? { todo: `VERIFY.todo.${shardIdx}.json`, md: "VERIFY.md" } : stageFiles("VERIFY");
-  const todoPath = emitWorklist(run, files, items, renderWorklistMd(buildWorklist(dossier)));
+  const todoPath = emitWorklist(run, files, items, renderWorklistMd(buildWorklist(dossier), loadContextDoc(run)));
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));

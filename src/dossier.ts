@@ -20,7 +20,7 @@ function excerpt(repo: string, step: PathStep, ctx = 3): string {
   return out.join("\n");
 }
 
-export function renderFindingDossier(repo: string, graph: Graph, f: Finding): string {
+export function renderFindingDossier(repo: string, graph: Graph, f: Finding, context?: string): string {
   const L: string[] = [];
   L.push(`# ${f.id} — ${f.title}`);
   L.push("");
@@ -28,6 +28,16 @@ export function renderFindingDossier(repo: string, graph: Graph, f: Finding): st
   if (f.cwe) L.push(`- ${f.cwe} — ${(f.references ?? [])[0] ?? ""}`);
   L.push(`- category: ${f.category}${f.tool !== "ultrasec" ? ` · reported by ${f.tool}` : ""}`);
   L.push("");
+  // Project context (presence-gated): the agent-authored CONTEXT.md, so the
+  // adjudicator reasons WITH the project's trust model. Evidence only — it never
+  // changes the verdict. Absent CONTEXT.md ⇒ this block is omitted (byte-identical).
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` — background to judge reachability/exploitability; not a verdict._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
   L.push(`## What to decide`);
   L.push(f.message);
   L.push("");

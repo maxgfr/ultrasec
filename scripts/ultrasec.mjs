@@ -3053,9 +3053,257 @@ async function runScan(args) {
   return 0;
 }
 
-// src/commands/import.ts
-import { resolve as resolve4, join as join12 } from "path";
+// src/commands/context.ts
+import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync5 } from "fs";
+import { join as join13, resolve as resolve4 } from "path";
+
+// src/context.ts
 import { existsSync as existsSync7, readFileSync as readFileSync7 } from "fs";
+import { join as join12 } from "path";
+var MAX_SCAFFOLD = 40;
+var AUTH_RE = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
+var JS_FRAMEWORKS = {
+  express: "express",
+  koa: "koa",
+  fastify: "fastify",
+  "@nestjs/core": "nestjs",
+  next: "next.js",
+  nuxt: "nuxt",
+  "@hapi/hapi": "hapi",
+  hapi: "hapi",
+  sails: "sails",
+  restify: "restify",
+  react: "react",
+  vue: "vue",
+  "@angular/core": "angular",
+  svelte: "svelte",
+  "apollo-server": "apollo",
+  graphql: "graphql",
+  "socket.io": "socket.io",
+  mongoose: "mongoose",
+  sequelize: "sequelize",
+  prisma: "prisma",
+  knex: "knex",
+  typeorm: "typeorm",
+  passport: "passport",
+  jsonwebtoken: "jwt"
+};
+var TEXT_MANIFESTS = [
+  {
+    file: "requirements.txt",
+    rules: [
+      [/\bflask\b/i, "flask"],
+      [/\bdjango\b/i, "django"],
+      [/\bfastapi\b/i, "fastapi"],
+      [/\btornado\b/i, "tornado"],
+      [/\bbottle\b/i, "bottle"],
+      [/\bpyramid\b/i, "pyramid"],
+      [/\bsanic\b/i, "sanic"],
+      [/\baiohttp\b/i, "aiohttp"],
+      [/\bsqlalchemy\b/i, "sqlalchemy"]
+    ]
+  },
+  {
+    file: "go.mod",
+    rules: [
+      [/gin-gonic\/gin/, "gin"],
+      [/labstack\/echo/, "echo"],
+      [/gofiber\/fiber/, "fiber"],
+      [/go-chi\/chi/, "chi"],
+      [/gorilla\/mux/, "gorilla/mux"],
+      [/gorm\.io\/gorm/, "gorm"]
+    ]
+  },
+  {
+    file: "Gemfile",
+    rules: [
+      [/\brails\b/i, "rails"],
+      [/\bsinatra\b/i, "sinatra"],
+      [/\bsequel\b/i, "sequel"],
+      [/\bhanami\b/i, "hanami"]
+    ]
+  },
+  {
+    file: "composer.json",
+    rules: [
+      [/laravel\/framework/, "laravel"],
+      [/symfony\//, "symfony"],
+      [/slim\/slim/, "slim"]
+    ]
+  },
+  {
+    file: "build.gradle",
+    rules: [[/springframework|org\.springframework|spring-boot/i, "spring"]]
+  },
+  {
+    file: "pom.xml",
+    rules: [
+      [/springframework/i, "spring"],
+      [/jersey/i, "jersey"]
+    ]
+  }
+];
+function detectFrameworks(repo) {
+  const found = /* @__PURE__ */ new Set();
+  const pkgPath = join12(repo, "package.json");
+  if (existsSync7(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync7(pkgPath, "utf8"));
+      const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {} };
+      for (const name of Object.keys(deps)) {
+        const label = Object.prototype.hasOwnProperty.call(JS_FRAMEWORKS, name) ? JS_FRAMEWORKS[name] : void 0;
+        if (label) found.add(label);
+      }
+    } catch {
+    }
+  }
+  for (const m of TEXT_MANIFESTS) {
+    const p = join12(repo, m.file);
+    if (!existsSync7(p)) continue;
+    let raw;
+    try {
+      raw = readFileSync7(p, "utf8");
+    } catch {
+      continue;
+    }
+    for (const [re, name] of m.rules) if (re.test(raw)) found.add(name);
+  }
+  return [...found].sort(byStr);
+}
+function appliesTo2(languages, langId) {
+  return languages.includes("*") || languages.includes(langId);
+}
+function inferTrustBoundaries(surface, authCount) {
+  const kinds = new Set(surface.entryPoints.map((g) => g.kind));
+  const out = [];
+  if (kinds.has("http")) out.push("HTTP request handlers receive untrusted client input (query/body/params/headers/cookies).");
+  if (kinds.has("ws")) out.push("WebSocket/stream messages are untrusted client data.");
+  if (kinds.has("cli")) out.push("CLI arguments are untrusted when the program is invoked with attacker-controlled args.");
+  if (kinds.has("env")) out.push("Environment variables \u2014 trust depends on the deployment / secret-management model.");
+  if (kinds.has("stdin")) out.push("Interactive/stdin input is untrusted.");
+  out.push(
+    authCount > 0 ? `Authentication boundary: ${authCount} candidate auth/authorization site(s) detected \u2014 confirm which routes they actually protect.` : `No auth/authorization middleware detected \u2014 confirm whether endpoints are intentionally public.`
+  );
+  return out;
+}
+function buildContextScaffold(repo, scan, surface) {
+  const frameworks = detectFrameworks(repo);
+  const entryPoints = surface.entryPoints.flatMap((g) => g.samples.map((s) => ({ file: s.file, line: s.line, kind: s.kind }))).sort((a, b) => byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind)).slice(0, MAX_SCAFFOLD);
+  const authMiddleware = [];
+  const sanitizers = [];
+  for (const fileScan of scan.files) {
+    const spec = langForFile(fileScan.rel);
+    if (!spec) continue;
+    const lines = readText(join12(repo, fileScan.rel)).split(/\r?\n/);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const am = AUTH_RE.exec(line);
+      if (am) authMiddleware.push({ file: fileScan.rel, line: i + 1, hint: am[0] });
+      for (const rule of SANITIZERS) {
+        if (!appliesTo2(rule.languages, spec.id)) continue;
+        if (rule.re.test(line)) {
+          sanitizers.push({ file: fileScan.rel, line: i + 1, kind: rule.kind });
+          break;
+        }
+      }
+    }
+  }
+  const bySite = (a, b) => byStr(a.file, b.file) || a.line - b.line;
+  return {
+    frameworks,
+    entryPoints,
+    authMiddleware: authMiddleware.sort(bySite).slice(0, MAX_SCAFFOLD),
+    sanitizers: sanitizers.sort(bySite).slice(0, MAX_SCAFFOLD),
+    trustBoundaries: inferTrustBoundaries(surface, authMiddleware.length)
+  };
+}
+function renderContextScaffoldMd(repo, run, s) {
+  const L = [];
+  L.push(`# ultrasec project-context primer`);
+  L.push("");
+  L.push(`- repo: \`${repo}\``);
+  L.push("");
+  L.push(`> The deterministic scaffold below is a STARTING POINT. Author **\`${join12(run, "CONTEXT.md")}\`**`);
+  L.push(`> describing the project's purpose, trust model, auth/authorization scheme, and any`);
+  L.push(`> framework-provided protections. ultrasec injects CONTEXT.md into every \`dossier\` and the`);
+  L.push(`> \`verify\` worklist, so later stages reason WITH your threat model. CONTEXT.md is **additive`);
+  L.push(`> evidence only \u2014 it never gates or changes a verdict.**`);
+  L.push("");
+  L.push(`## Detected frameworks`);
+  L.push(s.frameworks.length ? s.frameworks.map((f) => `\`${f}\``).join(", ") : "_none detected \u2014 confirm the stack manually._");
+  L.push("");
+  L.push(`## Entry points (untrusted input) \u2014 ${s.entryPoints.length}${s.entryPoints.length >= MAX_SCAFFOLD ? "+" : ""}`);
+  if (!s.entryPoints.length) L.push(`_none detected._`);
+  for (const e of s.entryPoints) L.push(`- \`${e.file}:${e.line}\` (${e.kind})`);
+  L.push("");
+  L.push(`## Auth / authorization sites (candidate protections) \u2014 ${s.authMiddleware.length}${s.authMiddleware.length >= MAX_SCAFFOLD ? "+" : ""}`);
+  if (!s.authMiddleware.length) L.push(`_none detected \u2014 confirm whether endpoints are intentionally public._`);
+  for (const a of s.authMiddleware) L.push(`- \`${a.file}:${a.line}\` \u2014 ${a.hint}`);
+  L.push("");
+  L.push(`## Sanitizers / validators present \u2014 ${s.sanitizers.length}${s.sanitizers.length >= MAX_SCAFFOLD ? "+" : ""}`);
+  if (!s.sanitizers.length) L.push(`_none detected._`);
+  for (const sa of s.sanitizers) L.push(`- \`${sa.file}:${sa.line}\` (${sa.kind})`);
+  L.push("");
+  L.push(`## Trust boundaries (inferred)`);
+  for (const t of s.trustBoundaries) L.push(`- ${t}`);
+  L.push("");
+  L.push(`## Suggested CONTEXT.md outline`);
+  L.push(`1. **What the app does** and who its users are.`);
+  L.push(`2. **Authentication & authorization model** \u2014 who is allowed to do what, and how it's enforced.`);
+  L.push(`3. **Trust boundaries** \u2014 where untrusted data enters; what is trusted.`);
+  L.push(`4. **Framework protections already in place** \u2014 ORM parameterization, template auto-escaping, CSRF tokens, etc.`);
+  L.push(`5. **Known-safe sinks / accepted risks** \u2014 so later stages don't re-litigate them.`);
+  L.push("");
+  return L.join("\n") + "\n";
+}
+function loadContextDoc(run) {
+  const p = join12(run, "CONTEXT.md");
+  if (!existsSync7(p)) return void 0;
+  try {
+    const s = readFileSync7(p, "utf8").trim();
+    return s.length ? s : void 0;
+  } catch {
+    return void 0;
+  }
+}
+
+// src/commands/context.ts
+function runContext(args) {
+  const repo = resolve4(flagStr(args, "repo") ?? ".");
+  const out = resolve4(flagStr(args, "out") ?? ".ultrasec");
+  const scanOpts = {
+    scope: listFlag(args, "scope"),
+    include: listFlag(args, "include"),
+    exclude: listFlag(args, "exclude"),
+    maxFiles: numFlag(args, "max-files"),
+    gitignore: flagBool(args, "gitignore")
+  };
+  let scaffold;
+  try {
+    const scan = scanRepo(repo, scanOpts);
+    const surface = buildAttackSurface(scan);
+    scaffold = buildContextScaffold(repo, scan, surface);
+  } catch (e) {
+    eprintln(`ultrasec context: ${e.message}`);
+    return 2;
+  }
+  mkdirSync5(out, { recursive: true });
+  writeFileSync5(join13(out, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
+  writeFileSync5(join13(out, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out, scaffold));
+  if (flagBool(args, "json")) {
+    println(JSON.stringify(scaffold, null, 2));
+    return 0;
+  }
+  println(`ultrasec context \u2192 ${out}`);
+  println(`  ${join13(out, "CONTEXT.scaffold.json")}  \xB7  ${join13(out, "CONTEXT.todo.md")}`);
+  println(`  frameworks: ${scaffold.frameworks.join(", ") || "\u2014"}  \xB7  entry points: ${scaffold.entryPoints.length}  \xB7  auth sites: ${scaffold.authMiddleware.length}  \xB7  sanitizers: ${scaffold.sanitizers.length}`);
+  println(`  next: author ${join13(out, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` \u2014 it's injected into every dossier.`);
+  return 0;
+}
+
+// src/commands/import.ts
+import { resolve as resolve5, join as join14 } from "path";
+import { existsSync as existsSync8, readFileSync as readFileSync8 } from "fs";
 
 // src/tools/deepsec.ts
 function slugToCategory(slug) {
@@ -3117,7 +3365,7 @@ async function runImport(args) {
     eprintln("ultrasec import: need a findings file \u2014 `ultrasec import <findings.json> --run <dir>`.");
     return 2;
   }
-  const run = resolve4(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve5(flagStr(args, "run") ?? ".ultrasec");
   const format = flagStr(args, "format") ?? "deepsec-json";
   if (format !== "deepsec-json") {
     eprintln(`ultrasec import: unknown --format '${format}' (supported: deepsec-json).`);
@@ -3125,7 +3373,7 @@ async function runImport(args) {
   }
   let raw;
   try {
-    raw = readFileSync7(resolve4(file), "utf8");
+    raw = readFileSync8(resolve5(file), "utf8");
   } catch (e) {
     eprintln(`ultrasec import: cannot read ${file} (${e instanceof Error ? e.message : String(e)}).`);
     return 2;
@@ -3136,7 +3384,7 @@ async function runImport(args) {
     return 1;
   }
   let prev;
-  if (existsSync7(join12(run, "findings.json"))) {
+  if (existsSync8(join14(run, "findings.json"))) {
     try {
       prev = loadDossier(run);
     } catch (e) {
@@ -3146,7 +3394,7 @@ async function runImport(args) {
   }
   const prevFindings = prev?.findings ?? [];
   const correlated = correlate([...prevFindings, ...imported]);
-  const repo = prev?.manifest.repo ?? resolve4(flagStr(args, "repo") ?? ".");
+  const repo = prev?.manifest.repo ?? resolve5(flagStr(args, "repo") ?? ".");
   const enrichOn = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
   const { findings: enriched, note: riskNote } = await enrichFindings(correlated, { enabled: enrichOn });
   const blameOn = flagBool(args, "blame") || flagBool(args, "provenance");
@@ -3184,12 +3432,12 @@ async function runImport(args) {
 }
 
 // src/commands/dossier.ts
-import { resolve as resolve5 } from "path";
+import { resolve as resolve6 } from "path";
 
 // src/dossier.ts
-import { join as join13 } from "path";
+import { join as join15 } from "path";
 function excerpt(repo, step, ctx = 3) {
-  const lines = readText(join13(repo, step.file)).split(/\r?\n/);
+  const lines = readText(join15(repo, step.file)).split(/\r?\n/);
   const lo = Math.max(1, step.line - ctx);
   const hi = Math.min(lines.length, step.line + ctx);
   const out = [];
@@ -3199,7 +3447,7 @@ function excerpt(repo, step, ctx = 3) {
   }
   return out.join("\n");
 }
-function renderFindingDossier(repo, graph, f) {
+function renderFindingDossier(repo, graph, f, context) {
   const L = [];
   L.push(`# ${f.id} \u2014 ${f.title}`);
   L.push("");
@@ -3207,6 +3455,13 @@ function renderFindingDossier(repo, graph, f) {
   if (f.cwe) L.push(`- ${f.cwe} \u2014 ${(f.references ?? [])[0] ?? ""}`);
   L.push(`- category: ${f.category}${f.tool !== "ultrasec" ? ` \xB7 reported by ${f.tool}` : ""}`);
   L.push("");
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` \u2014 background to judge reachability/exploitability; not a verdict._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
   L.push(`## What to decide`);
   L.push(f.message);
   L.push("");
@@ -3253,7 +3508,7 @@ function renderFindingDossier(repo, graph, f) {
 
 // src/commands/dossier.ts
 function runDossier(args) {
-  const run = resolve5(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve6(flagStr(args, "run") ?? ".ultrasec");
   const id = args._[1];
   if (!id) {
     eprintln("ultrasec dossier: need a <finding-id>. List them in DOSSIER.md or with `paths`.");
@@ -3272,14 +3527,14 @@ function runDossier(args) {
     return 2;
   }
   const repo = flagStr(args, "repo") ?? d.manifest.repo;
-  println(renderFindingDossier(repo, d.graph, f));
+  println(renderFindingDossier(repo, d.graph, f, loadContextDoc(run)));
   return 0;
 }
 
 // src/commands/paths.ts
-import { resolve as resolve6 } from "path";
+import { resolve as resolve7 } from "path";
 function runPaths(args) {
-  const run = resolve6(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve7(flagStr(args, "run") ?? ".ultrasec");
   const kind = flagStr(args, "kind");
   const sev = flagStr(args, "severity");
   let d;
@@ -3308,27 +3563,27 @@ function runPaths(args) {
 }
 
 // src/commands/verify.ts
-import { join as join15, resolve as resolve8 } from "path";
+import { join as join17, resolve as resolve9 } from "path";
 
 // src/stage.ts
-import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync5, readFileSync as readFileSync8, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
-import { join as join14, resolve as resolve7 } from "path";
+import { mkdirSync as mkdirSync6, writeFileSync as writeFileSync6, readFileSync as readFileSync9, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
+import { join as join16, resolve as resolve8 } from "path";
 function stageFiles(stem) {
   return { todo: `${stem}.todo.json`, md: `${stem}.md` };
 }
 function emitWorklist(run, files, items, md) {
-  mkdirSync5(run, { recursive: true });
-  const todoPath = join14(run, files.todo);
-  writeFileSync5(todoPath, JSON.stringify(items, null, 2));
-  writeFileSync5(join14(run, files.md), md);
+  mkdirSync6(run, { recursive: true });
+  const todoPath = join16(run, files.todo);
+  writeFileSync6(todoPath, JSON.stringify(items, null, 2));
+  writeFileSync6(join16(run, files.md), md);
   return todoPath;
 }
 function collectApplyFiles(applyPath, dirRegex) {
-  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve7(s.trim()));
-  const abs = resolve7(applyPath);
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve8(s.trim()));
+  const abs = resolve8(applyPath);
   try {
     if (statSync3(abs).isDirectory()) {
-      return readdirSync2(abs).filter((n) => dirRegex.test(n)).map((n) => join14(abs, n));
+      return readdirSync2(abs).filter((n) => dirRegex.test(n)).map((n) => join16(abs, n));
     }
   } catch {
   }
@@ -3338,7 +3593,7 @@ function readApply(applyPath, dirRegex, parse) {
   const out = [];
   for (const f of collectApplyFiles(applyPath, dirRegex)) {
     try {
-      out.push(...parse(readFileSync8(f, "utf8")));
+      out.push(...parse(readFileSync9(f, "utf8")));
     } catch (e) {
       throw new Error(`${f}: ${e.message}`);
     }
@@ -3376,7 +3631,7 @@ function buildWorklist(dossier) {
 function shard(items, n, i) {
   return items.filter((_, idx) => idx % n === i);
 }
-function renderWorklistMd(items) {
+function renderWorklistMd(items, context) {
   const L = [];
   L.push(`# ultrasec verification worklist (${items.length})`);
   L.push("");
@@ -3389,6 +3644,13 @@ function renderWorklistMd(items) {
   L.push(`> Be skeptical, but do NOT dismiss a high/critical finding unless you can`);
   L.push(`> positively **refute** it. Uncertain \u21D2 leave it for a human.`);
   L.push("");
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` \u2014 the project's trust model; background, never a verdict._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
   for (const it of items) {
     L.push(`## ${it.id} \u2014 [${it.severity}] ${it.title}`);
     if (it.cwe) L.push(`- ${it.cwe} \xB7 ${it.category}`);
@@ -3452,7 +3714,7 @@ function parseVerdicts(raw) {
 
 // src/commands/verify.ts
 function runVerify(args) {
-  const run = resolve8(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve9(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3467,7 +3729,7 @@ function runVerify(args) {
   const shardIdx = Number(flagStr(args, "shard") ?? "0") || 0;
   if (shards > 1) items = shard(items, shards, shardIdx);
   const files = shards > 1 ? { todo: `VERIFY.todo.${shardIdx}.json`, md: "VERIFY.md" } : stageFiles("VERIFY");
-  const todoPath = emitWorklist(run, files, items, renderWorklistMd(buildWorklist(dossier)));
+  const todoPath = emitWorklist(run, files, items, renderWorklistMd(buildWorklist(dossier), loadContextDoc(run)));
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
@@ -3491,7 +3753,7 @@ function applyMode(run, dossier, applyPath, args) {
     println(JSON.stringify({ applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman }, null, 2));
     return 0;
   }
-  println(`ultrasec verify --apply \u2192 updated ${join15(run, "findings.json")}`);
+  println(`ultrasec verify --apply \u2192 updated ${join17(run, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
   if (res.keptForHuman.length) {
     println(`  kept for human (high-severity, only 'unsupported' \u2014 not auto-dismissed):`);
@@ -3501,22 +3763,22 @@ function applyMode(run, dossier, applyPath, args) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve10 } from "path";
+import { resolve as resolve11 } from "path";
 
 // src/check.ts
-import { existsSync as existsSync8, readFileSync as readFileSync9 } from "fs";
-import { join as join16, resolve as resolve9, sep as sep2 } from "path";
+import { existsSync as existsSync9, readFileSync as readFileSync10 } from "fs";
+import { join as join18, resolve as resolve10, sep as sep2 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve9(repo);
-  const abs = resolve9(base, file);
+  const base = resolve10(repo);
+  const abs = resolve10(base, file);
   return abs === base || abs.startsWith(base + sep2);
 }
 function lineCount(repo, file) {
   if (!insideRepo(repo, file)) return null;
-  const abs = join16(repo, file);
-  if (!existsSync8(abs)) return null;
+  const abs = join18(repo, file);
+  if (!existsSync9(abs)) return null;
   try {
-    return readFileSync9(abs, "utf8").split(/\r?\n/).length;
+    return readFileSync10(abs, "utf8").split(/\r?\n/).length;
   } catch {
     return null;
   }
@@ -3573,7 +3835,7 @@ function check(dossier, opts = {}) {
 
 // src/commands/check.ts
 function runCheck(args) {
-  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
   const minSevRaw = flagStr(args, "min-severity");
@@ -3598,8 +3860,8 @@ function runCheck(args) {
 }
 
 // src/commands/render.ts
-import { writeFileSync as writeFileSync6 } from "fs";
-import { join as join17, resolve as resolve11 } from "path";
+import { writeFileSync as writeFileSync7 } from "fs";
+import { join as join19, resolve as resolve12 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -3885,7 +4147,7 @@ function renderHtml(d) {
 
 // src/commands/render.ts
 function runRender(args) {
-  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve12(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3899,16 +4161,16 @@ function runRender(args) {
     ["FULL.md", renderFull(dossier)],
     ["index.html", renderHtml(dossier)]
   ];
-  for (const [name, body] of outputs) writeFileSync6(join17(run, name), body);
+  for (const [name, body] of outputs) writeFileSync7(join19(run, name), body);
   println(`ultrasec render \u2192 ${run}`);
-  for (const [name] of outputs) println(`  ${join17(run, name)}`);
+  for (const [name] of outputs) println(`  ${join19(run, name)}`);
   return 0;
 }
 
 // src/commands/clean.ts
 import { execFileSync as execFileSync4 } from "child_process";
-import { existsSync as existsSync9, rmSync } from "fs";
-import { resolve as resolve12 } from "path";
+import { existsSync as existsSync10, rmSync } from "fs";
+import { resolve as resolve13 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 function dockerImages() {
@@ -3931,12 +4193,12 @@ function docker(args) {
   }
 }
 function runClean(args) {
-  const run = resolve12(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve13(flagStr(args, "run") ?? ".ultrasec");
   const dry = flagBool(args, "dry-run");
   const withDocker = flagBool(args, "docker");
   const keepOutput = flagBool(args, "keep-output");
   const removed = [];
-  if (!keepOutput && existsSync9(run)) {
+  if (!keepOutput && existsSync10(run)) {
     if (!dry) rmSync(run, { recursive: true, force: true });
     removed.push(`output  ${run}`);
   }
@@ -3987,6 +4249,10 @@ COMMANDS
   map        Cheap attack-surface recon: where untrusted input enters + what sinks
              exist, with suggested scoped targets. No taint BFS, no tools, no
              network \u2014 fast on huge repos. Flags: --scope \xB7 --out \xB7 --json.
+  context    Project-context primer: emit a deterministic scaffold (frameworks,
+             entry points, auth middleware, sanitizers) + a brief; you author
+             CONTEXT.md, which is injected into every dossier + verify worklist.
+             Highest-leverage first step. Flags: --repo \xB7 --out \xB7 --scope \xB7 --json.
   scan       Scan a repo: detect stack, run available tools (correlated across
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
@@ -4034,6 +4300,8 @@ async function dispatch(cmd, args) {
       return runMap(args);
     case "scan":
       return runScan(args);
+    case "context":
+      return runContext(args);
     case "import":
       return runImport(args);
     case "dossier":
