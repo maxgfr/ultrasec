@@ -22,11 +22,6 @@ const BUDGETS: Record<string, { maxDepth: number; maxCandidates: number }> = {
 
 const REVDEP_DEPTH = 2; // how far to expand changed files to their callers for --diff
 
-// The dossier artifacts ultrasec writes into the run dir — filtered out of a --diff
-// changed-set when --out is the repo root, so a diff scan never re-scans its output.
-const DOSSIER_FILES = new Set(["manifest.json", "findings.json", "graph.json", "DOSSIER.md", "MAP.md", "attack-surface.json", "VERIFY.md", "VERIFY.todo.json", "SUMMARY.md", "REPORT.md", "FULL.md", "index.html"]);
-const isDossierArtifact = (f: string): boolean => DOSSIER_FILES.has(f) || /^VERIFY\.todo\.\d+\.json$/.test(f) || f.startsWith("cache/");
-
 // `ultrasec scan --repo <dir> [--out .ultrasec] [--json]`
 // The mechanical pass: scan → build link-graph → enumerate cross-file taint
 // candidates → run external scanners (correlated across tools) → enrich CVEs
@@ -61,18 +56,17 @@ export async function runScan(args: ParsedArgs): Promise<number> {
       eprintln(`ultrasec: --diff/--since needs a git work tree and a resolvable ref (got '${diffRef}'). Aborting — no silent full scan.`);
       return 2;
     }
-    // Drop the audit's own output from the changed set (it shows up as untracked
-    // when --out lives inside the repo) so a diff scan never re-scans its own dossier.
+    // Drop the audit's own output DIRECTORY from the changed set (it shows up as
+    // untracked when --out lives inside the repo) so a diff scan never re-scans its
+    // own dossier. We only filter by the out-dir PREFIX — never by artifact names,
+    // which could collide with real source files. When --out is the repo root we
+    // can't prefix-filter, but the dossier files are non-source and are skipped by
+    // language detection anyway, so leaving them in the changed set is harmless.
     const relOut = relative(repo, out);
-    let changed: string[];
-    if (relOut === "" || relOut === ".") {
-      // --out IS the repo root: filter the dossier's own artifact files by name.
-      changed = changedRaw.filter((f) => !isDossierArtifact(f));
-    } else if (!relOut.startsWith("..")) {
-      changed = changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/"));
-    } else {
-      changed = changedRaw; // --out lives outside the repo — nothing to filter
-    }
+    const changed =
+      relOut && relOut !== "." && !relOut.startsWith("..")
+        ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/"))
+        : changedRaw;
     let targets = changed;
     if (existsSync(join(out, "graph.json"))) {
       try {

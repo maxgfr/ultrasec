@@ -96,12 +96,16 @@ export function globToRe(pattern: string): RegExp {
       const neg = p[j] === "!" || p[j] === "^";
       if (neg) j++;
       if (p[j] === "]") j++; // a ']' right after '[' (or '[!') is a literal member
-      while (j < p.length && p[j] !== "]") j++;
+      while (j < p.length && p[j] !== "]") {
+        if (p[j] === "\\") j++; // honour an escaped char so an escaped ']' isn't the terminator
+        j++;
+      }
       if (j >= p.length) {
         re += "\\["; // no closing ']' → a literal '['
         i++;
       } else {
-        const cls = p.slice(neg ? i + 2 : i + 1, j).replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+        // De-escape members, then escape only what a regex class needs (\ and ]).
+        const cls = p.slice(neg ? i + 2 : i + 1, j).replace(/\\(.)/g, "$1").replace(/[\\\]]/g, "\\$&");
         re += neg ? `[^/${cls}]` : `[${cls}]`; // negated class still never matches '/'
         i = j + 1;
       }
@@ -111,7 +115,14 @@ export function globToRe(pattern: string): RegExp {
     }
   }
   const body = dirMatch ? re + "(?:/.*)?" : re;
-  return new RegExp("^" + body + "$");
+  // Total by construction: a malformed class (e.g. a reversed range [z-a]) must
+  // never crash a scan — fall back to matching the pattern literally, like git
+  // gracefully ignoring an invalid pattern.
+  try {
+    return new RegExp("^" + body + "$");
+  } catch {
+    return new RegExp("^" + pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$");
+  }
 }
 
 interface ScopeEntry {

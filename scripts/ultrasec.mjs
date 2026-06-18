@@ -327,12 +327,15 @@ function globToRe(pattern) {
       const neg = p[j] === "!" || p[j] === "^";
       if (neg) j++;
       if (p[j] === "]") j++;
-      while (j < p.length && p[j] !== "]") j++;
+      while (j < p.length && p[j] !== "]") {
+        if (p[j] === "\\") j++;
+        j++;
+      }
       if (j >= p.length) {
         re += "\\[";
         i++;
       } else {
-        const cls = p.slice(neg ? i + 2 : i + 1, j).replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+        const cls = p.slice(neg ? i + 2 : i + 1, j).replace(/\\(.)/g, "$1").replace(/[\\\]]/g, "\\$&");
         re += neg ? `[^/${cls}]` : `[${cls}]`;
         i = j + 1;
       }
@@ -342,7 +345,11 @@ function globToRe(pattern) {
     }
   }
   const body = dirMatch ? re + "(?:/.*)?" : re;
-  return new RegExp("^" + body + "$");
+  try {
+    return new RegExp("^" + body + "$");
+  } catch {
+    return new RegExp("^" + pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$");
+  }
 }
 function literalBase(s) {
   const clean = s.replace(/^\.\//, "").replace(/\/+$/, "");
@@ -2758,8 +2765,6 @@ var BUDGETS = {
   thorough: { maxDepth: 8, maxCandidates: 5e3 }
 };
 var REVDEP_DEPTH = 2;
-var DOSSIER_FILES = /* @__PURE__ */ new Set(["manifest.json", "findings.json", "graph.json", "DOSSIER.md", "MAP.md", "attack-surface.json", "VERIFY.md", "VERIFY.todo.json", "SUMMARY.md", "REPORT.md", "FULL.md", "index.html"]);
-var isDossierArtifact = (f) => DOSSIER_FILES.has(f) || /^VERIFY\.todo\.\d+\.json$/.test(f) || f.startsWith("cache/");
 async function runScan(args) {
   const repo = resolve3(flagStr(args, "repo") ?? ".");
   const out = resolve3(flagStr(args, "out") ?? ".ultrasec");
@@ -2782,14 +2787,7 @@ async function runScan(args) {
       return 2;
     }
     const relOut = relative2(repo, out);
-    let changed;
-    if (relOut === "" || relOut === ".") {
-      changed = changedRaw.filter((f) => !isDossierArtifact(f));
-    } else if (!relOut.startsWith("..")) {
-      changed = changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/"));
-    } else {
-      changed = changedRaw;
-    }
+    const changed = relOut && relOut !== "." && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
     if (existsSync5(join9(out, "graph.json"))) {
       try {

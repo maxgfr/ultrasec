@@ -49,6 +49,22 @@ describe("globToRe", () => {
     expect(neg.test("filea.js")).toBe(true);
     expect(neg.test("file1.js")).toBe(false);
   });
+
+  it("is TOTAL: a malformed class (reversed range) never throws", () => {
+    expect(() => globToRe("[z-a].js")).not.toThrow();
+    expect(() => globToRe("[9-0]*")).not.toThrow();
+    expect(() => globToRe("[")).not.toThrow();
+    // a valid pattern after the bad one still compiles normally
+    expect(globToRe("**/*.js").test("a/b.js")).toBe(true);
+  });
+
+  it("handles an escaped ] as a class member, not the terminator", () => {
+    const re = globToRe("[a\\]b].js");
+    expect(re.test("a.js")).toBe(true);
+    expect(re.test("].js")).toBe(true);
+    expect(re.test("b.js")).toBe(true);
+    expect(re.test("c.js")).toBe(false);
+  });
 });
 
 describe("walk (defaults, backward-compatible)", () => {
@@ -126,6 +142,17 @@ describe("gitignore", () => {
   it("unescapes a leading backslash (\\#literal ignores a file named #literal)", () => {
     const rules = parseGitignore("\\#literal\n");
     expect(rules.some((r) => r.glob === "**/#literal")).toBe(true);
+  });
+
+  it("a malformed gitignore rule does not abort the rules after it", () => {
+    const t = mkdtempSync(join(tmpdir(), "ultrasec-gibad-"));
+    writeFileSync(join(t, "a.js"), "x");
+    writeFileSync(join(t, "keep.js"), "x");
+    writeFileSync(join(t, ".gitignore"), "[z-a].x\na.js\n"); // bad rule THEN a real one
+    const rels = walk(t, { gitignore: true }).map((f) => f.rel);
+    expect(rels).not.toContain("a.js"); // the rule after the malformed one still applies
+    expect(rels).toContain("keep.js");
+    rmSync(t, { recursive: true, force: true });
   });
 
   it("honours the root .gitignore when opted in", () => {
