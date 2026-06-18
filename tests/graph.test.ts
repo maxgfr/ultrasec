@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import { scanRepo } from "../src/scan.js";
-import { buildGraph } from "../src/graph.js";
+import { buildGraph, reverseDependents, mergeGraphs, type Graph } from "../src/graph.js";
 import { neighbors } from "../src/neighbors.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
@@ -61,6 +61,50 @@ describe("buildGraph", () => {
 
   it("indexes unique exported symbol definitions", () => {
     expect(graph.symbolDefs["getUser"]).toEqual(["src/db.js"]);
+  });
+
+  it("builds a reverse call-index (callersBySymbol)", () => {
+    const callers = graph.callersBySymbol?.["getUser"];
+    expect(callers, "expected getUser to have recorded callers").toBeTruthy();
+    expect(callers!.some((c) => c.file === "src/server.js")).toBe(true);
+    // sorted by (file, line) for deterministic BFS order
+    const sorted = callers!.slice().sort((a, b) => (a.file < b.file ? -1 : a.file > b.file ? 1 : a.line - b.line));
+    expect(callers).toEqual(sorted);
+  });
+});
+
+describe("mergeGraphs (prototype-key safety)", () => {
+  // Symbol names can collide with Object.prototype members — these must be treated
+  // as data, not return inherited functions. Regression for the merge crash on a
+  // `toString`/`constructor` callee.
+  const mk = (over: Partial<Graph>): Graph => ({ files: [], edges: [], symbolDefs: {}, callersBySymbol: {}, ...over });
+
+  it("merges graphs whose symbol names are Object.prototype members", () => {
+    const a = mk({
+      files: ["a.js"],
+      symbolDefs: { toString: ["a.js"], constructor: ["a.js"] },
+      callersBySymbol: { toString: [{ file: "a.js", line: 1 }], constructor: [{ file: "a.js", line: 2 }] },
+    });
+    const b = mk({
+      files: ["b.js"],
+      symbolDefs: { toString: ["b.js"] },
+      callersBySymbol: { toString: [{ file: "b.js", line: 3 }] },
+    });
+    let merged!: Graph;
+    expect(() => (merged = mergeGraphs(a, b))).not.toThrow();
+    expect(merged.symbolDefs["toString"]).toEqual(["a.js", "b.js"]);
+    expect(merged.callersBySymbol!["toString"]!.map((r) => r.file)).toEqual(["a.js", "b.js"]);
+    expect(Array.isArray(merged.callersBySymbol!["constructor"])).toBe(true);
+  });
+});
+
+describe("reverseDependents", () => {
+  const graph = buildGraph(scanRepo(FIXTURE));
+
+  it("includes the seed and files that call into it", () => {
+    const deps = reverseDependents(graph, ["src/db.js"], 3);
+    expect(deps).toContain("src/db.js"); // seed included
+    expect(deps).toContain("src/server.js"); // server imports/calls db
   });
 });
 

@@ -3,31 +3,48 @@ import { createHash } from "node:crypto";
 // ── Tiny zero-dependency arg parser ──────────────────────────────────────────
 // Supports: positionals, `--flag value`, `--flag=value`, and boolean `--flag`.
 // A flag immediately followed by another `--token` (or nothing) is boolean.
+/** A single flag occurrence; repeated flags accumulate into an array. */
+export type FlagValue = string | boolean | (string | boolean)[];
+
 export interface ParsedArgs {
   /** Positional arguments, in order (the first is usually the sub-command). */
   _: string[];
-  /** Named flags. Boolean flags are `true`; valued flags are strings. */
-  flags: Record<string, string | boolean>;
+  /** Named flags. Boolean flags are `true`; valued flags are strings; a flag
+   *  passed more than once becomes an array of its occurrences. */
+  flags: Record<string, FlagValue>;
 }
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const _: string[] = [];
-  const flags: Record<string, string | boolean> = {};
+  // Null-prototype so a flag literally named like an Object.prototype member
+  // ("--constructor", "--toString") can't return an inherited value on lookup.
+  const flags: Record<string, FlagValue> = Object.create(null);
+  // Repeated flags accumulate (e.g. `--scope a --scope b`) instead of last-wins,
+  // so a multi-value flag is never silently narrowed.
+  const set = (key: string, val: string | boolean): void => {
+    if (Object.prototype.hasOwnProperty.call(flags, key)) {
+      const cur = flags[key]!;
+      if (Array.isArray(cur)) cur.push(val);
+      else flags[key] = [cur, val];
+    } else {
+      flags[key] = val;
+    }
+  };
   for (let i = 0; i < argv.length; i++) {
     const tok = argv[i]!;
     if (tok.startsWith("--")) {
       const body = tok.slice(2);
       const eq = body.indexOf("=");
       if (eq >= 0) {
-        flags[body.slice(0, eq)] = body.slice(eq + 1);
+        set(body.slice(0, eq), body.slice(eq + 1));
         continue;
       }
       const next = argv[i + 1];
       if (next !== undefined && !next.startsWith("--")) {
-        flags[body] = next;
+        set(body, next);
         i++;
       } else {
-        flags[body] = true;
+        set(body, true);
       }
     } else {
       _.push(tok);
@@ -36,16 +53,47 @@ export function parseArgs(argv: string[]): ParsedArgs {
   return { _, flags };
 }
 
-/** Read a flag as a string, or `undefined` if absent / boolean-only. */
+/** Read a flag as a string, or `undefined` if absent / boolean-only. For a repeated
+ *  flag, the LAST string occurrence wins (conventional single-value semantics). */
 export function flagStr(args: ParsedArgs, name: string): string | undefined {
   const v = args.flags[name];
+  if (Array.isArray(v)) {
+    for (let i = v.length - 1; i >= 0; i--) if (typeof v[i] === "string") return v[i] as string;
+    return undefined;
+  }
   return typeof v === "string" ? v : undefined;
 }
 
 /** Read a flag as a boolean (presence, or `--flag=true`). */
 export function flagBool(args: ParsedArgs, name: string): boolean {
   const v = args.flags[name];
+  if (Array.isArray(v)) return v.some((x) => x === true || x === "true");
   return v === true || v === "true";
+}
+
+/** Read a flag as a trimmed string list — merges every occurrence of the flag AND
+ *  the comma-separated form (so `--scope a --scope b` and `--scope a,b` both work). */
+export function listFlag(args: ParsedArgs, name: string): string[] | undefined {
+  const v = args.flags[name];
+  if (v === undefined) return undefined;
+  const raw = Array.isArray(v) ? v : [v];
+  const parts = raw.flatMap((x) => (typeof x === "string" ? x.split(",") : [])).map((s) => s.trim()).filter(Boolean);
+  return parts.length ? parts : undefined;
+}
+
+/** Read a flag as a finite number (or `undefined` if absent / unparseable). */
+export function numFlag(args: ParsedArgs, name: string): number | undefined {
+  const v = flagStr(args, name);
+  if (v === undefined) return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/** Prototype-safe lookup on a string-keyed record: returns the value only if it is
+ *  an OWN property, so a key equal to an Object.prototype member ("constructor",
+ *  "toString", "valueOf", …) can never return an inherited function. */
+export function own<T>(obj: Record<string, T> | null | undefined, key: string): T | undefined {
+  return obj != null && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
 }
 
 /** Short, stable content hash for deriving idempotent ids. */

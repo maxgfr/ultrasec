@@ -6,12 +6,16 @@ import { normalizeSeverity } from "./normalize.js";
 // the standard base score so we can bucket it. Implements the CVSS v3.1 spec
 // formula (also correct for v3.0 in practice).
 
-const AV: Record<string, number> = { N: 0.85, A: 0.62, L: 0.55, P: 0.2 };
-const AC: Record<string, number> = { L: 0.77, H: 0.44 };
-const UI: Record<string, number> = { N: 0.85, R: 0.62 };
-const CIA: Record<string, number> = { H: 0.56, L: 0.22, N: 0 };
-const PR_U: Record<string, number> = { N: 0.85, L: 0.62, H: 0.27 };
-const PR_C: Record<string, number> = { N: 0.85, L: 0.68, H: 0.5 };
+// Null-prototype tables: a CVSS metric value from a tool-supplied vector could be
+// an Object.prototype member name ("constructor"…); a plain object would return an
+// inherited function and defeat the `=== undefined` validity check below.
+const nullObj = <T>(o: Record<string, T>): Record<string, T> => Object.assign(Object.create(null) as Record<string, T>, o);
+const AV = nullObj({ N: 0.85, A: 0.62, L: 0.55, P: 0.2 });
+const AC = nullObj({ L: 0.77, H: 0.44 });
+const UI = nullObj({ N: 0.85, R: 0.62 });
+const CIA = nullObj({ H: 0.56, L: 0.22, N: 0 });
+const PR_U = nullObj({ N: 0.85, L: 0.62, H: 0.27 });
+const PR_C = nullObj({ N: 0.85, L: 0.68, H: 0.5 });
 
 function roundup(x: number): number {
   return Math.ceil(x * 10) / 10;

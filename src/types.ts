@@ -2,7 +2,9 @@
 // rewrites this string at release time (kept in lockstep with package.json and
 // SKILL.md). SCHEMA_VERSION bumps when the on-disk audit-dossier format changes.
 export const VERSION = "1.3.0";
-export const SCHEMA_VERSION = 1;
+// 2: graph.json gained `callersBySymbol` (reverse call-index); manifest gained
+// optional `truncation`/`scopes` (large-repo scaling). Older dossiers omit them.
+export const SCHEMA_VERSION = 2;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -119,4 +121,15 @@ export interface Manifest {
   languages: string[];
   toolsRun: string[];
   counts: { findings: number; bySeverity: Record<Severity, number> };
+  /** Coverage truncation — surfaced so a capped run is never mistaken for a full one. */
+  truncation?: {
+    /** Taint candidates dropped by `--max-candidates` (0 = none dropped). */
+    candidates: number;
+    /** Total taint candidates enumerated before the cap. */
+    total: number;
+    /** True when the file walk hit `--max-files` (some files were not scanned). */
+    files?: boolean;
+  };
+  /** Every scope/diff that has contributed to this (possibly merged) run. */
+  scopes?: string[];
 }

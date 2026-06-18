@@ -7,8 +7,23 @@ import { findSinks, findSources, findSanitizers, cweUrl, type SinkHit, type Sour
 import { shortHash, byStr } from "./util.js";
 import { SEVERITIES, type Finding, type PathStep, type Severity } from "./types.js";
 
-const MAX_DEPTH = 6; // call-graph hops walked back from a sink
-const MAX_FINDINGS = 1000;
+const DEFAULT_MAX_DEPTH = 6; // call-graph hops walked back from a sink
+const DEFAULT_MAX_CANDIDATES = 1000;
+
+export interface TaintOptions {
+  /** Call-graph hops walked back from each sink (default 6). */
+  maxDepth?: number;
+  /** Keep at most this many ranked candidates (default 1000). Excess is reported, not dropped silently. */
+  maxCandidates?: number;
+}
+
+export interface TaintResult {
+  findings: Finding[];
+  /** Candidates dropped by `maxCandidates` (0 = none). */
+  truncated: number;
+  /** Total candidates enumerated before the cap. */
+  total: number;
+}
 
 function severityRank(s: Severity): number {
   return SEVERITIES.indexOf(s); // 0 = critical … 4 = info
@@ -34,7 +49,9 @@ function truncate(s: string, n = 60): string {
  * for the AI to adjudicate (it is the AI that confirms reachability/exploitability
  * and raises confidence via the verify gate).
  */
-export function enumerateTaint(scan: RepoScan, graph: Graph): Finding[] {
+export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions = {}): TaintResult {
+  const MAX_DEPTH = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
+  const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
   const byRel = new Map(scan.files.map((f) => [f.rel, f]));
   const contentCache = new Map<string, string>();
   const sourceCache = new Map<string, SourceHit[]>();
@@ -107,7 +124,6 @@ export function enumerateTaint(scan: RepoScan, graph: Graph): Finding[] {
   };
 
   for (const file of scan.files) {
-    if (findings.length >= MAX_FINDINGS) break;
     const lang = langForFile(file.rel);
     if (!lang) continue;
 
@@ -141,24 +157,42 @@ export function enumerateTaint(scan: RepoScan, graph: Graph): Finding[] {
         // from this file. (We don't require it to be the *only* definition — a
         // name shared across files shouldn't silently drop a real taint path;
         // recall-oriented, the AI adjudicates.)
+        // Array.isArray guards: symbol names can collide with Object.prototype
+        // members ("toString", "constructor", …), so plain-object lookups by name
+        // may return inherited functions instead of undefined.
         const defs = graph.symbolDefs[fr.sym];
-        if (!defs || !defs.includes(fr.file)) continue;
+        if (!Array.isArray(defs) || !defs.includes(fr.file)) continue;
 
-        for (const caller of scan.files) {
-          if (caller.rel === fr.file) continue;
-          for (const c of caller.calls) {
-            if (c.callee !== fr.sym) continue;
-            const callerSym = enclosingSymbol(caller, c.line);
-            const key = `${caller.rel}#${callerSym ?? c.line}`;
-            if (visited.has(key)) continue;
-            visited.add(key);
-            const hop: PathStep = { file: caller.rel, line: c.line, symbol: callerSym, why: `calls ${fr.sym}()` };
-            queue.push({ file: caller.rel, sym: callerSym, entryLine: c.line, hops: [hop, ...fr.hops], depth: fr.depth + 1 });
-          }
+        // Step back to callers via the precomputed reverse index — O(callers),
+        // not O(files) per frame. The index is pre-sorted by (file, line), so the
+        // BFS visits callers in exactly the order the old double loop did.
+        const callerList = graph.callersBySymbol?.[fr.sym];
+        for (const caller of Array.isArray(callerList) ? callerList : []) {
+          if (caller.file === fr.file) continue;
+          const key = `${caller.file}#${caller.symbol ?? caller.line}`;
+          if (visited.has(key)) continue;
+          visited.add(key);
+          const hop: PathStep = { file: caller.file, line: caller.line, symbol: caller.symbol, why: `calls ${fr.sym}()` };
+          queue.push({ file: caller.file, sym: caller.symbol, entryLine: caller.line, hops: [hop, ...fr.hops], depth: fr.depth + 1 });
         }
       }
     }
   }
 
-  return findings.sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || byStr(a.id, b.id));
+  // Rank, THEN cap — so the kept candidates are the important ones (not whatever
+  // happened to be enumerated first in alphabetical file order). Proximity = path
+  // length: fewer source→sink hops is closer to the attack surface, hence riskier.
+  const crossFile = (f: Finding): number => (f.path && new Set(f.path.map((p) => p.file)).size > 1 ? 1 : 0);
+  const proximity = (f: Finding): number => (f.path ? f.path.length : Number.MAX_SAFE_INTEGER);
+  findings.sort(
+    (a, b) =>
+      severityRank(a.severity) - severityRank(b.severity) ||
+      proximity(a) - proximity(b) ||
+      crossFile(b) - crossFile(a) ||
+      byStr(a.id, b.id),
+  );
+
+  const total = findings.length;
+  const kept = total > maxCandidates ? findings.slice(0, maxCandidates) : findings;
+  return { findings: kept, truncated: total - kept.length, total };
 }

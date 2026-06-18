@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import type { Graph } from "./graph.js";
+import { mergeGraphs, type Graph } from "./graph.js";
+import { byStr } from "./util.js";
 import { SEVERITIES, type Finding, type Manifest, type Severity } from "./types.js";
 
 // The on-disk audit dossier — the hand-off between the deterministic engine and
@@ -27,6 +28,69 @@ export function writeDossier(outDir: string, d: Dossier): void {
   writeFileSync(join(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
   writeFileSync(join(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
   writeFileSync(join(outDir, "DOSSIER.md"), renderDossierMd(d));
+}
+
+/**
+ * Fold a scoped/incremental pass (`next`) into an existing run (`prev`).
+ *  - findings already adjudicated in `prev` (status ≠ open) keep their lifecycle
+ *    (status/verdict/exploitPath/confidence/edited message) but refresh their
+ *    deterministic fields from `next`;
+ *  - genuinely new findings are appended;
+ *  - findings only in `prev` (outside this pass's scope) are KEPT — a scoped
+ *    re-scan must never delete what it didn't look at.
+ * Idempotent and order-independent (findings keyed by content-hash id).
+ */
+export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
+  const byId = new Map<string, Finding>();
+  for (const f of prev.findings) byId.set(f.id, f);
+  for (const f of next.findings) {
+    const old = byId.get(f.id);
+    if (old && old.status !== "open") {
+      // preserve adjudication; keep `next`'s deterministic fields (severity/path/risk).
+      byId.set(f.id, {
+        ...f,
+        status: old.status,
+        verdict: old.verdict,
+        exploitPath: old.exploitPath,
+        confidence: old.confidence,
+        message: old.message,
+      });
+    } else {
+      byId.set(f.id, f);
+    }
+  }
+  const findings = [...byId.values()].sort((a, b) => byStr(a.id, b.id));
+
+  const graph = mergeGraphs(prev.graph, next.graph);
+
+  const scopes = [...new Set([...(prev.manifest.scopes ?? []), ...(next.manifest.scopes ?? [])])].sort(byStr);
+  // Truncation reflects what the MERGED dossier still omits:
+  //  - a SCOPED pass (next has scopes) only re-covered part of the repo, so prev's
+  //    cap still applies to the rest → carry it forward (union);
+  //  - a FULL re-scan (no scopes) is authoritative for the whole repo, so its own
+  //    truncation wins — a complete, uncapped pass CLEARS a stale prior cap.
+  const pt = prev.manifest.truncation;
+  const nt = next.manifest.truncation;
+  const nextScoped = !!(next.manifest.scopes && next.manifest.scopes.length);
+  const truncation = nextScoped
+    ? pt || nt
+      ? {
+          candidates: Math.max(pt?.candidates ?? 0, nt?.candidates ?? 0),
+          total: Math.max(pt?.total ?? 0, nt?.total ?? 0),
+          ...(pt?.files || nt?.files ? { files: true as const } : {}),
+        }
+      : undefined
+    : nt;
+  const manifest: Manifest = {
+    ...next.manifest,
+    languages: [...new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
+    toolsRun: [...new Set([...prev.manifest.toolsRun, ...next.manifest.toolsRun])].sort(),
+    counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
+    ...(truncation ? { truncation } : { truncation: undefined }),
+    ...(scopes.length ? { scopes } : {}),
+  };
+
+  return { manifest, findings, graph };
 }
 
 export function loadDossier(outDir: string): Dossier {
@@ -59,6 +123,21 @@ export function renderDossierMd(d: Dossier): string {
   L.push(`> record a verdict via \`ultrasec verify\`. An uncertain high-severity stays`);
   L.push(`> **needs-human** — never silently dropped.`);
   L.push("");
+
+  if (m.truncation?.candidates) {
+    // Report the OMITTED count (accurate to what the cap dropped) rather than a
+    // "shown = total − candidates" that can drift from the merged finding set.
+    L.push(`> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** taint candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
+    L.push("");
+  }
+  if (m.truncation?.files) {
+    L.push(`> ⚠️ **Partial walk:** the file walk hit \`--max-files\` — some files were **not scanned**. Raise \`--max-files\` or narrow \`--scope\`.`);
+    L.push("");
+  }
+  if (m.scopes && m.scopes.length) {
+    L.push(`> 🔎 **Scoped run** — only these paths were analysed: ${m.scopes.map((s) => `\`${s}\``).join(", ")}. Findings outside this scope are not represented.`);
+    L.push("");
+  }
 
   if (!findings.length) {
     L.push(`_No candidate findings._`);

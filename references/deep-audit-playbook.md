@@ -25,8 +25,15 @@ an **optimization, not a requirement**:
 
 ## The loop
 
+0. **(Huge repo?) Map first.** If the repo is too big to scan whole, run
+   `map --repo <dir> --out <run>` for a cheap attack-surface recon and drill in
+   target-by-target with `scan --scope <dir> --merge` — see
+   [scale-audit-playbook.md](scale-audit-playbook.md). Otherwise continue:
+
 1. **Scan once.** `scan --repo <dir> --out <run> --tools auto`. This builds the
    shared link-graph + the candidate dossier + the tool findings everyone reuses.
+   `map` first (even when scanning whole) is a fast way to see the entry-point and
+   sink clusters before decomposing.
 
 2. **Decompose** into facets — two complementary axes:
    - **By vulnerability class**: SQLi, command/code injection, path traversal,

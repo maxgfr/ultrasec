@@ -2,6 +2,7 @@ import { VERSION } from "./types.js";
 import { parseArgs, flagBool, println, eprintln, type ParsedArgs } from "./util.js";
 import { runTools } from "./commands/tools.js";
 import { runGraph } from "./commands/graph.js";
+import { runMap } from "./commands/map.js";
 import { runScan } from "./commands/scan.js";
 import { runDossier } from "./commands/dossier.js";
 import { runPaths } from "./commands/paths.js";
@@ -21,10 +22,16 @@ USAGE
   ultrasec <command> [options]
 
 COMMANDS
+  map        Cheap attack-surface recon: where untrusted input enters + what sinks
+             exist, with suggested scoped targets. No taint BFS, no tools, no
+             network — fast on huge repos. Flags: --scope · --out · --json.
   scan       Scan a repo: detect stack, run available tools (correlated across
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
-             Flags: --tools auto|none|a,b · --docker · --no-enrich/--offline.
+             Flags: --tools auto|none|a,b · --docker · --no-enrich/--offline ·
+             --scope/--include/--exclude/--max-files/--gitignore (focus) ·
+             --budget quick|standard|thorough · --max-candidates · --max-depth ·
+             --diff <ref>/--since <commit> · --merge · --resume (incremental).
   tools      List known external scanners, which are installed, and how to get them.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source→sink chains.
@@ -57,6 +64,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runTools(args);
     case "graph":
       return runGraph(args);
+    case "map":
+      return runMap(args);
     case "scan":
       return runScan(args);
     case "dossier":
