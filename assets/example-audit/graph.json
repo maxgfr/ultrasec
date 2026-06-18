@@ -60,5 +60,117 @@
     "query": [
       "src/sqlite.js"
     ]
+  },
+  "callersBySymbol": {
+    "VULN": [
+      {
+        "file": "src/server.js",
+        "line": 7
+      },
+      {
+        "file": "src/server.js",
+        "line": 15
+      }
+    ],
+    "execSync": [
+      {
+        "file": "src/report.js",
+        "line": 5,
+        "symbol": "runReport"
+      }
+    ],
+    "express": [
+      {
+        "file": "src/server.js",
+        "line": 5
+      }
+    ],
+    "get": [
+      {
+        "file": "src/server.js",
+        "line": 9
+      },
+      {
+        "file": "src/server.js",
+        "line": 17
+      }
+    ],
+    "getUser": [
+      {
+        "file": "src/server.js",
+        "line": 11
+      }
+    ],
+    "json": [
+      {
+        "file": "src/server.js",
+        "line": 12
+      }
+    ],
+    "listen": [
+      {
+        "file": "src/server.js",
+        "line": 23
+      }
+    ],
+    "query": [
+      {
+        "file": "src/db.js",
+        "line": 6,
+        "symbol": "getUser"
+      },
+      {
+        "file": "src/db.js",
+        "line": 11,
+        "symbol": "getUserSafe"
+      }
+    ],
+    "require": [
+      {
+        "file": "src/db.js",
+        "line": 1
+      },
+      {
+        "file": "src/report.js",
+        "line": 1
+      },
+      {
+        "file": "src/server.js",
+        "line": 1
+      },
+      {
+        "file": "src/server.js",
+        "line": 2
+      },
+      {
+        "file": "src/server.js",
+        "line": 3
+      }
+    ],
+    "runReport": [
+      {
+        "file": "src/server.js",
+        "line": 19
+      }
+    ],
+    "send": [
+      {
+        "file": "src/server.js",
+        "line": 20
+      }
+    ],
+    "sink": [
+      {
+        "file": "src/report.js",
+        "line": 3
+      }
+    ],
+    "toString": [
+      {
+        "file": "src/report.js",
+        "line": 5,
+        "symbol": "runReport"
+      }
+    ]
   }
 }

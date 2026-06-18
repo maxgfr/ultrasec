@@ -58,14 +58,26 @@ External scanners are optional and auto-detected (see [Docker](#analysis-tools-v
 
 ```bash
 node scripts/ultrasec.mjs tools                       # installed scanners + how to get the rest
-node scripts/ultrasec.mjs map --repo .                # cheap attack-surface recon (no taint/tools/network)
+node scripts/ultrasec.mjs context --repo . --out .ultrasec   # project-context primer → author CONTEXT.md
 node scripts/ultrasec.mjs scan --repo . --out .ultrasec   # graph + cross-file taint + tools → dossier
-node scripts/ultrasec.mjs paths --run .ultrasec       # the candidate source→sink chains
+node scripts/ultrasec.mjs triage --run .ultrasec      # cheap noise/keep fast-lane (apply: --apply TRIAGE.json)
 node scripts/ultrasec.mjs dossier <id> --run .ultrasec    # one finding's real code + path (adjudicate)
+node scripts/ultrasec.mjs investigate --run .ultrasec     # hunt authz/business-logic; ingest grounded Discovery[]
 node scripts/ultrasec.mjs verify --run .ultrasec      # adversarial worklist → write verdicts.json
 node scripts/ultrasec.mjs verify --apply verdicts.json --run .ultrasec
+node scripts/ultrasec.mjs revalidate --run .ultrasec  # git-history false-positive cut (apply: REVALIDATE.json)
 node scripts/ultrasec.mjs check --run .ultrasec --semantic   # exit gate: grounded + adjudicated
-node scripts/ultrasec.mjs render --run .ultrasec      # SUMMARY/REPORT/FULL.md + index.html
+node scripts/ultrasec.mjs narrative --run .ultrasec   # author NARRATIVE.json (exec summary, fixes, chains)
+node scripts/ultrasec.mjs render --run .ultrasec --narrative NARRATIVE.json   # SUMMARY/REPORT/FULL.md + index.html
+```
+
+`context`, `triage`, `investigate`, `revalidate`, `narrative` are additive — a quick
+audit can skip them. To sequence the whole pipeline (and, opt-in, drive your own agent
+CLI to fill the worklists), use `run`:
+
+```bash
+node scripts/ultrasec.mjs run --repo . --out .ultrasec    # emits every worklist + a TODO; ZERO external calls
+node scripts/ultrasec.mjs run --repo . --powered --agent claude --cross-check codex   # autonomous (keys live in the CLI)
 ```
 
 Nothing external is required — the link-graph and taint reasoning are the
@@ -122,7 +134,12 @@ node scripts/ultrasec.mjs import findings.json --run .ultrasec    # ingest a dee
   the unified model, correlates it against the engine/scanner findings, risk-ranks it, and
   runs it through the same `[file:line]` grounding gate and conservative verify flow — making
   ultrasec the deterministic referee over deepsec's non-deterministic agent output. No keys,
-  no Vercel, no deepsec process spawned by ultrasec.
+  no Vercel, no deepsec process spawned by ultrasec. Correlation goes deeper than dedup: a
+  deepsec hit whose `file:line` lands on a node of an engine **taint path** corroborates that
+  flow in place (its `sources` gains `deepsec`, confidence bumps, the path is untouched), and
+  deepsec's revalidation reasoning/verdict is carried as a clearly-labelled **`priorAnalysis`
+  signal** (shown in the dossier + verify worklist, but it never changes a status — your
+  verify gate does).
 
 ## Analysis tools via Docker
 

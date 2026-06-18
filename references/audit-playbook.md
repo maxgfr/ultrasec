@@ -3,6 +3,15 @@
 The everyday workflow: narrow the repo to a handful of evidence-backed
 candidates, adjudicate each from the real code, gate, and report.
 
+> **Optional AI stages (all additive).** Before scanning, `context` lets you author
+> a `CONTEXT.md` (trust model + framework protections) that every later stage reasons
+> with. After scanning you can `triage` (cheap noise/keep fast-lane) and `investigate`
+> (hunt authz/business-logic bugs the engine can't enumerate). After verify, `revalidate`
+> cuts false positives against git history; `render --narrative` adds an AI-authored
+> executive summary + fixes. `run` sequences them all (and, opt-in, drives an agent CLI).
+> Playbooks: [revalidate](revalidate-playbook.md) · [investigate](investigate-playbook.md)
+> · [powered mode](powered-mode.md). A quick audit can skip all of these.
+
 ## 1. (Optional) install scanners
 
 ```
@@ -42,6 +51,17 @@ Then look for what taint enumeration can't: **broken access control / IDOR,
 missing authorization, business-logic abuse, weak crypto, unsafe config**. Add
 them as findings with `[file:line]` citations (edit `findings.json`, or note them
 for the report).
+
+## 3b. (Optional) revalidate against git history
+
+```
+node scripts/ultrasec.mjs revalidate --run .ultrasec        # git facts per confirmed/needs-human finding
+node scripts/ultrasec.mjs revalidate --apply REVALIDATE.json --run .ultrasec
+```
+
+Cuts false positives by re-checking each promoted finding against HEAD (does the
+cited line still exist? was it fixed?). `fixed`→dismissed (+ fixing commit); a
+high/critical `false-positive`→needs-human. See [revalidate-playbook.md](revalidate-playbook.md).
 
 ## 4. Verify and gate
 

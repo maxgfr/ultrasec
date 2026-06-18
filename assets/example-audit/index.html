@@ -24,12 +24,22 @@
   .exploit { background:#fef2f2; border-left:3px solid #b91c1c; padding:6px 10px; border-radius:4px; }
   @media (prefers-color-scheme: dark){ .exploit{ background:#1f1315; } }
   .refs { font-size:12px; color:#6b7280; word-break:break-all; }
+  .risk { margin:6px 0 4px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
+  .kv { font-size:12px; font-weight:600; color:#6b7280; }
   details { margin-top:18px; }
+  .ai-narrative { border:1px solid #6d28d9; background:#faf5ff; border-radius:10px; padding:10px 16px; margin:14px 0; }
+  @media (prefers-color-scheme: dark){ .ai-narrative{ background:#1e1b2e; border-color:#7c3aed; } .ai-fix{ background:#1e1b2e; } }
+  .ai-tag { background:#6d28d9; color:#fff; font-size:11px; padding:1px 6px; border-radius:8px; vertical-align:middle; }
+  .ai-note { color:#6b7280; font-size:12px; font-style:italic; margin:2px 0 8px; }
+  .ai-fix { border-left:3px solid #6d28d9; background:#faf5ff; padding:6px 10px; border-radius:4px; margin:8px 0; }
+  .ai-patch { background:#0b0f17; color:#e5e7eb; padding:8px; border-radius:6px; overflow:auto; font-size:12px; }
+  .ai-block { margin:8px 0; }
 </style></head>
 <body>
   <h1>Security audit</h1>
   <div class="sub">repo <code>examples/vuln-express</code> · ultrasec 0.0.0-development · tools: none</div>
   <div><span class="badge" style="background:#b91c1c">critical 1</span> <span class="badge" style="background:#c2410c">high 1</span> <span class="badge" style="background:#b45309">medium 1</span> <span class="badge" style="background:#15803d">low 0</span> <span class="badge" style="background:#64748b">info 0</span></div>
+  <section class="ai-narrative"><h2>Executive summary <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p>Two confirmed injection vulnerabilities in a public Express API: untrusted req.query values reach a raw SQL query and a shell command across files, with no validation. Both are directly exploitable by any client.</p></section>
   
   <section class="finding" id="3ffa0917b004">
     <h3><span class="badge" style="background:#b91c1c">CRITICAL</span> OS command injection: untrusted input reaches execSync()</h3>
@@ -41,11 +51,13 @@
       · verdict supported
       
     </div>
+    <div class="risk"><span class="badge" style="background:#b45309">risk 60</span></div>
     <div class="flow"><div class="node source"><div class="loc">src/server.js:18</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node hop"><div class="loc">src/server.js:19</div><div class="why">calls runReport()</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/report.js:5</div><div class="sym">runReport()</div><div class="why">command sink: execSync()</div></div></div>
     <p class="msg">Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
-Verdict (supported): req.query.name flows into execSync shell string in report.runReport</p>
-    <p class="exploit"><strong>Exploit path:</strong> GET /report?name=x;id</p>
+Revalidation (still-valid): still present at HEAD</p>
+    <p class="exploit"><strong>Exploit path:</strong> GET /report?name=$(id)</p>
+    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Use execFile with an argv array; never build a shell string from input. · owner @backend</div>
     <p class="refs"><a href="https://cwe.mitre.org/data/definitions/78.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/78.html</a></p>
   </section>
 
@@ -59,29 +71,36 @@ Verdict (supported): req.query.name flows into execSync shell string in report.r
       · verdict supported
       
     </div>
+    <div class="risk"><span class="badge" style="background:#b45309">risk 48</span></div>
     <div class="flow"><div class="node source"><div class="loc">src/server.js:10</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node hop"><div class="loc">src/server.js:11</div><div class="why">calls getUser()</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/db.js:6</div><div class="sym">getUser()</div><div class="why">sql sink: query()</div></div></div>
     <p class="msg">Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
-Verdict (supported): req.query.id concatenated into SQL across files; getUser builds a raw query</p>
-    <p class="exploit"><strong>Exploit path:</strong> GET /user?id=1 OR 1=1 -- </p>
+Revalidation (still-valid): still present at HEAD</p>
+    <p class="exploit"><strong>Exploit path:</strong> GET /user?id=1 OR 1=1</p>
+    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Use a parameterized query (placeholders), never string concatenation. · owner @backend</div>
     <p class="refs"><a href="https://cwe.mitre.org/data/definitions/89.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/89.html</a></p>
   </section>
-  <details><summary>1 dismissed candidate(s)</summary>
+
   <section class="finding" id="9b0bcc91ea6a">
     <h3><span class="badge" style="background:#b45309">MEDIUM</span> Cross-site scripting (reflected): untrusted input reaches send()</h3>
     <div class="meta">
       <code>9b0bcc91ea6a</code>
       · CWE-79 · taint
-      · status <span class="badge" style="background:#64748b">dismissed</span>
-      · confidence low
-      · verdict refuted
+      · status <span class="badge" style="background:#b91c1c">confirmed</span>
+      · confidence high
+      · verdict supported
       
     </div>
+    <div class="risk"><span class="badge" style="background:#475569">risk 30</span></div>
     <div class="flow"><div class="node source"><div class="loc">src/server.js:18</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/server.js:20</div><div class="why">xss sink: send()</div></div></div>
     <p class="msg">Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
-Verdict (refuted): res.send echoes server-generated report text, not attacker HTML in a browser-executable context</p>
-    
+Revalidation (still-valid): still present at HEAD</p>
+    <p class="exploit"><strong>Exploit path:</strong> GET /report?name=$(id)</p>
+    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Use execFile with an argv array; never build a shell string from input. · owner @backend</div>
     <p class="refs"><a href="https://cwe.mitre.org/data/definitions/79.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/79.html</a></p>
-  </section></details>
+  </section>
+  
+  <section class="ai-narrative"><h2>Attack chains <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="ai-block"><h3>Unauthenticated SQL injection via /user</h3><div class="meta"><code>54b733703450</code></div><p>GET /user?id=... flows req.query.id across server.js into a string-concatenated SQL query in db.getUser.</p></div></section>
+  <section class="ai-narrative"><h2>Root-cause groups <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="ai-block"><h3>Untrusted request input concatenated into interpreters</h3><div class="meta"><code>3ffa0917b004</code>, <code>54b733703450</code>, <code>9b0bcc91ea6a</code></div><p>Centralize input handling: parameterized queries + argv-array exec, plus an input-validation layer.</p></div></section>
 </body></html>

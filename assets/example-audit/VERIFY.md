@@ -9,6 +9,25 @@ the flow is **real and exploitable**, and set a verdict:
 > Be skeptical, but do NOT dismiss a high/critical finding unless you can
 > positively **refute** it. Uncertain ⇒ leave it for a human.
 
+## Project context
+_From `CONTEXT.md` — the project's trust model; background, never a verdict._
+
+# Project context — vuln-express
+
+A tiny Express HTTP API (demo). Two GET routes under `/`:
+- `GET /user?id=` — looks a user up by id.
+- `GET /report?name=` — runs a named report.
+
+**Trust model.** Every request is untrusted: `req.query.*` is attacker-controlled.
+There is **no authentication or authorization** — all routes are public by design
+for the demo, so the risk is purely injection, not access control.
+
+**Framework protections.** None configured. No ORM (raw SQL strings), no input
+validation middleware, no output encoding. Treat every `req.query` value as hostile.
+
+**Known-safe.** `db.getUserSafe` uses a parameterized query (`?` placeholder) and is
+NOT exploitable — do not flag it.
+
 ## 3ffa0917b004 — [critical] OS command injection: untrusted input reaches execSync()
 - CWE-78 · taint
 - files: `src/server.js:18`, `src/server.js:19`, `src/report.js:5`

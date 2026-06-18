@@ -35,14 +35,15 @@
         "why": "command sink: execSync()"
       }
     ],
-    "message": "Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nVerdict (supported): req.query.name flows into execSync shell string in report.runReport",
+    "message": "Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nRevalidation (still-valid): still present at HEAD",
     "tool": "ultrasec",
     "references": [
       "https://cwe.mitre.org/data/definitions/78.html"
     ],
     "status": "confirmed",
+    "risk": 60,
     "verdict": "supported",
-    "exploitPath": "GET /report?name=x;id"
+    "exploitPath": "GET /report?name=$(id)"
   },
   {
     "id": "54b733703450",
@@ -80,14 +81,15 @@
         "why": "sql sink: query()"
       }
     ],
-    "message": "Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nVerdict (supported): req.query.id concatenated into SQL across files; getUser builds a raw query",
+    "message": "Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nRevalidation (still-valid): still present at HEAD",
     "tool": "ultrasec",
     "references": [
       "https://cwe.mitre.org/data/definitions/89.html"
     ],
     "status": "confirmed",
+    "risk": 48,
     "verdict": "supported",
-    "exploitPath": "GET /user?id=1 OR 1=1 -- "
+    "exploitPath": "GET /user?id=1 OR 1=1"
   },
   {
     "id": "9b0bcc91ea6a",
@@ -95,7 +97,7 @@
     "cwe": "CWE-79",
     "title": "Cross-site scripting (reflected): untrusted input reaches send()",
     "severity": "medium",
-    "confidence": "low",
+    "confidence": "high",
     "source": {
       "file": "src/server.js",
       "line": 18,
@@ -118,12 +120,14 @@
         "why": "xss sink: send()"
       }
     ],
-    "message": "Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nVerdict (refuted): res.send echoes server-generated report text, not attacker HTML in a browser-executable context",
+    "message": "Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nRevalidation (still-valid): still present at HEAD",
     "tool": "ultrasec",
     "references": [
       "https://cwe.mitre.org/data/definitions/79.html"
     ],
-    "status": "dismissed",
-    "verdict": "refuted"
+    "status": "confirmed",
+    "risk": 30,
+    "verdict": "supported",
+    "exploitPath": "GET /report?name=$(id)"
   }
 ]
