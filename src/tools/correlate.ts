@@ -88,6 +88,14 @@ function mergeCluster(group: Finding[]): Finding {
   return out;
 }
 
+/** Two findings name the same vuln class only when BOTH carry a CWE and they
+ *  match (case-insensitive). Absent or differing CWE ⇒ not corroboration: a
+ *  standalone finding that merely shares a line with a taint node must NOT fold
+ *  into it (that silently destroys a distinct finding + misattributes its verdict). */
+function sameCwe(a: string | undefined, b: string | undefined): boolean {
+  return !!a && !!b && a.trim().toUpperCase() === b.trim().toUpperCase();
+}
+
 /** Every distinct file:line a taint finding touches (source, hops, sink). */
 function taintNodes(f: Finding): Set<string> {
   const locs = new Set<string>();
@@ -155,16 +163,22 @@ export function correlate(findings: Finding[]): Finding[] {
   for (const f of corr) {
     const where = f.sink ? `${f.sink.file}:${f.sink.line}` : null;
     const hits = where ? nodesByLoc.get(where) : undefined;
+    let corroborated = false;
     if (hits && hits.length) {
       for (const idx of hits) {
+        // Co-location is NOT enough: only fold when the standalone is plausibly the
+        // SAME vuln class as the taint finding (matching CWE). Otherwise a distinct
+        // finding sitting on a shared source/hop/sink line would be silently consumed.
+        if (!sameCwe(f.cwe, taint[idx]!.cwe)) continue;
         const set = extraSources.get(idx) ?? extraSources.set(idx, new Set()).get(idx)!;
         for (const s of f.sources ?? [f.tool]) set.add(s);
         // Preserve the standalone's reasoning as a SIGNAL on the taint finding —
         // otherwise corroboration would silently discard it. First one wins.
         if (f.priorAnalysis && !extraPrior.has(idx)) extraPrior.set(idx, f.priorAnalysis);
+        corroborated = true;
       }
-      continue; // consumed — it corroborates a taint node, not a standalone finding
     }
+    if (corroborated) continue; // consumed — it corroborates a taint node, not a standalone finding
     survivors.push(f);
   }
   const taintOut = taint.map((t, i) => {

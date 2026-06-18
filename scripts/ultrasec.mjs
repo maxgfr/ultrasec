@@ -19,6 +19,27 @@ var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 
 // src/util.ts
 import { createHash } from "crypto";
+var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
+  "help",
+  "version",
+  "json",
+  "offline",
+  "no-enrich",
+  "no-tools",
+  "docker",
+  "dry-run",
+  "blame",
+  "provenance",
+  "sinks",
+  "merge",
+  "resume",
+  "powered",
+  "no-scan",
+  "gitignore",
+  "semantic",
+  "keep-output"
+]);
+var SHORT_FLAGS = { h: "help", v: "version" };
 function parseArgs(argv) {
   const _ = [];
   const flags = /* @__PURE__ */ Object.create(null);
@@ -41,12 +62,14 @@ function parseArgs(argv) {
         continue;
       }
       const next = argv[i + 1];
-      if (next !== void 0 && !next.startsWith("--")) {
+      if (!BOOLEAN_FLAGS.has(body) && next !== void 0 && !next.startsWith("--")) {
         set(body, next);
         i++;
       } else {
         set(body, true);
       }
+    } else if (/^-[A-Za-z]+$/.test(tok)) {
+      for (const ch of tok.slice(1)) set(SHORT_FLAGS[ch] ?? ch, true);
     } else {
       _.push(tok);
     }
@@ -2023,6 +2046,9 @@ function mergeCluster(group) {
   if (verified) out.verified = true;
   return out;
 }
+function sameCwe(a, b) {
+  return !!a && !!b && a.trim().toUpperCase() === b.trim().toUpperCase();
+}
 function taintNodes(f) {
   const locs = /* @__PURE__ */ new Set();
   for (const p of f.path ?? []) locs.add(`${p.file}:${p.line}`);
@@ -2071,14 +2097,17 @@ function correlate(findings) {
   for (const f of corr) {
     const where = f.sink ? `${f.sink.file}:${f.sink.line}` : null;
     const hits = where ? nodesByLoc.get(where) : void 0;
+    let corroborated = false;
     if (hits && hits.length) {
       for (const idx of hits) {
+        if (!sameCwe(f.cwe, taint[idx].cwe)) continue;
         const set = extraSources.get(idx) ?? extraSources.set(idx, /* @__PURE__ */ new Set()).get(idx);
         for (const s of f.sources ?? [f.tool]) set.add(s);
         if (f.priorAnalysis && !extraPrior.has(idx)) extraPrior.set(idx, f.priorAnalysis);
+        corroborated = true;
       }
-      continue;
     }
+    if (corroborated) continue;
     survivors.push(f);
   }
   const taintOut = taint.map((t, i) => {

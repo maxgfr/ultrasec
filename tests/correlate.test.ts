@@ -150,4 +150,36 @@ describe("correlate — taint corroboration (Phase 6 relaxation)", () => {
     expect(twice[0]!.sources).toEqual(once[0]!.sources);
     expect(twice[0]!.path).toEqual(once[0]!.path);
   });
+
+  // Regression: co-location is NOT corroboration. A standalone finding of a
+  // DIFFERENT vuln class that merely lands on a taint source/hop/sink line was
+  // silently consumed (the distinct finding vanished) and its verdict reasoning
+  // was misattributed onto the unrelated taint finding. It must now survive.
+  it("does NOT fold a co-located standalone with an absent CWE (authz finding preserved)", () => {
+    const taint = taintFinding("t1"); // CWE-89, SOURCE node src/server.js:10
+    const authz = makeToolFinding({
+      tool: "deepsec",
+      category: "authz",
+      ident: "missing-access-control:src/server.js:10",
+      title: "Broken access control",
+      severity: "medium",
+      message: "missing authorization check",
+      file: "src/server.js",
+      line: 10, // exactly the taint SOURCE line — but no CWE → not the same vuln
+    });
+    authz.priorAnalysis = { tool: "deepsec", revalidationVerdict: "false-positive", reasoning: "behind auth middleware" };
+    const out = correlate([taint, authz]);
+    expect(out).toHaveLength(2); // the authz finding is NOT consumed
+    const t = out.find((f) => f.tool === "ultrasec")!;
+    expect(t.sources ?? ["ultrasec"]).toEqual(["ultrasec"]); // not corroborated
+    expect(t.priorAnalysis).toBeUndefined(); // the authz verdict is NOT misattributed onto the SQLi
+    expect(out.some((f) => f.category === "authz")).toBe(true); // distinct finding survives standalone
+  });
+
+  it("does NOT fold a co-located standalone whose CWE differs from the taint's", () => {
+    const taint = taintFinding("t1"); // CWE-89
+    const out = correlate([taint, sast("deepsec", "CWE-862", "src/db.js", 6, "high")]); // same sink line, different CWE
+    expect(out).toHaveLength(2);
+    expect(out.find((f) => f.tool === "ultrasec")!.sources ?? ["ultrasec"]).toEqual(["ultrasec"]);
+  });
 });

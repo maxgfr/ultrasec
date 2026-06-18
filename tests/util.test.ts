@@ -44,6 +44,41 @@ describe("parseArgs", () => {
     expect(flagBool(a, "toString")).toBe(false);
     expect(listFlag(a, "hasOwnProperty")).toBeUndefined();
   });
+
+  // Regression: a value-less (boolean) flag must NOT swallow the following
+  // positional — `dossier --json <id>` once parsed as { json: "<id>" } and lost
+  // the id, yielding a spurious "need a <finding-id>".
+  it("a boolean flag does not consume the following positional", () => {
+    const a = parseArgs(["dossier", "--json", "abc123", "--run", "/r"]);
+    expect(flagBool(a, "json")).toBe(true);
+    expect(flagStr(a, "json")).toBeUndefined();
+    expect(a._).toEqual(["dossier", "abc123"]); // the id survives as a positional
+    expect(flagStr(a, "run")).toBe("/r"); // value flags still consume their value
+  });
+
+  it("a value flag still consumes its value (boolean registry is flag-scoped)", () => {
+    expect(flagStr(parseArgs(["graph", "--repo", "/x", "--json"]), "repo")).toBe("/x");
+    expect(flagBool(parseArgs(["graph", "--repo", "/x", "--json"]), "json")).toBe(true);
+  });
+
+  // Regression: `-h`/`-v` are documented short aliases. They were silently dropped
+  // (treated as positionals), so `clean -h` skipped help and DESTRUCTIVELY ran clean.
+  it("recognizes -h / -v short flags as their long aliases", () => {
+    expect(flagBool(parseArgs(["clean", "-h"]), "help")).toBe(true);
+    expect(parseArgs(["clean", "-h"])._).toEqual(["clean"]); // -h is a flag, not a positional → main() shows help before dispatch
+    expect(flagBool(parseArgs(["-v"]), "version")).toBe(true);
+  });
+
+  it("bundles single-dash short flags (-hv → help + version)", () => {
+    const a = parseArgs(["-hv"]);
+    expect(flagBool(a, "help")).toBe(true);
+    expect(flagBool(a, "version")).toBe(true);
+  });
+
+  it("does not treat a lone dash or a negative number as a short flag", () => {
+    expect(parseArgs(["scan", "-"])._).toEqual(["scan", "-"]);
+    expect(parseArgs(["x", "-1"])._).toEqual(["x", "-1"]);
+  });
 });
 
 describe("own", () => {
