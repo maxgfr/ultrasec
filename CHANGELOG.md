@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.6.0](https://github.com/maxgfr/ultrasec/compare/v1.5.0...v1.6.0) (2026-06-18)
+
+
+### Features
+
+* **context:** project-context primer injected into dossier + verify worklist ([0a73c75](https://github.com/maxgfr/ultrasec/commit/0a73c757fe043590798a6f21e536bb3fef8091b8))
+* **deepsec:** correlate onto taint paths + ingest priorAnalysis as a signal ([3cd2fa2](https://github.com/maxgfr/ultrasec/commit/3cd2fa2147fe80d93d8ad8d93b29995bfa70ced2))
+* **implement:** remediation-PRD draft stage fed to the to-prd skill ([1db1dab](https://github.com/maxgfr/ultrasec/commit/1db1dab4569a743c0c6412bae5c6d783a33ea934))
+* **investigate:** agentic-discovery stage ingesting grounded ultrasec-ai findings ([cd06a17](https://github.com/maxgfr/ultrasec/commit/cd06a17fbb5cd4e9597559fa766993249657f133))
+* **narrative:** AI-authored report sections via `render --narrative` ([7351017](https://github.com/maxgfr/ultrasec/commit/7351017cfbc77619df5eea3a771d9e1a2cba034f))
+* **revalidate:** git-history false-positive cut (deepsec-style revalidate pass) ([5717564](https://github.com/maxgfr/ultrasec/commit/57175644718dc707e49ff6603b5aa1820ecc8d42))
+* **run:** opt-in powered mode driving an external agent CLI over the worklists ([6c077f8](https://github.com/maxgfr/ultrasec/commit/6c077f8a6d8376194d426e7b7d6b6b3f380b7df6))
+* **stage:** shared emit→apply harness; refactor verify onto it (byte-identical) ([32cbaf5](https://github.com/maxgfr/ultrasec/commit/32cbaf562c317928ec0617f888d796ce0a863c79))
+* **triage:** cheap code-free quick-dismiss fast-lane over open candidates ([ef38871](https://github.com/maxgfr/ultrasec/commit/ef3887102c0dabc160c630a95ecf77aadeee10ad))
+
 # [1.5.0](https://github.com/maxgfr/ultrasec/compare/v1.4.0...v1.5.0) (2026-06-18)
 
 
