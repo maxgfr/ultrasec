@@ -1,5 +1,5 @@
-import { readFileSync, readdirSync, lstatSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { readFileSync, readdirSync, lstatSync, statSync, realpathSync } from "node:fs";
+import { join, relative, resolve, sep } from "node:path";
 import { byStr } from "./util.js";
 
 // Directories never worth scanning for a security audit (vendored code, build
@@ -83,10 +83,32 @@ export function globToRe(pattern: string): RegExp {
       i += 2;
       continue;
     }
-    const ch = p[i++]!;
-    if (ch === "*") re += "[^/]*";
-    else if (ch === "?") re += "[^/]";
-    else re += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    const ch = p[i]!;
+    if (ch === "*") {
+      re += "[^/]*";
+      i++;
+    } else if (ch === "?") {
+      re += "[^/]";
+      i++;
+    } else if (ch === "[") {
+      // POSIX-style character class ([abc], [!a-z]) — translate, don't escape.
+      let j = i + 1;
+      const neg = p[j] === "!" || p[j] === "^";
+      if (neg) j++;
+      if (p[j] === "]") j++; // a ']' right after '[' (or '[!') is a literal member
+      while (j < p.length && p[j] !== "]") j++;
+      if (j >= p.length) {
+        re += "\\["; // no closing ']' → a literal '['
+        i++;
+      } else {
+        const cls = p.slice(neg ? i + 2 : i + 1, j).replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+        re += neg ? `[^/${cls}]` : `[${cls}]`; // negated class still never matches '/'
+        i = j + 1;
+      }
+    } else {
+      re += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      i++;
+    }
   }
   const body = dirMatch ? re + "(?:/.*)?" : re;
   return new RegExp("^" + body + "$");
@@ -144,25 +166,25 @@ function fileInScope(rel: string, scopes: ScopeEntry[]): boolean {
   return false;
 }
 
-export interface GitignoreGlobs {
-  /** Patterns that exclude paths. */
-  excludes: string[];
-  /** `!`-negation patterns that RE-INCLUDE paths a broader exclude would drop. */
-  reincludes: string[];
+/** One `.gitignore` rule, in source order. `negated` marks a `!`-re-include. */
+export interface GitignoreRule {
+  glob: string;
+  negated: boolean;
 }
 
-/** Best-effort parse of a repo-root `.gitignore` into our glob vocabulary. Common
- *  patterns only: comments, anchored (`/x`) vs any-depth, directory-only (trailing
- *  `/`), and `!`-negations (honoured as re-includes so we don't UNDER-scan files
- *  git would actually see). */
-export function gitignoreToGlobs(content: string): GitignoreGlobs {
-  const excludes: string[] = [];
-  const reincludes: string[] = [];
+/** Best-effort parse of a repo-root `.gitignore` into an ORDERED rule list (git's
+ *  last-match-wins). Common patterns only: comments, anchored (`/x`) vs any-depth,
+ *  directory-only (trailing `/`), `!`-negations, and a leading `\` escape for a
+ *  literal `#`/`!`. Order is preserved so a later exclude can re-override an earlier
+ *  `!`-negation, matching `git check-ignore`. */
+export function parseGitignore(content: string): GitignoreRule[] {
+  const rules: GitignoreRule[] = [];
   for (const raw of content.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     const negated = line.startsWith("!");
     let body = negated ? line.slice(1) : line;
+    if (body.startsWith("\\")) body = body.slice(1); // unescape a literal leading '#'/'!'
     const rooted = body.startsWith("/");
     let pat = rooted ? body.slice(1) : body;
     const dirOnly = pat.endsWith("/");
@@ -170,14 +192,12 @@ export function gitignoreToGlobs(content: string): GitignoreGlobs {
     if (!pat) continue;
     const anchored = rooted || pat.includes("/");
     const g = anchored ? pat : "**/" + pat;
-    const sink = negated ? reincludes : excludes;
-    // Always match the path + (for a dir) its contents. Only a NON-dir-only pattern
-    // also matches a bare file of that name — a `build/` entry must not exclude a
-    // file literally named `build` elsewhere.
-    sink.push(g + "/");
-    if (!dirOnly) sink.push(g);
+    // Match the path + (for a dir) its contents. Only a NON-dir-only pattern also
+    // matches a bare file of that name (`build/` must not exclude a file `build`).
+    rules.push({ glob: g + "/", negated });
+    if (!dirOnly) rules.push({ glob: g, negated });
   }
-  return { excludes, reincludes };
+  return rules;
 }
 
 /** Recursively list files under `root`, skipping ignored dirs. Deterministic. */
@@ -193,22 +213,31 @@ export function walkWithMeta(root: string, opts: WalkOptions = {}): WalkResult {
   const scopes = opts.scope && opts.scope.length ? toScopeEntries(opts.scope) : undefined;
   const includeRes = opts.include && opts.include.length ? opts.include.map(globToRe) : undefined;
 
-  const excludeGlobs = [...(opts.exclude ?? [])];
-  const reincludeGlobs: string[] = [];
+  // User --exclude: a flat exclude set (no negation). gitignore: an ORDERED rule
+  // list evaluated last-match-wins so a later exclude can override an earlier `!`.
+  const userExcludeRes = opts.exclude && opts.exclude.length ? opts.exclude.map(globToRe) : undefined;
+  const giRules: { re: RegExp; negated: boolean }[] = [];
   if (opts.gitignore) {
     try {
-      const gi = gitignoreToGlobs(readFileSync(join(root, ".gitignore"), "utf8"));
-      excludeGlobs.push(...gi.excludes);
-      reincludeGlobs.push(...gi.reincludes);
+      for (const r of parseGitignore(readFileSync(join(root, ".gitignore"), "utf8"))) giRules.push({ re: globToRe(r.glob), negated: r.negated });
     } catch {
       /* no .gitignore — fine */
     }
   }
-  const excludeRes = excludeGlobs.length ? excludeGlobs.map(globToRe) : undefined;
-  const reincludeRes = reincludeGlobs.length ? reincludeGlobs.map(globToRe) : undefined;
-  // Excluded UNLESS a gitignore `!`-negation re-includes it (git's last-match-wins).
-  const isExcluded = (rel: string): boolean =>
-    !!excludeRes && excludeRes.some((re) => re.test(rel)) && !(reincludeRes && reincludeRes.some((re) => re.test(rel)));
+  const isExcluded = (rel: string): boolean => {
+    if (userExcludeRes && userExcludeRes.some((re) => re.test(rel))) return true;
+    let ex = false;
+    for (const r of giRules) if (r.re.test(rel)) ex = !r.negated; // last match wins
+    return ex;
+  };
+
+  // Resolve `root` once for symlink-containment checks (reject targets that escape).
+  let rootReal: string;
+  try {
+    rootReal = realpathSync(root);
+  } catch {
+    rootReal = resolve(root);
+  }
 
   const out: WalkedFile[] = [];
   let truncated = false;
@@ -226,13 +255,24 @@ export function walkWithMeta(root: string, opts: WalkOptions = {}): WalkResult {
       const abs = join(dir, name);
       let st;
       try {
-        // lstat (not stat): never follow symlinks — a directory symlink to an
-        // ancestor would otherwise loop and multiply the file set. Matches git.
-        st = lstatSync(abs);
+        st = lstatSync(abs); // classify WITHOUT following — see symlink handling below
       } catch {
         continue;
       }
-      if (st.isSymbolicLink()) continue;
+      if (st.isSymbolicLink()) {
+        // git tracks symlinked FILES, so scan a symlink that resolves to a regular
+        // file INSIDE the repo; but never recurse a symlinked DIRECTORY (it could
+        // point at an ancestor → loop) and never follow one that escapes the repo.
+        try {
+          const real = realpathSync(abs);
+          if (real !== rootReal && !real.startsWith(rootReal + sep)) continue; // escapes repo
+          const target = statSync(abs); // follow
+          if (target.isDirectory()) continue; // avoid symlink-dir loops
+          st = target; // a real file inside the repo → treat it as a file
+        } catch {
+          continue; // dangling/broken symlink
+        }
+      }
       const rel = relative(root, abs).split(sep).join("/");
       if (st.isDirectory()) {
         if (ignore.has(name)) continue;

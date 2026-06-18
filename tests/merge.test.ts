@@ -62,14 +62,22 @@ describe("mergeDossier", () => {
     expect(merged.findings.find((f) => f.id === "b")!.status).toBe("dismissed");
   });
 
-  it("carries the truncation warning forward (a merge must not hide a capped run)", () => {
+  it("a SCOPED merge carries a prior cap forward (must not hide a capped run)", () => {
     const prev = dossier([finding("a")]);
     prev.manifest.truncation = { candidates: 3400, total: 4400 };
-    const next = dossier([finding("a")], ["src"]); // a scoped pass, NOT truncated
+    const next = dossier([finding("a")], ["src"]); // scoped pass, NOT truncated
     const merged = mergeDossier(prev, next);
     expect(merged.manifest.truncation).toBeTruthy();
     expect(merged.manifest.truncation!.candidates).toBe(3400);
     expect(merged.manifest.truncation!.total).toBe(4400);
+  });
+
+  it("a FULL uncapped re-scan CLEARS a stale prior cap (no false truncation warning)", () => {
+    const prev = dossier([finding("a")]);
+    prev.manifest.truncation = { candidates: 3400, total: 4400 };
+    const next = dossier([finding("a")]); // full re-scan (no scopes), not truncated
+    const merged = mergeDossier(prev, next);
+    expect(merged.manifest.truncation).toBeUndefined(); // stale cap cleared
   });
 
   it("unions scopes and is idempotent", () => {

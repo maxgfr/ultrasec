@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { walk, walkWithMeta, globToRe, gitignoreToGlobs } from "../src/walk.js";
+import { walk, walkWithMeta, globToRe, parseGitignore } from "../src/walk.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
 
@@ -38,6 +38,16 @@ describe("globToRe", () => {
     const re = globToRe("a?.js");
     expect(re.test("ab.js")).toBe(true);
     expect(re.test("a/.js")).toBe(false);
+  });
+
+  it("supports [...] character classes (incl. negation), not literal escaping", () => {
+    const cls = globToRe("**/*.[oa]");
+    expect(cls.test("x.o")).toBe(true);
+    expect(cls.test("x.a")).toBe(true);
+    expect(cls.test("x.c")).toBe(false);
+    const neg = globToRe("file[!0-9].js");
+    expect(neg.test("filea.js")).toBe(true);
+    expect(neg.test("file1.js")).toBe(false);
   });
 });
 
@@ -96,12 +106,26 @@ describe("gitignore", () => {
   const tmp = mkdtempSync(join(tmpdir(), "ultrasec-walk-"));
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
-  it("converts common patterns, keeps dir-only as dir-only, and captures negations", () => {
-    const { excludes, reincludes } = gitignoreToGlobs("# comment\nsecret.txt\nbuildlogs/\n!keep.js\n");
-    expect(excludes).toContain("**/secret.txt"); // file → bare form
-    expect(excludes).toContain("**/buildlogs/"); // dir-only → dir form
-    expect(excludes).not.toContain("**/buildlogs"); // …but NOT the bare-file form
-    expect(reincludes.some((g) => g.includes("keep.js"))).toBe(true); // negation honoured, not dropped
+  it("parses ordered rules: dir-only stays dir-only, negations carry a flag", () => {
+    const rules = parseGitignore("# comment\nsecret.txt\nbuildlogs/\n!keep.js\n");
+    const globs = rules.map((r) => r.glob);
+    expect(globs).toContain("**/secret.txt"); // file → bare form
+    expect(globs).toContain("**/buildlogs/"); // dir-only → dir form
+    expect(globs).not.toContain("**/buildlogs"); // …but NOT the bare-file form
+    expect(rules.some((r) => r.glob.includes("keep.js") && r.negated)).toBe(true); // negation captured, not dropped
+  });
+
+  it("honours last-match-wins: a later exclude re-overrides an earlier negation", () => {
+    const t = mkdtempSync(join(tmpdir(), "ultrasec-order-"));
+    writeFileSync(join(t, "keep.log"), "x");
+    writeFileSync(join(t, ".gitignore"), "!keep.log\n*.log\n"); // exclude AFTER negation → keep.log ignored
+    expect(walk(t, { gitignore: true }).map((f) => f.rel)).not.toContain("keep.log");
+    rmSync(t, { recursive: true, force: true });
+  });
+
+  it("unescapes a leading backslash (\\#literal ignores a file named #literal)", () => {
+    const rules = parseGitignore("\\#literal\n");
+    expect(rules.some((r) => r.glob === "**/#literal")).toBe(true);
   });
 
   it("honours the root .gitignore when opted in", () => {
@@ -129,20 +153,39 @@ describe("gitignore", () => {
 });
 
 describe("walk (symlink safety)", () => {
-  it("does not follow symlinks (no cycle, no duplication)", () => {
+  it("skips a directory-symlink loop but still scans a symlinked FILE in-repo", () => {
     const t = mkdtempSync(join(tmpdir(), "ultrasec-sym-"));
-    mkdirSync(join(t, "real"), { recursive: true });
-    writeFileSync(join(t, "real", "f.js"), "x");
-    // a directory symlink pointing back at the repo root would loop if followed
+    mkdirSync(join(t, "src"), { recursive: true });
+    writeFileSync(join(t, "real.js"), "x");
+    writeFileSync(join(t, "src", "f.js"), "x");
     try {
-      symlinkSync(t, join(t, "real", "loop"), "dir");
+      symlinkSync(t, join(t, "src", "loop"), "dir"); // dir symlink → ancestor (would loop)
+      symlinkSync("../real.js", join(t, "src", "linked.js")); // file symlink → in-repo file
     } catch {
       rmSync(t, { recursive: true, force: true });
       return; // symlinks unsupported on this FS — nothing to assert
     }
     const rels = walk(t).map((f) => f.rel);
-    expect(rels).toContain("real/f.js");
-    expect(rels.some((r) => r.includes("loop"))).toBe(false); // symlink not traversed
+    expect(rels).toContain("src/f.js");
+    expect(rels).toContain("src/linked.js"); // symlinked file IS scanned (git tracks it)
+    expect(rels.some((r) => r.includes("loop"))).toBe(false); // dir symlink NOT traversed
     rmSync(t, { recursive: true, force: true });
+  });
+
+  it("does not follow a symlink that escapes the repo root", () => {
+    const outside = mkdtempSync(join(tmpdir(), "ultrasec-outside-"));
+    writeFileSync(join(outside, "secret.js"), "x");
+    const t = mkdtempSync(join(tmpdir(), "ultrasec-escape-"));
+    try {
+      symlinkSync(join(outside, "secret.js"), join(t, "escape.js"));
+    } catch {
+      rmSync(t, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+      return;
+    }
+    const rels = walk(t).map((f) => f.rel);
+    expect(rels).not.toContain("escape.js"); // escaping symlink rejected
+    rmSync(t, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
   });
 });

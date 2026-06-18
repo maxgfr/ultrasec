@@ -273,8 +273,8 @@ function runTools(args) {
 }
 
 // src/walk.ts
-import { readFileSync, readdirSync, lstatSync } from "fs";
-import { join, relative, sep } from "path";
+import { readFileSync, readdirSync, lstatSync, statSync, realpathSync } from "fs";
+import { join, relative, resolve, sep } from "path";
 var DEFAULT_IGNORE_DIRS = /* @__PURE__ */ new Set([
   ".git",
   "node_modules",
@@ -315,10 +315,31 @@ function globToRe(pattern) {
       i += 2;
       continue;
     }
-    const ch = p[i++];
-    if (ch === "*") re += "[^/]*";
-    else if (ch === "?") re += "[^/]";
-    else re += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    const ch = p[i];
+    if (ch === "*") {
+      re += "[^/]*";
+      i++;
+    } else if (ch === "?") {
+      re += "[^/]";
+      i++;
+    } else if (ch === "[") {
+      let j = i + 1;
+      const neg = p[j] === "!" || p[j] === "^";
+      if (neg) j++;
+      if (p[j] === "]") j++;
+      while (j < p.length && p[j] !== "]") j++;
+      if (j >= p.length) {
+        re += "\\[";
+        i++;
+      } else {
+        const cls = p.slice(neg ? i + 2 : i + 1, j).replace(/\\/g, "\\\\").replace(/\]/g, "\\]");
+        re += neg ? `[^/${cls}]` : `[${cls}]`;
+        i = j + 1;
+      }
+    } else {
+      re += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      i++;
+    }
   }
   const body = dirMatch ? re + "(?:/.*)?" : re;
   return new RegExp("^" + body + "$");
@@ -359,14 +380,14 @@ function fileInScope(rel, scopes) {
   }
   return false;
 }
-function gitignoreToGlobs(content) {
-  const excludes = [];
-  const reincludes = [];
+function parseGitignore(content) {
+  const rules = [];
   for (const raw of content.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line || line.startsWith("#")) continue;
     const negated = line.startsWith("!");
     let body = negated ? line.slice(1) : line;
+    if (body.startsWith("\\")) body = body.slice(1);
     const rooted = body.startsWith("/");
     let pat = rooted ? body.slice(1) : body;
     const dirOnly = pat.endsWith("/");
@@ -374,11 +395,10 @@ function gitignoreToGlobs(content) {
     if (!pat) continue;
     const anchored = rooted || pat.includes("/");
     const g = anchored ? pat : "**/" + pat;
-    const sink = negated ? reincludes : excludes;
-    sink.push(g + "/");
-    if (!dirOnly) sink.push(g);
+    rules.push({ glob: g + "/", negated });
+    if (!dirOnly) rules.push({ glob: g, negated });
   }
-  return { excludes, reincludes };
+  return rules;
 }
 function walk(root, opts = {}) {
   return walkWithMeta(root, opts).files;
@@ -389,19 +409,26 @@ function walkWithMeta(root, opts = {}) {
   const maxFiles = opts.maxFiles ?? Infinity;
   const scopes = opts.scope && opts.scope.length ? toScopeEntries(opts.scope) : void 0;
   const includeRes = opts.include && opts.include.length ? opts.include.map(globToRe) : void 0;
-  const excludeGlobs = [...opts.exclude ?? []];
-  const reincludeGlobs = [];
+  const userExcludeRes = opts.exclude && opts.exclude.length ? opts.exclude.map(globToRe) : void 0;
+  const giRules = [];
   if (opts.gitignore) {
     try {
-      const gi = gitignoreToGlobs(readFileSync(join(root, ".gitignore"), "utf8"));
-      excludeGlobs.push(...gi.excludes);
-      reincludeGlobs.push(...gi.reincludes);
+      for (const r of parseGitignore(readFileSync(join(root, ".gitignore"), "utf8"))) giRules.push({ re: globToRe(r.glob), negated: r.negated });
     } catch {
     }
   }
-  const excludeRes = excludeGlobs.length ? excludeGlobs.map(globToRe) : void 0;
-  const reincludeRes = reincludeGlobs.length ? reincludeGlobs.map(globToRe) : void 0;
-  const isExcluded = (rel) => !!excludeRes && excludeRes.some((re) => re.test(rel)) && !(reincludeRes && reincludeRes.some((re) => re.test(rel)));
+  const isExcluded = (rel) => {
+    if (userExcludeRes && userExcludeRes.some((re) => re.test(rel))) return true;
+    let ex = false;
+    for (const r of giRules) if (r.re.test(rel)) ex = !r.negated;
+    return ex;
+  };
+  let rootReal;
+  try {
+    rootReal = realpathSync(root);
+  } catch {
+    rootReal = resolve(root);
+  }
   const out = [];
   let truncated = false;
   const visit = (dir) => {
@@ -421,7 +448,17 @@ function walkWithMeta(root, opts = {}) {
       } catch {
         continue;
       }
-      if (st.isSymbolicLink()) continue;
+      if (st.isSymbolicLink()) {
+        try {
+          const real = realpathSync(abs);
+          if (real !== rootReal && !real.startsWith(rootReal + sep)) continue;
+          const target = statSync(abs);
+          if (target.isDirectory()) continue;
+          st = target;
+        } catch {
+          continue;
+        }
+      }
       const rel = relative(root, abs).split(sep).join("/");
       if (st.isDirectory()) {
         if (ignore.has(name)) continue;
@@ -1019,7 +1056,7 @@ function runGraph(args) {
 }
 
 // src/commands/map.ts
-import { resolve, join as join3 } from "path";
+import { resolve as resolve2, join as join3 } from "path";
 import { mkdirSync, writeFileSync, readFileSync as readFileSync2, existsSync } from "fs";
 
 // src/map.ts
@@ -1382,7 +1419,7 @@ function renderMapMd(repo, s) {
 
 // src/commands/map.ts
 async function runMap(args) {
-  const repo = resolve(flagStr(args, "repo") ?? ".");
+  const repo = resolve2(flagStr(args, "repo") ?? ".");
   const out = flagStr(args, "out");
   const scope = listFlag(args, "scope");
   const include = listFlag(args, "include");
@@ -1391,7 +1428,7 @@ async function runMap(args) {
   const gitignore = flagBool(args, "gitignore");
   let coveredScopes = [];
   if (out) {
-    const mPath = join3(resolve(out), "manifest.json");
+    const mPath = join3(resolve2(out), "manifest.json");
     if (existsSync(mPath)) {
       try {
         const m = JSON.parse(readFileSync2(mPath, "utf8"));
@@ -1403,7 +1440,7 @@ async function runMap(args) {
   const scan = scanRepo(repo, { scope, include, exclude, maxFiles, gitignore });
   const surface = buildAttackSurface(scan, coveredScopes);
   if (out) {
-    const outDir = resolve(out);
+    const outDir = resolve2(out);
     mkdirSync(outDir, { recursive: true });
     writeFileSync(join3(outDir, "attack-surface.json"), JSON.stringify(surface, null, 2));
     writeFileSync(join3(outDir, "MAP.md"), renderMapMd(repo, surface));
@@ -1414,12 +1451,12 @@ async function runMap(args) {
   }
   println(renderMapMd(repo, surface));
   if (out) println(`
-wrote ${join3(resolve(out), "MAP.md")} + attack-surface.json`);
+wrote ${join3(resolve2(out), "MAP.md")} + attack-surface.json`);
   return 0;
 }
 
 // src/commands/scan.ts
-import { resolve as resolve2, join as join9, relative as relative2 } from "path";
+import { resolve as resolve3, join as join9, relative as relative2 } from "path";
 import { existsSync as existsSync5 } from "fs";
 
 // src/taint.ts
@@ -1896,7 +1933,7 @@ function orchestrate(adapters, repo, opts = {}) {
 }
 
 // src/tools/scoring.ts
-import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, statSync, writeFileSync as writeFileSync3 } from "fs";
+import { existsSync as existsSync2, mkdirSync as mkdirSync3, readFileSync as readFileSync4, statSync as statSync2, writeFileSync as writeFileSync3 } from "fs";
 import { gunzipSync } from "zlib";
 import { homedir } from "os";
 import { join as join6 } from "path";
@@ -1965,7 +2002,7 @@ function cacheDir() {
 }
 function fresh(path) {
   try {
-    return existsSync2(path) && Date.now() - statSync(path).mtimeMs < TTL_MS;
+    return existsSync2(path) && Date.now() - statSync2(path).mtimeMs < TTL_MS;
   } catch {
     return false;
   }
@@ -2628,11 +2665,12 @@ function mergeDossier(prev, next) {
   const scopes = [.../* @__PURE__ */ new Set([...prev.manifest.scopes ?? [], ...next.manifest.scopes ?? []])].sort(byStr);
   const pt = prev.manifest.truncation;
   const nt = next.manifest.truncation;
-  const truncation = pt || nt ? {
+  const nextScoped = !!(next.manifest.scopes && next.manifest.scopes.length);
+  const truncation = nextScoped ? pt || nt ? {
     candidates: Math.max(pt?.candidates ?? 0, nt?.candidates ?? 0),
     total: Math.max(pt?.total ?? 0, nt?.total ?? 0),
     ...pt?.files || nt?.files ? { files: true } : {}
-  } : void 0;
+  } : void 0 : nt;
   const manifest = {
     ...next.manifest,
     languages: [.../* @__PURE__ */ new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
@@ -2671,8 +2709,7 @@ function renderDossierMd(d) {
   L.push(`> **needs-human** \u2014 never silently dropped.`);
   L.push("");
   if (m.truncation?.candidates) {
-    const shown = m.truncation.total - m.truncation.candidates;
-    L.push(`> \u26A0\uFE0F **Coverage capped:** showing the top **${shown}** of **${m.truncation.total}** taint candidates \u2014 **${m.truncation.candidates} not shown**. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
+    L.push(`> \u26A0\uFE0F **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** taint candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
     L.push("");
   }
   if (m.truncation?.files) {
@@ -2721,9 +2758,11 @@ var BUDGETS = {
   thorough: { maxDepth: 8, maxCandidates: 5e3 }
 };
 var REVDEP_DEPTH = 2;
+var DOSSIER_FILES = /* @__PURE__ */ new Set(["manifest.json", "findings.json", "graph.json", "DOSSIER.md", "MAP.md", "attack-surface.json", "VERIFY.md", "VERIFY.todo.json", "SUMMARY.md", "REPORT.md", "FULL.md", "index.html"]);
+var isDossierArtifact = (f) => DOSSIER_FILES.has(f) || /^VERIFY\.todo\.\d+\.json$/.test(f) || f.startsWith("cache/");
 async function runScan(args) {
-  const repo = resolve2(flagStr(args, "repo") ?? ".");
-  const out = resolve2(flagStr(args, "out") ?? ".ultrasec");
+  const repo = resolve3(flagStr(args, "repo") ?? ".");
+  const out = resolve3(flagStr(args, "out") ?? ".ultrasec");
   const scope = listFlag(args, "scope");
   const include = listFlag(args, "include");
   const exclude = listFlag(args, "exclude");
@@ -2743,7 +2782,14 @@ async function runScan(args) {
       return 2;
     }
     const relOut = relative2(repo, out);
-    const changed = relOut && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
+    let changed;
+    if (relOut === "" || relOut === ".") {
+      changed = changedRaw.filter((f) => !isDossierArtifact(f));
+    } else if (!relOut.startsWith("..")) {
+      changed = changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/"));
+    } else {
+      changed = changedRaw;
+    }
     let targets = changed;
     if (existsSync5(join9(out, "graph.json"))) {
       try {
@@ -2844,7 +2890,7 @@ async function runScan(args) {
 }
 
 // src/commands/dossier.ts
-import { resolve as resolve3 } from "path";
+import { resolve as resolve4 } from "path";
 
 // src/dossier.ts
 import { join as join10 } from "path";
@@ -2913,7 +2959,7 @@ function renderFindingDossier(repo, graph, f) {
 
 // src/commands/dossier.ts
 function runDossier(args) {
-  const run = resolve3(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve4(flagStr(args, "run") ?? ".ultrasec");
   const id = args._[1];
   if (!id) {
     eprintln("ultrasec dossier: need a <finding-id>. List them in DOSSIER.md or with `paths`.");
@@ -2937,9 +2983,9 @@ function runDossier(args) {
 }
 
 // src/commands/paths.ts
-import { resolve as resolve4 } from "path";
+import { resolve as resolve5 } from "path";
 function runPaths(args) {
-  const run = resolve4(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve5(flagStr(args, "run") ?? ".ultrasec");
   const kind = flagStr(args, "kind");
   const sev = flagStr(args, "severity");
   let d;
@@ -2968,8 +3014,8 @@ function runPaths(args) {
 }
 
 // src/commands/verify.ts
-import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, readdirSync as readdirSync2, statSync as statSync2 } from "fs";
-import { join as join11, resolve as resolve5 } from "path";
+import { readFileSync as readFileSync6, writeFileSync as writeFileSync5, readdirSync as readdirSync2, statSync as statSync3 } from "fs";
+import { join as join11, resolve as resolve6 } from "path";
 
 // src/verify.ts
 function pending(findings) {
@@ -3073,7 +3119,7 @@ function parseVerdicts(raw) {
 
 // src/commands/verify.ts
 function runVerify(args) {
-  const run = resolve5(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve6(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3100,10 +3146,10 @@ function runVerify(args) {
   return 0;
 }
 function collectVerdictFiles(applyPath) {
-  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve5(s.trim()));
-  const abs = resolve5(applyPath);
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve6(s.trim()));
+  const abs = resolve6(applyPath);
   try {
-    if (statSync2(abs).isDirectory()) {
+    if (statSync3(abs).isDirectory()) {
       return readdirSync2(abs).filter((n) => /verdict.*\.json$/i.test(n)).map((n) => join11(abs, n));
     }
   } catch {
@@ -3138,14 +3184,14 @@ function applyMode(run, dossier, applyPath, args) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve7 } from "path";
+import { resolve as resolve8 } from "path";
 
 // src/check.ts
 import { existsSync as existsSync6, readFileSync as readFileSync7 } from "fs";
-import { join as join12, resolve as resolve6, sep as sep2 } from "path";
+import { join as join12, resolve as resolve7, sep as sep2 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve6(repo);
-  const abs = resolve6(base, file);
+  const base = resolve7(repo);
+  const abs = resolve7(base, file);
   return abs === base || abs.startsWith(base + sep2);
 }
 function lineCount(repo, file) {
@@ -3210,7 +3256,7 @@ function check(dossier, opts = {}) {
 
 // src/commands/check.ts
 function runCheck(args) {
-  const run = resolve7(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve8(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
   const minSevRaw = flagStr(args, "min-severity");
@@ -3236,7 +3282,7 @@ function runCheck(args) {
 
 // src/commands/render.ts
 import { writeFileSync as writeFileSync6 } from "fs";
-import { join as join13, resolve as resolve8 } from "path";
+import { join as join13, resolve as resolve9 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -3511,7 +3557,7 @@ function renderHtml(d) {
 
 // src/commands/render.ts
 function runRender(args) {
-  const run = resolve8(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve9(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3534,7 +3580,7 @@ function runRender(args) {
 // src/commands/clean.ts
 import { execFileSync as execFileSync4 } from "child_process";
 import { existsSync as existsSync7, rmSync } from "fs";
-import { resolve as resolve9 } from "path";
+import { resolve as resolve10 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 function dockerImages() {
@@ -3557,7 +3603,7 @@ function docker(args) {
   }
 }
 function runClean(args) {
-  const run = resolve9(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
   const dry = flagBool(args, "dry-run");
   const withDocker = flagBool(args, "docker");
   const keepOutput = flagBool(args, "keep-output");

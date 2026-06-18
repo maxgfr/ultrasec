@@ -64,18 +64,23 @@ export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
   const graph = mergeGraphs(prev.graph, next.graph);
 
   const scopes = [...new Set([...(prev.manifest.scopes ?? []), ...(next.manifest.scopes ?? [])])].sort(byStr);
-  // Carry truncation forward: if EITHER pass was coverage-capped, the merged run is
-  // still incomplete — never let a merge silently present a capped run as complete.
+  // Truncation reflects what the MERGED dossier still omits:
+  //  - a SCOPED pass (next has scopes) only re-covered part of the repo, so prev's
+  //    cap still applies to the rest → carry it forward (union);
+  //  - a FULL re-scan (no scopes) is authoritative for the whole repo, so its own
+  //    truncation wins — a complete, uncapped pass CLEARS a stale prior cap.
   const pt = prev.manifest.truncation;
   const nt = next.manifest.truncation;
-  const truncation =
-    pt || nt
+  const nextScoped = !!(next.manifest.scopes && next.manifest.scopes.length);
+  const truncation = nextScoped
+    ? pt || nt
       ? {
           candidates: Math.max(pt?.candidates ?? 0, nt?.candidates ?? 0),
           total: Math.max(pt?.total ?? 0, nt?.total ?? 0),
           ...(pt?.files || nt?.files ? { files: true as const } : {}),
         }
-      : undefined;
+      : undefined
+    : nt;
   const manifest: Manifest = {
     ...next.manifest,
     languages: [...new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
@@ -120,8 +125,9 @@ export function renderDossierMd(d: Dossier): string {
   L.push("");
 
   if (m.truncation?.candidates) {
-    const shown = m.truncation.total - m.truncation.candidates;
-    L.push(`> ⚠️ **Coverage capped:** showing the top **${shown}** of **${m.truncation.total}** taint candidates — **${m.truncation.candidates} not shown**. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
+    // Report the OMITTED count (accurate to what the cap dropped) rather than a
+    // "shown = total − candidates" that can drift from the merged finding set.
+    L.push(`> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** taint candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
     L.push("");
   }
   if (m.truncation?.files) {
