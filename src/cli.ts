@@ -13,6 +13,7 @@ import { runPaths } from "./commands/paths.js";
 import { runVerify } from "./commands/verify.js";
 import { runRevalidate } from "./commands/revalidate.js";
 import { runNarrative } from "./commands/narrative.js";
+import { runImplement } from "./commands/implement.js";
 import { runCheck } from "./commands/check.js";
 import { runRender } from "./commands/render.js";
 import { runClean } from "./commands/clean.js";
@@ -67,6 +68,11 @@ COMMANDS
              high-sev false-positive → needs-human). Flags: --run · --repo · --apply.
   narrative  Emit the report-narrative worklist (reportable findings + a Narrative
              scaffold); you author NARRATIVE.json, folded in via 'render --narrative'.
+  implement  Emit a remediation-PRD draft (IMPLEMENT.md) + a structured worklist
+             (IMPLEMENT.todo.json) from confirmed (→ fix) / needs-human (→ investigate)
+             findings, folding the grounded NARRATIVE.json (fixes, patches, root causes)
+             when present. Emit-only — never changes a finding's status. Feed IMPLEMENT.md
+             to the 'to-prd' skill or an implementer. Flags: --run · --narrative <file> · --json.
   render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
              --narrative <file> folds in AI-authored sections (exec summary, fixes,
              attack chains, root causes), clearly marked + grounding-checked.
@@ -75,7 +81,7 @@ COMMANDS
   clean      Remove the audit dossier and, with --docker, the scanner images +
              toolbox image + trivy cache volume (--dry-run to preview).
   run        Orchestrate the AI stages (context → triage → investigate → verify →
-             revalidate → narrative → check → render). DEFAULT makes ZERO external
+             revalidate → narrative → implement → check → render). DEFAULT makes ZERO external
              calls: scans + emits every worklist + prints the agent TODO. --powered
              drives an agent CLI per worklist (keys live in that CLI, not ultrasec);
              --cross-check <cli> escalates high/critical verify/revalidate
@@ -125,6 +131,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runRevalidate(args);
     case "narrative":
       return runNarrative(args);
+    case "implement":
+      return runImplement(args);
     case "check":
       return runCheck(args);
     case "render":

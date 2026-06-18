@@ -8,7 +8,7 @@ import { runPipeline, ALL_STAGES, type StageName, type PipelineOptions } from ".
 //    [--cross-check <name|tpl>] [--stages a,b,c] [--no-scan]`
 //
 // Sequences the AI stages (context → triage → investigate → verify → revalidate →
-// narrative → check → render). The DEFAULT (no --powered) makes ZERO external
+// narrative → implement → check → render). The DEFAULT (no --powered) makes ZERO external
 // calls: it only scans + emits the worklists and prints the agent TODO list. With
 // --powered it drives the configured agent CLI per worklist (the keys live in that
 // CLI, not in ultrasec); --cross-check adds a second agent whose high/critical
@@ -69,7 +69,8 @@ export function runRun(args: ParsedArgs): number {
     println(`  stages: ${stages.join(" → ")}`);
     println(`  agent TODO — fill each worklist, then apply (or re-run with --powered --agent <cli>):`);
     for (const e of res.emitted) {
-      const apply = e.outName === "CONTEXT.md" || e.outName === "NARRATIVE.json" ? "" : ` → \`ultrasec ${e.stage} --apply ${e.outName} --run ${run}\``;
+      const noApply = e.outName === "CONTEXT.md" || e.outName === "NARRATIVE.json" || e.outName === "REMEDIATION_PRD.md";
+      const apply = noApply ? "" : ` → \`ultrasec ${e.stage} --apply ${e.outName} --run ${run}\``;
       println(`    - ${e.stage}: read ${e.worklist}, write ${join(run, e.outName)}${apply}`);
     }
     println(`  then: ultrasec render${stages.includes("narrative") ? " --narrative NARRATIVE.json" : ""} --run ${run}`);

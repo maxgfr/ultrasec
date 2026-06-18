@@ -86,5 +86,12 @@ Present: the SUMMARY counts, each confirmed finding with its cross-file path and
 exploit path, the needs-human list, and the run folder. See
 [citation-format.md](citation-format.md) for how findings are cited.
 
+## 6. Plan the fixes (optional)
+
+To turn the confirmed findings into an actionable remediation plan, run
+`implement --run .ultrasec` — it emits a remediation-PRD draft (fix stories grounded in
+their `[file:line]`, grouped by root cause) you can feed to the `to-prd` skill or an
+implementer. See [implement-playbook.md](implement-playbook.md).
+
 For a thorough/high-assurance audit, escalate to
 [deep-audit-playbook.md](deep-audit-playbook.md).

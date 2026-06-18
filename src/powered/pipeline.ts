@@ -18,6 +18,7 @@ import { buildInvestigateWorklist, renderInvestigateMd, ingestDiscoveries, parse
 import { buildWorklist, renderWorklistMd, applyVerdicts, parseVerdicts } from "../verify.js";
 import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../revalidate.js";
 import { buildNarrativeWorklist, renderNarrativeWorklistMd, parseNarrative, mergeNarrative, hasNarrativeContent } from "../narrative.js";
+import { buildImplementWorklist, renderImplementMd, loadNarrative } from "../implement.js";
 import type { AgentRunner } from "./agent.js";
 
 // The powered-mode pipeline. The keyless DEFAULT (no `--powered`) sequences only
@@ -25,7 +26,7 @@ import type { AgentRunner } from "./agent.js";
 // the configured agent CLI per worklist, applying each through the SAME apply
 // functions the manual path uses — there is no duplicated stage logic here.
 
-export const ALL_STAGES = ["context", "triage", "investigate", "verify", "revalidate", "narrative"] as const;
+export const ALL_STAGES = ["context", "triage", "investigate", "verify", "revalidate", "narrative", "implement"] as const;
 export type StageName = (typeof ALL_STAGES)[number];
 
 interface StageDef {
@@ -114,6 +115,18 @@ const STAGES: Record<StageName, StageDef> = {
     },
     instruction: (repo, run, worklist, outPath) =>
       `Read the narrative worklist at ${worklist}. Author NARRATIVE.json (executiveSummary, remediations, attackChains, rootCauses) citing only confirmed finding ids, and write it to ${outPath}. ${UNTRUSTED}`,
+  },
+  implement: {
+    crossCheckable: false,
+    emit(repo, run, dossier) {
+      const narrative = loadNarrative(run, dossier);
+      const wl = buildImplementWorklist(dossier, narrative);
+      const f = stageFiles("IMPLEMENT");
+      emitWorklist(run, f, wl, renderImplementMd(wl, loadContextDoc(run)));
+      return { worklist: join(run, f.md), outName: "REMEDIATION_PRD.md" };
+    },
+    instruction: (repo, run, worklist, outPath) =>
+      `Read the remediation-PRD draft at ${worklist}. Author a complete remediation PRD in to-prd format (Problem Statement, Solution, User Stories, Implementation Decisions, Testing Decisions, Out of Scope) and write it as a LOCAL file at ${outPath} — do NOT publish to any tracker. Cite only the finding ids in the draft; never invent findings or change any finding's status. ${UNTRUSTED}`,
   },
 };
 

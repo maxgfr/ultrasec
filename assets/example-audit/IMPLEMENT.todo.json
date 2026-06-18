@@ -1,0 +1,53 @@
+{
+  "fixes": [
+    {
+      "id": "3ffa0917b004",
+      "title": "OS command injection: untrusted input reaches execSync()",
+      "severity": "critical",
+      "category": "taint",
+      "cwe": "CWE-78",
+      "at": "src/server.js:18 → src/server.js:19 → src/report.js:5",
+      "status": "confirmed",
+      "kind": "fix",
+      "fix": "Use execFile with an argv array; never build a shell string from input.",
+      "owner": "@backend"
+    },
+    {
+      "id": "54b733703450",
+      "title": "SQL injection: untrusted input reaches query()",
+      "severity": "high",
+      "category": "taint",
+      "cwe": "CWE-89",
+      "at": "src/server.js:10 → src/server.js:11 → src/db.js:6",
+      "status": "confirmed",
+      "kind": "fix",
+      "fix": "Use a parameterized query (placeholders), never string concatenation.",
+      "owner": "@backend"
+    },
+    {
+      "id": "9b0bcc91ea6a",
+      "title": "Cross-site scripting (reflected): untrusted input reaches send()",
+      "severity": "medium",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "at": "src/server.js:18 → src/server.js:20",
+      "status": "confirmed",
+      "kind": "fix",
+      "fix": "Use execFile with an argv array; never build a shell string from input.",
+      "owner": "@backend"
+    }
+  ],
+  "investigations": [],
+  "rootCauses": [
+    {
+      "cause": "Untrusted request input concatenated into interpreters",
+      "findingIds": [
+        "3ffa0917b004",
+        "54b733703450",
+        "9b0bcc91ea6a"
+      ],
+      "note": "Centralize input handling: parameterized queries + argv-array exec, plus an input-validation layer."
+    }
+  ],
+  "dismissed": 0
+}

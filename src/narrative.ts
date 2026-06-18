@@ -22,7 +22,7 @@ export interface NarrativeFindingRef {
   owner?: string;
 }
 
-function citedAt(f: Finding): string {
+export function citedAt(f: Finding): string {
   if (f.path?.length) return f.path.map((p) => `${p.file}:${p.line}`).join(" → ");
   if (f.sink) return `${f.sink.file}:${f.sink.line}`;
   if (f.source) return `${f.source.file}:${f.source.line}`;
