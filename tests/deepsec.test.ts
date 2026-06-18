@@ -76,10 +76,23 @@ describe("importDeepsec", () => {
     expect(sqli.cwe).toBe("CWE-89");
   });
 
-  it("keeps the githubUrl reference and folds the revalidation reasoning into the message", () => {
+  it("keeps the githubUrl reference and a CLEAN message (reasoning is not folded in)", () => {
     const sqli = f.find((x) => x.title.includes("SQL injection"))!;
     expect(sqli.references).toContain("https://github.com/x/y/blob/main/src/db/users.ts#L42");
-    expect(sqli.message.toLowerCase()).toContain("revalidation");
+    expect(sqli.message).toBe("SQL injection in user lookup"); // just the title — no reasoning
+  });
+
+  it("ingests deepsec's reasoning + revalidation verdict as priorAnalysis (a SIGNAL, never a verdict)", () => {
+    const sqli = f.find((x) => x.title.includes("SQL injection"))!;
+    expect(sqli.priorAnalysis).toBeDefined();
+    expect(sqli.priorAnalysis!.tool).toBe("deepsec");
+    expect(sqli.priorAnalysis!.revalidationVerdict).toBe("true-positive");
+    expect(sqli.priorAnalysis!.reasoning).toContain("reaches the DB unsanitized");
+    // a deepsec finding without a revalidation block falls back to the description.
+    const authz = f.find((x) => x.title.includes("access control"))!;
+    expect(authz.priorAnalysis!.reasoning).toContain("Missing authorization check");
+    // the finding still starts open — priorAnalysis NEVER changes the status.
+    expect(sqli.status).toBe("open");
   });
 
   it("ids are stable/idempotent across re-imports", () => {

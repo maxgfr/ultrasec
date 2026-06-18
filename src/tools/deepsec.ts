@@ -1,4 +1,4 @@
-import { CONFIDENCES, type Category, type Confidence, type Finding } from "../types.js";
+import { CONFIDENCES, type Category, type Confidence, type Finding, type PriorAnalysis } from "../types.js";
 import { firstCwe, makeToolFinding, normalizeSeverity } from "./normalize.js";
 
 // deepsec interop bridge. vercel-labs/deepsec is an UPSTREAM producer, not a tool
@@ -19,6 +19,7 @@ interface DeepsecMeta {
   vulnSlug?: string;
   confidence?: string;
   revalidation?: { verdict?: string; reasoning?: string };
+  mitigationsChecked?: string[];
   githubUrl?: string;
 }
 interface ExportedFinding {
@@ -75,24 +76,36 @@ export function importDeepsec(raw: string): Finding[] {
     const slug = String(md.vulnSlug ?? "finding");
     const line = Array.isArray(md.lineNumbers) && md.lineNumbers.length && typeof md.lineNumbers[0] === "number" ? md.lineNumbers[0] : undefined;
     const reval = md.revalidation;
-    const revalNote = reval && reval.reasoning ? ` — deepsec revalidation (${reval.verdict ?? "?"}): ${reval.reasoning}` : "";
 
-    out.push(
-      makeToolFinding({
-        tool: "deepsec",
-        category: slugToCategory(slug),
-        // ident carries file:line so the content-hash id is stable across re-imports.
-        ident: `${slug}:${md.filePath}:${line ?? ""}`,
-        title: entry.title || slug,
-        severity: normalizeSeverity(md.severity ?? entry.severity),
-        message: `${entry.title || slug}${revalNote}`,
-        file: md.filePath,
-        line,
-        cwe: firstCwe([entry.description ?? "", ...(entry.labels ?? [])].join(" ")),
-        confidence: mapConfidence(md.confidence),
-        references: md.githubUrl ? [md.githubUrl] : undefined,
-      }),
-    );
+    const f = makeToolFinding({
+      tool: "deepsec",
+      category: slugToCategory(slug),
+      // ident carries file:line so the content-hash id is stable across re-imports.
+      ident: `${slug}:${md.filePath}:${line ?? ""}`,
+      title: entry.title || slug,
+      severity: normalizeSeverity(md.severity ?? entry.severity),
+      // Keep the message clean — deepsec's reasoning is a SIGNAL on priorAnalysis,
+      // never folded into the finding text (so it can't read as ultrasec's verdict).
+      message: entry.title || slug,
+      file: md.filePath,
+      line,
+      cwe: firstCwe([entry.description ?? "", ...(entry.labels ?? [])].join(" ")),
+      confidence: mapConfidence(md.confidence),
+      references: md.githubUrl ? [md.githubUrl] : undefined,
+    });
+
+    // Ingest deepsec's reasoning as a labelled SIGNAL — never auto-applied.
+    const prior: PriorAnalysis = { tool: "deepsec" };
+    const reasoning = reval?.reasoning ?? entry.description;
+    if (reasoning) prior.reasoning = reasoning;
+    if (Array.isArray(md.mitigationsChecked)) {
+      const m = md.mitigationsChecked.filter((x): x is string => typeof x === "string");
+      if (m.length) prior.mitigationsChecked = m;
+    }
+    if (reval?.verdict) prior.revalidationVerdict = reval.verdict;
+    if (prior.reasoning || prior.mitigationsChecked || prior.revalidationVerdict) f.priorAnalysis = prior;
+
+    out.push(f);
   }
   return out;
 }

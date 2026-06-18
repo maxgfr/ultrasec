@@ -13,6 +13,13 @@ candidate ranking; **you** decide where to look and when to stop.
 > of it code you'll never read. Map-first spends the budget where the attack surface
 > actually is.
 
+> The AI stages scope cleanly too: `context --scope <dir>` and `investigate --scope
+> <dir>` accept the same focus knobs, and `triage` is a cheap way to clear noise from
+> a large candidate set before the per-finding reads. `revalidate` is especially
+> valuable here — git history tells you which findings in a huge tree were already
+> fixed. See [investigate-playbook.md](investigate-playbook.md) ·
+> [revalidate-playbook.md](revalidate-playbook.md).
+
 ## The loop
 
 1. **Map the attack surface (cheap, no taint, no tools, no network).**

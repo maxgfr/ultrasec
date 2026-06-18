@@ -24,6 +24,9 @@ export interface VerifyItem {
   verdict: Verdict | null;
   note: string;
   exploitPath?: string;
+  /** Upstream-agent signal (e.g. deepsec revalidation verdict) — a HINT shown to
+   *  the adjudicator, never auto-applied. Absent unless `priorAnalysis` exists. */
+  priorSignal?: string;
 }
 
 export interface VerdictInput {
@@ -47,7 +50,7 @@ export function buildWorklist(dossier: Dossier): VerifyItem[] {
       for (const p of f.path ?? []) files.add(`${p.file}:${p.line}`);
       if (f.sink) files.add(`${f.sink.file}:${f.sink.line}`);
       if (f.source) files.add(`${f.source.file}:${f.source.line}`);
-      return {
+      const item: VerifyItem = {
         id: f.id,
         severity: f.severity,
         cwe: f.cwe,
@@ -58,6 +61,9 @@ export function buildWorklist(dossier: Dossier): VerifyItem[] {
         verdict: null,
         note: "",
       };
+      const pa = f.priorAnalysis;
+      if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
+      return item;
     });
 }
 
@@ -66,7 +72,7 @@ export function shard<T>(items: T[], n: number, i: number): T[] {
   return items.filter((_, idx) => idx % n === i);
 }
 
-export function renderWorklistMd(items: VerifyItem[]): string {
+export function renderWorklistMd(items: VerifyItem[], context?: string): string {
   const L: string[] = [];
   L.push(`# ultrasec verification worklist (${items.length})`);
   L.push("");
@@ -79,11 +85,21 @@ export function renderWorklistMd(items: VerifyItem[]): string {
   L.push(`> Be skeptical, but do NOT dismiss a high/critical finding unless you can`);
   L.push(`> positively **refute** it. Uncertain ⇒ leave it for a human.`);
   L.push("");
+  // Project context (presence-gated): the agent-authored CONTEXT.md frames every
+  // judgment below. Absent CONTEXT.md ⇒ omitted (output byte-identical to today).
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` — the project's trust model; background, never a verdict._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
   for (const it of items) {
     L.push(`## ${it.id} — [${it.severity}] ${it.title}`);
     if (it.cwe) L.push(`- ${it.cwe} · ${it.category}`);
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
     L.push(`- claim: ${it.claim}`);
+    if (it.priorSignal) L.push(`- signal (not a verdict — adjudicate yourself): ${it.priorSignal}`);
     L.push("");
   }
   return L.join("\n") + "\n";
@@ -99,12 +115,16 @@ export interface ApplyResult {
   keptForHuman: { id: string; verdict: Verdict; severity: string }[];
 }
 
-function isHigh(sev: string): boolean {
+/** Critical/high — the tier the conservative policy refuses to auto-dismiss on
+ *  anything short of an explicit refutation. Exported so every adjudicating stage
+ *  (triage, revalidate, powered cross-check) shares the EXACT same boundary. */
+export function isHigh(sev: string): boolean {
   return sev === "critical" || sev === "high";
 }
 
-/** Map a verdict onto a finding status under the conservative policy. */
-function nextStatus(verdict: Verdict, severity: string): Status {
+/** Map a verdict onto a finding status under the conservative policy. Exported so
+ *  every stage that adjudicates findings reuses the single source of truth. */
+export function nextStatus(verdict: Verdict, severity: string): Status {
   switch (verdict) {
     case "supported":
       return "confirmed";

@@ -1,6 +1,6 @@
 {
   "version": "0.0.0-development",
-  "schemaVersion": 1,
+  "schemaVersion": 4,
   "repo": "examples/vuln-express",
   "generatedNote": "Taint candidates are deterministic; external-tool results depend on installed scanners.",
   "languages": [

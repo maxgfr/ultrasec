@@ -20,7 +20,7 @@ function excerpt(repo: string, step: PathStep, ctx = 3): string {
   return out.join("\n");
 }
 
-export function renderFindingDossier(repo: string, graph: Graph, f: Finding): string {
+export function renderFindingDossier(repo: string, graph: Graph, f: Finding, context?: string): string {
   const L: string[] = [];
   L.push(`# ${f.id} — ${f.title}`);
   L.push("");
@@ -28,9 +28,34 @@ export function renderFindingDossier(repo: string, graph: Graph, f: Finding): st
   if (f.cwe) L.push(`- ${f.cwe} — ${(f.references ?? [])[0] ?? ""}`);
   L.push(`- category: ${f.category}${f.tool !== "ultrasec" ? ` · reported by ${f.tool}` : ""}`);
   L.push("");
+  // Project context (presence-gated): the agent-authored CONTEXT.md, so the
+  // adjudicator reasons WITH the project's trust model. Evidence only — it never
+  // changes the verdict. Absent CONTEXT.md ⇒ this block is omitted (byte-identical).
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` — background to judge reachability/exploitability; not a verdict._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
   L.push(`## What to decide`);
   L.push(f.message);
   L.push("");
+
+  // Prior analysis (presence-gated): upstream-agent reasoning ingested as a SIGNAL.
+  // Clearly labelled as NOT a verdict — the adjudicator still decides from the code.
+  if (f.priorAnalysis) {
+    const pa = f.priorAnalysis;
+    L.push(`## Prior analysis (signal, not a verdict)`);
+    L.push(`_From \`${pa.tool}\` — background only; ultrasec's verify gate, not this, decides the status._`);
+    if (pa.revalidationVerdict) L.push(`- ${pa.tool} revalidation verdict: **${pa.revalidationVerdict}** (a hint — confirm it yourself)`);
+    if (pa.mitigationsChecked && pa.mitigationsChecked.length) L.push(`- mitigations ${pa.tool} checked: ${pa.mitigationsChecked.join(", ")}`);
+    if (pa.reasoning) {
+      L.push("");
+      L.push(pa.reasoning);
+    }
+    L.push("");
+  }
 
   if (f.path && f.path.length) {
     L.push(`## Cross-file path (source → sink)`);

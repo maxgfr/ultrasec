@@ -25,3 +25,16 @@ Every finding is grounded in real code. The contract:
 - `exploitPath` is a concrete trigger ("GET /user?id=1 OR 1=1") — include it for
   every `supported` finding; it's what makes a report actionable and what proves
   you reasoned the flow through, not just pattern-matched it.
+
+- **AI-discovered findings (`tool: "ultrasec-ai"`)** — those you add via
+  `investigate` — are held to the **exact same grounding bar**. Their citations are
+  checked *before* they're ingested: an out-of-range or nonexistent `[file:line]`
+  (primary or any path step) is **rejected**, so `check` can never fail on an
+  AI-invented line. A discovery at an existing finding's location folds into that
+  finding's `sources` rather than duplicating it. `ultrasec-ai` is just a `tool`
+  convention — no new category; they adjudicate like any candidate.
+
+- **Upstream `priorAnalysis` is a signal, not a citation.** Reasoning ingested from
+  an upstream agent (e.g. deepsec's `revalidationVerdict`) is surfaced in the dossier
+  and the verify worklist clearly labelled "signal, not a verdict" — it never changes
+  a status. ultrasec's own conservative `verify` gate is the only thing that does.

@@ -13,6 +13,15 @@ The engine stays deterministic and keyless — you supply the judgement
 supplies determinism (graph, candidate enumeration, tool runs, the worklist, the
 gate). No LLM calls and no API keys are added by the engine.
 
+> Compose the deep tier with the dedicated AI stages: `context` to prime the trust
+> model, `investigate` to systematically hunt authz/business-logic bugs per
+> attack-surface region ([investigate-playbook.md](investigate-playbook.md)), and
+> `revalidate` to cut false positives against git history
+> ([revalidate-playbook.md](revalidate-playbook.md)). To run the whole loop under an
+> external agent CLI, see [powered-mode.md](powered-mode.md) — note `run --powered
+> --cross-check <cli>` adds a second adjudicator whose high/critical disagreement
+> escalates a finding to needs-human.
+
 ## Portability contract
 
 Every step is a plain `node scripts/ultrasec.mjs …` call. Parallel subagents are

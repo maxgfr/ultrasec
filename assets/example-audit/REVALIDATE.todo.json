@@ -1,0 +1,53 @@
+[
+  {
+    "id": "3ffa0917b004",
+    "severity": "critical",
+    "title": "OS command injection: untrusted input reaches execSync()",
+    "at": "src/report.js:5",
+    "fileExists": true,
+    "currentLine": "  return execSync(\"generate-report --for \" + name).toString();",
+    "commitsSinceFinding": null,
+    "lineLastChanged": {
+      "commit": "5e902a3",
+      "author": "ultrasec example",
+      "date": "2026-01-15"
+    },
+    "renamedTo": null,
+    "verdict": null,
+    "note": ""
+  },
+  {
+    "id": "54b733703450",
+    "severity": "high",
+    "title": "SQL injection: untrusted input reaches query()",
+    "at": "src/db.js:6",
+    "fileExists": true,
+    "currentLine": "  return sqlite.query(sql);",
+    "commitsSinceFinding": null,
+    "lineLastChanged": {
+      "commit": "5e902a3",
+      "author": "ultrasec example",
+      "date": "2026-01-15"
+    },
+    "renamedTo": null,
+    "verdict": null,
+    "note": ""
+  },
+  {
+    "id": "9b0bcc91ea6a",
+    "severity": "medium",
+    "title": "Cross-site scripting (reflected): untrusted input reaches send()",
+    "at": "src/server.js:20",
+    "fileExists": true,
+    "currentLine": "  res.send(out);",
+    "commitsSinceFinding": null,
+    "lineLastChanged": {
+      "commit": "5e902a3",
+      "author": "ultrasec example",
+      "date": "2026-01-15"
+    },
+    "renamedTo": null,
+    "verdict": null,
+    "note": ""
+  }
+]

@@ -1,4 +1,4 @@
-import { SEVERITIES, type Confidence, type Finding, type Severity } from "../types.js";
+import { SEVERITIES, type Confidence, type Finding, type PriorAnalysis, type Severity } from "../types.js";
 import { byStr } from "../util.js";
 import { pickCve } from "./normalize.js";
 
@@ -88,16 +88,30 @@ function mergeCluster(group: Finding[]): Finding {
   return out;
 }
 
+/** Every distinct file:line a taint finding touches (source, hops, sink). */
+function taintNodes(f: Finding): Set<string> {
+  const locs = new Set<string>();
+  for (const p of f.path ?? []) locs.add(`${p.file}:${p.line}`);
+  if (f.sink) locs.add(`${f.sink.file}:${f.sink.line}`);
+  if (f.source) locs.add(`${f.source.file}:${f.source.line}`);
+  return locs;
+}
+
 /**
- * Collapse corroborating tool findings; leave taint candidates as-is. Stable,
- * idempotent (re-running on an already-correlated set is a no-op), and order is
- * deterministic (id-sorted).
+ * Collapse corroborating tool findings; then CORROBORATE taint candidates with
+ * any standalone tool finding whose exact sink `file:line` lands on a node of the
+ * taint path (source/hop/sink). Such a standalone is folded into the taint
+ * finding (`sources ∪= tool`, confidence bumped) and CONSUMED — but the taint
+ * finding's `path`/`source`/`sink`/`title`/`severity` are NEVER touched (object-
+ * copy, exact-line match only, no fuzzy windows). Stable, idempotent (re-running
+ * on an already-correlated set is a no-op), order deterministic (id-sorted).
  */
 export function correlate(findings: Finding[]): Finding[] {
   const taint = findings.filter((f) => f.tool === "ultrasec");
   const tool = findings.filter((f) => f.tool !== "ultrasec");
 
-  const out: Finding[] = [...taint];
+  // Correlated (cross-tool de-duplicated) non-taint findings.
+  const corr: Finding[] = [];
 
   // 1) Non-dep: group by category + cwe|title + file:line.
   const nonDep = tool.filter((f) => f.category !== "dep");
@@ -108,7 +122,7 @@ export function correlate(findings: Finding[]): Finding[] {
     const key = `${f.category}::${ident}::${where}`;
     (byKey.get(key) ?? byKey.set(key, []).get(key)!).push(f);
   }
-  for (const group of byKey.values()) out.push(group.length === 1 ? withSources(group[0]!) : mergeCluster(group));
+  for (const group of byKey.values()) corr.push(group.length === 1 ? withSources(group[0]!) : mergeCluster(group));
 
   // 2) dep: union-find over shared advisory ids, scoped to package@version.
   const dep = tool.filter((f) => f.category === "dep");
@@ -128,9 +142,43 @@ export function correlate(findings: Finding[]): Finding[] {
     const r = dsu.find(i);
     (clusters.get(r) ?? clusters.set(r, []).get(r)!).push(f);
   });
-  for (const group of clusters.values()) out.push(group.length === 1 ? withSources(group[0]!) : mergeCluster(group));
+  for (const group of clusters.values()) corr.push(group.length === 1 ? withSources(group[0]!) : mergeCluster(group));
 
-  return out.sort((a, b) => byStr(a.id, b.id));
+  // 3) Corroborate taint candidates with co-located standalone tool findings.
+  const nodesByLoc = new Map<string, number[]>(); // "file:line" -> taint indices
+  taint.forEach((t, i) => {
+    for (const loc of taintNodes(t)) (nodesByLoc.get(loc) ?? nodesByLoc.set(loc, []).get(loc)!).push(i);
+  });
+  const extraSources = new Map<number, Set<string>>();
+  const extraPrior = new Map<number, PriorAnalysis>(); // carry the consumed finding's signal
+  const survivors: Finding[] = [];
+  for (const f of corr) {
+    const where = f.sink ? `${f.sink.file}:${f.sink.line}` : null;
+    const hits = where ? nodesByLoc.get(where) : undefined;
+    if (hits && hits.length) {
+      for (const idx of hits) {
+        const set = extraSources.get(idx) ?? extraSources.set(idx, new Set()).get(idx)!;
+        for (const s of f.sources ?? [f.tool]) set.add(s);
+        // Preserve the standalone's reasoning as a SIGNAL on the taint finding —
+        // otherwise corroboration would silently discard it. First one wins.
+        if (f.priorAnalysis && !extraPrior.has(idx)) extraPrior.set(idx, f.priorAnalysis);
+      }
+      continue; // consumed — it corroborates a taint node, not a standalone finding
+    }
+    survivors.push(f);
+  }
+  const taintOut = taint.map((t, i) => {
+    const extra = extraSources.get(i);
+    if (!extra || !extra.size) return t; // untouched (identity preserved)
+    const sources = [...new Set([...(t.sources ?? [t.tool]), ...extra])].sort(byStr);
+    const next: Finding = { ...t, sources, confidence: bumpConfidence(t.confidence, sources.length) };
+    // Additive only — never touches path/source/sink/title/severity.
+    const prior = next.priorAnalysis ?? extraPrior.get(i);
+    if (prior) next.priorAnalysis = prior;
+    return next;
+  });
+
+  return [...taintOut, ...survivors].sort((a, b) => byStr(a.id, b.id));
 }
 
 /** Ensure even singletons carry a normalized `sources` list. */

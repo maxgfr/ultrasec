@@ -1,0 +1,40 @@
+{
+  "executiveSummary": "Two confirmed injection vulnerabilities in a public Express API: untrusted req.query values reach a raw SQL query and a shell command across files, with no validation. Both are directly exploitable by any client.",
+  "remediations": [
+    {
+      "id": "3ffa0917b004",
+      "fix": "Use execFile with an argv array; never build a shell string from input.",
+      "owner": "@backend"
+    },
+    {
+      "id": "54b733703450",
+      "fix": "Use a parameterized query (placeholders), never string concatenation.",
+      "owner": "@backend"
+    },
+    {
+      "id": "9b0bcc91ea6a",
+      "fix": "Use execFile with an argv array; never build a shell string from input.",
+      "owner": "@backend"
+    }
+  ],
+  "attackChains": [
+    {
+      "title": "Unauthenticated SQL injection via /user",
+      "findingIds": [
+        "54b733703450"
+      ],
+      "narrative": "GET /user?id=... flows req.query.id across server.js into a string-concatenated SQL query in db.getUser."
+    }
+  ],
+  "rootCauses": [
+    {
+      "cause": "Untrusted request input concatenated into interpreters",
+      "findingIds": [
+        "3ffa0917b004",
+        "54b733703450",
+        "9b0bcc91ea6a"
+      ],
+      "note": "Centralize input handling: parameterized queries + argv-array exec, plus an input-validation layer."
+    }
+  ]
+}

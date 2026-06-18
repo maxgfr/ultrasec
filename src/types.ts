@@ -6,7 +6,10 @@ export const VERSION = "1.5.0";
 // optional `truncation`/`scopes` (large-repo scaling). Older dossiers omit them.
 // 3: findings gained optional `provenance` (git-blame author/commit/date +
 // CODEOWNERS owner), populated only under `scan --blame`. Older dossiers omit it.
-export const SCHEMA_VERSION = 3;
+// 4: findings gained optional `priorAnalysis` (upstream-agent reasoning ingested
+// as a SIGNAL, e.g. from deepsec) + `fixedIn` (commit a `revalidate` fix folded
+// in). Both additive + optional — older dossiers omit them (back-compat).
+export const SCHEMA_VERSION = 4;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -80,6 +83,21 @@ export interface Provenance {
   owner?: string;
 }
 
+/**
+ * Reasoning from an UPSTREAM agent scanner (e.g. deepsec) ingested as a SIGNAL —
+ * NEVER auto-applied. ultrasec's conservative verify gate remains the only thing
+ * that changes a finding's status; this is background for the adjudicator, surfaced
+ * (clearly labelled) in the dossier + verify worklist but never a verdict.
+ */
+export interface PriorAnalysis {
+  /** Producing tool, e.g. "deepsec". */
+  tool: string;
+  reasoning?: string;
+  mitigationsChecked?: string[];
+  /** e.g. "true-positive" | "fixed" | … — a hint, NOT an ultrasec status. */
+  revalidationVerdict?: string;
+}
+
 export interface Finding {
   /** Stable id, content-derived (so re-scans and merges are idempotent). */
   id: string;
@@ -132,7 +150,51 @@ export interface Finding {
   exploitPath?: string;
   /** Deterministic git-blame / CODEOWNERS provenance (opt-in `--blame`). Evidence only. */
   provenance?: Provenance;
+  /** Commit that fixed/moved the cited line, set by `revalidate --apply` on a
+   *  `fixed` verdict (Phase 2). Optional — older dossiers omit it (back-compat). */
+  fixedIn?: string;
+  /** Upstream-agent reasoning (e.g. deepsec) ingested as a SIGNAL — never a verdict. */
+  priorAnalysis?: PriorAnalysis;
   status: Status;
+}
+
+// ── Project-context primer (Phase 1) ─────────────────────────────────────────
+// A deterministic scaffold of the project's trust model the agent turns into a
+// prose CONTEXT.md. ADDITIVE EVIDENCE ONLY — it never gates a verdict.
+export interface ContextScaffold {
+  frameworks: string[];
+  entryPoints: { file: string; line: number; kind: string }[];
+  authMiddleware: { file: string; line: number; hint: string }[];
+  sanitizers: { file: string; line: number; kind: string }[];
+  trustBoundaries: string[];
+}
+
+// ── AI-authored report narrative (Phase 3) ───────────────────────────────────
+// Additive, clearly-marked report sections the agent authors and `render
+// --narrative` folds in. NEVER changes a finding's status/severity/set — it's
+// prose layered on top of the deterministic report; sections citing unknown or
+// non-confirmed finding ids are dropped on merge (grounding stays strict).
+export interface Remediation {
+  id: string;
+  fix: string;
+  patch?: string;
+  owner?: string;
+}
+export interface AttackChain {
+  title: string;
+  findingIds: string[];
+  narrative: string;
+}
+export interface RootCauseGroup {
+  cause: string;
+  findingIds: string[];
+  note: string;
+}
+export interface Narrative {
+  executiveSummary?: string;
+  remediations?: Remediation[];
+  attackChains?: AttackChain[];
+  rootCauses?: RootCauseGroup[];
 }
 
 // ── Audit dossier (on-disk run folder) ───────────────────────────────────────

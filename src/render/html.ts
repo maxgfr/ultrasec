@@ -1,6 +1,7 @@
 import type { Dossier } from "../store.js";
-import { SEVERITIES, type Finding, type Severity } from "../types.js";
+import { SEVERITIES, type Finding, type Narrative, type Remediation, type Severity } from "../types.js";
 import { byStr } from "../util.js";
+import { AI_DISCLAIMER, hasNarrativeContent, remediationMap } from "../narrative.js";
 
 // A single self-contained index.html — embedded CSS, no external assets, no JS
 // required. The cross-file path renders as offline boxes-and-arrows so it works
@@ -53,7 +54,13 @@ function sourcesHtml(f: Finding): string {
   return f.tool !== "ultrasec" ? `· via ${esc(f.tool)}` : "";
 }
 
-function findingHtml(f: Finding): string {
+function fixHtml(r?: Remediation): string {
+  if (!r) return "";
+  const patch = r.patch ? `<pre class="ai-patch">${esc(r.patch)}</pre>` : "";
+  return `\n    <div class="ai-fix"><strong>Suggested fix (AI):</strong> ${esc(r.fix)}${r.owner ? ` · owner ${esc(r.owner)}` : ""}${patch}</div>`;
+}
+
+function findingHtml(f: Finding, rem?: Remediation): string {
   const refs = (f.references ?? [])
     .slice(0, 5)
     .map((r) => `<a href="${esc(r)}" rel="noreferrer noopener">${esc(r.replace(/^https?:\/\//, ""))}</a>`)
@@ -72,18 +79,57 @@ function findingHtml(f: Finding): string {
     ${riskHtml(f)}
     ${pathHtml(f)}
     <p class="msg">${esc(f.message)}</p>
-    ${f.exploitPath ? `<p class="exploit"><strong>Exploit path:</strong> ${esc(f.exploitPath)}</p>` : ""}
+    ${f.exploitPath ? `<p class="exploit"><strong>Exploit path:</strong> ${esc(f.exploitPath)}</p>` : ""}${fixHtml(rem)}
     ${refs ? `<p class="refs">${refs}</p>` : ""}
   </section>`;
 }
 
-export function renderHtml(d: Dossier): string {
+function aiSectionHtml(title: string, items: string): string {
+  return `\n  <section class="ai-narrative"><h2>${esc(title)} <span class="ai-tag">AI</span></h2><p class="ai-note">${esc(AI_DISCLAIMER)}</p>${items}</section>`;
+}
+
+function execSummaryHtml(n?: Narrative): string {
+  if (!n?.executiveSummary) return "";
+  return aiSectionHtml("Executive summary", `<p>${esc(n.executiveSummary)}</p>`);
+}
+
+function chainsHtml(n?: Narrative): string {
+  if (!n?.attackChains?.length) return "";
+  const items = n.attackChains
+    .map((c) => `<div class="ai-block"><h3>${esc(c.title)}</h3><div class="meta">${c.findingIds.map((id) => `<code>${esc(id)}</code>`).join(" → ")}</div><p>${esc(c.narrative)}</p></div>`)
+    .join("");
+  return aiSectionHtml("Attack chains", items);
+}
+
+function rootCausesHtml(n?: Narrative): string {
+  if (!n?.rootCauses?.length) return "";
+  const items = n.rootCauses
+    .map((g) => `<div class="ai-block"><h3>${esc(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<code>${esc(id)}</code>`).join(", ")}</div><p>${esc(g.note)}</p></div>`)
+    .join("");
+  return aiSectionHtml("Root-cause groups", items);
+}
+
+// Injected only when --narrative carries content, so a no-narrative render stays
+// byte-identical (the rules are appended after the last base rule, before </style>).
+function aiCss(narrative?: Narrative): string {
+  if (!hasNarrativeContent(narrative)) return "";
+  return `\n  .ai-narrative { border:1px solid #6d28d9; background:#faf5ff; border-radius:10px; padding:10px 16px; margin:14px 0; }
+  @media (prefers-color-scheme: dark){ .ai-narrative{ background:#1e1b2e; border-color:#7c3aed; } .ai-fix{ background:#1e1b2e; } }
+  .ai-tag { background:#6d28d9; color:#fff; font-size:11px; padding:1px 6px; border-radius:8px; vertical-align:middle; }
+  .ai-note { color:#6b7280; font-size:12px; font-style:italic; margin:2px 0 8px; }
+  .ai-fix { border-left:3px solid #6d28d9; background:#faf5ff; padding:6px 10px; border-radius:4px; margin:8px 0; }
+  .ai-patch { background:#0b0f17; color:#e5e7eb; padding:8px; border-radius:6px; overflow:auto; font-size:12px; }
+  .ai-block { margin:8px 0; }`;
+}
+
+export function renderHtml(d: Dossier, narrative?: Narrative): string {
   const c = d.manifest.counts.bySeverity;
   const fs = d.findings
     .slice()
     .sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
   const shown = fs.filter((f) => f.status !== "dismissed");
   const dismissed = fs.filter((f) => f.status === "dismissed");
+  const rem = remediationMap(narrative);
 
   const counts = SEVERITIES.map((s) => `${badge(`${s} ${c[s]}`, SEV_COLOR[s])}`).join(" ");
 
@@ -115,14 +161,14 @@ export function renderHtml(d: Dossier): string {
   .refs { font-size:12px; color:#6b7280; word-break:break-all; }
   .risk { margin:6px 0 4px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
   .kv { font-size:12px; font-weight:600; color:#6b7280; }
-  details { margin-top:18px; }
+  details { margin-top:18px; }${aiCss(narrative)}
 </style></head>
 <body>
   <h1>Security audit</h1>
   <div class="sub">repo <code>${esc(d.manifest.repo)}</code> · ultrasec ${esc(d.manifest.version)} · tools: ${esc(d.manifest.toolsRun.join(", ") || "none")}</div>
-  <div>${counts}</div>
-  ${shown.length ? shown.map(findingHtml).join("\n") : "<p>No actionable findings.</p>"}
-  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map(findingHtml).join("\n")}</details>` : ""}
+  <div>${counts}</div>${execSummaryHtml(narrative)}
+  ${shown.length ? shown.map((f) => findingHtml(f, rem.get(f.id))).join("\n") : "<p>No actionable findings.</p>"}
+  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map((f) => findingHtml(f, rem.get(f.id))).join("\n")}</details>` : ""}${chainsHtml(narrative)}${rootCausesHtml(narrative)}
 </body></html>
 `;
 }

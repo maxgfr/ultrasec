@@ -4,13 +4,19 @@ import { runTools } from "./commands/tools.js";
 import { runGraph } from "./commands/graph.js";
 import { runMap } from "./commands/map.js";
 import { runScan } from "./commands/scan.js";
+import { runContext } from "./commands/context.js";
 import { runImport } from "./commands/import.js";
 import { runDossier } from "./commands/dossier.js";
+import { runTriage } from "./commands/triage.js";
+import { runInvestigate } from "./commands/investigate.js";
 import { runPaths } from "./commands/paths.js";
 import { runVerify } from "./commands/verify.js";
+import { runRevalidate } from "./commands/revalidate.js";
+import { runNarrative } from "./commands/narrative.js";
 import { runCheck } from "./commands/check.js";
 import { runRender } from "./commands/render.js";
 import { runClean } from "./commands/clean.js";
+import { runRun } from "./commands/run.js";
 
 const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
 
@@ -26,6 +32,10 @@ COMMANDS
   map        Cheap attack-surface recon: where untrusted input enters + what sinks
              exist, with suggested scoped targets. No taint BFS, no tools, no
              network — fast on huge repos. Flags: --scope · --out · --json.
+  context    Project-context primer: emit a deterministic scaffold (frameworks,
+             entry points, auth middleware, sanitizers) + a brief; you author
+             CONTEXT.md, which is injected into every dossier + verify worklist.
+             Highest-leverage first step. Flags: --repo · --out · --scope · --json.
   scan       Scan a repo: detect stack, run available tools (correlated across
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
@@ -42,12 +52,35 @@ COMMANDS
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source→sink chains.
   dossier    Print the grounding packet for one finding (real code + neighbours).
+  triage     Fast, code-free first pass over OPEN candidates: emit / apply
+             noise|keep. 'noise' dismisses only low/med/info; on high/critical
+             it is ignored (kept open for verify). Flags: --run · --apply.
   verify     Emit / apply the adversarial finding↔evidence worklist.
+  investigate Agentic discovery: emit an attack-surface-region worklist (entry/
+             sink files + graph neighbours); --apply ingests grounded Discovery[]
+             as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
+             existing findings' sources). Flags: --run · --repo · --apply · --scope.
+  revalidate Git-history false-positive cut: emit compact git facts (does the
+             cited line still exist? when did it last change?) for confirmed /
+             needs-human findings; --apply folds in still-valid/fixed/
+             false-positive/uncertain (fixed → dismissed + fixed-in commit;
+             high-sev false-positive → needs-human). Flags: --run · --repo · --apply.
+  narrative  Emit the report-narrative worklist (reportable findings + a Narrative
+             scaffold); you author NARRATIVE.json, folded in via 'render --narrative'.
   render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
+             --narrative <file> folds in AI-authored sections (exec summary, fixes,
+             attack chains, root causes), clearly marked + grounding-checked.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
              --semantic also folds in the verify verdicts.
   clean      Remove the audit dossier and, with --docker, the scanner images +
              toolbox image + trivy cache volume (--dry-run to preview).
+  run        Orchestrate the AI stages (context → triage → investigate → verify →
+             revalidate → narrative → check → render). DEFAULT makes ZERO external
+             calls: scans + emits every worklist + prints the agent TODO. --powered
+             drives an agent CLI per worklist (keys live in that CLI, not ultrasec);
+             --cross-check <cli> escalates high/critical verify/revalidate
+             disagreement to needs-human. Flags: --repo · --out · --powered ·
+             --agent <name|tpl> · --cross-check <name|tpl> · --stages · --no-scan.
 
 GLOBAL
   --help, -h     Show this help.
@@ -74,20 +107,32 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runMap(args);
     case "scan":
       return runScan(args);
+    case "context":
+      return runContext(args);
     case "import":
       return runImport(args);
     case "dossier":
       return runDossier(args);
+    case "triage":
+      return runTriage(args);
     case "paths":
       return runPaths(args);
     case "verify":
       return runVerify(args);
+    case "investigate":
+      return runInvestigate(args);
+    case "revalidate":
+      return runRevalidate(args);
+    case "narrative":
+      return runNarrative(args);
     case "check":
       return runCheck(args);
     case "render":
       return runRender(args);
     case "clean":
       return runClean(args);
+    case "run":
+      return runRun(args);
     default:
       eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
       return 2;
