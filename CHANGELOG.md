@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.6.1](https://github.com/maxgfr/ultrasec/compare/v1.6.0...v1.6.1) (2026-06-18)
+
+
+### Bug Fixes
+
+* **graph:** escape NUL separators in keyOf so sources stay text-only ([9c7e3a9](https://github.com/maxgfr/ultrasec/commit/9c7e3a9c4434377e7d9b7b0abd3b8f4e31f9534c))
+* **parser,correlate:** honor short flags, stop boolean-flag token theft, gate taint corroboration by CWE ([ef0f368](https://github.com/maxgfr/ultrasec/commit/ef0f3689ec0ffea1f608aa3f1642cf4d8d4a34aa))
+
 # [1.6.0](https://github.com/maxgfr/ultrasec/compare/v1.5.0...v1.6.0) (2026-06-18)
 
 
