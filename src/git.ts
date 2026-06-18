@@ -46,3 +46,48 @@ export function changedFiles(repo: string, ref: string): string[] | null {
 
   return [...out].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
 }
+
+// ── Blame (provenance) ───────────────────────────────────────────────────────
+export interface BlameInfo {
+  /** Last author to touch the line. */
+  author?: string;
+  /** Short commit sha (first 10 chars). */
+  commit?: string;
+  /** Author-date as ISO yyyy-mm-dd — deterministic from history (NOT wall-clock). */
+  date?: string;
+}
+
+/**
+ * Parse one entry of `git blame --porcelain` output into a {@link BlameInfo}.
+ * Pure (no I/O), so it is unit-testable without a repo. Returns `null` when the
+ * input isn't porcelain (the first line must be `<40-hex-sha> <orig> <final> …`).
+ * The date is derived from `author-time` (epoch seconds, UTC) — a stable git
+ * fact, so two runs over the same history yield the same date.
+ */
+export function parseBlamePorcelain(raw: string): BlameInfo | null {
+  if (!raw) return null;
+  const lines = raw.split(/\r?\n/);
+  const m = /^([0-9a-f]{40})\b/.exec((lines[0] ?? "").trim());
+  if (!m) return null;
+  const info: BlameInfo = { commit: m[1]!.slice(0, 10) };
+  for (const line of lines) {
+    if (line.startsWith("author ")) info.author = line.slice(7).trim();
+    else if (line.startsWith("author-time ")) {
+      const t = Number(line.slice(12).trim());
+      if (Number.isFinite(t)) info.date = new Date(t * 1000).toISOString().slice(0, 10);
+    }
+  }
+  return info;
+}
+
+/**
+ * Blame a single line. `file` is repo-relative and passed positionally after
+ * `--` (never interpolated — same injection-hardening as the diff path). Returns
+ * `null` when git is unavailable, the path doesn't resolve, or the line is
+ * invalid — callers degrade to no provenance rather than failing.
+ */
+export function blameLine(repo: string, file: string, line: number): BlameInfo | null {
+  if (!Number.isInteger(line) || line < 1) return null;
+  const out = git(repo, ["blame", "-L", `${line},${line}`, "--porcelain", "--", file]);
+  return out === null ? null : parseBlamePorcelain(out);
+}
