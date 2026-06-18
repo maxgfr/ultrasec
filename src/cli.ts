@@ -8,6 +8,7 @@ import { runContext } from "./commands/context.js";
 import { runImport } from "./commands/import.js";
 import { runDossier } from "./commands/dossier.js";
 import { runTriage } from "./commands/triage.js";
+import { runInvestigate } from "./commands/investigate.js";
 import { runPaths } from "./commands/paths.js";
 import { runVerify } from "./commands/verify.js";
 import { runRevalidate } from "./commands/revalidate.js";
@@ -54,6 +55,10 @@ COMMANDS
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
              it is ignored (kept open for verify). Flags: --run · --apply.
   verify     Emit / apply the adversarial finding↔evidence worklist.
+  investigate Agentic discovery: emit an attack-surface-region worklist (entry/
+             sink files + graph neighbours); --apply ingests grounded Discovery[]
+             as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
+             existing findings' sources). Flags: --run · --repo · --apply · --scope.
   revalidate Git-history false-positive cut: emit compact git facts (does the
              cited line still exist? when did it last change?) for confirmed /
              needs-human findings; --apply folds in still-valid/fixed/
@@ -106,6 +111,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runPaths(args);
     case "verify":
       return runVerify(args);
+    case "investigate":
+      return runInvestigate(args);
     case "revalidate":
       return runRevalidate(args);
     case "narrative":

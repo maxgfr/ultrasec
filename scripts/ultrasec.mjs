@@ -5,6 +5,16 @@ var VERSION = "1.5.0";
 var SCHEMA_VERSION = 3;
 var SEVERITIES = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
+var CATEGORIES = [
+  "taint",
+  "sast",
+  "dep",
+  "secret",
+  "config",
+  "authz",
+  "crypto",
+  "other"
+];
 var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 
 // src/util.ts
@@ -3843,10 +3853,289 @@ function runTriage(args) {
   return 0;
 }
 
+// src/commands/investigate.ts
+import { resolve as resolve10 } from "path";
+
+// src/check.ts
+import { existsSync as existsSync9, readFileSync as readFileSync10 } from "fs";
+import { join as join17, resolve as resolve9, sep as sep2 } from "path";
+function insideRepo(repo, file) {
+  const base = resolve9(repo);
+  const abs = resolve9(base, file);
+  return abs === base || abs.startsWith(base + sep2);
+}
+function lineCount(repo, file) {
+  if (!insideRepo(repo, file)) return null;
+  const abs = join17(repo, file);
+  if (!existsSync9(abs)) return null;
+  try {
+    return readFileSync10(abs, "utf8").split(/\r?\n/).length;
+  } catch {
+    return null;
+  }
+}
+function locsOf(f) {
+  const locs = [];
+  if (f.source) locs.push(f.source);
+  if (f.sink) locs.push(f.sink);
+  for (const p of f.path ?? []) locs.push(p);
+  return locs;
+}
+function atLeast(sev, floor) {
+  return SEVERITIES.indexOf(sev) <= SEVERITIES.indexOf(floor);
+}
+function check(dossier, opts = {}) {
+  const repo = opts.repo ?? dossier.manifest.repo;
+  const floor = opts.minSeverity;
+  const findings = floor ? dossier.findings.filter((f) => atLeast(f.severity, floor)) : dossier.findings;
+  const dangling = [];
+  const lineCache = /* @__PURE__ */ new Map();
+  const linesOf = (file) => {
+    if (!lineCache.has(file)) lineCache.set(file, lineCount(repo, file));
+    return lineCache.get(file);
+  };
+  for (const f of findings) {
+    if (f.status === "dismissed") continue;
+    for (const loc of locsOf(f)) {
+      if (!insideRepo(repo, loc.file)) continue;
+      const lc = linesOf(loc.file);
+      if (lc === null) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
+      else if (loc.line < 1 || loc.line > lc) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range (file has ${lc} lines)` });
+    }
+  }
+  const open = findings.filter((f) => f.status === "open").length;
+  const confirmed = findings.filter((f) => f.status === "confirmed").length;
+  const dismissed = findings.filter((f) => f.status === "dismissed").length;
+  const needsHuman = findings.filter((f) => f.status === "needs-human").length;
+  const messages = [];
+  let ok = true;
+  if (dangling.length) {
+    ok = false;
+    messages.push(`${dangling.length} dangling citation(s) \u2014 a cited [file:line] does not resolve (hallucinated or stale).`);
+  }
+  if (opts.semantic) {
+    if (open > 0) {
+      ok = false;
+      messages.push(`${open} candidate(s) still unadjudicated \u2014 run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
+    }
+    if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human \u2014 review required (not auto-failing).`);
+  }
+  if (ok) messages.push(`grounding OK${opts.semantic ? " \xB7 audit adjudicated" : ""} \u2014 ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
+  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, messages };
+}
+
+// src/investigate.ts
+var MAX_FILES_PER_REGION = 8;
+var MAX_NEIGHBORS_PER_REGION = 12;
+var AI_TOOL = "ultrasec-ai";
+function topDir2(rel) {
+  const i = rel.indexOf("/");
+  return i === -1 ? "." : rel.slice(0, i);
+}
+function buildInvestigateWorklist(surface, graph) {
+  const filesByRegion = /* @__PURE__ */ new Map();
+  const add2 = (region, file) => (filesByRegion.get(region) ?? filesByRegion.set(region, /* @__PURE__ */ new Set()).get(region)).add(file);
+  for (const g of surface.entryPoints) for (const s of g.samples) add2(topDir2(s.file), s.file);
+  for (const k of surface.sinks) for (const s of k.samples) add2(topDir2(s.file), s.file);
+  const regions = [];
+  for (const t of surface.suggestedTargets) {
+    const files = [...filesByRegion.get(t.scope) ?? []].sort(byStr).slice(0, MAX_FILES_PER_REGION);
+    const nb = /* @__PURE__ */ new Set();
+    for (const f of files) {
+      if (!graph.files.includes(f)) continue;
+      for (const l of neighbors(graph, f, 1).links) nb.add(l.node);
+    }
+    for (const f of files) nb.delete(f);
+    regions.push({
+      region: t.scope,
+      score: t.score,
+      sinks: t.sinks,
+      sources: t.sources,
+      files,
+      neighbors: [...nb].sort(byStr).slice(0, MAX_NEIGHBORS_PER_REGION),
+      prompt: "What the deterministic pass can't see: missing/incorrect authorization & IDOR, business-logic flaws, and multi-hop taint that crosses these files. Cite resolvable [file:line]."
+    });
+  }
+  return regions;
+}
+function renderInvestigateMd(regions, context) {
+  const L = [];
+  L.push(`# ultrasec investigation worklist (${regions.length} region${regions.length === 1 ? "" : "s"})`);
+  L.push("");
+  L.push(`Investigate each region for issues the deterministic engine can't enumerate, and emit`);
+  L.push(`grounded **Discovery[]** as INVESTIGATE.json (array of`);
+  L.push(`{title, category, severity, cwe?, message, file, line, path?}). Then:`);
+  L.push(`\`ultrasec investigate --apply INVESTIGATE.json --run <run>\`.`);
+  L.push("");
+  L.push(`> Every discovery is ingested as an \`${AI_TOOL}\` **open** candidate and must be verified`);
+  L.push(`> like any other. Citations are checked: a [file:line] that doesn't resolve is **rejected**.`);
+  L.push(`> A discovery at an existing finding's location folds into its \`sources\` (no duplicate).`);
+  L.push("");
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\`._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
+  for (const r of regions) {
+    L.push(`## \`${r.region}\` \u2014 ${r.sinks} sink(s), ${r.sources} entry point(s)`);
+    if (r.files.length) L.push(`- files: ${r.files.map((f) => `\`${f}\``).join(", ")}`);
+    if (r.neighbors.length) L.push(`- neighbours: ${r.neighbors.map((f) => `\`${f}\``).join(", ")}`);
+    L.push(`- hunt: ${r.prompt}`);
+    L.push("");
+  }
+  return L.join("\n") + "\n";
+}
+function locOf(f) {
+  if (f.sink) return `${f.sink.file}:${f.sink.line}`;
+  const last = f.path?.[f.path.length - 1];
+  if (last) return `${last.file}:${last.line}`;
+  if (f.source) return `${f.source.file}:${f.source.line}`;
+  return "";
+}
+function dedupKey(category, ident, where) {
+  return `${category}::${ident.trim().toLowerCase()}::${where}`;
+}
+function citationProblem(repo, d) {
+  const locs = [{ file: d.file, line: d.line }, ...(d.path ?? []).map((p) => ({ file: p.file, line: p.line }))];
+  for (const loc of locs) {
+    if (!insideRepo(repo, loc.file)) return `citation outside repo: ${loc.file}`;
+    const lc = lineCount(repo, loc.file);
+    if (lc === null) return `file not found: ${loc.file}`;
+    if (loc.line < 1 || loc.line > lc) return `line out of range: ${loc.file}:${loc.line} (file has ${lc} lines)`;
+  }
+  return null;
+}
+function ingestDiscoveries(dossier, discoveries, repo) {
+  const result = /* @__PURE__ */ new Map();
+  const idByKey = /* @__PURE__ */ new Map();
+  for (const f of dossier.findings) {
+    result.set(f.id, f);
+    idByKey.set(dedupKey(f.category, f.cwe ?? f.title, locOf(f)), f.id);
+  }
+  let ingested = 0, folded = 0;
+  const rejected = [];
+  for (const d of discoveries) {
+    const problem = citationProblem(repo, d);
+    if (problem) {
+      rejected.push({ discovery: d, reason: problem });
+      continue;
+    }
+    const key = dedupKey(d.category, d.cwe ?? d.title, `${d.file}:${d.line}`);
+    const existingId = idByKey.get(key);
+    if (existingId) {
+      const prev = result.get(existingId);
+      const sources = [.../* @__PURE__ */ new Set([...prev.sources ?? [prev.tool], AI_TOOL])].sort(byStr);
+      result.set(existingId, { ...prev, sources });
+      folded++;
+      continue;
+    }
+    const f = makeToolFinding({
+      tool: AI_TOOL,
+      category: d.category,
+      ident: `${d.category}:${d.title}:${d.file}:${d.line}`,
+      title: d.title,
+      severity: d.severity,
+      message: d.message,
+      file: d.file,
+      line: d.line,
+      cwe: d.cwe,
+      confidence: "low"
+      // AI-discovered + unverified — recall-oriented, adjudicate it
+    });
+    if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: p.why }));
+    result.set(f.id, f);
+    idByKey.set(key, f.id);
+    ingested++;
+  }
+  const findings = [...result.values()].sort((a, b) => byStr(a.id, b.id));
+  return { findings, ingested, folded, rejected };
+}
+function parseDiscoveries(raw) {
+  const data = JSON.parse(raw);
+  const arr = Array.isArray(data) ? data : Array.isArray(data?.discoveries) ? data.discoveries : [];
+  const out = [];
+  for (const d of arr) {
+    if (!d || typeof d !== "object") continue;
+    if (typeof d.title !== "string" || typeof d.message !== "string" || typeof d.file !== "string") continue;
+    if (!Number.isInteger(d.line) || d.line < 1) continue;
+    if (!CATEGORIES.includes(d.category)) continue;
+    if (!SEVERITIES.includes(d.severity)) continue;
+    const path = Array.isArray(d.path) ? d.path.filter((p) => p && typeof p.file === "string" && Number.isInteger(p.line) && p.line >= 1).map((p) => ({ file: p.file, line: p.line, why: typeof p.why === "string" ? p.why : "" })) : void 0;
+    out.push({
+      title: d.title,
+      category: d.category,
+      severity: d.severity,
+      ...typeof d.cwe === "string" ? { cwe: d.cwe } : {},
+      message: d.message,
+      file: d.file,
+      line: d.line,
+      ...path && path.length ? { path } : {}
+    });
+  }
+  return out;
+}
+
+// src/commands/investigate.ts
+function runInvestigate(args) {
+  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
+  let dossier;
+  try {
+    dossier = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec investigate: ${e.message}`);
+    return 2;
+  }
+  const repo = resolve10(flagStr(args, "repo") ?? dossier.manifest.repo);
+  const applyPath = flagStr(args, "apply");
+  if (applyPath) {
+    let discoveries;
+    try {
+      discoveries = readApply(applyPath, /(investigat|discover).*\.json$/i, parseDiscoveries);
+    } catch (e) {
+      eprintln(`ultrasec investigate: cannot read discoveries at ${e.message}`);
+      return 2;
+    }
+    const res = ingestDiscoveries(dossier, discoveries, repo);
+    persistFindings(run, dossier, res.findings);
+    if (flagBool(args, "json")) {
+      println(JSON.stringify({ ingested: res.ingested, folded: res.folded, rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })) }, null, 2));
+      return 0;
+    }
+    println(`ultrasec investigate --apply \u2192 updated ${run}/findings.json`);
+    println(`  ingested ${res.ingested} new ${"ultrasec-ai"} finding(s) \xB7 folded ${res.folded} into existing \xB7 rejected ${res.rejected.length}`);
+    for (const r of res.rejected) println(`  \u2717 rejected "${r.discovery.title}": ${r.reason}`);
+    if (res.ingested) println(`  next: \`ultrasec dossier <id> --run ${run}\` then \`verify\` \u2014 adjudicate them like any candidate.`);
+    return 0;
+  }
+  const scanOpts = { scope: listFlag(args, "scope"), include: listFlag(args, "include"), exclude: listFlag(args, "exclude"), maxFiles: numFlag(args, "max-files"), gitignore: flagBool(args, "gitignore") };
+  let regions;
+  try {
+    regions = buildInvestigateWorklist(buildAttackSurface(scanRepo(repo, scanOpts)), dossier.graph);
+  } catch (e) {
+    eprintln(`ultrasec investigate: ${e.message}`);
+    return 2;
+  }
+  const todoPath = emitWorklist(run, stageFiles("INVESTIGATE"), regions, renderInvestigateMd(regions, loadContextDoc(run)));
+  if (flagBool(args, "json")) {
+    println(JSON.stringify(regions, null, 2));
+    return 0;
+  }
+  println(`ultrasec investigate \u2192 ${todoPath} (${regions.length} region${regions.length === 1 ? "" : "s"})`);
+  if (!regions.length) {
+    println(`  no attack-surface regions detected \u2014 try \`map\` or widen the scope.`);
+  } else {
+    println(`  investigate each region, emit grounded Discovery[] as INVESTIGATE.json, then:`);
+    println(`  ultrasec investigate --apply INVESTIGATE.json --run ${run}`);
+  }
+  return 0;
+}
+
 // src/commands/paths.ts
-import { resolve as resolve9 } from "path";
+import { resolve as resolve11 } from "path";
 function runPaths(args) {
-  const run = resolve9(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
   const kind = flagStr(args, "kind");
   const sev = flagStr(args, "severity");
   let d;
@@ -3875,9 +4164,9 @@ function runPaths(args) {
 }
 
 // src/commands/verify.ts
-import { join as join17, resolve as resolve10 } from "path";
+import { join as join18, resolve as resolve12 } from "path";
 function runVerify(args) {
-  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve12(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -3916,7 +4205,7 @@ function applyMode(run, dossier, applyPath, args) {
     println(JSON.stringify({ applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman }, null, 2));
     return 0;
   }
-  println(`ultrasec verify --apply \u2192 updated ${join17(run, "findings.json")}`);
+  println(`ultrasec verify --apply \u2192 updated ${join18(run, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
   if (res.keptForHuman.length) {
     println(`  kept for human (high-severity, only 'unsupported' \u2014 not auto-dismissed):`);
@@ -3926,7 +4215,7 @@ function applyMode(run, dossier, applyPath, args) {
 }
 
 // src/commands/revalidate.ts
-import { resolve as resolve11 } from "path";
+import { resolve as resolve13 } from "path";
 
 // src/revalidate.ts
 var REVALIDATION_VERDICTS = ["still-valid", "fixed", "false-positive", "uncertain"];
@@ -4071,7 +4360,7 @@ function revalFactsFromWorklist(items) {
 
 // src/commands/revalidate.ts
 function runRevalidate(args) {
-  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve13(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -4079,7 +4368,7 @@ function runRevalidate(args) {
     eprintln(`ultrasec revalidate: ${e.message}`);
     return 2;
   }
-  const repo = resolve11(flagStr(args, "repo") ?? dossier.manifest.repo);
+  const repo = resolve13(flagStr(args, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
     let inputs;
@@ -4118,7 +4407,7 @@ function runRevalidate(args) {
 }
 
 // src/commands/narrative.ts
-import { resolve as resolve12 } from "path";
+import { resolve as resolve14 } from "path";
 
 // src/narrative.ts
 var AI_DISCLAIMER = "AI-authored \u2014 verify against the cited findings before acting.";
@@ -4256,7 +4545,7 @@ function rootCausesMd(n) {
 
 // src/commands/narrative.ts
 function runNarrative(args) {
-  const run = resolve12(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve14(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -4281,79 +4570,9 @@ function runNarrative(args) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve14 } from "path";
-
-// src/check.ts
-import { existsSync as existsSync9, readFileSync as readFileSync10 } from "fs";
-import { join as join18, resolve as resolve13, sep as sep2 } from "path";
-function insideRepo(repo, file) {
-  const base = resolve13(repo);
-  const abs = resolve13(base, file);
-  return abs === base || abs.startsWith(base + sep2);
-}
-function lineCount(repo, file) {
-  if (!insideRepo(repo, file)) return null;
-  const abs = join18(repo, file);
-  if (!existsSync9(abs)) return null;
-  try {
-    return readFileSync10(abs, "utf8").split(/\r?\n/).length;
-  } catch {
-    return null;
-  }
-}
-function locsOf(f) {
-  const locs = [];
-  if (f.source) locs.push(f.source);
-  if (f.sink) locs.push(f.sink);
-  for (const p of f.path ?? []) locs.push(p);
-  return locs;
-}
-function atLeast(sev, floor) {
-  return SEVERITIES.indexOf(sev) <= SEVERITIES.indexOf(floor);
-}
-function check(dossier, opts = {}) {
-  const repo = opts.repo ?? dossier.manifest.repo;
-  const floor = opts.minSeverity;
-  const findings = floor ? dossier.findings.filter((f) => atLeast(f.severity, floor)) : dossier.findings;
-  const dangling = [];
-  const lineCache = /* @__PURE__ */ new Map();
-  const linesOf = (file) => {
-    if (!lineCache.has(file)) lineCache.set(file, lineCount(repo, file));
-    return lineCache.get(file);
-  };
-  for (const f of findings) {
-    if (f.status === "dismissed") continue;
-    for (const loc of locsOf(f)) {
-      if (!insideRepo(repo, loc.file)) continue;
-      const lc = linesOf(loc.file);
-      if (lc === null) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
-      else if (loc.line < 1 || loc.line > lc) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range (file has ${lc} lines)` });
-    }
-  }
-  const open = findings.filter((f) => f.status === "open").length;
-  const confirmed = findings.filter((f) => f.status === "confirmed").length;
-  const dismissed = findings.filter((f) => f.status === "dismissed").length;
-  const needsHuman = findings.filter((f) => f.status === "needs-human").length;
-  const messages = [];
-  let ok = true;
-  if (dangling.length) {
-    ok = false;
-    messages.push(`${dangling.length} dangling citation(s) \u2014 a cited [file:line] does not resolve (hallucinated or stale).`);
-  }
-  if (opts.semantic) {
-    if (open > 0) {
-      ok = false;
-      messages.push(`${open} candidate(s) still unadjudicated \u2014 run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
-    }
-    if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human \u2014 review required (not auto-failing).`);
-  }
-  if (ok) messages.push(`grounding OK${opts.semantic ? " \xB7 audit adjudicated" : ""} \u2014 ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
-  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, messages };
-}
-
-// src/commands/check.ts
+import { resolve as resolve15 } from "path";
 function runCheck(args) {
-  const run = resolve14(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve15(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
   const minSevRaw = flagStr(args, "min-severity");
@@ -4379,7 +4598,7 @@ function runCheck(args) {
 
 // src/commands/render.ts
 import { readFileSync as readFileSync11, writeFileSync as writeFileSync7 } from "fs";
-import { join as join19, resolve as resolve15 } from "path";
+import { join as join19, resolve as resolve16 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -4706,7 +4925,7 @@ function renderHtml(d, narrative) {
 
 // src/commands/render.ts
 function runRender(args) {
-  const run = resolve15(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve16(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -4720,7 +4939,7 @@ function runRender(args) {
   if (narrativePath) {
     let parsed;
     try {
-      parsed = parseNarrative(readFileSync11(resolve15(narrativePath), "utf8"));
+      parsed = parseNarrative(readFileSync11(resolve16(narrativePath), "utf8"));
     } catch (e) {
       eprintln(`ultrasec render: cannot read narrative at ${narrativePath}: ${e.message}`);
       return 2;
@@ -4745,7 +4964,7 @@ function runRender(args) {
 // src/commands/clean.ts
 import { execFileSync as execFileSync4 } from "child_process";
 import { existsSync as existsSync10, rmSync } from "fs";
-import { resolve as resolve16 } from "path";
+import { resolve as resolve17 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 function dockerImages() {
@@ -4768,7 +4987,7 @@ function docker(args) {
   }
 }
 function runClean(args) {
-  const run = resolve16(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve17(flagStr(args, "run") ?? ".ultrasec");
   const dry = flagBool(args, "dry-run");
   const withDocker = flagBool(args, "docker");
   const keepOutput = flagBool(args, "keep-output");
@@ -4848,6 +5067,10 @@ COMMANDS
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
              it is ignored (kept open for verify). Flags: --run \xB7 --apply.
   verify     Emit / apply the adversarial finding\u2194evidence worklist.
+  investigate Agentic discovery: emit an attack-surface-region worklist (entry/
+             sink files + graph neighbours); --apply ingests grounded Discovery[]
+             as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
+             existing findings' sources). Flags: --run \xB7 --repo \xB7 --apply \xB7 --scope.
   revalidate Git-history false-positive cut: emit compact git facts (does the
              cited line still exist? when did it last change?) for confirmed /
              needs-human findings; --apply folds in still-valid/fixed/
@@ -4899,6 +5122,8 @@ async function dispatch(cmd, args) {
       return runPaths(args);
     case "verify":
       return runVerify(args);
+    case "investigate":
+      return runInvestigate(args);
     case "revalidate":
       return runRevalidate(args);
     case "narrative":
