@@ -132,6 +132,9 @@ export interface Finding {
   exploitPath?: string;
   /** Deterministic git-blame / CODEOWNERS provenance (opt-in `--blame`). Evidence only. */
   provenance?: Provenance;
+  /** Commit that fixed/moved the cited line, set by `revalidate --apply` on a
+   *  `fixed` verdict (Phase 2). Optional — older dossiers omit it (back-compat). */
+  fixedIn?: string;
   status: Status;
 }
 

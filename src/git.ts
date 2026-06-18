@@ -91,3 +91,100 @@ export function blameLine(repo: string, file: string, line: number): BlameInfo |
   const out = git(repo, ["blame", "-L", `${line},${line}`, "--porcelain", "--", file]);
   return out === null ? null : parseBlamePorcelain(out);
 }
+
+// ── Revalidation facts (Phase 2 — git-history FP cut) ────────────────────────
+// Compact, offline-tolerant git facts about a finding's cited location, so the
+// agent can decide whether a previously-confirmed issue is still-valid / fixed /
+// false-positive / uncertain WITHOUT re-reading the whole repo. Every helper goes
+// through the hardened argv `git()` path and degrades to a benign value (false /
+// null) when git is unavailable, so the engine's network-free contract holds.
+
+// Bound git-history work so a pathological file can't stall a run.
+const LOG_CAP = 50;
+const HUGE_FILE_LINES = 20000;
+
+/** True when `file` exists in the committed tree at HEAD. (`HEAD:<file>` is a single
+ *  argv rev-expression, never a shell string — same injection-hardening as blame.) */
+export function fileExistsAtHead(repo: string, file: string): boolean {
+  return git(repo, ["cat-file", "-e", `HEAD:${file}`]) !== null;
+}
+
+/** The content of `file` line `line` at HEAD, or `null` if the file/line is gone. */
+export function lineContentAtHead(repo: string, file: string, line: number): string | null {
+  if (!Number.isInteger(line) || line < 1) return null;
+  const blob = git(repo, ["show", `HEAD:${file}`]);
+  if (blob === null) return null;
+  const lines = blob.split(/\r?\n/);
+  return line <= lines.length ? lines[line - 1]! : null;
+}
+
+/**
+ * Short shas of commits that touched `file` after `sinceRef` (exclusive), newest
+ * first, capped at {@link LOG_CAP}. `null` when git is unavailable or `sinceRef`
+ * doesn't resolve — so a missing provenance ref yields "unknown", not "zero".
+ */
+export function logSince(repo: string, file: string, sinceRef: string): string[] | null {
+  if (git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) === null) return null;
+  const out = git(repo, ["log", `--max-count=${LOG_CAP}`, "--format=%h", `${sinceRef}..HEAD`, "--", file]);
+  if (out === null) return null;
+  return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+
+export interface LineChange {
+  commit: string;
+  author?: string;
+  date?: string;
+}
+
+/**
+ * Parse the header line of `git log -L … --format=%h%x00%an%x00%ad` output (NUL-
+ * separated) into a {@link LineChange}. Pure (no I/O). Returns `null` when no
+ * NUL-delimited header is present (empty history / unsupported output).
+ */
+export function parseLineLog(raw: string): LineChange | null {
+  const header = raw.split(/\r?\n/).find((l) => l.includes("\u0000"));
+  if (!header) return null;
+  const [commit, author, date] = header.split("\u0000");
+  if (!commit || !commit.trim()) return null;
+  return { commit: commit.trim(), author: author?.trim() || undefined, date: date?.trim() || undefined };
+}
+
+/**
+ * The most recent commit that changed `file` line `line` (via `git log -L`),
+ * or `null`. Guards against pathological cost: skips files larger than
+ * {@link HUGE_FILE_LINES} lines or a line past EOF, degrading to `null`.
+ */
+export function lineLastChanged(repo: string, file: string, line: number): LineChange | null {
+  if (!Number.isInteger(line) || line < 1) return null;
+  const blob = git(repo, ["show", `HEAD:${file}`]);
+  if (blob === null) return null;
+  const total = blob.split(/\r?\n/).length;
+  if (line > total || total > HUGE_FILE_LINES) return null;
+  const out = git(repo, ["log", "-n", "1", "--format=%h%x00%an%x00%ad", "--date=short", "-L", `${line},${line}:${file}`]);
+  return out === null ? null : parseLineLog(out);
+}
+
+/**
+ * Find the path a now-deleted `oldPath` was renamed to, by scanning rename events
+ * in `git log --name-status` output (lines like `R100\told\tnew`). Pure. Returns
+ * the first new path whose old name matches, or `null`.
+ */
+export function parseRenameStatus(raw: string, oldPath: string): string | null {
+  for (const l of raw.split(/\r?\n/)) {
+    const m = /^R\d*\t([^\t]+)\t([^\t]+)$/.exec(l);
+    if (m && m[1] === oldPath) return m[2]!;
+  }
+  return null;
+}
+
+/**
+ * Best-effort: if `file` no longer exists at HEAD, the path it was most likely
+ * renamed to. Bounded (scans the last {@link LOG_CAP}×4 rename events). `null`
+ * when the file still exists, git is unavailable, or no rename is found.
+ */
+export function fileRenamedTo(repo: string, file: string): string | null {
+  if (fileExistsAtHead(repo, file)) return null;
+  const out = git(repo, ["log", "--all", "-M", "--diff-filter=R", "--name-status", "--format=", `--max-count=${LOG_CAP * 4}`]);
+  if (out === null) return null;
+  return parseRenameStatus(out, file);
+}

@@ -9,6 +9,7 @@ import { runImport } from "./commands/import.js";
 import { runDossier } from "./commands/dossier.js";
 import { runPaths } from "./commands/paths.js";
 import { runVerify } from "./commands/verify.js";
+import { runRevalidate } from "./commands/revalidate.js";
 import { runCheck } from "./commands/check.js";
 import { runRender } from "./commands/render.js";
 import { runClean } from "./commands/clean.js";
@@ -48,6 +49,11 @@ COMMANDS
   paths      List candidate cross-file source→sink chains.
   dossier    Print the grounding packet for one finding (real code + neighbours).
   verify     Emit / apply the adversarial finding↔evidence worklist.
+  revalidate Git-history false-positive cut: emit compact git facts (does the
+             cited line still exist? when did it last change?) for confirmed /
+             needs-human findings; --apply folds in still-valid/fixed/
+             false-positive/uncertain (fixed → dismissed + fixed-in commit;
+             high-sev false-positive → needs-human). Flags: --run · --repo · --apply.
   render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
              --semantic also folds in the verify verdicts.
@@ -89,6 +95,8 @@ async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<numb
       return runPaths(args);
     case "verify":
       return runVerify(args);
+    case "revalidate":
+      return runRevalidate(args);
     case "check":
       return runCheck(args);
     case "render":

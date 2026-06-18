@@ -1697,6 +1697,53 @@ function blameLine(repo, file, line) {
   const out = git(repo, ["blame", "-L", `${line},${line}`, "--porcelain", "--", file]);
   return out === null ? null : parseBlamePorcelain(out);
 }
+var LOG_CAP = 50;
+var HUGE_FILE_LINES = 2e4;
+function fileExistsAtHead(repo, file) {
+  return git(repo, ["cat-file", "-e", `HEAD:${file}`]) !== null;
+}
+function lineContentAtHead(repo, file, line) {
+  if (!Number.isInteger(line) || line < 1) return null;
+  const blob = git(repo, ["show", `HEAD:${file}`]);
+  if (blob === null) return null;
+  const lines = blob.split(/\r?\n/);
+  return line <= lines.length ? lines[line - 1] : null;
+}
+function logSince(repo, file, sinceRef) {
+  if (git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) === null) return null;
+  const out = git(repo, ["log", `--max-count=${LOG_CAP}`, "--format=%h", `${sinceRef}..HEAD`, "--", file]);
+  if (out === null) return null;
+  return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+function parseLineLog(raw) {
+  const header2 = raw.split(/\r?\n/).find((l) => l.includes("\0"));
+  if (!header2) return null;
+  const [commit, author, date] = header2.split("\0");
+  if (!commit || !commit.trim()) return null;
+  return { commit: commit.trim(), author: author?.trim() || void 0, date: date?.trim() || void 0 };
+}
+function lineLastChanged(repo, file, line) {
+  if (!Number.isInteger(line) || line < 1) return null;
+  const blob = git(repo, ["show", `HEAD:${file}`]);
+  if (blob === null) return null;
+  const total = blob.split(/\r?\n/).length;
+  if (line > total || total > HUGE_FILE_LINES) return null;
+  const out = git(repo, ["log", "-n", "1", "--format=%h%x00%an%x00%ad", "--date=short", "-L", `${line},${line}:${file}`]);
+  return out === null ? null : parseLineLog(out);
+}
+function parseRenameStatus(raw, oldPath) {
+  for (const l of raw.split(/\r?\n/)) {
+    const m = /^R\d*\t([^\t]+)\t([^\t]+)$/.exec(l);
+    if (m && m[1] === oldPath) return m[2];
+  }
+  return null;
+}
+function fileRenamedTo(repo, file) {
+  if (fileExistsAtHead(repo, file)) return null;
+  const out = git(repo, ["log", "--all", "-M", "--diff-filter=R", "--name-status", "--format=", `--max-count=${LOG_CAP * 4}`]);
+  if (out === null) return null;
+  return parseRenameStatus(out, file);
+}
 
 // src/provenance.ts
 import { existsSync as existsSync2, readFileSync as readFileSync3 } from "fs";
@@ -3762,15 +3809,207 @@ function applyMode(run, dossier, applyPath, args) {
   return 0;
 }
 
+// src/commands/revalidate.ts
+import { resolve as resolve10 } from "path";
+
+// src/revalidate.ts
+var REVALIDATION_VERDICTS = ["still-valid", "fixed", "false-positive", "uncertain"];
+function inScope(f) {
+  return f.status === "confirmed" || f.status === "needs-human";
+}
+function citedLoc(f) {
+  if (f.sink) return { file: f.sink.file, line: f.sink.line };
+  const last = f.path?.[f.path.length - 1];
+  if (last) return { file: last.file, line: last.line };
+  if (f.source) return { file: f.source.file, line: f.source.line };
+  return null;
+}
+function buildRevalidateWorklist(dossier, repo) {
+  return dossier.findings.filter(inScope).slice().sort((a, b) => byStr(a.id, b.id)).map((f) => {
+    const loc = citedLoc(f);
+    const file = loc?.file ?? "";
+    const line = loc?.line ?? 0;
+    const fileExists = file ? fileExistsAtHead(repo, file) : false;
+    const currentLine = fileExists && line ? lineContentAtHead(repo, file, line) : null;
+    const sinceRef = f.provenance?.commit;
+    const since = sinceRef && file ? logSince(repo, file, sinceRef) : null;
+    return {
+      id: f.id,
+      severity: f.severity,
+      title: f.title,
+      at: `${file}:${line}`,
+      fileExists,
+      currentLine,
+      commitsSinceFinding: since ? since.length : null,
+      lineLastChanged: fileExists && line ? lineLastChanged(repo, file, line) : null,
+      renamedTo: file && !fileExists ? fileRenamedTo(repo, file) : null,
+      verdict: null,
+      note: ""
+    };
+  });
+}
+function renderRevalidateMd(items, context) {
+  const L = [];
+  L.push(`# ultrasec revalidation worklist (${items.length})`);
+  L.push("");
+  L.push(`Each finding below was already ranked **real** (confirmed / needs-human). Using the`);
+  L.push(`git facts, decide whether it is still a live issue and set a \`verdict\`:`);
+  L.push(`\`still-valid\` \xB7 \`fixed\` \xB7 \`false-positive\` \xB7 \`uncertain\` (+ a short \`note\`, and`);
+  L.push(`\`fixedIn\` \u2014 the fixing commit sha \u2014 when \`fixed\`). Save as REVALIDATE.json (array of`);
+  L.push(`{id, verdict, fixedIn?, note?}) and run \`ultrasec revalidate --apply REVALIDATE.json\`.`);
+  L.push("");
+  L.push(`> Conservative on apply: \`fixed\` \u2192 dismissed (records the fixing commit);`);
+  L.push(`> a high/critical \`false-positive\` \u2192 **needs-human** (never auto-dismissed);`);
+  L.push(`> \`uncertain\`/unknown \u2192 needs-human. \`still-valid\` keeps the finding as-is.`);
+  L.push("");
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` \u2014 the project's trust model; background, never a verdict._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
+  for (const it of items) {
+    L.push(`## ${it.id} \u2014 [${it.severity}] ${it.title}`);
+    L.push(`- at: \`${it.at}\` \xB7 file exists at HEAD: ${it.fileExists ? "yes" : "**NO**"}`);
+    if (it.currentLine !== null) L.push(`- current line: \`${it.currentLine.trim().slice(0, 200)}\``);
+    else if (it.fileExists) L.push(`- current line: **cited line is out of range now (drifted/removed)**`);
+    if (it.commitsSinceFinding !== null) L.push(`- commits to file since finding: ${it.commitsSinceFinding}`);
+    if (it.lineLastChanged) L.push(`- line last changed: \`${it.lineLastChanged.commit}\`${it.lineLastChanged.date ? ` (${it.lineLastChanged.date})` : ""}${it.lineLastChanged.author ? ` by ${it.lineLastChanged.author}` : ""}`);
+    if (it.renamedTo) L.push(`- file appears renamed to: \`${it.renamedTo}\``);
+    L.push("");
+  }
+  return L.join("\n") + "\n";
+}
+function applyRevalidations(dossier, inputs, opts = {}) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const v of inputs) byId.set(v.id, v);
+  const unresolved = opts.unresolved ?? /* @__PURE__ */ new Set();
+  const fixedInById = opts.fixedInById ?? /* @__PURE__ */ new Map();
+  let applied = 0, stillValid = 0, fixed = 0, dismissed = 0, needsHuman = 0;
+  const flagged = [];
+  const withNote = (f, label, note) => `${f.message}
+
+Revalidation (${label})${note ? `: ${note}` : ""}`;
+  const findings = dossier.findings.map((f) => {
+    const v = byId.get(f.id);
+    if (!v || !inScope(f)) return f;
+    applied++;
+    switch (v.verdict) {
+      case "still-valid": {
+        stillValid++;
+        let message = f.message;
+        if (unresolved.has(f.id)) {
+          flagged.push({ id: f.id, reason: "marked still-valid but cited location no longer resolves at HEAD \u2014 re-confirm" });
+          message = withNote(f, "still-valid", `${v.note ? v.note + " " : ""}\u26A0\uFE0F cited location drifted/removed at HEAD \u2014 re-confirm the line`);
+        } else if (v.note) {
+          message = withNote(f, "still-valid", v.note);
+        }
+        return { ...f, message };
+      }
+      case "fixed": {
+        fixed++;
+        dismissed++;
+        const sha = v.fixedIn ?? fixedInById.get(f.id);
+        const next = { ...f, status: "dismissed", message: withNote(f, "fixed", `${v.note ? v.note + " " : ""}${sha ? `fixed in ${sha}` : "fixed"}`) };
+        if (sha) next.fixedIn = sha;
+        return next;
+      }
+      case "false-positive": {
+        const status = isHigh(f.severity) ? "needs-human" : "dismissed";
+        if (status === "needs-human") {
+          needsHuman++;
+          flagged.push({ id: f.id, reason: "high-severity false-positive \u2014 escalated to needs-human, not auto-dismissed" });
+        } else {
+          dismissed++;
+        }
+        return { ...f, status, message: withNote(f, "false-positive", v.note) };
+      }
+      default: {
+        needsHuman++;
+        return { ...f, status: "needs-human", message: withNote(f, v.verdict, v.note) };
+      }
+    }
+  });
+  return { findings, applied, stillValid, fixed, dismissed, needsHuman, flagged };
+}
+function parseRevalidations(raw) {
+  const data = JSON.parse(raw);
+  const arr = Array.isArray(data) ? data : Array.isArray(data?.revalidations) ? data.revalidations : [];
+  return arr.filter((v) => v && typeof v.id === "string" && REVALIDATION_VERDICTS.includes(v.verdict)).map((v) => ({
+    id: v.id,
+    verdict: v.verdict,
+    fixedIn: typeof v.fixedIn === "string" ? v.fixedIn : void 0,
+    note: typeof v.note === "string" ? v.note : void 0
+  }));
+}
+function revalFactsFromWorklist(items) {
+  const unresolved = /* @__PURE__ */ new Set();
+  const fixedInById = /* @__PURE__ */ new Map();
+  for (const it of items) {
+    if (!it.fileExists || it.currentLine === null) unresolved.add(it.id);
+    if (it.lineLastChanged?.commit) fixedInById.set(it.id, it.lineLastChanged.commit);
+  }
+  return { unresolved, fixedInById };
+}
+
+// src/commands/revalidate.ts
+function runRevalidate(args) {
+  const run = resolve10(flagStr(args, "run") ?? ".ultrasec");
+  let dossier;
+  try {
+    dossier = loadDossier(run);
+  } catch (e) {
+    eprintln(`ultrasec revalidate: ${e.message}`);
+    return 2;
+  }
+  const repo = resolve10(flagStr(args, "repo") ?? dossier.manifest.repo);
+  const applyPath = flagStr(args, "apply");
+  if (applyPath) {
+    let inputs;
+    try {
+      inputs = readApply(applyPath, /revalidat.*\.json$/i, parseRevalidations);
+    } catch (e) {
+      eprintln(`ultrasec revalidate: cannot read revalidations at ${e.message}`);
+      return 2;
+    }
+    const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo));
+    const res = applyRevalidations(dossier, inputs, facts);
+    persistFindings(run, dossier, res.findings);
+    if (flagBool(args, "json")) {
+      println(JSON.stringify({ applied: res.applied, stillValid: res.stillValid, fixed: res.fixed, dismissed: res.dismissed, needsHuman: res.needsHuman, flagged: res.flagged }, null, 2));
+      return 0;
+    }
+    println(`ultrasec revalidate --apply \u2192 updated ${run}/findings.json`);
+    println(`  applied ${res.applied} verdict(s): ${res.stillValid} still-valid \xB7 ${res.fixed} fixed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
+    for (const fl of res.flagged) println(`  \u26A0\uFE0F  ${fl.id}: ${fl.reason}`);
+    return 0;
+  }
+  const items = buildRevalidateWorklist(dossier, repo);
+  const todoPath = emitWorklist(run, stageFiles("REVALIDATE"), items, renderRevalidateMd(items, loadContextDoc(run)));
+  if (flagBool(args, "json")) {
+    println(JSON.stringify(items, null, 2));
+    return 0;
+  }
+  println(`ultrasec revalidate \u2192 ${todoPath} (${items.length} item${items.length === 1 ? "" : "s"})`);
+  if (!items.length) {
+    println(`  no confirmed/needs-human findings to revalidate \u2014 run \`verify --apply\` first.`);
+  } else {
+    println(`  decide still-valid/fixed/false-positive/uncertain per finding, save REVALIDATE.json, then:`);
+    println(`  ultrasec revalidate --apply REVALIDATE.json --run ${run}`);
+  }
+  return 0;
+}
+
 // src/commands/check.ts
-import { resolve as resolve11 } from "path";
+import { resolve as resolve12 } from "path";
 
 // src/check.ts
 import { existsSync as existsSync9, readFileSync as readFileSync10 } from "fs";
-import { join as join18, resolve as resolve10, sep as sep2 } from "path";
+import { join as join18, resolve as resolve11, sep as sep2 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve10(repo);
-  const abs = resolve10(base, file);
+  const base = resolve11(repo);
+  const abs = resolve11(base, file);
   return abs === base || abs.startsWith(base + sep2);
 }
 function lineCount(repo, file) {
@@ -3835,7 +4074,7 @@ function check(dossier, opts = {}) {
 
 // src/commands/check.ts
 function runCheck(args) {
-  const run = resolve11(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve12(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
   const minSevRaw = flagStr(args, "min-severity");
@@ -3861,7 +4100,7 @@ function runCheck(args) {
 
 // src/commands/render.ts
 import { writeFileSync as writeFileSync7 } from "fs";
-import { join as join19, resolve as resolve12 } from "path";
+import { join as join19, resolve as resolve13 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -4147,7 +4386,7 @@ function renderHtml(d) {
 
 // src/commands/render.ts
 function runRender(args) {
-  const run = resolve12(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve13(flagStr(args, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run);
@@ -4170,7 +4409,7 @@ function runRender(args) {
 // src/commands/clean.ts
 import { execFileSync as execFileSync4 } from "child_process";
 import { existsSync as existsSync10, rmSync } from "fs";
-import { resolve as resolve13 } from "path";
+import { resolve as resolve14 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 function dockerImages() {
@@ -4193,7 +4432,7 @@ function docker(args) {
   }
 }
 function runClean(args) {
-  const run = resolve13(flagStr(args, "run") ?? ".ultrasec");
+  const run = resolve14(flagStr(args, "run") ?? ".ultrasec");
   const dry = flagBool(args, "dry-run");
   const withDocker = flagBool(args, "docker");
   const keepOutput = flagBool(args, "keep-output");
@@ -4270,6 +4509,11 @@ COMMANDS
   paths      List candidate cross-file source\u2192sink chains.
   dossier    Print the grounding packet for one finding (real code + neighbours).
   verify     Emit / apply the adversarial finding\u2194evidence worklist.
+  revalidate Git-history false-positive cut: emit compact git facts (does the
+             cited line still exist? when did it last change?) for confirmed /
+             needs-human findings; --apply folds in still-valid/fixed/
+             false-positive/uncertain (fixed \u2192 dismissed + fixed-in commit;
+             high-sev false-positive \u2192 needs-human). Flags: --run \xB7 --repo \xB7 --apply.
   render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
              --semantic also folds in the verify verdicts.
@@ -4310,6 +4554,8 @@ async function dispatch(cmd, args) {
       return runPaths(args);
     case "verify":
       return runVerify(args);
+    case "revalidate":
+      return runRevalidate(args);
     case "check":
       return runCheck(args);
     case "render":
