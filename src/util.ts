@@ -1,8 +1,12 @@
 import { createHash } from "node:crypto";
 
 // ── Tiny zero-dependency arg parser ──────────────────────────────────────────
-// Supports: positionals, `--flag value`, `--flag=value`, and boolean `--flag`.
-// A flag immediately followed by another `--token` (or nothing) is boolean.
+// Supports: positionals, `--flag value`, `--flag=value`, boolean `--flag`, and
+// single-dash short flags (`-h`, `-v`, bundled `-hv`).
+// A long flag is boolean when it is in BOOLEAN_FLAGS, or is immediately followed
+// by another flag token / nothing. Listing a value-less flag in BOOLEAN_FLAGS is
+// what stops it from greedily swallowing a following positional — e.g. so
+// `dossier --json <id>` keeps `<id>` as a positional instead of `--json`'s value.
 /** A single flag occurrence; repeated flags accumulate into an array. */
 export type FlagValue = string | boolean | (string | boolean)[];
 
@@ -13,6 +17,36 @@ export interface ParsedArgs {
    *  passed more than once becomes an array of its occurrences. */
   flags: Record<string, FlagValue>;
 }
+
+/**
+ * Value-less (boolean) flags: they set `true` and NEVER consume the next token,
+ * so a positional after them isn't swallowed (the `dossier --json <id>` class of
+ * bug). MUST stay in sync with every flag read via `flagBool()`.
+ */
+export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
+  "help",
+  "version",
+  "json",
+  "offline",
+  "no-enrich",
+  "no-tools",
+  "docker",
+  "dry-run",
+  "blame",
+  "provenance",
+  "sinks",
+  "merge",
+  "resume",
+  "powered",
+  "no-scan",
+  "gitignore",
+  "semantic",
+  "keep-output",
+]);
+
+/** Single-dash short-flag aliases, as documented in the CLI's GLOBAL help. Each
+ *  maps to the long flag it stands for; an unknown letter becomes its own boolean. */
+const SHORT_FLAGS: Record<string, string> = { h: "help", v: "version" };
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const _: string[] = [];
@@ -40,12 +74,16 @@ export function parseArgs(argv: string[]): ParsedArgs {
         continue;
       }
       const next = argv[i + 1];
-      if (next !== undefined && !next.startsWith("--")) {
+      if (!BOOLEAN_FLAGS.has(body) && next !== undefined && !next.startsWith("--")) {
         set(body, next);
         i++;
       } else {
         set(body, true);
       }
+    } else if (/^-[A-Za-z]+$/.test(tok)) {
+      // Single-dash short flag(s), e.g. `-h`, `-v`, bundled `-hv`. Always boolean;
+      // each letter resolves to its long-name alias when known, else to itself.
+      for (const ch of tok.slice(1)) set(SHORT_FLAGS[ch] ?? ch, true);
     } else {
       _.push(tok);
     }
