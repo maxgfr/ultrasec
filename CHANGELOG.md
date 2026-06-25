@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.7.0](https://github.com/maxgfr/ultrasec/compare/v1.6.1...v1.7.0) (2026-06-25)
+
+
+### Features
+
+* **skill,narrative:** add hunting heuristics, severity discipline, and positive-patterns + hardening-notes report sections ([c86da82](https://github.com/maxgfr/ultrasec/commit/c86da82c79f0f262edea605ffbcdf21249243934))
+
 ## [1.6.1](https://github.com/maxgfr/ultrasec/compare/v1.6.0...v1.6.1) (2026-06-18)
 
 
