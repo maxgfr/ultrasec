@@ -93,6 +93,19 @@ function execSummaryHtml(n?: Narrative): string {
   return aiSectionHtml("Executive summary", `<p>${esc(n.executiveSummary)}</p>`);
 }
 
+function positivePatternsHtml(n?: Narrative): string {
+  if (!n?.positivePatterns) return "";
+  return aiSectionHtml("What the codebase does well", `<p>${esc(n.positivePatterns)}</p>`);
+}
+
+function hardeningNotesHtml(n?: Narrative): string {
+  if (!n?.hardeningNotes?.length) return "";
+  const items = `<p class="ai-note">Defense-in-depth suggestions — not findings; excluded from the severity counts.</p><ul>${n.hardeningNotes
+    .map((h) => `<li>${esc(h)}</li>`)
+    .join("")}</ul>`;
+  return aiSectionHtml("Hardening notes", items);
+}
+
 function chainsHtml(n?: Narrative): string {
   if (!n?.attackChains?.length) return "";
   const items = n.attackChains
@@ -166,9 +179,9 @@ export function renderHtml(d: Dossier, narrative?: Narrative): string {
 <body>
   <h1>Security audit</h1>
   <div class="sub">repo <code>${esc(d.manifest.repo)}</code> · ultrasec ${esc(d.manifest.version)} · tools: ${esc(d.manifest.toolsRun.join(", ") || "none")}</div>
-  <div>${counts}</div>${execSummaryHtml(narrative)}
+  <div>${counts}</div>${execSummaryHtml(narrative)}${positivePatternsHtml(narrative)}
   ${shown.length ? shown.map((f) => findingHtml(f, rem.get(f.id))).join("\n") : "<p>No actionable findings.</p>"}
-  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map((f) => findingHtml(f, rem.get(f.id))).join("\n")}</details>` : ""}${chainsHtml(narrative)}${rootCausesHtml(narrative)}
+  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map((f) => findingHtml(f, rem.get(f.id))).join("\n")}</details>` : ""}${chainsHtml(narrative)}${rootCausesHtml(narrative)}${hardeningNotesHtml(narrative)}
 </body></html>
 `;
 }

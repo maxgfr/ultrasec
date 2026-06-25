@@ -2,7 +2,7 @@ import type { Dossier } from "../store.js";
 import { SEVERITIES, type Finding, type Narrative, type Remediation, type Severity } from "../types.js";
 import { pathMermaid } from "./mermaid.js";
 import { byStr } from "../util.js";
-import { executiveSummaryMd, suggestedFixMd, attackChainsMd, rootCausesMd, remediationMap } from "../narrative.js";
+import { executiveSummaryMd, positivePatternsMd, suggestedFixMd, attackChainsMd, rootCausesMd, hardeningNotesMd, remediationMap } from "../narrative.js";
 
 // The tiered Markdown report: SUMMARY (TL;DR), REPORT (confirmed + needs-human,
 // actionable), FULL (everything incl. dismissed, with the reasoning trail).
@@ -78,7 +78,7 @@ export function renderSummary(d: Dossier, narrative?: Narrative): string {
   const fs = sortFindings(d.findings);
   const confirmed = fs.filter((f) => f.status === "confirmed");
   const needs = fs.filter((f) => f.status === "needs-human");
-  const L: string[] = [`# Security audit — summary`, "", header(d), "", ...executiveSummaryMd(narrative)];
+  const L: string[] = [`# Security audit — summary`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
   if (!confirmed.length && !needs.length) {
     L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) — see REPORT.md.` : `No findings.`);
     return L.join("\n") + "\n";
@@ -145,7 +145,7 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Reme
 export function renderReport(d: Dossier, narrative?: Narrative): string {
   const fs = sortFindings(d.findings).filter((f) => f.status === "confirmed" || f.status === "needs-human" || f.status === "open");
   const rem = remediationMap(narrative);
-  const L: string[] = [`# Security audit — report`, "", header(d), "", ...executiveSummaryMd(narrative)];
+  const L: string[] = [`# Security audit — report`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
   if (!fs.length) {
     L.push(`No actionable findings. (See FULL.md for dismissed candidates.)`);
     return L.join("\n") + "\n";
@@ -158,14 +158,14 @@ export function renderReport(d: Dossier, narrative?: Narrative): string {
     L.push("---");
     L.push("");
   }
-  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative));
+  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
   return L.join("\n") + "\n";
 }
 
 export function renderFull(d: Dossier, narrative?: Narrative): string {
   const fs = sortFindings(d.findings);
   const rem = remediationMap(narrative);
-  const L: string[] = [`# Security audit — full`, "", header(d), "", ...executiveSummaryMd(narrative)];
+  const L: string[] = [`# Security audit — full`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
   const groups: [string, Finding[]][] = [
     ["Confirmed", fs.filter((f) => f.status === "confirmed")],
     ["Needs human review", fs.filter((f) => f.status === "needs-human")],
@@ -181,7 +181,7 @@ export function renderFull(d: Dossier, narrative?: Narrative): string {
       L.push("");
     }
   }
-  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative));
+  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
   L.push(`---`);
   L.push(`Engine: ultrasec ${d.manifest.version}. ${d.manifest.generatedNote}`);
   return L.join("\n") + "\n";

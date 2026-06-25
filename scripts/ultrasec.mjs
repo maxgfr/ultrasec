@@ -4521,9 +4521,11 @@ function buildNarrativeWorklist(dossier) {
   }));
   const scaffold = {
     executiveSummary: "",
+    positivePatterns: "",
     remediations: reportable.filter((f) => f.status === "confirmed").map((f) => ({ id: f.id, fix: "", ...f.provenance?.owner ? { owner: f.provenance.owner } : {} })),
     attackChains: [],
-    rootCauses: []
+    rootCauses: [],
+    hardeningNotes: []
   };
   return { findings, scaffold };
 }
@@ -4534,12 +4536,16 @@ function renderNarrativeWorklistMd(wl, context) {
   L.push(`Author **NARRATIVE.json** (a Narrative object), then fold it into the report with`);
   L.push(`\`ultrasec render --narrative NARRATIVE.json --run <run>\`. Fields (all optional, all additive):`);
   L.push(`- \`executiveSummary\`: a few sentences for non-experts atop the report.`);
+  L.push(`- \`positivePatterns\`: what the codebase does **well** (solid auth, parameterized queries\u2026) \u2014 calibrates trust in the findings and helps prioritise. Free prose, advisory.`);
   L.push(`- \`remediations\`: \`{id, fix, patch?, owner?}\` \u2014 a concrete fix per **confirmed** finding.`);
   L.push(`- \`attackChains\`: \`{title, findingIds[], narrative}\` \u2014 how findings combine into an exploit.`);
   L.push(`- \`rootCauses\`: \`{cause, findingIds[], note}\` \u2014 group findings by shared underlying cause.`);
+  L.push(`- \`hardeningNotes\`: \`string[]\` \u2014 defense-in-depth suggestions that are **not** findings (the attack is already prevented elsewhere). Advisory; excluded from the severity counts.`);
   L.push("");
-  L.push(`> Grounding is strict: any section citing an **unknown or non-confirmed** finding id is`);
-  L.push(`> dropped on merge. Narrative prose **never** changes a finding's status, severity, or set.`);
+  L.push(`> Grounding is strict for finding-citing sections: any \`remediations\`/\`attackChains\`/\`rootCauses\``);
+  L.push(`> entry citing an **unknown or non-confirmed** finding id is dropped on merge. \`executiveSummary\`,`);
+  L.push(`> \`positivePatterns\`, and \`hardeningNotes\` are advisory prose that cite no finding ids. Narrative`);
+  L.push(`> prose **never** changes a finding's status, severity, or set.`);
   L.push("");
   if (context) {
     L.push(`## Project context`);
@@ -4564,6 +4570,11 @@ function parseNarrative(raw) {
   const d = JSON.parse(raw);
   const n = {};
   if (typeof d?.executiveSummary === "string") n.executiveSummary = d.executiveSummary;
+  if (typeof d?.positivePatterns === "string") n.positivePatterns = d.positivePatterns;
+  if (Array.isArray(d?.hardeningNotes)) {
+    const hn = d.hardeningNotes.filter((x) => typeof x === "string" && x.trim()).map((x) => x.trim());
+    if (hn.length) n.hardeningNotes = hn;
+  }
   if (Array.isArray(d?.remediations)) {
     const rem = d.remediations.filter((r) => r && typeof r.id === "string" && typeof r.fix === "string").map((r) => ({ id: r.id, fix: r.fix, ...typeof r.patch === "string" ? { patch: r.patch } : {}, ...typeof r.owner === "string" ? { owner: r.owner } : {} }));
     if (rem.length) n.remediations = rem;
@@ -4582,6 +4593,8 @@ function mergeNarrative(n, dossier) {
   const confirmed = new Set(dossier.findings.filter((f) => f.status === "confirmed").map((f) => f.id));
   const out = {};
   if (n.executiveSummary && n.executiveSummary.trim()) out.executiveSummary = n.executiveSummary.trim();
+  if (n.positivePatterns && n.positivePatterns.trim()) out.positivePatterns = n.positivePatterns.trim();
+  if (n.hardeningNotes?.length) out.hardeningNotes = n.hardeningNotes;
   const rem = (n.remediations ?? []).filter((r) => confirmed.has(r.id));
   if (rem.length) out.remediations = rem;
   const chains = (n.attackChains ?? []).filter((c) => c.findingIds.length > 0 && c.findingIds.every((id) => confirmed.has(id)));
@@ -4591,7 +4604,7 @@ function mergeNarrative(n, dossier) {
   return out;
 }
 function hasNarrativeContent(n) {
-  return !!n && !!(n.executiveSummary || n.remediations?.length || n.attackChains?.length || n.rootCauses?.length);
+  return !!n && !!(n.executiveSummary || n.positivePatterns || n.remediations?.length || n.attackChains?.length || n.rootCauses?.length || n.hardeningNotes?.length);
 }
 function remediationMap(n) {
   const m = /* @__PURE__ */ new Map();
@@ -4601,6 +4614,10 @@ function remediationMap(n) {
 function executiveSummaryMd(n) {
   if (!n?.executiveSummary) return [];
   return [`## Executive summary (AI-authored)`, `_${AI_DISCLAIMER}_`, "", n.executiveSummary, ""];
+}
+function positivePatternsMd(n) {
+  if (!n?.positivePatterns) return [];
+  return [`## What the codebase does well (AI-authored)`, `_${AI_DISCLAIMER}_`, "", n.positivePatterns, ""];
 }
 function suggestedFixMd(r) {
   if (!r) return [];
@@ -4630,6 +4647,19 @@ function rootCausesMd(n) {
     L.push(g.note);
     L.push("");
   }
+  return L;
+}
+function hardeningNotesMd(n) {
+  if (!n?.hardeningNotes?.length) return [];
+  const L = [
+    `## Hardening notes (AI-authored)`,
+    `_${AI_DISCLAIMER}_`,
+    "",
+    `_Defense-in-depth suggestions \u2014 **not** findings (the attack is already prevented elsewhere); excluded from the severity counts._`,
+    ""
+  ];
+  for (const note of n.hardeningNotes) L.push(`- ${note}`);
+  L.push("");
   return L;
 }
 
@@ -4949,7 +4979,7 @@ function renderSummary(d, narrative) {
   const fs = sortFindings(d.findings);
   const confirmed = fs.filter((f) => f.status === "confirmed");
   const needs = fs.filter((f) => f.status === "needs-human");
-  const L = [`# Security audit \u2014 summary`, "", header(d), "", ...executiveSummaryMd(narrative)];
+  const L = [`# Security audit \u2014 summary`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
   if (!confirmed.length && !needs.length) {
     L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) \u2014 see REPORT.md.` : `No findings.`);
     return L.join("\n") + "\n";
@@ -5012,7 +5042,7 @@ function renderFinding(f, opts = {}) {
 function renderReport(d, narrative) {
   const fs = sortFindings(d.findings).filter((f) => f.status === "confirmed" || f.status === "needs-human" || f.status === "open");
   const rem = remediationMap(narrative);
-  const L = [`# Security audit \u2014 report`, "", header(d), "", ...executiveSummaryMd(narrative)];
+  const L = [`# Security audit \u2014 report`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
   if (!fs.length) {
     L.push(`No actionable findings. (See FULL.md for dismissed candidates.)`);
     return L.join("\n") + "\n";
@@ -5025,13 +5055,13 @@ function renderReport(d, narrative) {
     L.push("---");
     L.push("");
   }
-  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative));
+  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
   return L.join("\n") + "\n";
 }
 function renderFull(d, narrative) {
   const fs = sortFindings(d.findings);
   const rem = remediationMap(narrative);
-  const L = [`# Security audit \u2014 full`, "", header(d), "", ...executiveSummaryMd(narrative)];
+  const L = [`# Security audit \u2014 full`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
   const groups = [
     ["Confirmed", fs.filter((f) => f.status === "confirmed")],
     ["Needs human review", fs.filter((f) => f.status === "needs-human")],
@@ -5047,7 +5077,7 @@ function renderFull(d, narrative) {
       L.push("");
     }
   }
-  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative));
+  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
   L.push(`---`);
   L.push(`Engine: ultrasec ${d.manifest.version}. ${d.manifest.generatedNote}`);
   return L.join("\n") + "\n";
@@ -5126,6 +5156,15 @@ function execSummaryHtml(n) {
   if (!n?.executiveSummary) return "";
   return aiSectionHtml("Executive summary", `<p>${esc2(n.executiveSummary)}</p>`);
 }
+function positivePatternsHtml(n) {
+  if (!n?.positivePatterns) return "";
+  return aiSectionHtml("What the codebase does well", `<p>${esc2(n.positivePatterns)}</p>`);
+}
+function hardeningNotesHtml(n) {
+  if (!n?.hardeningNotes?.length) return "";
+  const items = `<p class="ai-note">Defense-in-depth suggestions \u2014 not findings; excluded from the severity counts.</p><ul>${n.hardeningNotes.map((h) => `<li>${esc2(h)}</li>`).join("")}</ul>`;
+  return aiSectionHtml("Hardening notes", items);
+}
 function chainsHtml(n) {
   if (!n?.attackChains?.length) return "";
   const items = n.attackChains.map((c) => `<div class="ai-block"><h3>${esc2(c.title)}</h3><div class="meta">${c.findingIds.map((id) => `<code>${esc2(id)}</code>`).join(" \u2192 ")}</div><p>${esc2(c.narrative)}</p></div>`).join("");
@@ -5187,9 +5226,9 @@ function renderHtml(d, narrative) {
 <body>
   <h1>Security audit</h1>
   <div class="sub">repo <code>${esc2(d.manifest.repo)}</code> \xB7 ultrasec ${esc2(d.manifest.version)} \xB7 tools: ${esc2(d.manifest.toolsRun.join(", ") || "none")}</div>
-  <div>${counts}</div>${execSummaryHtml(narrative)}
+  <div>${counts}</div>${execSummaryHtml(narrative)}${positivePatternsHtml(narrative)}
   ${shown.length ? shown.map((f) => findingHtml(f, rem.get(f.id))).join("\n") : "<p>No actionable findings.</p>"}
-  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map((f) => findingHtml(f, rem.get(f.id))).join("\n")}</details>` : ""}${chainsHtml(narrative)}${rootCausesHtml(narrative)}
+  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map((f) => findingHtml(f, rem.get(f.id))).join("\n")}</details>` : ""}${chainsHtml(narrative)}${rootCausesHtml(narrative)}${hardeningNotesHtml(narrative)}
 </body></html>
 `;
 }
@@ -5217,7 +5256,7 @@ function runRender(args) {
     }
     const merged = mergeNarrative(parsed, dossier);
     narrative = merged;
-    narrativeNote = hasNarrativeContent(merged) ? `  + AI narrative folded in (${merged.remediations?.length ?? 0} fix(es), ${merged.attackChains?.length ?? 0} chain(s), ${merged.rootCauses?.length ?? 0} root-cause group(s)${merged.executiveSummary ? ", exec summary" : ""})` : `  \u26A0\uFE0F  narrative had no sections grounded on confirmed findings \u2014 report rendered without it`;
+    narrativeNote = hasNarrativeContent(merged) ? `  + AI narrative folded in (${merged.remediations?.length ?? 0} fix(es), ${merged.attackChains?.length ?? 0} chain(s), ${merged.rootCauses?.length ?? 0} root-cause group(s)${merged.executiveSummary ? ", exec summary" : ""}${merged.positivePatterns ? ", positive patterns" : ""}${merged.hardeningNotes?.length ? `, ${merged.hardeningNotes.length} hardening note(s)` : ""})` : `  \u26A0\uFE0F  narrative had no sections grounded on confirmed findings \u2014 report rendered without it`;
   }
   const outputs = [
     ["SUMMARY.md", renderSummary(dossier, narrative)],

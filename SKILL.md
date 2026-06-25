@@ -30,7 +30,13 @@ real and exploitable, find the subtle bugs the tools miss, and verify.
 >    auto-suppression discards real bugs.
 > 4. **Use the tools, then go beyond them.** Run the installed scanners (`tools`),
 >    triage their output, and add what only cross-file/semantic reasoning can
->    find: authorization/IDOR, business-logic, multi-hop taint.
+>    find: authorization/IDOR, business-logic, multi-hop taint — hunt with the
+>    attacker-mindset angles in [references/hunting-heuristics.md](references/hunting-heuristics.md).
+> 5. **Only report what you can exploit.** Every finding needs a concrete attacker
+>    scenario (who · what they send · what they get) — not "potentially". A
+>    defense-in-depth gap another layer already prevents is a *hardening note*, not a
+>    finding. Calibrate severity against a comparable baseline:
+>    [references/severity-and-discipline.md](references/severity-and-discipline.md).
 
 Most commands accept `--json` — prefer it when you branch on the result.
 
@@ -115,8 +121,11 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   dangling `[file:line]` (anti-hallucination); `--semantic` also fails if any
   candidate is still unadjudicated.
 - `narrative --run <dir>` — emit the **report-narrative** worklist (reportable findings +
-  a `Narrative` scaffold). You author `NARRATIVE.json` (executive summary, per-confirmed
-  remediations, attack chains, root-cause groups); it is folded in by `render --narrative`.
+  a `Narrative` scaffold). You author `NARRATIVE.json` (executive summary, `positivePatterns`
+  (what the codebase does well), per-confirmed remediations, attack chains, root-cause groups,
+  and `hardeningNotes` (defense-in-depth, *not* findings)); it is folded in by
+  `render --narrative`. Finding-citing sections are grounding-checked; the advisory prose
+  (`executiveSummary`/`positivePatterns`/`hardeningNotes`) cites no ids and is kept as-is.
 - `implement --run <dir> [--narrative NARRATIVE.json]` — emit a **remediation-PRD draft**
   (`IMPLEMENT.md`) + a structured worklist (`IMPLEMENT.todo.json`): confirmed findings → fix
   work items (each grounded in its `[file:line]` with an acceptance-criteria scaffold),
@@ -151,7 +160,11 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
    Same loop for incremental `--diff` re-audits in CI.
 4. **Tune coverage** — sink/source/sanitizer catalog + CWE map:
    [references/catalog.md](references/catalog.md); external tools:
-   [references/tools.md](references/tools.md).
+   [references/tools.md](references/tools.md). For the bugs the engine *can't*
+   enumerate (authz, business logic, feature abuse, chained attacks) hunt with
+   [references/hunting-heuristics.md](references/hunting-heuristics.md); to calibrate
+   severity and avoid false positives,
+   [references/severity-and-discipline.md](references/severity-and-discipline.md).
 5. **Drive it autonomously** — let an external agent CLI fill the worklists end-to-end
    (opt-in, keys live in that CLI): [references/powered-mode.md](references/powered-mode.md).
    Two deepsec-style accuracy passes worth their own playbooks:
@@ -170,8 +183,11 @@ a worklist → you **fill** it → `--apply` folds it back in under a conservati
 
 1. **Prime the context** *(highest leverage)*. `context --repo <dir> --out <run>`,
    then author `<run>/CONTEXT.md` from `CONTEXT.todo.md` — the project's purpose,
-   trust model, auth/authorization scheme, and framework protections. Every later
-   stage reasons WITH it. (Evidence only — it never gates a verdict.)
+   trust model, auth/authorization scheme, framework protections, and a **comparable
+   mainstream app to calibrate severity against**. Every later stage reasons WITH it.
+   (Evidence only — it never gates a verdict.) The recon questions to answer and the
+   baseline idea are in
+   [references/severity-and-discipline.md](references/severity-and-discipline.md).
 
 2. **Scan.** `scan --repo <dir> --out <run>`. Check `tools` first if you want to
    install scanners for richer coverage (Trivy for deps/secrets/IaC is highest-leverage).
@@ -185,9 +201,12 @@ a worklist → you **fill** it → `--apply` folds it back in under a conservati
 
 5. **Investigate what the engine can't enumerate.** `investigate --run <run>` groups
    the attack surface by region; hunt **broken access control / IDOR, business-logic
-   flaws, missing authz**, multi-hop taint, and emit grounded `Discovery[]`
-   (`investigate --apply`). They land `ultrasec-ai` `open` and are adjudicated like any
-   candidate; out-of-range citations are rejected, so don't fear over-reporting.
+   flaws, missing authz**, feature abuse, chained attacks, multi-hop taint, and emit
+   grounded `Discovery[]` (`investigate --apply`). Bring the attacker-mindset angles
+   and the non-taint attack-class taxonomy in
+   [references/hunting-heuristics.md](references/hunting-heuristics.md). They land
+   `ultrasec-ai` `open` and are adjudicated like any candidate; out-of-range citations
+   are rejected, so don't fear over-reporting.
 
 6. **Adjudicate each candidate from evidence.** For each, run `dossier <id>` and read
    the **real code along the path**. Decide: is the SOURCE attacker-controlled? does the
@@ -209,11 +228,15 @@ a worklist → you **fill** it → `--apply` folds it back in under a conservati
    remaining candidate until it passes.
 
 10. **Narrate & render.** Optionally `narrative --run <run>`, author `NARRATIVE.json`
-    (executive summary, per-confirmed fixes, attack chains, root causes), then
-    `render --run <run> --narrative NARRATIVE.json` (the AI sections are clearly marked
-    and grounding-checked). Without a narrative, plain `render`. Present the SUMMARY,
-    the confirmed findings with their cross-file + exploit paths, the needs-human list,
-    and the dossier path.
+    (executive summary, **what the codebase does well** (`positivePatterns`),
+    per-confirmed fixes, attack chains, root causes, and **`hardeningNotes`** —
+    defense-in-depth suggestions that are *not* findings), then
+    `render --run <run> --narrative NARRATIVE.json` (the AI sections are clearly marked;
+    finding-citing sections are grounding-checked, the advisory prose isn't). Without a
+    narrative, plain `render`. Present the SUMMARY, the confirmed findings with their
+    cross-file + exploit paths, the needs-human list, and the dossier path. A single
+    pass finds only part of the surface — recommend a `--merge` re-run for coverage
+    ([references/severity-and-discipline.md](references/severity-and-discipline.md)).
 
 11. **Plan the fixes (optional).** `implement --run <run>` emits a remediation-PRD draft
     (`IMPLEMENT.md`): confirmed → fix stories (each grounded in its `[file:line]` with an

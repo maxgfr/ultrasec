@@ -48,7 +48,10 @@ an **optimization, not a requirement**:
    - **By vulnerability class**: SQLi, command/code injection, path traversal,
      SSRF, deserialization, XSS, secrets/deps (tool triage), and the non-taint
      classes only reasoning finds — **authorization/IDOR, business logic, weak
-     crypto, SSO/session**.
+     crypto, SSO/session, feature abuse & data leakage, chained attacks**, plus a
+     **wildcard** facet and an **obvious-things** sweep. The attacker-mindset angles
+     and the full taxonomy for these are in
+     [hunting-heuristics.md](hunting-heuristics.md).
    - **By entry point / module**: each HTTP route group, CLI, queue consumer,
      webhook — the places untrusted input enters. Use `graph` and `paths` to see
      which files each touches.

@@ -48,9 +48,13 @@ For each candidate, the four questions (answer from the code in the packet):
 4. **Sink** — is it exploitable with the value that arrives? Write the concrete trigger.
 
 Then look for what taint enumeration can't: **broken access control / IDOR,
-missing authorization, business-logic abuse, weak crypto, unsafe config**. Add
-them as findings with `[file:line]` citations (edit `findings.json`, or note them
-for the report).
+missing authorization, business-logic abuse, feature abuse, chained attacks, weak
+crypto, unsafe config** — hunt these with the attacker-mindset angles and the
+non-taint taxonomy in [hunting-heuristics.md](hunting-heuristics.md). Add them as
+findings with `[file:line]` citations (edit `findings.json`, or note them for the
+report). Calibrate severity and avoid false positives with
+[severity-and-discipline.md](severity-and-discipline.md) — only report what you can
+exploit; a gap another layer already prevents is a hardening note, not a finding.
 
 ## 3b. (Optional) revalidate against git history
 
@@ -84,7 +88,16 @@ node scripts/ultrasec.mjs render --run .ultrasec              # SUMMARY/REPORT/F
 
 Present: the SUMMARY counts, each confirmed finding with its cross-file path and
 exploit path, the needs-human list, and the run folder. See
-[citation-format.md](citation-format.md) for how findings are cited.
+[citation-format.md](citation-format.md) for how findings are cited. A
+`NARRATIVE.json` can also carry **`positivePatterns`** (what the codebase does well —
+calibrates trust) and **`hardeningNotes`** (defense-in-depth, *not* findings);
+`render --narrative` emits both as clearly-marked sections.
+
+> **Coverage improves with more runs.** One pass reads only the paths you dug into.
+> Re-run and fold passes into one dossier with `--merge` (verdicts preserved),
+> weighting a re-run toward the classes/regions the last pass under-covered. On a
+> first/only pass, say so and recommend another —
+> [severity-and-discipline.md](severity-and-discipline.md).
 
 ## 6. Plan the fixes (optional)
 

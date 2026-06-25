@@ -48,11 +48,13 @@ export function buildNarrativeWorklist(dossier: Dossier): { findings: NarrativeF
   // Remediations are for CONFIRMED issues only (the merge will drop the rest).
   const scaffold: Narrative = {
     executiveSummary: "",
+    positivePatterns: "",
     remediations: reportable
       .filter((f) => f.status === "confirmed")
       .map((f) => ({ id: f.id, fix: "", ...(f.provenance?.owner ? { owner: f.provenance.owner } : {}) })),
     attackChains: [],
     rootCauses: [],
+    hardeningNotes: [],
   };
   return { findings, scaffold };
 }
@@ -64,12 +66,16 @@ export function renderNarrativeWorklistMd(wl: { findings: NarrativeFindingRef[];
   L.push(`Author **NARRATIVE.json** (a Narrative object), then fold it into the report with`);
   L.push(`\`ultrasec render --narrative NARRATIVE.json --run <run>\`. Fields (all optional, all additive):`);
   L.push(`- \`executiveSummary\`: a few sentences for non-experts atop the report.`);
+  L.push(`- \`positivePatterns\`: what the codebase does **well** (solid auth, parameterized queries…) — calibrates trust in the findings and helps prioritise. Free prose, advisory.`);
   L.push(`- \`remediations\`: \`{id, fix, patch?, owner?}\` — a concrete fix per **confirmed** finding.`);
   L.push(`- \`attackChains\`: \`{title, findingIds[], narrative}\` — how findings combine into an exploit.`);
   L.push(`- \`rootCauses\`: \`{cause, findingIds[], note}\` — group findings by shared underlying cause.`);
+  L.push(`- \`hardeningNotes\`: \`string[]\` — defense-in-depth suggestions that are **not** findings (the attack is already prevented elsewhere). Advisory; excluded from the severity counts.`);
   L.push("");
-  L.push(`> Grounding is strict: any section citing an **unknown or non-confirmed** finding id is`);
-  L.push(`> dropped on merge. Narrative prose **never** changes a finding's status, severity, or set.`);
+  L.push(`> Grounding is strict for finding-citing sections: any \`remediations\`/\`attackChains\`/\`rootCauses\``);
+  L.push(`> entry citing an **unknown or non-confirmed** finding id is dropped on merge. \`executiveSummary\`,`);
+  L.push(`> \`positivePatterns\`, and \`hardeningNotes\` are advisory prose that cite no finding ids. Narrative`);
+  L.push(`> prose **never** changes a finding's status, severity, or set.`);
   L.push("");
   if (context) {
     L.push(`## Project context`);
@@ -96,6 +102,11 @@ export function parseNarrative(raw: string): Narrative {
   const d = JSON.parse(raw) as any;
   const n: Narrative = {};
   if (typeof d?.executiveSummary === "string") n.executiveSummary = d.executiveSummary;
+  if (typeof d?.positivePatterns === "string") n.positivePatterns = d.positivePatterns;
+  if (Array.isArray(d?.hardeningNotes)) {
+    const hn = d.hardeningNotes.filter((x: any) => typeof x === "string" && x.trim()).map((x: string) => x.trim());
+    if (hn.length) n.hardeningNotes = hn;
+  }
   if (Array.isArray(d?.remediations)) {
     const rem: Remediation[] = d.remediations
       .filter((r: any) => r && typeof r.id === "string" && typeof r.fix === "string")
@@ -127,6 +138,9 @@ export function mergeNarrative(n: Narrative, dossier: Dossier): Narrative {
   const confirmed = new Set(dossier.findings.filter((f) => f.status === "confirmed").map((f) => f.id));
   const out: Narrative = {};
   if (n.executiveSummary && n.executiveSummary.trim()) out.executiveSummary = n.executiveSummary.trim();
+  // Advisory prose — no finding-id citation, so no grounding gate (like the executive summary).
+  if (n.positivePatterns && n.positivePatterns.trim()) out.positivePatterns = n.positivePatterns.trim();
+  if (n.hardeningNotes?.length) out.hardeningNotes = n.hardeningNotes;
   const rem = (n.remediations ?? []).filter((r) => confirmed.has(r.id));
   if (rem.length) out.remediations = rem;
   const chains = (n.attackChains ?? []).filter((c) => c.findingIds.length > 0 && c.findingIds.every((id) => confirmed.has(id)));
@@ -137,7 +151,7 @@ export function mergeNarrative(n: Narrative, dossier: Dossier): Narrative {
 }
 
 export function hasNarrativeContent(n?: Narrative): boolean {
-  return !!n && !!(n.executiveSummary || n.remediations?.length || n.attackChains?.length || n.rootCauses?.length);
+  return !!n && !!(n.executiveSummary || n.positivePatterns || n.remediations?.length || n.attackChains?.length || n.rootCauses?.length || n.hardeningNotes?.length);
 }
 
 export function remediationMap(n?: Narrative): Map<string, Remediation> {
@@ -150,6 +164,11 @@ export function remediationMap(n?: Narrative): Map<string, Remediation> {
 export function executiveSummaryMd(n?: Narrative): string[] {
   if (!n?.executiveSummary) return [];
   return [`## Executive summary (AI-authored)`, `_${AI_DISCLAIMER}_`, "", n.executiveSummary, ""];
+}
+
+export function positivePatternsMd(n?: Narrative): string[] {
+  if (!n?.positivePatterns) return [];
+  return [`## What the codebase does well (AI-authored)`, `_${AI_DISCLAIMER}_`, "", n.positivePatterns, ""];
 }
 
 export function suggestedFixMd(r: Remediation | undefined): string[] {
@@ -182,5 +201,19 @@ export function rootCausesMd(n?: Narrative): string[] {
     L.push(g.note);
     L.push("");
   }
+  return L;
+}
+
+export function hardeningNotesMd(n?: Narrative): string[] {
+  if (!n?.hardeningNotes?.length) return [];
+  const L = [
+    `## Hardening notes (AI-authored)`,
+    `_${AI_DISCLAIMER}_`,
+    "",
+    `_Defense-in-depth suggestions — **not** findings (the attack is already prevented elsewhere); excluded from the severity counts._`,
+    "",
+  ];
+  for (const note of n.hardeningNotes) L.push(`- ${note}`);
+  L.push("");
   return L;
 }

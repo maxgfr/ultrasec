@@ -192,9 +192,13 @@ export interface RootCauseGroup {
 }
 export interface Narrative {
   executiveSummary?: string;
+  /** What the codebase does well — calibrates trust in the findings. Free prose, advisory (cites no finding ids). */
+  positivePatterns?: string;
   remediations?: Remediation[];
   attackChains?: AttackChain[];
   rootCauses?: RootCauseGroup[];
+  /** Defense-in-depth suggestions that are explicitly NOT findings — advisory, excluded from severity counts and never grounding-gated. */
+  hardeningNotes?: string[];
 }
 
 // ── Audit dossier (on-disk run folder) ───────────────────────────────────────

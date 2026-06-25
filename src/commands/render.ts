@@ -35,7 +35,7 @@ export function runRender(args: ParsedArgs): number {
     const merged = mergeNarrative(parsed, dossier);
     narrative = merged;
     narrativeNote = hasNarrativeContent(merged)
-      ? `  + AI narrative folded in (${merged.remediations?.length ?? 0} fix(es), ${merged.attackChains?.length ?? 0} chain(s), ${merged.rootCauses?.length ?? 0} root-cause group(s)${merged.executiveSummary ? ", exec summary" : ""})`
+      ? `  + AI narrative folded in (${merged.remediations?.length ?? 0} fix(es), ${merged.attackChains?.length ?? 0} chain(s), ${merged.rootCauses?.length ?? 0} root-cause group(s)${merged.executiveSummary ? ", exec summary" : ""}${merged.positivePatterns ? ", positive patterns" : ""}${merged.hardeningNotes?.length ? `, ${merged.hardeningNotes.length} hardening note(s)` : ""})`
       : `  ⚠️  narrative had no sections grounded on confirmed findings — report rendered without it`;
   }
 

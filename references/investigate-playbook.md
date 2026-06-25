@@ -19,12 +19,19 @@ graph neighbours, and a hunt prompt. Work the highest-attack-surface regions fir
 
 ## 2. Hunt and emit grounded Discovery[]
 
-For each region, read the real code and look for what the engine can't:
+For each region, read the real code and look for what the engine can't. Bring the
+attacker-mindset angles and the full non-taint taxonomy (feature abuse, chained
+attacks, wildcard, obvious-things) from
+[hunting-heuristics.md](hunting-heuristics.md) — the headline classes:
 
 - **Broken access control / IDOR** — an endpoint that reads/writes another user's
-  object with no ownership check.
+  object with no ownership check; a parallel path that checks a weaker permission; a
+  request-body field that overrides the intended restriction (mass assignment).
 - **Missing authorization** — a privileged route with no auth guard.
-- **Business-logic flaws** — price/quantity tampering, race conditions, replay.
+- **Business-logic flaws** — price/quantity tampering, race conditions, replay,
+  state-machine skips, rollback abuse.
+- **Feature abuse & data leakage** — export-as-exfiltration, import-as-injection,
+  search-as-oracle, enumeration via side effects, webhook-as-SSRF.
 - **Multi-hop taint** the BFS missed (e.g. through a callback, a queue, or config).
 
 Emit `INVESTIGATE.json` — an array of:

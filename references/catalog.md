@@ -58,7 +58,11 @@ confirm the sanitizer actually covers the flow.
 Taint enumeration is structural. These classes need cross-file/semantic reasoning
 and are your job to find and add: **broken access control / IDOR**, **missing
 authorization**, **business-logic abuse**, **auth/session/SSO** flaws, **race
-conditions**, **mass assignment**, **SSTI** in custom templating, and **ReDoS**.
+conditions**, **mass assignment**, **feature abuse & data leakage**, **chained
+attacks**, **SSTI** in custom templating, and **ReDoS**. Hunt them with the
+attacker-mindset angles and the non-taint taxonomy in
+[hunting-heuristics.md](hunting-heuristics.md), and calibrate severity with
+[severity-and-discipline.md](severity-and-discipline.md).
 
 ## Extending the catalog
 
