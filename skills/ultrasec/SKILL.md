@@ -1,6 +1,6 @@
 ---
 name: ultrasec
-description: "Use when the user wants a SECURITY AUDIT of a codebase — to find real, exploitable vulnerabilities by reasoning about how untrusted data flows ACROSS functions and files, not just linting one file at a time. A deterministic zero-dependency engine (no API keys, no npm install) scans the whole repo, builds a cross-file/function link-graph, enumerates candidate source→sink taint paths (SQLi, NoSQL injection, command/code injection, path traversal & zip-slip, SSRF, XSS, SSTI, XXE, LDAP injection, header/CRLF injection, prototype pollution, insecure deserialization, weak crypto, open redirect), and orchestrates whatever best-in-class OSS scanners are installed (Trivy, OpenGrep/Semgrep, gitleaks, osv-scanner, cargo-audit, govulncheck, bandit, gosec, checkov, hadolint, kingfisher…), correlating their findings across tools and ranking everything by composite EPSS/CISA-KEV/CVSS risk; YOU then read the real code along each path, judge whether the flow is genuinely reachable and exploitable (incl. authz/business-logic bugs the tools miss), and adversarially verify every finding into a cited, tiered report. Anti-hallucination: every finding must cite resolvable [file:line] hops (`check` fails otherwise). Conservative: an uncertain high-severity finding is flagged needs-human, never silently dropped. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review of this codebase', 'is this code vulnerable to SQL injection/XSS/SSRF/command injection', 'taint analysis', 'where does user input reach a dangerous sink', 'check my dependencies for CVEs', 'scan for secrets'. The code-facing security sibling of ultraindex/ultrasearch."
+description: "Use when the user wants a SECURITY AUDIT of a codebase — find real, exploitable bugs by tracing how untrusted data flows ACROSS functions and files, not one file at a time. A deterministic zero-dep engine (no keys, no install) scans the repo, builds a cross-file link-graph, enumerates source→sink taint paths (SQLi, command/code injection, path traversal, SSRF, XSS, SSTI, XXE, prototype pollution), runs installed scanners (Trivy, Semgrep, gitleaks…), correlates findings, ranks by EPSS/KEV/CVSS risk; YOU read the code along each path, judge reachability/exploitability (incl. authz/business-logic bugs), and adversarially verify each into a cited report. Every finding cites resolvable [file:line] hops (`check` fails otherwise); an uncertain high-severity one stays needs-human, never dropped. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review of this codebase', 'is this vulnerable to SQL injection/XSS/SSRF', 'taint analysis', 'check my dependencies for CVEs', 'scan for secrets'."
 license: MIT
 metadata:
   version: 1.7.0
@@ -20,7 +20,8 @@ real and exploitable, find the subtle bugs the tools miss, and verify.
 
 > **The core rules:**
 > 1. **Reason from evidence, not memory.** Judge each finding from the real code
->    `dossier` shows you, and cite it `[file:line]`. `check` REJECTS any finding
+>    `dossier` shows you, and cite it `[file:line]` in the exact
+>    [citation format](references/citation-format.md). `check` REJECTS any finding
 >    whose cited location doesn't resolve — so don't invent line numbers.
 > 2. **The engine finds *candidates*; you decide.** Enumerated taint paths are
 >    deterministic and recall-oriented — many are false positives by design.

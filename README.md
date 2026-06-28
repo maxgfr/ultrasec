@@ -90,8 +90,8 @@ CISA KEV + CVSS). Risk scoring uses cached, offline-friendly feeds — add
 `--no-enrich`/`--offline` to skip the network and rank by severity alone.
 
 See [`assets/example-audit/`](assets/example-audit/) for a complete run, and
-[`SKILL.md`](SKILL.md) + [`references/`](references/) for the agent workflow
-(including the [deep-audit playbook](references/deep-audit-playbook.md)).
+[`SKILL.md`](skills/ultrasec/SKILL.md) + [`references/`](skills/ultrasec/references/) for the agent workflow
+(including the [deep-audit playbook](skills/ultrasec/references/deep-audit-playbook.md)).
 
 ### Large repos (millions–billions of LOC)
 
@@ -107,7 +107,7 @@ node scripts/ultrasec.mjs scan --repo . --diff origin/main --merge --resume --ou
 `--budget quick|standard|thorough` (and `--max-candidates`/`--max-depth`)
 rank-then-cap candidates (truncation is reported, never silent); `--merge` folds a
 scoped pass into one dossier (preserving prior verdicts); `--resume` reuses a
-content-hashed scan cache. Full loop: [scale-audit playbook](references/scale-audit-playbook.md).
+content-hashed scan cache. Full loop: [scale-audit playbook](skills/ultrasec/references/scale-audit-playbook.md).
 
 ## Extra recall, provenance & deepsec interop
 
@@ -173,7 +173,7 @@ TARGET=/path/to/repo docker compose run --rm ultrasec scan --repo /work --out /w
 TARGET=/path/to/repo docker compose run --rm ultrasec tools     # all show ✓ installed
 ```
 
-See [`references/tools.md`](references/tools.md) for the full scanner matrix,
+See [`references/tools.md`](skills/ultrasec/references/tools.md) for the full scanner matrix,
 the correlation/risk-scoring layers, and recommended additions (GuardDog for
 malicious packages, TruffleHog for live secret verification, cppcheck for C/C++).
 

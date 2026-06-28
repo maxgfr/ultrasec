@@ -22,9 +22,10 @@
         "assets": [
           "package.json",
           "src/types.ts",
-          "SKILL.md",
+          "skills/ultrasec/SKILL.md",
           "CHANGELOG.md",
-          "scripts/ultrasec.mjs"
+          "scripts/ultrasec.mjs",
+          "skills/ultrasec/scripts/ultrasec.mjs"
         ],
         "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
       }

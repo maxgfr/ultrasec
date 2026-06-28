@@ -8,9 +8,8 @@
     "ultrasec": "scripts/ultrasec.mjs"
   },
   "files": [
-    "SKILL.md",
+    "skills",
     "scripts",
-    "references",
     "assets",
     "src"
   ],
@@ -18,11 +17,12 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/copy-bundle.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "check:build": "tsup && git diff --exit-code -- scripts/ultrasec.mjs",
+    "verify:bundle": "node scripts/verify-skill-bundle.mjs",
+    "check:build": "tsup && node scripts/copy-bundle.mjs && git diff --exit-code -- scripts/ultrasec.mjs skills/ultrasec/scripts/ultrasec.mjs && node scripts/verify-skill-bundle.mjs",
     "demo": "node scripts/ultrasec.mjs scan --repo tests/fixtures/vuln-express --out /tmp/ultrasec-demo && node scripts/ultrasec.mjs check --run /tmp/ultrasec-demo",
     "release": "semantic-release"
   },
