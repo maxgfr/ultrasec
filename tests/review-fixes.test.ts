@@ -64,9 +64,27 @@ describe("verify: invalid verdict values are rejected", () => {
 
 describe("check: a path escaping the repo is skipped, never read or false-flagged", () => {
   function dossier(file: string): Dossier {
-    const f: Finding = { id: "a", category: "taint", title: "t", severity: "high", confidence: "high", message: "m", tool: "ultrasec", status: "confirmed", sink: { file, line: 1 } };
+    const f: Finding = {
+      id: "a",
+      category: "taint",
+      title: "t",
+      severity: "high",
+      confidence: "high",
+      message: "m",
+      tool: "ultrasec",
+      status: "confirmed",
+      sink: { file, line: 1 },
+    };
     return {
-      manifest: { version: "0", schemaVersion: 1, repo: "/tmp", generatedNote: "", languages: [], toolsRun: [], counts: { findings: 1, bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 } } },
+      manifest: {
+        version: "0",
+        schemaVersion: 1,
+        repo: "/tmp",
+        generatedNote: "",
+        languages: [],
+        toolsRun: [],
+        counts: { findings: 1, bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 } },
+      },
       findings: [f],
       graph: { files: [], edges: [], symbolDefs: {} },
     };

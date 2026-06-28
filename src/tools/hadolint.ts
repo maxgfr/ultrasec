@@ -21,7 +21,10 @@ export const hadolint: ToolAdapter = {
   category: "config",
   dockerImage: "hadolint/hadolint:v2.12.0",
   argv: () => ["--format", "json", "--no-fail"],
-  enumerate: (repo) => walk(repo).map((f) => f.rel).filter(isDockerfile),
+  enumerate: (repo) =>
+    walk(repo)
+      .map((f) => f.rel)
+      .filter(isDockerfile),
   parse(raw): Finding[] {
     const arr = JSON.parse(raw || "[]") as any;
     if (!Array.isArray(arr)) return [];

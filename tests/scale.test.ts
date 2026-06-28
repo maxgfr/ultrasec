@@ -18,7 +18,10 @@ describe("scale: shared-sink fan-out (O(edges) guard)", () => {
   beforeAll(() => {
     repo = mkdtempSync(join(tmpdir(), "ultrasec-scale-"));
     mkdirSync(join(repo, "src"), { recursive: true });
-    writeFileSync(join(repo, "src", "sink.js"), `function runQuery(x) {\n  return globalThis.db.query("SELECT * WHERE id=" + x);\n}\nmodule.exports = { runQuery };\n`);
+    writeFileSync(
+      join(repo, "src", "sink.js"),
+      `function runQuery(x) {\n  return globalThis.db.query("SELECT * WHERE id=" + x);\n}\nmodule.exports = { runQuery };\n`,
+    );
     for (let i = 0; i < N; i++) {
       writeFileSync(
         join(repo, "src", `h${i}.js`),

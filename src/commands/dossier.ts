@@ -15,7 +15,7 @@ export function runDossier(args: ParsedArgs): number {
     return 2;
   }
 
-  let d;
+  let d: ReturnType<typeof loadDossier>;
   try {
     d = loadDossier(run);
   } catch (e) {

@@ -46,9 +46,32 @@ export interface Extraction {
 
 // Control-flow / declaration words that precede `(` but are not function calls.
 const SHARED_KEYWORDS = new Set([
-  "if", "for", "while", "switch", "catch", "return", "function", "await",
-  "typeof", "instanceof", "new", "delete", "void", "in", "of", "do", "else",
-  "case", "throw", "with", "super", "this", "and", "or", "not", "is",
+  "if",
+  "for",
+  "while",
+  "switch",
+  "catch",
+  "return",
+  "function",
+  "await",
+  "typeof",
+  "instanceof",
+  "new",
+  "delete",
+  "void",
+  "in",
+  "of",
+  "do",
+  "else",
+  "case",
+  "throw",
+  "with",
+  "super",
+  "this",
+  "and",
+  "or",
+  "not",
+  "is",
 ]);
 
 const ID = "[A-Za-z_$][\\w$]*";
@@ -62,11 +85,7 @@ export const LANGS: LangSpec[] = [
       { kind: "function", re: new RegExp(`(?:export\\s+)?(?:const|let|var)\\s+(${ID})\\s*=\\s*(?:async\\s*)?(?:function\\b|\\([^)]*\\)\\s*=>|${ID}\\s*=>)`) },
       { kind: "class", re: new RegExp(`(?:export\\s+)?(?:default\\s+)?(?:abstract\\s+)?class\\s+(${ID})`) },
     ],
-    imports: [
-      /import\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]/,
-      /require\(\s*['"]([^'"]+)['"]\s*\)/,
-      /import\(\s*['"]([^'"]+)['"]\s*\)/,
-    ],
+    imports: [/import\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]/, /require\(\s*['"]([^'"]+)['"]\s*\)/, /import\(\s*['"]([^'"]+)['"]\s*\)/],
     exportRule: "js",
   },
   {
@@ -96,7 +115,10 @@ export const LANGS: LangSpec[] = [
     extensions: ["java"],
     defs: [
       { kind: "class", re: /(?:class|interface|enum|record)\s+([A-Za-z_]\w*)/ },
-      { kind: "method", re: /(?:public|private|protected)\s+(?:static\s+|final\s+|abstract\s+|synchronized\s+|native\s+)*[\w<>\[\].,?\s]+?\s+([A-Za-z_]\w*)\s*\([^;{]*\)\s*(?:throws[\w,.\s]+)?\{/ },
+      {
+        kind: "method",
+        re: /(?:public|private|protected)\s+(?:static\s+|final\s+|abstract\s+|synchronized\s+|native\s+)*[\w<>\[\].,?\s]+?\s+([A-Za-z_]\w*)\s*\([^;{]*\)\s*(?:throws[\w,.\s]+)?\{/,
+      },
     ],
     imports: [/^\s*import\s+(?:static\s+)?([\w.]+)\s*;/],
     exportRule: "always",
@@ -151,7 +173,10 @@ export const LANGS: LangSpec[] = [
     extensions: ["cs"],
     defs: [
       { kind: "class", re: /(?:class|interface|struct|record|enum)\s+([A-Za-z_]\w*)/ },
-      { kind: "method", re: /(?:public|private|protected|internal)\s+(?:static\s+|virtual\s+|override\s+|async\s+|sealed\s+)*[\w<>\[\].,?\s]+?\s+([A-Za-z_]\w*)\s*\([^;{]*\)\s*\{/ },
+      {
+        kind: "method",
+        re: /(?:public|private|protected|internal)\s+(?:static\s+|virtual\s+|override\s+|async\s+|sealed\s+)*[\w<>\[\].,?\s]+?\s+([A-Za-z_]\w*)\s*\([^;{]*\)\s*\{/,
+      },
     ],
     imports: [/^\s*using\s+(?:static\s+)?([\w.]+)\s*;/],
     exportRule: "always",
@@ -193,9 +218,7 @@ export const LANGS: LangSpec[] = [
   {
     id: "shell",
     extensions: ["sh", "bash", "zsh"],
-    defs: [
-      { kind: "function", re: /^\s*(?:function\s+)?([A-Za-z_]\w*)\s*\(\s*\)\s*\{/ },
-    ],
+    defs: [{ kind: "function", re: /^\s*(?:function\s+)?([A-Za-z_]\w*)\s*\(\s*\)\s*\{/ }],
     imports: [/^\s*(?:source|\.)\s+([^\s;]+)/],
     exportRule: "always",
     keywords: ["if", "then", "fi", "for", "do", "done", "while", "case", "esac", "echo", "function", "return", "local", "export"],
@@ -233,7 +256,25 @@ export function langForFile(rel: string): LangSpec | undefined {
   return byExt.get(rel.slice(dot + 1).toLowerCase());
 }
 
-function isExported(rule: ExportRule, name: string, defLine: string, content: string): boolean {
+// CJS export markers: `module.exports`, `exports.x`, plain `exports`.
+const cjsExportLineRe = /\b(?:module\.)?exports\b/;
+
+// Collect, ONCE per file, the substring of every line from its `exports` marker
+// onward — concatenated into a tiny "export region". `isExported` (js rule) then
+// tests `\bname\b` against this region instead of re-scanning the whole file per
+// symbol, which made marking exports O(symbols × file-size). Behaviour is
+// identical: the old regex `\b(?:module\.)?exports\b[^\n]*\bname\b` can only match
+// a name on the SAME line, after `exports` — exactly what this region preserves.
+function cjsExportRegion(content: string): string {
+  let region = "";
+  for (const line of content.split(/\r?\n/)) {
+    const m = cjsExportLineRe.exec(line);
+    if (m) region += line.slice(m.index) + "\n";
+  }
+  return region;
+}
+
+function isExported(rule: ExportRule, name: string, defLine: string, exportRegion: string): boolean {
   switch (rule) {
     case "always":
       return true;
@@ -244,12 +285,16 @@ function isExported(rule: ExportRule, name: string, defLine: string, content: st
     case "js":
       if (/\bexport\b/.test(defLine)) return true;
       // CJS: module.exports = { name }, exports.name = , module.exports = name
-      const reExports = new RegExp(`\\b(?:module\\.)?exports\\b[^\\n]*\\b${name}\\b`);
-      return reExports.test(content);
+      return new RegExp(`\\b${name}\\b`).test(exportRegion);
   }
 }
 
 const callRe = /(?:([A-Za-z_$][\w$]*)\s*\.\s*)?([A-Za-z_$][\w$]*)\s*\(/g;
+
+// A single source line longer than this is almost certainly minified/generated;
+// running the call/def/import regexes over it risks catastrophic backtracking on
+// a sub-1.5MB file. Such lines carry no readable taint signal, so we skip them.
+const MAX_LINE_LEN = 2000;
 
 export function extract(spec: LangSpec, content: string): Extraction {
   const lines = content.split(/\r?\n/);
@@ -257,10 +302,17 @@ export function extract(spec: LangSpec, content: string): Extraction {
   const imports: Imp[] = [];
   const calls: Call[] = [];
   const kw = new Set([...SHARED_KEYWORDS, ...(spec.keywords ?? [])]);
+  // Precomputed ONCE per file (only the js rule consults it) so isExported is a
+  // cheap lookup instead of a full-file rescan per symbol.
+  const exportRegion = spec.exportRule === "js" ? cjsExportRegion(content) : "";
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
     const ln = i + 1;
+
+    // Skip pathologically long (minified/generated) lines: the regexes below can
+    // backtrack catastrophically on them and they hold no readable taint signal.
+    if (line.length > MAX_LINE_LEN) continue;
 
     // Names defined ON this line — so we don't mistake `function query(` or
     // `def handle(` for a *call* to query/handle (the def syntax has parens too).
@@ -269,7 +321,7 @@ export function extract(spec: LangSpec, content: string): Extraction {
       const m = d.re.exec(line);
       if (m && m[1]) {
         definedHere.add(m[1]);
-        symbols.push({ name: m[1], kind: d.kind, line: ln, exported: isExported(spec.exportRule, m[1], line, content) });
+        symbols.push({ name: m[1], kind: d.kind, line: ln, exported: isExported(spec.exportRule, m[1], line, exportRegion) });
       }
     }
     for (const re of spec.imports) {

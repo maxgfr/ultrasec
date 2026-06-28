@@ -24,8 +24,7 @@ export const trivy: ToolAdapter = {
             title: v.Title || `${v.PkgName}: ${v.VulnerabilityID}`,
             severity: normalizeSeverity(v.Severity, "medium"),
             message:
-              `${v.PkgName}@${v.InstalledVersion}: ${v.Title || v.Description || v.VulnerabilityID}` +
-              (v.FixedVersion ? ` (fixed in ${v.FixedVersion})` : ""),
+              `${v.PkgName}@${v.InstalledVersion}: ${v.Title || v.Description || v.VulnerabilityID}` + (v.FixedVersion ? ` (fixed in ${v.FixedVersion})` : ""),
             file: target,
             cwe: firstCwe(v.CweIDs),
             references: [v.PrimaryURL, ...(v.References ?? [])].filter(Boolean),

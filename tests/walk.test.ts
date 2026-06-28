@@ -70,13 +70,7 @@ describe("globToRe", () => {
 describe("walk (defaults, backward-compatible)", () => {
   it("lists every file (no language filter)", () => {
     const rels = walk(FIXTURE).map((f) => f.rel);
-    expect(rels).toEqual([
-      "package.json",
-      "src/db.js",
-      "src/report.js",
-      "src/server.js",
-      "src/sqlite.js",
-    ]);
+    expect(rels).toEqual(["package.json", "src/db.js", "src/report.js", "src/server.js", "src/sqlite.js"]);
   });
 
   it("is deterministic across runs", () => {
@@ -161,7 +155,9 @@ describe("gitignore", () => {
     writeFileSync(join(tmp, "ignored.log"), "x");
     writeFileSync(join(tmp, "logs", "a.txt"), "x");
     writeFileSync(join(tmp, ".gitignore"), "*.log\nlogs/\n");
-    const rels = walk(tmp, { gitignore: true }).map((f) => f.rel).filter((r) => r !== ".gitignore");
+    const rels = walk(tmp, { gitignore: true })
+      .map((f) => f.rel)
+      .filter((r) => r !== ".gitignore");
     expect(rels).toContain("keep.js");
     expect(rels).not.toContain("ignored.log");
     expect(rels.some((r) => r.startsWith("logs/"))).toBe(false);

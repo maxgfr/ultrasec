@@ -12,7 +12,7 @@ import { buildNarrativeWorklist, renderNarrativeWorklistMd } from "../narrative.
 // on at render time and NEVER changes a finding's status/severity/set.
 export function runNarrative(args: ParsedArgs): number {
   const run = resolve(flagStr(args, "run") ?? ".ultrasec");
-  let dossier;
+  let dossier: ReturnType<typeof loadDossier>;
   try {
     dossier = loadDossier(run);
   } catch (e) {

@@ -38,10 +38,20 @@ describe("orchestrate (graceful degradation)", () => {
 
 describe("relativizeFindings (→ repo-relative, native or docker)", () => {
   const f: Finding = {
-    id: "x", category: "dep", title: "t", severity: "high", confidence: "medium", message: "m", tool: "osv-scanner", status: "open",
+    id: "x",
+    category: "dep",
+    title: "t",
+    severity: "high",
+    confidence: "medium",
+    message: "m",
+    tool: "osv-scanner",
+    status: "open",
     source: { file: "/work/a.js", line: 1 },
     sink: { file: "/work/pkg/b.js", line: 2 },
-    path: [{ file: "/work/a.js", line: 1, why: "s" }, { file: "rel/c.js", line: 3, why: "k" }],
+    path: [
+      { file: "/work/a.js", line: 1, why: "s" },
+      { file: "rel/c.js", line: 3, why: "k" },
+    ],
   };
   it("strips the /work mount prefix (docker mode)", () => {
     const [g] = relativizeFindings([f], "/work");

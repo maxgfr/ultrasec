@@ -1,3 +1,5 @@
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { VERSION } from "./types.js";
 import { parseArgs, flagBool, println, eprintln, type ParsedArgs } from "./util.js";
 import { runTools } from "./commands/tools.js";
@@ -19,7 +21,7 @@ import { runRender } from "./commands/render.js";
 import { runClean } from "./commands/clean.js";
 import { runRun } from "./commands/run.js";
 
-const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
+export const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
 
 A deterministic, zero-dependency engine builds a cross-file/function link-graph,
 enumerates candidate source→sink taint paths, orchestrates best-in-class OSS
@@ -93,58 +95,49 @@ GLOBAL
   --version, -v  Print the version.
   --json         Machine-readable output (where supported).
 
-Run \`ultrasec <command> --help\` for command-specific options.
+Each command's flags are listed above; \`--help\`/\`-h\` (anywhere) prints this help.
 `;
 
-async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<number> {
-  switch (cmd) {
-    case undefined:
-    case "help":
-      println(HELP);
-      return 0;
-    case "version":
-      println(VERSION);
-      return 0;
-    case "tools":
-      return runTools(args);
-    case "graph":
-      return runGraph(args);
-    case "map":
-      return runMap(args);
-    case "scan":
-      return runScan(args);
-    case "context":
-      return runContext(args);
-    case "import":
-      return runImport(args);
-    case "dossier":
-      return runDossier(args);
-    case "triage":
-      return runTriage(args);
-    case "paths":
-      return runPaths(args);
-    case "verify":
-      return runVerify(args);
-    case "investigate":
-      return runInvestigate(args);
-    case "revalidate":
-      return runRevalidate(args);
-    case "narrative":
-      return runNarrative(args);
-    case "implement":
-      return runImplement(args);
-    case "check":
-      return runCheck(args);
-    case "render":
-      return runRender(args);
-    case "clean":
-      return runClean(args);
-    case "run":
-      return runRun(args);
-    default:
-      eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
-      return 2;
+// Single source of truth for the command→handler mapping. The test-suite asserts
+// every command named in HELP has an entry here (and vice-versa), so the help
+// text can never drift from what actually dispatches.
+type CommandHandler = (args: ParsedArgs) => number | Promise<number>;
+export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
+  tools: runTools,
+  graph: runGraph,
+  map: runMap,
+  scan: runScan,
+  context: runContext,
+  import: runImport,
+  dossier: runDossier,
+  triage: runTriage,
+  paths: runPaths,
+  verify: runVerify,
+  investigate: runInvestigate,
+  revalidate: runRevalidate,
+  narrative: runNarrative,
+  implement: runImplement,
+  check: runCheck,
+  render: runRender,
+  clean: runClean,
+  run: runRun,
+};
+
+export async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<number> {
+  if (cmd === undefined || cmd === "help") {
+    println(HELP);
+    return 0;
   }
+  if (cmd === "version") {
+    println(VERSION);
+    return 0;
+  }
+  const handler = COMMAND_HANDLERS[cmd];
+  if (!handler) {
+    eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
+    return 2;
+  }
+  return handler(args);
 }
 
 async function main(): Promise<void> {
@@ -164,7 +157,22 @@ async function main(): Promise<void> {
   process.exit(code);
 }
 
-main().catch((err) => {
-  eprintln(`ultrasec: ${err instanceof Error ? err.stack || err.message : String(err)}`);
-  process.exit(1);
-});
+// Only auto-run when this bundle is the process entry point — never when a test
+// imports it for HELP / dispatch / COMMAND_HANDLERS. realpathSync resolves the
+// `.bin` symlink npm/npx creates so `npx ultrasec` still matches import.meta.url.
+function isEntrypoint(): boolean {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(argv1)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isEntrypoint()) {
+  main().catch((err) => {
+    eprintln(`ultrasec: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+    process.exit(1);
+  });
+}

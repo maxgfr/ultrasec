@@ -6,7 +6,17 @@ import { renderSummary, renderReport, renderFull } from "../src/render/report.js
 import { renderHtml } from "../src/render/html.js";
 
 function f(id: string, status: Finding["status"], severity: Finding["severity"] = "high"): Finding {
-  return { id, category: "taint", title: `finding ${id}`, severity, confidence: "high", message: "m", tool: "ultrasec", status, sink: { file: "src/db.js", line: 6 } };
+  return {
+    id,
+    category: "taint",
+    title: `finding ${id}`,
+    severity,
+    confidence: "high",
+    message: "m",
+    tool: "ultrasec",
+    status,
+    sink: { file: "src/db.js", line: 6 },
+  };
 }
 
 function dossier(findings: Finding[]): Dossier {
@@ -41,7 +51,10 @@ describe("parseNarrative", () => {
       JSON.stringify({
         executiveSummary: "Two SQLi were confirmed.",
         positivePatterns: "Auth uses argon2id and every query is parameterized.",
-        remediations: [{ id: "c1", fix: "Use params", owner: "@api" }, { id: "x", bad: 1 }],
+        remediations: [
+          { id: "c1", fix: "Use params", owner: "@api" },
+          { id: "x", bad: 1 },
+        ],
         attackChains: [{ title: "chain", findingIds: ["c1"], narrative: "..." }, { title: "bad" }],
         rootCauses: [{ cause: "string concat", findingIds: ["c1"], note: "n" }],
         hardeningNotes: ["Add a CSP header.", "  ", 42, "Set SameSite=Strict on the session cookie."],

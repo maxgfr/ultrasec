@@ -127,7 +127,10 @@ export function logSince(repo: string, file: string, sinceRef: string): string[]
   if (git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) === null) return null;
   const out = git(repo, ["log", `--max-count=${LOG_CAP}`, "--format=%h", `${sinceRef}..HEAD`, "--", file]);
   if (out === null) return null;
-  return out.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  return out
+    .split(/\r?\n/)
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 export interface LineChange {

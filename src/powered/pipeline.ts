@@ -249,7 +249,7 @@ export function runPipeline(opts: PipelineOptions): PipelineResult {
   if (!ck.ok) errors.push(`check: ${ck.messages.join(" ")}`);
   actions.push("check");
 
-  let narrative;
+  let narrative: ReturnType<typeof mergeNarrative> | undefined;
   const narrPath = join(opts.run, "NARRATIVE.json");
   if (opts.powered && opts.stages.includes("narrative")) {
     try {

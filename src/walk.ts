@@ -105,7 +105,10 @@ export function globToRe(pattern: string): RegExp {
         i++;
       } else {
         // De-escape members, then escape only what a regex class needs (\ and ]).
-        const cls = p.slice(neg ? i + 2 : i + 1, j).replace(/\\(.)/g, "$1").replace(/[\\\]]/g, "\\$&");
+        const cls = p
+          .slice(neg ? i + 2 : i + 1, j)
+          .replace(/\\(.)/g, "$1")
+          .replace(/[\\\]]/g, "\\$&");
         re += neg ? `[^/${cls}]` : `[${cls}]`; // negated class still never matches '/'
         i = j + 1;
       }
@@ -264,7 +267,7 @@ export function walkWithMeta(root: string, opts: WalkOptions = {}): WalkResult {
     for (const name of entries.sort(byStr)) {
       if (truncated) return;
       const abs = join(dir, name);
-      let st;
+      let st: ReturnType<typeof lstatSync>;
       try {
         st = lstatSync(abs); // classify WITHOUT following — see symlink handling below
       } catch {

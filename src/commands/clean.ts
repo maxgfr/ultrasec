@@ -61,7 +61,10 @@ export function runClean(args: ParsedArgs): number {
         }
       }
       const vols = docker(["volume", "ls", "-q", "-f", `name=${VOLUME_NAME_FILTER}`]);
-      for (const v of vols.out.split("\n").map((s) => s.trim()).filter(Boolean)) {
+      for (const v of vols.out
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean)) {
         if (!dry) docker(["volume", "rm", v]);
         removed.push(`volume  ${v}`);
       }

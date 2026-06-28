@@ -35,7 +35,9 @@ function dossier(findings: Finding[], scopes?: string[]): Dossier {
 
 describe("mergeDossier", () => {
   it("preserves a confirmed verdict across a scoped re-scan", () => {
-    const prev = dossier([finding("a", { status: "confirmed", verdict: "supported", confidence: "high", exploitPath: "GET /x", message: "candidate\n\nVerdict (supported): real" })]);
+    const prev = dossier([
+      finding("a", { status: "confirmed", verdict: "supported", confidence: "high", exploitPath: "GET /x", message: "candidate\n\nVerdict (supported): real" }),
+    ]);
     // the same finding re-enumerated by a scoped pass arrives as fresh `open`
     const next = dossier([finding("a", { status: "open", confidence: "low", message: "candidate" })], ["src"]);
     const merged = mergeDossier(prev, next);

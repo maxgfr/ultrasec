@@ -39,8 +39,7 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "trivy",
     category: "dep",
-    description:
-      "All-in-one scanner: dependency CVEs (SCA), secrets, IaC/misconfig, licenses — across most ecosystems.",
+    description: "All-in-one scanner: dependency CVEs (SCA), secrets, IaC/misconfig, licenses — across most ecosystems.",
     languages: ["*"],
     install: { brew: "brew install trivy", docker: "aquasec/trivy", url: "https://aquasecurity.github.io/trivy/" },
     runHint: "trivy fs --quiet --format json --scanners vuln,secret,misconfig <repo>",
@@ -51,7 +50,11 @@ export const TOOLS: ToolSpec[] = [
     category: "dep",
     description: "Google OSV.dev dependency vulnerability scanner driven by lockfiles.",
     languages: ["*"],
-    install: { brew: "brew install osv-scanner", go: "go install github.com/google/osv-scanner/cmd/osv-scanner@latest", url: "https://google.github.io/osv-scanner/" },
+    install: {
+      brew: "brew install osv-scanner",
+      go: "go install github.com/google/osv-scanner/cmd/osv-scanner@latest",
+      url: "https://google.github.io/osv-scanner/",
+    },
     runHint: "osv-scanner --format json -r <repo>",
   },
   {
@@ -142,7 +145,12 @@ export const TOOLS: ToolSpec[] = [
     category: "sast",
     description: "Go security checker, stdlib-aware (math/rand, InsecureSkipVerify, exec with tainted args, SQL concat).",
     languages: ["go"],
-    install: { brew: "brew install gosec", go: "go install github.com/securego/gosec/v2/cmd/gosec@latest", docker: "ghcr.io/securego/gosec", url: "https://github.com/securego/gosec" },
+    install: {
+      brew: "brew install gosec",
+      go: "go install github.com/securego/gosec/v2/cmd/gosec@latest",
+      docker: "ghcr.io/securego/gosec",
+      url: "https://github.com/securego/gosec",
+    },
     runHint: "gosec -fmt json -quiet -no-fail ./...",
   },
   {

@@ -33,9 +33,7 @@ describe("enumerateSinkCandidates (orphan-sink recall)", () => {
   it("does NOT re-emit a sink already covered by a taint finding", () => {
     const { findings } = enumerateSinkCandidates(scan, taint);
     for (const t of taint) {
-      const dup = findings.find(
-        (f) => f.sink!.file === t.sink!.file && f.sink!.line === t.sink!.line && f.sink!.kind === t.sink!.kind,
-      );
+      const dup = findings.find((f) => f.sink!.file === t.sink!.file && f.sink!.line === t.sink!.line && f.sink!.kind === t.sink!.kind);
       expect(dup, `orphan layer duplicated a covered taint sink ${t.sink!.file}:${t.sink!.line}`).toBeFalsy();
     }
   });

@@ -110,8 +110,7 @@ export function buildGraph(scan: RepoScan): Graph {
   return { files: [...fileSet].sort(byStr), edges, symbolDefs, callersBySymbol };
 }
 
-const edgeSort = (a: Edge, b: Edge): number =>
-  byStr(a.from, b.from) || byStr(a.to, b.to) || byStr(a.kind, b.kind) || byStr(a.toSymbol ?? "", b.toSymbol ?? "");
+const edgeSort = (a: Edge, b: Edge): number => byStr(a.from, b.from) || byStr(a.to, b.to) || byStr(a.kind, b.kind) || byStr(a.toSymbol ?? "", b.toSymbol ?? "");
 
 /** Union two graphs (for merging a scoped pass into an existing run). Deterministic. */
 export function mergeGraphs(a: Graph, b: Graph): Graph {

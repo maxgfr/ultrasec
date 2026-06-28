@@ -175,7 +175,9 @@ export function renderImplementMd(wl: ImplementWorklist, context?: string): stri
   }
   if (wl.investigations.length) {
     L.push("");
-    L.push(`A further **${wl.investigations.length}** finding(s) (${severityBreakdown(wl.investigations)}) are uncertain and need human investigation before a fix can be scoped.`);
+    L.push(
+      `A further **${wl.investigations.length}** finding(s) (${severityBreakdown(wl.investigations)}) are uncertain and need human investigation before a fix can be scoped.`,
+    );
   }
   L.push("");
 
@@ -206,7 +208,9 @@ export function renderImplementMd(wl: ImplementWorklist, context?: string): stri
   let n = 0;
   for (const f of wl.fixes) {
     n++;
-    L.push(`${n}. **Fix \`${f.title}\`** at \`${f.at}\` so it is no longer exploitable. _([${f.severity}] ${f.cwe ?? f.category} · \`${f.id}\`${f.owner ? ` · owner ${f.owner}` : ""})_`);
+    L.push(
+      `${n}. **Fix \`${f.title}\`** at \`${f.at}\` so it is no longer exploitable. _([${f.severity}] ${f.cwe ?? f.category} · \`${f.id}\`${f.owner ? ` · owner ${f.owner}` : ""})_`,
+    );
     if (f.fix) L.push(`   - Suggested fix (AI): ${f.fix}`);
     if (f.patch) {
       L.push(`   - Suggested patch:`);
@@ -227,7 +231,9 @@ export function renderImplementMd(wl: ImplementWorklist, context?: string): stri
     let m = 0;
     for (const f of wl.investigations) {
       m++;
-      L.push(`${m}. Investigate \`${f.title}\` at \`${f.at}\` _([${f.severity}] ${f.cwe ?? f.category} · \`${f.id}\`${f.owner ? ` · owner ${f.owner}` : ""})_ — confirm whether it is exploitable, then route to fix or dismiss.`);
+      L.push(
+        `${m}. Investigate \`${f.title}\` at \`${f.at}\` _([${f.severity}] ${f.cwe ?? f.category} · \`${f.id}\`${f.owner ? ` · owner ${f.owner}` : ""})_ — confirm whether it is exploitable, then route to fix or dismiss.`,
+      );
     }
     L.push("");
   }

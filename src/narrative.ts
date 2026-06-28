@@ -66,11 +66,15 @@ export function renderNarrativeWorklistMd(wl: { findings: NarrativeFindingRef[];
   L.push(`Author **NARRATIVE.json** (a Narrative object), then fold it into the report with`);
   L.push(`\`ultrasec render --narrative NARRATIVE.json --run <run>\`. Fields (all optional, all additive):`);
   L.push(`- \`executiveSummary\`: a few sentences for non-experts atop the report.`);
-  L.push(`- \`positivePatterns\`: what the codebase does **well** (solid auth, parameterized queries…) — calibrates trust in the findings and helps prioritise. Free prose, advisory.`);
+  L.push(
+    `- \`positivePatterns\`: what the codebase does **well** (solid auth, parameterized queries…) — calibrates trust in the findings and helps prioritise. Free prose, advisory.`,
+  );
   L.push(`- \`remediations\`: \`{id, fix, patch?, owner?}\` — a concrete fix per **confirmed** finding.`);
   L.push(`- \`attackChains\`: \`{title, findingIds[], narrative}\` — how findings combine into an exploit.`);
   L.push(`- \`rootCauses\`: \`{cause, findingIds[], note}\` — group findings by shared underlying cause.`);
-  L.push(`- \`hardeningNotes\`: \`string[]\` — defense-in-depth suggestions that are **not** findings (the attack is already prevented elsewhere). Advisory; excluded from the severity counts.`);
+  L.push(
+    `- \`hardeningNotes\`: \`string[]\` — defense-in-depth suggestions that are **not** findings (the attack is already prevented elsewhere). Advisory; excluded from the severity counts.`,
+  );
   L.push("");
   L.push(`> Grounding is strict for finding-citing sections: any \`remediations\`/\`attackChains\`/\`rootCauses\``);
   L.push(`> entry citing an **unknown or non-confirmed** finding id is dropped on merge. \`executiveSummary\`,`);
@@ -110,7 +114,12 @@ export function parseNarrative(raw: string): Narrative {
   if (Array.isArray(d?.remediations)) {
     const rem: Remediation[] = d.remediations
       .filter((r: any) => r && typeof r.id === "string" && typeof r.fix === "string")
-      .map((r: any) => ({ id: r.id, fix: r.fix, ...(typeof r.patch === "string" ? { patch: r.patch } : {}), ...(typeof r.owner === "string" ? { owner: r.owner } : {}) }));
+      .map((r: any) => ({
+        id: r.id,
+        fix: r.fix,
+        ...(typeof r.patch === "string" ? { patch: r.patch } : {}),
+        ...(typeof r.owner === "string" ? { owner: r.owner } : {}),
+      }));
     if (rem.length) n.remediations = rem;
   }
   if (Array.isArray(d?.attackChains)) {
@@ -151,7 +160,9 @@ export function mergeNarrative(n: Narrative, dossier: Dossier): Narrative {
 }
 
 export function hasNarrativeContent(n?: Narrative): boolean {
-  return !!n && !!(n.executiveSummary || n.positivePatterns || n.remediations?.length || n.attackChains?.length || n.rootCauses?.length || n.hardeningNotes?.length);
+  return (
+    !!n && !!(n.executiveSummary || n.positivePatterns || n.remediations?.length || n.attackChains?.length || n.rootCauses?.length || n.hardeningNotes?.length)
+  );
 }
 
 export function remediationMap(n?: Narrative): Map<string, Remediation> {

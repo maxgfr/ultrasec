@@ -11,7 +11,7 @@ import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from ".
 // per-finding verify. A `noise` verdict on high/critical is ignored (kept open).
 export function runTriage(args: ParsedArgs): number {
   const run = resolve(flagStr(args, "run") ?? ".ultrasec");
-  let dossier;
+  let dossier: ReturnType<typeof loadDossier>;
   try {
     dossier = loadDossier(run);
   } catch (e) {
@@ -21,7 +21,7 @@ export function runTriage(args: ParsedArgs): number {
 
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
-    let inputs;
+    let inputs: ReturnType<typeof parseTriage>;
     try {
       inputs = readApply(applyPath, /triage.*\.json$/i, parseTriage);
     } catch (e) {

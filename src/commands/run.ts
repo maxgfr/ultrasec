@@ -44,14 +44,20 @@ export function runRun(args: ParsedArgs): number {
     powered,
     stages,
     scan: !noScan,
-    scanOpts: { scope: listFlag(args, "scope"), include: listFlag(args, "include"), exclude: listFlag(args, "exclude"), maxFiles: numFlag(args, "max-files"), gitignore: flagBool(args, "gitignore") },
+    scanOpts: {
+      scope: listFlag(args, "scope"),
+      include: listFlag(args, "include"),
+      exclude: listFlag(args, "exclude"),
+      maxFiles: numFlag(args, "max-files"),
+      gitignore: flagBool(args, "gitignore"),
+    },
   };
   if (powered) {
     opts.runner = new CliAgentRunner(agent);
     if (crossCheck) opts.crossRunner = new CliAgentRunner(crossCheck);
   }
 
-  let res;
+  let res: ReturnType<typeof runPipeline>;
   try {
     res = runPipeline(opts);
   } catch (e) {

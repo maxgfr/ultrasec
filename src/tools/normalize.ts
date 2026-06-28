@@ -69,7 +69,10 @@ export function pickCve(ids: (string | undefined | null)[]): string | undefined 
 
 /** Every distinct CVE id mentioned anywhere in the given strings/arrays. */
 export function cvesIn(...inputs: unknown[]): string[] {
-  const text = inputs.flat(Infinity).map((x) => (typeof x === "string" ? x : "")).join(" ");
+  const text = inputs
+    .flat(Infinity)
+    .map((x) => (typeof x === "string" ? x : ""))
+    .join(" ");
   const out = new Set<string>();
   const re = /CVE-\d{4}-\d{4,}/gi;
   let m: RegExpExecArray | null;

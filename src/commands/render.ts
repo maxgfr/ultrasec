@@ -13,7 +13,7 @@ import type { Narrative } from "../types.js";
 // confirmed ids are dropped). Without --narrative the output is byte-identical.
 export function runRender(args: ParsedArgs): number {
   const run = resolve(flagStr(args, "run") ?? ".ultrasec");
-  let dossier;
+  let dossier: ReturnType<typeof loadDossier>;
   try {
     dossier = loadDossier(run);
   } catch (e) {

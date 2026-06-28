@@ -115,7 +115,10 @@ export function listFlag(args: ParsedArgs, name: string): string[] | undefined {
   const v = args.flags[name];
   if (v === undefined) return undefined;
   const raw = Array.isArray(v) ? v : [v];
-  const parts = raw.flatMap((x) => (typeof x === "string" ? x.split(",") : [])).map((s) => s.trim()).filter(Boolean);
+  const parts = raw
+    .flatMap((x) => (typeof x === "string" ? x.split(",") : []))
+    .map((s) => s.trim())
+    .filter(Boolean);
   return parts.length ? parts : undefined;
 }
 

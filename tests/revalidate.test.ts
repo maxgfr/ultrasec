@@ -4,12 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Dossier } from "../src/store.js";
 import type { Finding, Severity } from "../src/types.js";
-import {
-  buildRevalidateWorklist,
-  applyRevalidations,
-  parseRevalidations,
-  revalFactsFromWorklist,
-} from "../src/revalidate.js";
+import { buildRevalidateWorklist, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../src/revalidate.js";
 
 function finding(id: string, severity: Severity, status: Finding["status"]): Finding {
   return {
@@ -74,11 +69,7 @@ describe("applyRevalidations — conservative policy", () => {
   });
 
   it("fixed → infers fixedIn from lineLastChanged when the agent omits it", () => {
-    const r = applyRevalidations(
-      dossier([finding("a", "high", "confirmed")]),
-      [{ id: "a", verdict: "fixed" }],
-      { fixedInById: new Map([["a", "abc1234"]]) },
-    );
+    const r = applyRevalidations(dossier([finding("a", "high", "confirmed")]), [{ id: "a", verdict: "fixed" }], { fixedInById: new Map([["a", "abc1234"]]) });
     expect(r.findings[0]!.fixedIn).toBe("abc1234");
   });
 
@@ -117,8 +108,32 @@ describe("applyRevalidations — conservative policy", () => {
 describe("revalFactsFromWorklist", () => {
   it("derives the unresolved set + inferred fixing commits", () => {
     const facts = revalFactsFromWorklist([
-      { id: "gone", severity: "high", title: "t", at: "x:1", fileExists: false, currentLine: null, commitsSinceFinding: null, lineLastChanged: null, renamedTo: null, verdict: null, note: "" },
-      { id: "live", severity: "high", title: "t", at: "y:2", fileExists: true, currentLine: "code", commitsSinceFinding: 1, lineLastChanged: { commit: "abc1234" }, renamedTo: null, verdict: null, note: "" },
+      {
+        id: "gone",
+        severity: "high",
+        title: "t",
+        at: "x:1",
+        fileExists: false,
+        currentLine: null,
+        commitsSinceFinding: null,
+        lineLastChanged: null,
+        renamedTo: null,
+        verdict: null,
+        note: "",
+      },
+      {
+        id: "live",
+        severity: "high",
+        title: "t",
+        at: "y:2",
+        fileExists: true,
+        currentLine: "code",
+        commitsSinceFinding: 1,
+        lineLastChanged: { commit: "abc1234" },
+        renamedTo: null,
+        verdict: null,
+        note: "",
+      },
     ]);
     expect([...facts.unresolved!]).toEqual(["gone"]);
     expect(facts.fixedInById!.get("live")).toBe("abc1234");

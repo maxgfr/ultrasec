@@ -14,7 +14,7 @@ import { buildInvestigateWorklist, renderInvestigateMd, ingestDiscoveries, parse
 // Discovery[] as `ultrasec-ai` open candidates (dedup-folded, citation-checked).
 export function runInvestigate(args: ParsedArgs): number {
   const run = resolve(flagStr(args, "run") ?? ".ultrasec");
-  let dossier;
+  let dossier: ReturnType<typeof loadDossier>;
   try {
     dossier = loadDossier(run);
   } catch (e) {
@@ -25,7 +25,7 @@ export function runInvestigate(args: ParsedArgs): number {
 
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
-    let discoveries;
+    let discoveries: ReturnType<typeof parseDiscoveries>;
     try {
       discoveries = readApply(applyPath, /(investigat|discover).*\.json$/i, parseDiscoveries);
     } catch (e) {
@@ -36,7 +36,13 @@ export function runInvestigate(args: ParsedArgs): number {
     persistFindings(run, dossier, res.findings);
 
     if (flagBool(args, "json")) {
-      println(JSON.stringify({ ingested: res.ingested, folded: res.folded, rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })) }, null, 2));
+      println(
+        JSON.stringify(
+          { ingested: res.ingested, folded: res.folded, rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })) },
+          null,
+          2,
+        ),
+      );
       return 0;
     }
     println(`ultrasec investigate --apply → updated ${run}/findings.json`);
@@ -47,8 +53,14 @@ export function runInvestigate(args: ParsedArgs): number {
   }
 
   // Emit mode
-  const scanOpts = { scope: listFlag(args, "scope"), include: listFlag(args, "include"), exclude: listFlag(args, "exclude"), maxFiles: numFlag(args, "max-files"), gitignore: flagBool(args, "gitignore") };
-  let regions;
+  const scanOpts = {
+    scope: listFlag(args, "scope"),
+    include: listFlag(args, "include"),
+    exclude: listFlag(args, "exclude"),
+    maxFiles: numFlag(args, "max-files"),
+    gitignore: flagBool(args, "gitignore"),
+  };
+  let regions: ReturnType<typeof buildInvestigateWorklist>;
   try {
     regions = buildInvestigateWorklist(buildAttackSurface(scanRepo(repo, scanOpts)), dossier.graph);
   } catch (e) {

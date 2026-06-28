@@ -99,9 +99,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     const crossFile = new Set(path.map((p) => p.file)).size > 1;
 
     const confidence = sanitizers.length ? "low" : "low"; // candidates are always low until verified
-    const note = sanitizers.length
-      ? ` Possible sanitizer on the sink line (${sanitizers.join("; ")}) — confirm it actually neutralizes this flow.`
-      : "";
+    const note = sanitizers.length ? ` Possible sanitizer on the sink line (${sanitizers.join("; ")}) — confirm it actually neutralizes this flow.` : "";
 
     findings.push({
       id,
@@ -185,11 +183,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
   const crossFile = (f: Finding): number => (f.path && new Set(f.path.map((p) => p.file)).size > 1 ? 1 : 0);
   const proximity = (f: Finding): number => (f.path ? f.path.length : Number.MAX_SAFE_INTEGER);
   findings.sort(
-    (a, b) =>
-      severityRank(a.severity) - severityRank(b.severity) ||
-      proximity(a) - proximity(b) ||
-      crossFile(b) - crossFile(a) ||
-      byStr(a.id, b.id),
+    (a, b) => severityRank(a.severity) - severityRank(b.severity) || proximity(a) - proximity(b) || crossFile(b) - crossFile(a) || byStr(a.id, b.id),
   );
 
   const total = findings.length;

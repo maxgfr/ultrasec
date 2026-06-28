@@ -42,7 +42,16 @@ describe("applyEnrichment", () => {
     kev: new Map([["CVE-2021-23337", "2022-05-25"]]),
   };
   it("attaches epss/kev/risk to a CVE finding and risk-only to others", () => {
-    const dep = makeToolFinding({ tool: "trivy", category: "dep", ident: "CVE-2021-23337", title: "x", severity: "high", message: "m", pkg: "lodash", version: "1" });
+    const dep = makeToolFinding({
+      tool: "trivy",
+      category: "dep",
+      ident: "CVE-2021-23337",
+      title: "x",
+      severity: "high",
+      message: "m",
+      pkg: "lodash",
+      version: "1",
+    });
     const sast = makeToolFinding({ tool: "semgrep", category: "sast", ident: "r:1", title: "y", severity: "medium", message: "m", file: "a.py", line: 1 });
     const [d, s] = applyEnrichment([dep, sast], feeds);
     expect(d!.epss).toBeCloseTo(0.9);

@@ -136,7 +136,9 @@ export function renderDossierMd(d: Dossier): string {
   if (m.truncation?.candidates) {
     // Report the OMITTED count (accurate to what the cap dropped) rather than a
     // "shown = total − candidates" that can drift from the merged finding set.
-    L.push(`> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
+    L.push(
+      `> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`,
+    );
     L.push("");
   }
   if (m.truncation?.files) {
@@ -144,7 +146,9 @@ export function renderDossierMd(d: Dossier): string {
     L.push("");
   }
   if (m.scopes && m.scopes.length) {
-    L.push(`> 🔎 **Scoped run** — only these paths were analysed: ${m.scopes.map((s) => `\`${s}\``).join(", ")}. Findings outside this scope are not represented.`);
+    L.push(
+      `> 🔎 **Scoped run** — only these paths were analysed: ${m.scopes.map((s) => `\`${s}\``).join(", ")}. Findings outside this scope are not represented.`,
+    );
     L.push("");
   }
 
@@ -156,9 +160,7 @@ export function renderDossierMd(d: Dossier): string {
   L.push(`## Candidates`);
   L.push("");
   // Highest composite risk first so the AI adjudicates what matters most early.
-  const ordered = findings
-    .slice()
-    .sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
+  const ordered = findings.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
   for (const f of ordered) {
     L.push(`### ${f.id} — ${severityBadge(f.severity)} ${f.title}`);
     L.push("");

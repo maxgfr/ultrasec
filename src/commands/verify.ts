@@ -9,7 +9,7 @@ import { loadContextDoc } from "../context.js";
 // `ultrasec verify --apply <file|dir|a,b,c> --run <dir>` → fold verdicts back in
 export function runVerify(args: ParsedArgs): number {
   const run = resolve(flagStr(args, "run") ?? ".ultrasec");
-  let dossier;
+  let dossier: ReturnType<typeof loadDossier>;
   try {
     dossier = loadDossier(run);
   } catch (e) {
@@ -43,7 +43,7 @@ export function runVerify(args: ParsedArgs): number {
 }
 
 function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPath: string, args: ParsedArgs): number {
-  let verdicts;
+  let verdicts: ReturnType<typeof parseVerdicts>;
   try {
     verdicts = readApply(applyPath, /verdict.*\.json$/i, parseVerdicts);
   } catch (e) {
@@ -55,7 +55,13 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
   persistFindings(run, dossier, res.findings);
 
   if (flagBool(args, "json")) {
-    println(JSON.stringify({ applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman }, null, 2));
+    println(
+      JSON.stringify(
+        { applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman },
+        null,
+        2,
+      ),
+    );
     return 0;
   }
   println(`ultrasec verify --apply → updated ${join(run, "findings.json")}`);

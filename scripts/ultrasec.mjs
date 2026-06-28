@@ -1,20 +1,15 @@
 #!/usr/bin/env node
 
+// src/cli.ts
+import { realpathSync as realpathSync2 } from "fs";
+import { pathToFileURL } from "url";
+
 // src/types.ts
 var VERSION = "1.7.1";
 var SCHEMA_VERSION = 4;
 var SEVERITIES = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
-var CATEGORIES = [
-  "taint",
-  "sast",
-  "dep",
-  "secret",
-  "config",
-  "authz",
-  "crypto",
-  "other"
-];
+var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "other"];
 var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 
 // src/util.ts
@@ -135,7 +130,11 @@ var TOOLS = [
     category: "dep",
     description: "Google OSV.dev dependency vulnerability scanner driven by lockfiles.",
     languages: ["*"],
-    install: { brew: "brew install osv-scanner", go: "go install github.com/google/osv-scanner/cmd/osv-scanner@latest", url: "https://google.github.io/osv-scanner/" },
+    install: {
+      brew: "brew install osv-scanner",
+      go: "go install github.com/google/osv-scanner/cmd/osv-scanner@latest",
+      url: "https://google.github.io/osv-scanner/"
+    },
     runHint: "osv-scanner --format json -r <repo>"
   },
   {
@@ -226,7 +225,12 @@ var TOOLS = [
     category: "sast",
     description: "Go security checker, stdlib-aware (math/rand, InsecureSkipVerify, exec with tainted args, SQL concat).",
     languages: ["go"],
-    install: { brew: "brew install gosec", go: "go install github.com/securego/gosec/v2/cmd/gosec@latest", docker: "ghcr.io/securego/gosec", url: "https://github.com/securego/gosec" },
+    install: {
+      brew: "brew install gosec",
+      go: "go install github.com/securego/gosec/v2/cmd/gosec@latest",
+      docker: "ghcr.io/securego/gosec",
+      url: "https://github.com/securego/gosec"
+    },
     runHint: "gosec -fmt json -quiet -no-fail ./..."
   },
   {
@@ -570,11 +574,7 @@ var LANGS = [
       { kind: "function", re: new RegExp(`(?:export\\s+)?(?:const|let|var)\\s+(${ID})\\s*=\\s*(?:async\\s*)?(?:function\\b|\\([^)]*\\)\\s*=>|${ID}\\s*=>)`) },
       { kind: "class", re: new RegExp(`(?:export\\s+)?(?:default\\s+)?(?:abstract\\s+)?class\\s+(${ID})`) }
     ],
-    imports: [
-      /import\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]/,
-      /require\(\s*['"]([^'"]+)['"]\s*\)/,
-      /import\(\s*['"]([^'"]+)['"]\s*\)/
-    ],
+    imports: [/import\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]/, /require\(\s*['"]([^'"]+)['"]\s*\)/, /import\(\s*['"]([^'"]+)['"]\s*\)/],
     exportRule: "js"
   },
   {
@@ -604,7 +604,10 @@ var LANGS = [
     extensions: ["java"],
     defs: [
       { kind: "class", re: /(?:class|interface|enum|record)\s+([A-Za-z_]\w*)/ },
-      { kind: "method", re: /(?:public|private|protected)\s+(?:static\s+|final\s+|abstract\s+|synchronized\s+|native\s+)*[\w<>\[\].,?\s]+?\s+([A-Za-z_]\w*)\s*\([^;{]*\)\s*(?:throws[\w,.\s]+)?\{/ }
+      {
+        kind: "method",
+        re: /(?:public|private|protected)\s+(?:static\s+|final\s+|abstract\s+|synchronized\s+|native\s+)*[\w<>\[\].,?\s]+?\s+([A-Za-z_]\w*)\s*\([^;{]*\)\s*(?:throws[\w,.\s]+)?\{/
+      }
     ],
     imports: [/^\s*import\s+(?:static\s+)?([\w.]+)\s*;/],
     exportRule: "always",
@@ -659,7 +662,10 @@ var LANGS = [
     extensions: ["cs"],
     defs: [
       { kind: "class", re: /(?:class|interface|struct|record|enum)\s+([A-Za-z_]\w*)/ },
-      { kind: "method", re: /(?:public|private|protected|internal)\s+(?:static\s+|virtual\s+|override\s+|async\s+|sealed\s+)*[\w<>\[\].,?\s]+?\s+([A-Za-z_]\w*)\s*\([^;{]*\)\s*\{/ }
+      {
+        kind: "method",
+        re: /(?:public|private|protected|internal)\s+(?:static\s+|virtual\s+|override\s+|async\s+|sealed\s+)*[\w<>\[\].,?\s]+?\s+([A-Za-z_]\w*)\s*\([^;{]*\)\s*\{/
+      }
     ],
     imports: [/^\s*using\s+(?:static\s+)?([\w.]+)\s*;/],
     exportRule: "always",
@@ -701,9 +707,7 @@ var LANGS = [
   {
     id: "shell",
     extensions: ["sh", "bash", "zsh"],
-    defs: [
-      { kind: "function", re: /^\s*(?:function\s+)?([A-Za-z_]\w*)\s*\(\s*\)\s*\{/ }
-    ],
+    defs: [{ kind: "function", re: /^\s*(?:function\s+)?([A-Za-z_]\w*)\s*\(\s*\)\s*\{/ }],
     imports: [/^\s*(?:source|\.)\s+([^\s;]+)/],
     exportRule: "always",
     keywords: ["if", "then", "fi", "for", "do", "done", "while", "case", "esac", "echo", "function", "return", "local", "export"]
@@ -738,7 +742,16 @@ function langForFile(rel) {
   if (dot < 0) return void 0;
   return byExt.get(rel.slice(dot + 1).toLowerCase());
 }
-function isExported(rule, name, defLine, content) {
+var cjsExportLineRe = /\b(?:module\.)?exports\b/;
+function cjsExportRegion(content) {
+  let region = "";
+  for (const line of content.split(/\r?\n/)) {
+    const m = cjsExportLineRe.exec(line);
+    if (m) region += line.slice(m.index) + "\n";
+  }
+  return region;
+}
+function isExported(rule, name, defLine, exportRegion) {
   switch (rule) {
     case "always":
       return true;
@@ -748,26 +761,28 @@ function isExported(rule, name, defLine, content) {
       return /^[A-Z]/.test(name);
     case "js":
       if (/\bexport\b/.test(defLine)) return true;
-      const reExports = new RegExp(`\\b(?:module\\.)?exports\\b[^\\n]*\\b${name}\\b`);
-      return reExports.test(content);
+      return new RegExp(`\\b${name}\\b`).test(exportRegion);
   }
 }
 var callRe = /(?:([A-Za-z_$][\w$]*)\s*\.\s*)?([A-Za-z_$][\w$]*)\s*\(/g;
+var MAX_LINE_LEN = 2e3;
 function extract(spec, content) {
   const lines = content.split(/\r?\n/);
   const symbols = [];
   const imports = [];
   const calls = [];
   const kw = /* @__PURE__ */ new Set([...SHARED_KEYWORDS, ...spec.keywords ?? []]);
+  const exportRegion = spec.exportRule === "js" ? cjsExportRegion(content) : "";
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const ln = i + 1;
+    if (line.length > MAX_LINE_LEN) continue;
     const definedHere = /* @__PURE__ */ new Set();
     for (const d of spec.defs) {
       const m = d.re.exec(line);
       if (m && m[1]) {
         definedHere.add(m[1]);
-        symbols.push({ name: m[1], kind: d.kind, line: ln, exported: isExported(spec.exportRule, m[1], line, content) });
+        symbols.push({ name: m[1], kind: d.kind, line: ln, exported: isExported(spec.exportRule, m[1], line, exportRegion) });
       }
     }
     for (const re of spec.imports) {
@@ -1126,7 +1141,22 @@ var SINKS = [
     cwe: "CWE-78",
     severity: "critical",
     languages: ["*"],
-    callees: ["exec", "execSync", "spawn", "spawnSync", "system", "popen", "Popen", "shell_exec", "passthru", "proc_open", "check_output", "check_call", "call", "run"],
+    callees: [
+      "exec",
+      "execSync",
+      "spawn",
+      "spawnSync",
+      "system",
+      "popen",
+      "Popen",
+      "shell_exec",
+      "passthru",
+      "proc_open",
+      "check_output",
+      "check_call",
+      "call",
+      "run"
+    ],
     receivers: ["child_process", "subprocess", "os", "Runtime", "shell"],
     title: "OS command injection",
     note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell."
@@ -1145,7 +1175,23 @@ var SINKS = [
     cwe: "CWE-22",
     severity: "high",
     languages: ["*"],
-    callees: ["readFile", "readFileSync", "writeFile", "writeFileSync", "createReadStream", "createWriteStream", "sendFile", "unlink", "open", "readdir", "appendFile", "extractall", "extract", "unzip", "extractAll"],
+    callees: [
+      "readFile",
+      "readFileSync",
+      "writeFile",
+      "writeFileSync",
+      "createReadStream",
+      "createWriteStream",
+      "sendFile",
+      "unlink",
+      "open",
+      "readdir",
+      "appendFile",
+      "extractall",
+      "extract",
+      "unzip",
+      "extractAll"
+    ],
     title: "Path traversal / archive extraction (zip-slip)",
     note: "Tainted data used as a filesystem path, or an archive extracted without validating entry names (zip-slip). Confine to a base dir (basename/realpath + allow-list) and reject entries that escape it."
   },
@@ -1288,10 +1334,20 @@ function findSinks(lang, calls) {
   return out;
 }
 var SOURCES = [
-  { kind: "http", languages: ["javascript"], re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|params|headers|cookies|url|originalUrl|hostname|ip|files|file)\b/, title: "HTTP request input" },
+  {
+    kind: "http",
+    languages: ["javascript"],
+    re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|params|headers|cookies|url|originalUrl|hostname|ip|files|file)\b/,
+    title: "HTTP request input"
+  },
   { kind: "ws", languages: ["javascript"], re: /\.on\s*\(\s*['"](?:message|data)['"]/, title: "WebSocket/stream message" },
   { kind: "http", languages: ["javascript"], re: /\bctx\s*\.\s*(?:request|query|params|body)\b/, title: "Koa/HTTP context input" },
-  { kind: "http", languages: ["python"], re: /(?<![\w.])request\s*\.\s*(?:args|form|values|json|data|files|cookies|headers|GET|POST)\b/, title: "HTTP request input" },
+  {
+    kind: "http",
+    languages: ["python"],
+    re: /(?<![\w.])request\s*\.\s*(?:args|form|values|json|data|files|cookies|headers|GET|POST)\b/,
+    title: "HTTP request input"
+  },
   { kind: "http", languages: ["php"], re: /\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\b/, title: "HTTP superglobal input" },
   { kind: "http", languages: ["java", "kotlin", "scala"], re: /\.get(?:Parameter|Header|QueryString)\s*\(/, title: "Servlet request input" },
   { kind: "http", languages: ["ruby"], re: /(?<![\w.])params\s*\[/, title: "Rails params input" },
@@ -1324,12 +1380,27 @@ var SANITIZERS = [
   { kind: "xss", languages: ["*"], re: /\bescape(?:Html)?\b|sanitize|DOMPurify|bleach|markupsafe|escapeHTML/, note: "escaping/sanitizer present" },
   { kind: "deserialize", languages: ["*"], re: /safe_load|safeLoad|JSON\.parse/, note: "safe loader present" },
   { kind: "nosql", languages: ["*"], re: /mongo-?[sS]anitize|sanitizeFilter|\$eq\b/, note: "operator-stripping sanitizer present" },
-  { kind: "xxe", languages: ["*"], re: /resolve_entities\s*=\s*False|feature_external_ges|FEATURE_SECURE_PROCESSING|noent\s*=\s*False|XMLConstants/, note: "external-entity resolution disabled" },
+  {
+    kind: "xxe",
+    languages: ["*"],
+    re: /resolve_entities\s*=\s*False|feature_external_ges|FEATURE_SECURE_PROCESSING|noent\s*=\s*False|XMLConstants/,
+    note: "external-entity resolution disabled"
+  },
   { kind: "ldap", languages: ["*"], re: /ldap\.escape|escapeDN|escapeFilter|escape_filter_chars/, note: "LDAP escaping present" },
   { kind: "crlf", languages: ["*"], re: /encodeURIComponent|stripCRLF|replace\(\s*\/[^/]*[\\]r/, note: "CR/LF stripping present" },
-  { kind: "proto", languages: ["*"], re: /__proto__|Object\.freeze|Object\.create\(\s*null|hasOwnProperty|structuredClone/, note: "prototype-pollution guard present" },
+  {
+    kind: "proto",
+    languages: ["*"],
+    re: /__proto__|Object\.freeze|Object\.create\(\s*null|hasOwnProperty|structuredClone/,
+    note: "prototype-pollution guard present"
+  },
   { kind: "ssti", languages: ["*"], re: /autoescape|markupsafe|\|\s*e\b|escape\(/, note: "template autoescaping present" },
-  { kind: "*", languages: ["*"], re: /\bparseInt\b|\bNumber\(|\bInteger\.parse|validator\.|\bz\.|Joi\.|\bisInt\b|\bUUID\b/, note: "type-coercion/validation present" }
+  {
+    kind: "*",
+    languages: ["*"],
+    re: /\bparseInt\b|\bNumber\(|\bInteger\.parse|validator\.|\bz\.|Joi\.|\bisInt\b|\bUUID\b/,
+    note: "type-coercion/validation present"
+  }
 ];
 function findSanitizers(lang, line, sinkKind) {
   const hints = [];
@@ -1448,7 +1519,9 @@ function renderMapMd(repo, s) {
   L.push("");
   if (!s.sinks.length) L.push(`_None detected._`);
   for (const k of s.sinks) {
-    L.push(`- **${k.kind}** (${k.cwe}, ${k.severity}) \xD7${k.count}: ${k.samples.map((x) => `\`${x.file}:${x.line}\``).join(", ")}${k.count > k.samples.length ? " \u2026" : ""}`);
+    L.push(
+      `- **${k.kind}** (${k.cwe}, ${k.severity}) \xD7${k.count}: ${k.samples.map((x) => `\`${x.file}:${x.line}\``).join(", ")}${k.count > k.samples.length ? " \u2026" : ""}`
+    );
   }
   L.push("");
   L.push(`## By language`);
@@ -2022,9 +2095,7 @@ function bumpConfidence(c, agree) {
   return agree >= 2 ? "high" : c;
 }
 function mergeCluster(group) {
-  const rep = group.slice().sort(
-    (a, b) => sevRank(a.severity) - sevRank(b.severity) || (b.risk ?? 0) - (a.risk ?? 0) || byStr(a.id, b.id)
-  )[0];
+  const rep = group.slice().sort((a, b) => sevRank(a.severity) - sevRank(b.severity) || (b.risk ?? 0) - (a.risk ?? 0) || byStr(a.id, b.id))[0];
   const sources = [...new Set(group.flatMap((f) => f.sources ?? [f.tool]))].sort(byStr);
   const references = [...new Set(group.flatMap((f) => f.references ?? []))];
   const aliases = [...new Set(group.flatMap((f) => f.aliases ?? []).map((a) => a.toUpperCase()))].sort(byStr);
@@ -2325,10 +2396,7 @@ async function loadCached(url, file, gz) {
   }
 }
 async function loadFeeds() {
-  const [epssCsv, kevJson] = await Promise.all([
-    loadCached(EPSS_URL, "epss.csv", true),
-    loadCached(KEV_URL, "kev.json", false)
-  ]);
+  const [epssCsv, kevJson] = await Promise.all([loadCached(EPSS_URL, "epss.csv", true), loadCached(KEV_URL, "kev.json", false)]);
   return { epss: parseEpssCsv(epssCsv), kev: parseKev(kevJson) };
 }
 async function enrichFindings(findings, opts = {}) {
@@ -2889,20 +2957,7 @@ var kingfisher = {
 };
 
 // src/tools/index.ts
-var ADAPTERS = [
-  trivy,
-  opengrep,
-  semgrep,
-  gitleaks,
-  osvScanner,
-  cargoAudit,
-  govulncheck,
-  bandit,
-  gosec,
-  checkov,
-  hadolint,
-  kingfisher
-];
+var ADAPTERS = [trivy, opengrep, semgrep, gitleaks, osvScanner, cargoAudit, govulncheck, bandit, gosec, checkov, hadolint, kingfisher];
 
 // src/store.ts
 import { mkdirSync as mkdirSync4, writeFileSync as writeFileSync4, readFileSync as readFileSync6, existsSync as existsSync5 } from "fs";
@@ -2996,7 +3051,9 @@ function renderDossierMd(d) {
   L.push(`> **needs-human** \u2014 never silently dropped.`);
   L.push("");
   if (m.truncation?.candidates) {
-    L.push(`> \u26A0\uFE0F **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`);
+    L.push(
+      `> \u26A0\uFE0F **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`
+    );
     L.push("");
   }
   if (m.truncation?.files) {
@@ -3004,7 +3061,9 @@ function renderDossierMd(d) {
     L.push("");
   }
   if (m.scopes && m.scopes.length) {
-    L.push(`> \u{1F50E} **Scoped run** \u2014 only these paths were analysed: ${m.scopes.map((s) => `\`${s}\``).join(", ")}. Findings outside this scope are not represented.`);
+    L.push(
+      `> \u{1F50E} **Scoped run** \u2014 only these paths were analysed: ${m.scopes.map((s) => `\`${s}\``).join(", ")}. Findings outside this scope are not represented.`
+    );
     L.push("");
   }
   if (!findings.length) {
@@ -3133,7 +3192,9 @@ async function runScan(args) {
       final = mergeDossier(prev, nextDossier);
       mergedNote = ` \xB7 merged into ${prev.findings.length} prior finding(s)`;
     } catch (e) {
-      eprintln(`ultrasec: could not merge into the existing dossier at ${out} (${e instanceof Error ? e.message : String(e)}); writing a fresh dossier instead.`);
+      eprintln(
+        `ultrasec: could not merge into the existing dossier at ${out} (${e instanceof Error ? e.message : String(e)}); writing a fresh dossier instead.`
+      );
     }
   }
   writeDossier(out, final);
@@ -3144,7 +3205,20 @@ async function runScan(args) {
     const kev = final.findings.filter((f) => f.kev).length;
     println(
       JSON.stringify(
-        { out, counts: fm.counts, languages: fm.languages, files: scan.files.length, toolsRun: fm.toolsRun, kev, risk: riskNote, truncation, scopes: fm.scopes, diff: diffNote, sinks: sinksOn ? sinkCand.findings.length : void 0, merged: mergedNote.trim() || void 0 },
+        {
+          out,
+          counts: fm.counts,
+          languages: fm.languages,
+          files: scan.files.length,
+          toolsRun: fm.toolsRun,
+          kev,
+          risk: riskNote,
+          truncation,
+          scopes: fm.scopes,
+          diff: diffNote,
+          sinks: sinksOn ? sinkCand.findings.length : void 0,
+          merged: mergedNote.trim() || void 0
+        },
         null,
         2
       )
@@ -3159,10 +3233,14 @@ async function runScan(args) {
   } else if (!skipTools) {
     println(`  external tools run: ${tool.toolsRun.join(", ") || "none"}  (\`ultrasec tools\` to see/install more)`);
   }
-  println(`  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} \xB7 high ${fc.high} \xB7 med ${fc.medium} \xB7 low ${fc.low})  \xB7  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""} + ${tool.findings.length} tool this pass`);
+  println(
+    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} \xB7 high ${fc.high} \xB7 med ${fc.medium} \xB7 low ${fc.low})  \xB7  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""} + ${tool.findings.length} tool this pass`
+  );
   println(`  ${riskNote}`);
   if (truncation?.candidates) {
-    println(`  \u26A0\uFE0F  showing top ${maxCandidates} of ${truncation.total} candidates \u2014 ${truncation.candidates} not shown. Raise --max-candidates or narrow --scope.`);
+    println(
+      `  \u26A0\uFE0F  showing top ${maxCandidates} of ${truncation.total} candidates \u2014 ${truncation.candidates} not shown. Raise --max-candidates or narrow --scope.`
+    );
   }
   if (truncation?.files) {
     println(`  \u26A0\uFE0F  file walk hit --max-files (${maxFiles}) \u2014 some files were NOT scanned. Raise --max-files or narrow --scope.`);
@@ -3418,7 +3496,9 @@ function runContext(args) {
   }
   println(`ultrasec context \u2192 ${out}`);
   println(`  ${join13(out, "CONTEXT.scaffold.json")}  \xB7  ${join13(out, "CONTEXT.todo.md")}`);
-  println(`  frameworks: ${scaffold.frameworks.join(", ") || "\u2014"}  \xB7  entry points: ${scaffold.entryPoints.length}  \xB7  auth sites: ${scaffold.authMiddleware.length}  \xB7  sanitizers: ${scaffold.sanitizers.length}`);
+  println(
+    `  frameworks: ${scaffold.frameworks.join(", ") || "\u2014"}  \xB7  entry points: ${scaffold.entryPoints.length}  \xB7  auth sites: ${scaffold.authMiddleware.length}  \xB7  sanitizers: ${scaffold.sanitizers.length}`
+  );
   println(`  next: author ${join13(out, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` \u2014 it's injected into every dossier.`);
   return 0;
 }
@@ -4010,7 +4090,8 @@ function check(dossier, opts = {}) {
     }
     if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human \u2014 review required (not auto-failing).`);
   }
-  if (ok) messages.push(`grounding OK${opts.semantic ? " \xB7 audit adjudicated" : ""} \u2014 ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
+  if (ok)
+    messages.push(`grounding OK${opts.semantic ? " \xB7 audit adjudicated" : ""} \u2014 ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
   return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, messages };
 }
 
@@ -4190,7 +4271,13 @@ function runInvestigate(args) {
     const res = ingestDiscoveries(dossier, discoveries, repo);
     persistFindings(run, dossier, res.findings);
     if (flagBool(args, "json")) {
-      println(JSON.stringify({ ingested: res.ingested, folded: res.folded, rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })) }, null, 2));
+      println(
+        JSON.stringify(
+          { ingested: res.ingested, folded: res.folded, rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })) },
+          null,
+          2
+        )
+      );
       return 0;
     }
     println(`ultrasec investigate --apply \u2192 updated ${run}/findings.json`);
@@ -4199,7 +4286,13 @@ function runInvestigate(args) {
     if (res.ingested) println(`  next: \`ultrasec dossier <id> --run ${run}\` then \`verify\` \u2014 adjudicate them like any candidate.`);
     return 0;
   }
-  const scanOpts = { scope: listFlag(args, "scope"), include: listFlag(args, "include"), exclude: listFlag(args, "exclude"), maxFiles: numFlag(args, "max-files"), gitignore: flagBool(args, "gitignore") };
+  const scanOpts = {
+    scope: listFlag(args, "scope"),
+    include: listFlag(args, "include"),
+    exclude: listFlag(args, "exclude"),
+    maxFiles: numFlag(args, "max-files"),
+    gitignore: flagBool(args, "gitignore")
+  };
   let regions;
   try {
     regions = buildInvestigateWorklist(buildAttackSurface(scanRepo(repo, scanOpts)), dossier.graph);
@@ -4239,7 +4332,13 @@ function runPaths(args) {
   if (kind) findings = findings.filter((f) => f.sink?.kind === kind);
   if (sev) findings = findings.filter((f) => f.severity === sev);
   if (flagBool(args, "json")) {
-    println(JSON.stringify(findings.map((f) => ({ id: f.id, severity: f.severity, cwe: f.cwe, path: f.path })), null, 2));
+    println(
+      JSON.stringify(
+        findings.map((f) => ({ id: f.id, severity: f.severity, cwe: f.cwe, path: f.path })),
+        null,
+        2
+      )
+    );
     return 0;
   }
   if (!findings.length) {
@@ -4292,7 +4391,13 @@ function applyMode(run, dossier, applyPath, args) {
   const res = applyVerdicts(dossier, verdicts);
   persistFindings(run, dossier, res.findings);
   if (flagBool(args, "json")) {
-    println(JSON.stringify({ applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman }, null, 2));
+    println(
+      JSON.stringify(
+        { applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman },
+        null,
+        2
+      )
+    );
     return 0;
   }
   println(`ultrasec verify --apply \u2192 updated ${join18(run, "findings.json")}`);
@@ -4370,7 +4475,10 @@ function renderRevalidateMd(items, context) {
     if (it.currentLine !== null) L.push(`- current line: \`${it.currentLine.trim().slice(0, 200)}\``);
     else if (it.fileExists) L.push(`- current line: **cited line is out of range now (drifted/removed)**`);
     if (it.commitsSinceFinding !== null) L.push(`- commits to file since finding: ${it.commitsSinceFinding}`);
-    if (it.lineLastChanged) L.push(`- line last changed: \`${it.lineLastChanged.commit}\`${it.lineLastChanged.date ? ` (${it.lineLastChanged.date})` : ""}${it.lineLastChanged.author ? ` by ${it.lineLastChanged.author}` : ""}`);
+    if (it.lineLastChanged)
+      L.push(
+        `- line last changed: \`${it.lineLastChanged.commit}\`${it.lineLastChanged.date ? ` (${it.lineLastChanged.date})` : ""}${it.lineLastChanged.author ? ` by ${it.lineLastChanged.author}` : ""}`
+      );
     if (it.renamedTo) L.push(`- file appears renamed to: \`${it.renamedTo}\``);
     L.push("");
   }
@@ -4406,7 +4514,11 @@ Revalidation (${label})${note ? `: ${note}` : ""}`;
         fixed++;
         dismissed++;
         const sha = v.fixedIn ?? fixedInById.get(f.id);
-        const next = { ...f, status: "dismissed", message: withNote(f, "fixed", `${v.note ? v.note + " " : ""}${sha ? `fixed in ${sha}` : "fixed"}`) };
+        const next = {
+          ...f,
+          status: "dismissed",
+          message: withNote(f, "fixed", `${v.note ? v.note + " " : ""}${sha ? `fixed in ${sha}` : "fixed"}`)
+        };
         if (sha) next.fixedIn = sha;
         return next;
       }
@@ -4472,11 +4584,19 @@ function runRevalidate(args) {
     const res = applyRevalidations(dossier, inputs, facts);
     persistFindings(run, dossier, res.findings);
     if (flagBool(args, "json")) {
-      println(JSON.stringify({ applied: res.applied, stillValid: res.stillValid, fixed: res.fixed, dismissed: res.dismissed, needsHuman: res.needsHuman, flagged: res.flagged }, null, 2));
+      println(
+        JSON.stringify(
+          { applied: res.applied, stillValid: res.stillValid, fixed: res.fixed, dismissed: res.dismissed, needsHuman: res.needsHuman, flagged: res.flagged },
+          null,
+          2
+        )
+      );
       return 0;
     }
     println(`ultrasec revalidate --apply \u2192 updated ${run}/findings.json`);
-    println(`  applied ${res.applied} verdict(s): ${res.stillValid} still-valid \xB7 ${res.fixed} fixed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
+    println(
+      `  applied ${res.applied} verdict(s): ${res.stillValid} still-valid \xB7 ${res.fixed} fixed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`
+    );
     for (const fl of res.flagged) println(`  \u26A0\uFE0F  ${fl.id}: ${fl.reason}`);
     return 0;
   }
@@ -4536,11 +4656,15 @@ function renderNarrativeWorklistMd(wl, context) {
   L.push(`Author **NARRATIVE.json** (a Narrative object), then fold it into the report with`);
   L.push(`\`ultrasec render --narrative NARRATIVE.json --run <run>\`. Fields (all optional, all additive):`);
   L.push(`- \`executiveSummary\`: a few sentences for non-experts atop the report.`);
-  L.push(`- \`positivePatterns\`: what the codebase does **well** (solid auth, parameterized queries\u2026) \u2014 calibrates trust in the findings and helps prioritise. Free prose, advisory.`);
+  L.push(
+    `- \`positivePatterns\`: what the codebase does **well** (solid auth, parameterized queries\u2026) \u2014 calibrates trust in the findings and helps prioritise. Free prose, advisory.`
+  );
   L.push(`- \`remediations\`: \`{id, fix, patch?, owner?}\` \u2014 a concrete fix per **confirmed** finding.`);
   L.push(`- \`attackChains\`: \`{title, findingIds[], narrative}\` \u2014 how findings combine into an exploit.`);
   L.push(`- \`rootCauses\`: \`{cause, findingIds[], note}\` \u2014 group findings by shared underlying cause.`);
-  L.push(`- \`hardeningNotes\`: \`string[]\` \u2014 defense-in-depth suggestions that are **not** findings (the attack is already prevented elsewhere). Advisory; excluded from the severity counts.`);
+  L.push(
+    `- \`hardeningNotes\`: \`string[]\` \u2014 defense-in-depth suggestions that are **not** findings (the attack is already prevented elsewhere). Advisory; excluded from the severity counts.`
+  );
   L.push("");
   L.push(`> Grounding is strict for finding-citing sections: any \`remediations\`/\`attackChains\`/\`rootCauses\``);
   L.push(`> entry citing an **unknown or non-confirmed** finding id is dropped on merge. \`executiveSummary\`,`);
@@ -4576,7 +4700,12 @@ function parseNarrative(raw) {
     if (hn.length) n.hardeningNotes = hn;
   }
   if (Array.isArray(d?.remediations)) {
-    const rem = d.remediations.filter((r) => r && typeof r.id === "string" && typeof r.fix === "string").map((r) => ({ id: r.id, fix: r.fix, ...typeof r.patch === "string" ? { patch: r.patch } : {}, ...typeof r.owner === "string" ? { owner: r.owner } : {} }));
+    const rem = d.remediations.filter((r) => r && typeof r.id === "string" && typeof r.fix === "string").map((r) => ({
+      id: r.id,
+      fix: r.fix,
+      ...typeof r.patch === "string" ? { patch: r.patch } : {},
+      ...typeof r.owner === "string" ? { owner: r.owner } : {}
+    }));
     if (rem.length) n.remediations = rem;
   }
   if (Array.isArray(d?.attackChains)) {
@@ -4787,7 +4916,9 @@ function renderImplementMd(wl, context) {
   }
   if (wl.investigations.length) {
     L.push("");
-    L.push(`A further **${wl.investigations.length}** finding(s) (${severityBreakdown(wl.investigations)}) are uncertain and need human investigation before a fix can be scoped.`);
+    L.push(
+      `A further **${wl.investigations.length}** finding(s) (${severityBreakdown(wl.investigations)}) are uncertain and need human investigation before a fix can be scoped.`
+    );
   }
   L.push("");
   L.push(`## Solution`);
@@ -4814,7 +4945,9 @@ function renderImplementMd(wl, context) {
   let n = 0;
   for (const f of wl.fixes) {
     n++;
-    L.push(`${n}. **Fix \`${f.title}\`** at \`${f.at}\` so it is no longer exploitable. _([${f.severity}] ${f.cwe ?? f.category} \xB7 \`${f.id}\`${f.owner ? ` \xB7 owner ${f.owner}` : ""})_`);
+    L.push(
+      `${n}. **Fix \`${f.title}\`** at \`${f.at}\` so it is no longer exploitable. _([${f.severity}] ${f.cwe ?? f.category} \xB7 \`${f.id}\`${f.owner ? ` \xB7 owner ${f.owner}` : ""})_`
+    );
     if (f.fix) L.push(`   - Suggested fix (AI): ${f.fix}`);
     if (f.patch) {
       L.push(`   - Suggested patch:`);
@@ -4833,7 +4966,9 @@ function renderImplementMd(wl, context) {
     let m = 0;
     for (const f of wl.investigations) {
       m++;
-      L.push(`${m}. Investigate \`${f.title}\` at \`${f.at}\` _([${f.severity}] ${f.cwe ?? f.category} \xB7 \`${f.id}\`${f.owner ? ` \xB7 owner ${f.owner}` : ""})_ \u2014 confirm whether it is exploitable, then route to fix or dismiss.`);
+      L.push(
+        `${m}. Investigate \`${f.title}\` at \`${f.at}\` _([${f.severity}] ${f.cwe ?? f.category} \xB7 \`${f.id}\`${f.owner ? ` \xB7 owner ${f.owner}` : ""})_ \u2014 confirm whether it is exploitable, then route to fix or dismiss.`
+      );
     }
     L.push("");
   }
@@ -4861,7 +4996,9 @@ function runImplement(args) {
     println(JSON.stringify(wl, null, 2));
     return 0;
   }
-  println(`ultrasec implement \u2192 ${todoPath} (${wl.fixes.length} fix \xB7 ${wl.investigations.length} investigate \xB7 ${wl.rootCauses.length} root cause${wl.rootCauses.length === 1 ? "" : "s"})`);
+  println(
+    `ultrasec implement \u2192 ${todoPath} (${wl.fixes.length} fix \xB7 ${wl.investigations.length} investigate \xB7 ${wl.rootCauses.length} root cause${wl.rootCauses.length === 1 ? "" : "s"})`
+  );
   if (!wl.fixes.length && !wl.investigations.length) {
     println(`  nothing confirmed/needs-human yet \u2014 run \`verify --apply\` first.`);
   } else {
@@ -5004,7 +5141,9 @@ function renderFinding(f, opts = {}) {
   L.push(`### ${BADGE[f.severity]} ${f.title}`);
   L.push("");
   const src = sourcesTag(f);
-  L.push(`\`${f.id}\` \xB7 ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) \xB7 ` : ""}${f.category} \xB7 ${statusTag(f)}${src ? ` \xB7 ${src}` : ""}`);
+  L.push(
+    `\`${f.id}\` \xB7 ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) \xB7 ` : ""}${f.category} \xB7 ${statusTag(f)}${src ? ` \xB7 ${src}` : ""}`
+  );
   const rt = riskTag(f);
   if (rt) {
     L.push("");
@@ -5035,7 +5174,9 @@ function renderFinding(f, opts = {}) {
   }
   if (f.references?.length) {
     L.push("");
-    L.push(`References: ${f.references.slice(0, 5).map((r) => `<${r}>`).join(" \xB7 ")}`);
+    L.push(
+      `References: ${f.references.slice(0, 5).map((r) => `<${r}>`).join(" \xB7 ")}`
+    );
   }
   return L.join("\n");
 }
@@ -5167,12 +5308,16 @@ function hardeningNotesHtml(n) {
 }
 function chainsHtml(n) {
   if (!n?.attackChains?.length) return "";
-  const items = n.attackChains.map((c) => `<div class="ai-block"><h3>${esc2(c.title)}</h3><div class="meta">${c.findingIds.map((id) => `<code>${esc2(id)}</code>`).join(" \u2192 ")}</div><p>${esc2(c.narrative)}</p></div>`).join("");
+  const items = n.attackChains.map(
+    (c) => `<div class="ai-block"><h3>${esc2(c.title)}</h3><div class="meta">${c.findingIds.map((id) => `<code>${esc2(id)}</code>`).join(" \u2192 ")}</div><p>${esc2(c.narrative)}</p></div>`
+  ).join("");
   return aiSectionHtml("Attack chains", items);
 }
 function rootCausesHtml(n) {
   if (!n?.rootCauses?.length) return "";
-  const items = n.rootCauses.map((g) => `<div class="ai-block"><h3>${esc2(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<code>${esc2(id)}</code>`).join(", ")}</div><p>${esc2(g.note)}</p></div>`).join("");
+  const items = n.rootCauses.map(
+    (g) => `<div class="ai-block"><h3>${esc2(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<code>${esc2(id)}</code>`).join(", ")}</div><p>${esc2(g.note)}</p></div>`
+  ).join("");
   return aiSectionHtml("Root-cause groups", items);
 }
 function aiCss(narrative) {
@@ -5601,7 +5746,13 @@ function runRun(args) {
     powered,
     stages,
     scan: !noScan,
-    scanOpts: { scope: listFlag(args, "scope"), include: listFlag(args, "include"), exclude: listFlag(args, "exclude"), maxFiles: numFlag(args, "max-files"), gitignore: flagBool(args, "gitignore") }
+    scanOpts: {
+      scope: listFlag(args, "scope"),
+      include: listFlag(args, "include"),
+      exclude: listFlag(args, "exclude"),
+      maxFiles: numFlag(args, "max-files"),
+      gitignore: flagBool(args, "gitignore")
+    }
   };
   if (powered) {
     opts.runner = new CliAgentRunner(agent);
@@ -5713,57 +5864,43 @@ GLOBAL
   --version, -v  Print the version.
   --json         Machine-readable output (where supported).
 
-Run \`ultrasec <command> --help\` for command-specific options.
+Each command's flags are listed above; \`--help\`/\`-h\` (anywhere) prints this help.
 `;
+var COMMAND_HANDLERS = {
+  tools: runTools,
+  graph: runGraph,
+  map: runMap,
+  scan: runScan,
+  context: runContext,
+  import: runImport,
+  dossier: runDossier,
+  triage: runTriage,
+  paths: runPaths,
+  verify: runVerify,
+  investigate: runInvestigate,
+  revalidate: runRevalidate,
+  narrative: runNarrative,
+  implement: runImplement,
+  check: runCheck,
+  render: runRender,
+  clean: runClean,
+  run: runRun
+};
 async function dispatch(cmd, args) {
-  switch (cmd) {
-    case void 0:
-    case "help":
-      println(HELP);
-      return 0;
-    case "version":
-      println(VERSION);
-      return 0;
-    case "tools":
-      return runTools(args);
-    case "graph":
-      return runGraph(args);
-    case "map":
-      return runMap(args);
-    case "scan":
-      return runScan(args);
-    case "context":
-      return runContext(args);
-    case "import":
-      return runImport(args);
-    case "dossier":
-      return runDossier(args);
-    case "triage":
-      return runTriage(args);
-    case "paths":
-      return runPaths(args);
-    case "verify":
-      return runVerify(args);
-    case "investigate":
-      return runInvestigate(args);
-    case "revalidate":
-      return runRevalidate(args);
-    case "narrative":
-      return runNarrative(args);
-    case "implement":
-      return runImplement(args);
-    case "check":
-      return runCheck(args);
-    case "render":
-      return runRender(args);
-    case "clean":
-      return runClean(args);
-    case "run":
-      return runRun(args);
-    default:
-      eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
-      return 2;
+  if (cmd === void 0 || cmd === "help") {
+    println(HELP);
+    return 0;
   }
+  if (cmd === "version") {
+    println(VERSION);
+    return 0;
+  }
+  const handler = COMMAND_HANDLERS[cmd];
+  if (!handler) {
+    eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
+    return 2;
+  }
+  return handler(args);
 }
 async function main() {
   const argv = process.argv.slice(2);
@@ -5779,7 +5916,23 @@ async function main() {
   const code = await dispatch(args._[0], args);
   process.exit(code);
 }
-main().catch((err) => {
-  eprintln(`ultrasec: ${err instanceof Error ? err.stack || err.message : String(err)}`);
-  process.exit(1);
-});
+function isEntrypoint() {
+  const argv1 = process.argv[1];
+  if (!argv1) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync2(argv1)).href;
+  } catch {
+    return false;
+  }
+}
+if (isEntrypoint()) {
+  main().catch((err) => {
+    eprintln(`ultrasec: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+    process.exit(1);
+  });
+}
+export {
+  COMMAND_HANDLERS,
+  HELP,
+  dispatch
+};

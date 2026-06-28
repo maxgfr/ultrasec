@@ -111,7 +111,8 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     }
     if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human — review required (not auto-failing).`);
   }
-  if (ok) messages.push(`grounding OK${opts.semantic ? " · audit adjudicated" : ""} — ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
+  if (ok)
+    messages.push(`grounding OK${opts.semantic ? " · audit adjudicated" : ""} — ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
 
   return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, messages };
 }

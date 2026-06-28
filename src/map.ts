@@ -193,7 +193,9 @@ export function renderMapMd(repo: string, s: AttackSurface): string {
   L.push("");
   if (!s.sinks.length) L.push(`_None detected._`);
   for (const k of s.sinks) {
-    L.push(`- **${k.kind}** (${k.cwe}, ${k.severity}) ×${k.count}: ${k.samples.map((x) => `\`${x.file}:${x.line}\``).join(", ")}${k.count > k.samples.length ? " …" : ""}`);
+    L.push(
+      `- **${k.kind}** (${k.cwe}, ${k.severity}) ×${k.count}: ${k.samples.map((x) => `\`${x.file}:${x.line}\``).join(", ")}${k.count > k.samples.length ? " …" : ""}`,
+    );
   }
   L.push("");
 

@@ -116,6 +116,6 @@ describe("parseJsonStream", () => {
     expect(msgs).toHaveLength(3);
   });
   it("skips malformed fragments", () => {
-    expect(parseJsonStream("{bad} {\"ok\":1}").length).toBe(1);
+    expect(parseJsonStream('{bad} {"ok":1}').length).toBe(1);
   });
 });

@@ -65,6 +65,50 @@ describe("def lines are not mistaken for calls", () => {
   });
 });
 
+describe("extract (js) export rule — precomputed CJS export region", () => {
+  const js = langForFile("x.js")!;
+
+  it("marks ESM-exported and CJS-exported symbols, leaving private ones unexported", () => {
+    const { symbols } = extract(
+      js,
+      [
+        "export function pub(a) { return a; }",
+        "function helper() {}",
+        "function shipped() {}",
+        "function alsoShipped() {}",
+        "module.exports = { shipped, alsoShipped };",
+        "function viaExports() {}",
+        "exports.viaExports = viaExports;",
+      ].join("\n"),
+    );
+    const exp = (n: string) => symbols.find((s) => s.name === n)?.exported;
+    expect(exp("pub")).toBe(true); // ESM export on the def line
+    expect(exp("shipped")).toBe(true); // module.exports = { shipped }
+    expect(exp("alsoShipped")).toBe(true);
+    expect(exp("viaExports")).toBe(true); // exports.viaExports =
+    expect(exp("helper")).toBe(false); // never exported
+  });
+
+  it("does not export a name that only appears before the exports marker on a line", () => {
+    // The old whole-file regex required the name to appear AFTER `exports` on the
+    // same line; the precomputed region preserves that exact semantic.
+    const { symbols } = extract(js, ["function before() {}", "before(); // exports happen elsewhere", "module.exports = {};"].join("\n"));
+    expect(symbols.find((s) => s.name === "before")?.exported).toBe(false);
+  });
+});
+
+describe("extract — pathologically long (minified) lines are skipped", () => {
+  const js = langForFile("x.js")!;
+  it("ignores defs/calls on a >2000-char line without hanging", () => {
+    const longLine = `var x = "${"a".repeat(5000)}"; function buried() {} db.query(buried);`;
+    const src = ["function realDef() {}", longLine, "realDef();"].join("\n");
+    const { symbols, calls } = extract(js, src);
+    expect(symbols.some((s) => s.name === "realDef")).toBe(true);
+    expect(symbols.some((s) => s.name === "buried")).toBe(false); // on the skipped line
+    expect(calls.some((c) => c.callee === "query")).toBe(false); // on the skipped line
+  });
+});
+
 describe("extract (go) export rule = capitalized", () => {
   const go = langForFile("x.go")!;
   const { symbols } = extract(go, ["func Handler(w, r) {", "}", "func helper() {", "}"].join("\n"));

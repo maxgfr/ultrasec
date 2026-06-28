@@ -22,7 +22,7 @@ export function runContext(args: ParsedArgs): number {
     gitignore: flagBool(args, "gitignore"),
   };
 
-  let scaffold;
+  let scaffold: ReturnType<typeof buildContextScaffold>;
   try {
     const scan = scanRepo(repo, scanOpts);
     const surface = buildAttackSurface(scan);
@@ -42,7 +42,9 @@ export function runContext(args: ParsedArgs): number {
   }
   println(`ultrasec context → ${out}`);
   println(`  ${join(out, "CONTEXT.scaffold.json")}  ·  ${join(out, "CONTEXT.todo.md")}`);
-  println(`  frameworks: ${scaffold.frameworks.join(", ") || "—"}  ·  entry points: ${scaffold.entryPoints.length}  ·  auth sites: ${scaffold.authMiddleware.length}  ·  sanitizers: ${scaffold.sanitizers.length}`);
+  println(
+    `  frameworks: ${scaffold.frameworks.join(", ") || "—"}  ·  entry points: ${scaffold.entryPoints.length}  ·  auth sites: ${scaffold.authMiddleware.length}  ·  sanitizers: ${scaffold.sanitizers.length}`,
+  );
   println(`  next: author ${join(out, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` — it's injected into every dossier.`);
   return 0;
 }

@@ -104,7 +104,9 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Reme
   L.push(`### ${BADGE[f.severity]} ${f.title}`);
   L.push("");
   const src = sourcesTag(f);
-  L.push(`\`${f.id}\` · ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) · ` : ""}${f.category} · ${statusTag(f)}${src ? ` · ${src}` : ""}`);
+  L.push(
+    `\`${f.id}\` · ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) · ` : ""}${f.category} · ${statusTag(f)}${src ? ` · ${src}` : ""}`,
+  );
   const rt = riskTag(f);
   if (rt) {
     L.push("");
@@ -137,7 +139,12 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Reme
   }
   if (f.references?.length) {
     L.push("");
-    L.push(`References: ${f.references.slice(0, 5).map((r) => `<${r}>`).join(" · ")}`);
+    L.push(
+      `References: ${f.references
+        .slice(0, 5)
+        .map((r) => `<${r}>`)
+        .join(" · ")}`,
+    );
   }
   return L.join("\n");
 }

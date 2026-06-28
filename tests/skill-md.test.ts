@@ -20,7 +20,10 @@ const frontmatter = match?.[1] ?? "";
 // Pull a frontmatter scalar with the same regex the `skills` CLI / the
 // verify-skill-bundle gate use, stripping surrounding quotes.
 const field = (re: RegExp): string | undefined =>
-  frontmatter.match(re)?.[1]?.trim().replace(/^["']|["']$/g, "");
+  frontmatter
+    .match(re)?.[1]
+    ?.trim()
+    .replace(/^["']|["']$/g, "");
 
 describe("SKILL.md is installable by the `skills` CLI", () => {
   it("is packaged under skills/ultrasec/, not the repo root", () => {
@@ -46,23 +49,23 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
 
   // Claude Code caps skill descriptions at 1024 characters when matching a
   // request to a skill; a longer description risks truncation at the exact
-  // moment the skill needs to be recognized.
-  it("keeps the description under the 1024-char matcher limit", () => {
-    expect((field(/^description:\s*(.+)$/m) ?? "").length).toBeLessThanOrEqual(1024);
+  // moment the skill needs to be recognized. We budget at 1000 (mirrors
+  // DESC_MAX in scripts/verify-skill-bundle.mjs) to keep a safety margin so a
+  // future edit can't silently cross the cap.
+  it("keeps the description within the 1000-char budget (headroom under the 1024 matcher limit)", () => {
+    expect((field(/^description:\s*(.+)$/m) ?? "").length).toBeLessThanOrEqual(1000);
   });
 
   it("only references playbooks that exist on disk", () => {
     const mentioned = [...new Set(raw.match(/references\/[a-z0-9-]+\.md/g) ?? [])];
     expect(mentioned.length).toBeGreaterThan(0);
-    for (const ref of mentioned)
-      expect(existsSync(join(SKILL_DIR, ref)), `${ref} is mentioned in SKILL.md but missing`).toBe(true);
+    for (const ref of mentioned) expect(existsSync(join(SKILL_DIR, ref)), `${ref} is mentioned in SKILL.md but missing`).toBe(true);
   });
 
   it("mentions every references/*.md playbook", () => {
     const files = readdirSync(join(SKILL_DIR, "references")).filter((f) => f.endsWith(".md"));
     expect(files.length).toBeGreaterThan(0);
-    for (const f of files)
-      expect(raw.includes(`references/${f}`), `references/${f} exists but SKILL.md never mentions it`).toBe(true);
+    for (const f of files) expect(raw.includes(`references/${f}`), `references/${f} exists but SKILL.md never mentions it`).toBe(true);
   });
 
   it("keeps version in lockstep across SKILL.md, package.json and src/types.ts", () => {

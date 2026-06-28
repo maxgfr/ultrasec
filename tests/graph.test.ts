@@ -40,9 +40,7 @@ describe("buildGraph", () => {
   const graph = buildGraph(scanRepo(FIXTURE));
 
   it("creates resolved import edges across files", () => {
-    const e = graph.edges.find(
-      (x) => x.from === "src/server.js" && x.to === "src/db.js" && x.kind === "import",
-    );
+    const e = graph.edges.find((x) => x.from === "src/server.js" && x.to === "src/db.js" && x.kind === "import");
     expect(e).toBeTruthy();
   });
 
@@ -52,9 +50,7 @@ describe("buildGraph", () => {
   });
 
   it("creates a cross-file call edge (server.getUser -> db.js)", () => {
-    const e = graph.edges.find(
-      (x) => x.from === "src/server.js" && x.to === "src/db.js" && x.kind === "call",
-    );
+    const e = graph.edges.find((x) => x.from === "src/server.js" && x.to === "src/db.js" && x.kind === "call");
     expect(e).toBeTruthy();
     expect(e!.toSymbol).toBe("getUser");
   });

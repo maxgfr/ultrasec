@@ -58,7 +58,15 @@ describe("CliAgentRunner — drives an argv-only CLI, verifies output", () => {
 
 describe("reconcileCrossCheck", () => {
   const f = (id: string, severity: Finding["severity"], status: Finding["status"]): Finding => ({
-    id, category: "taint", title: id, severity, confidence: "high", message: "m", tool: "ultrasec", status, sink: { file: "a", line: 1 },
+    id,
+    category: "taint",
+    title: id,
+    severity,
+    confidence: "high",
+    message: "m",
+    tool: "ultrasec",
+    status,
+    sink: { file: "a", line: 1 },
   });
 
   it("escalates a HIGH/CRITICAL disagreement to needs-human (never downgrades)", () => {
@@ -129,14 +137,26 @@ describe("runPipeline — powered", () => {
     // context + narrative + implement have no apply; the rest do
     expect(res.actions).toEqual([
       "scan",
-      "emit:context", "fill:context",
-      "emit:triage", "fill:triage", "apply:triage",
-      "emit:investigate", "fill:investigate", "apply:investigate",
-      "emit:verify", "fill:verify", "apply:verify",
-      "emit:revalidate", "fill:revalidate", "apply:revalidate",
-      "emit:narrative", "fill:narrative",
-      "emit:implement", "fill:implement",
-      "check", "render",
+      "emit:context",
+      "fill:context",
+      "emit:triage",
+      "fill:triage",
+      "apply:triage",
+      "emit:investigate",
+      "fill:investigate",
+      "apply:investigate",
+      "emit:verify",
+      "fill:verify",
+      "apply:verify",
+      "emit:revalidate",
+      "fill:revalidate",
+      "apply:revalidate",
+      "emit:narrative",
+      "fill:narrative",
+      "emit:implement",
+      "fill:implement",
+      "check",
+      "render",
     ]);
     expect(mock.calls).toContain("verify");
     expect(res.externalCalls).toBe(7); // one per stage
@@ -154,7 +174,7 @@ describe("runPipeline — powered", () => {
     });
     expect(res.actions).toContain("crosscheck:verify");
     expect(res.externalCalls).toBe(2); // primary + cross
-    const high = loadDossier(run).findings.filter((f) => (f.severity === "high" || f.severity === "critical"));
+    const high = loadDossier(run).findings.filter((f) => f.severity === "high" || f.severity === "critical");
     expect(high.length).toBeGreaterThan(0);
     expect(high.every((f) => f.status === "needs-human")).toBe(true); // escalated
     expect(res.escalated.length).toBeGreaterThan(0);

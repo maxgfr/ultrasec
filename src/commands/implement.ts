@@ -13,7 +13,7 @@ import { buildImplementWorklist, loadNarrative, renderImplementMd } from "../imp
 // Feed IMPLEMENT.md to the local `to-prd` skill to author the PRD, or to an implementer/AI.
 export function runImplement(args: ParsedArgs): number {
   const run = resolve(flagStr(args, "run") ?? ".ultrasec");
-  let dossier;
+  let dossier: ReturnType<typeof loadDossier>;
   try {
     dossier = loadDossier(run);
   } catch (e) {
@@ -30,7 +30,9 @@ export function runImplement(args: ParsedArgs): number {
     println(JSON.stringify(wl, null, 2));
     return 0;
   }
-  println(`ultrasec implement → ${todoPath} (${wl.fixes.length} fix · ${wl.investigations.length} investigate · ${wl.rootCauses.length} root cause${wl.rootCauses.length === 1 ? "" : "s"})`);
+  println(
+    `ultrasec implement → ${todoPath} (${wl.fixes.length} fix · ${wl.investigations.length} investigate · ${wl.rootCauses.length} root cause${wl.rootCauses.length === 1 ? "" : "s"})`,
+  );
   if (!wl.fixes.length && !wl.investigations.length) {
     println(`  nothing confirmed/needs-human yet — run \`verify --apply\` first.`);
   } else {

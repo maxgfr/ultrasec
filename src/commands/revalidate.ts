@@ -11,7 +11,7 @@ import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseR
 // git-history false-positive cut — deepsec's "revalidate" pass, ultrasec-style.
 export function runRevalidate(args: ParsedArgs): number {
   const run = resolve(flagStr(args, "run") ?? ".ultrasec");
-  let dossier;
+  let dossier: ReturnType<typeof loadDossier>;
   try {
     dossier = loadDossier(run);
   } catch (e) {
@@ -22,7 +22,7 @@ export function runRevalidate(args: ParsedArgs): number {
 
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
-    let inputs;
+    let inputs: ReturnType<typeof parseRevalidations>;
     try {
       inputs = readApply(applyPath, /revalidat.*\.json$/i, parseRevalidations);
     } catch (e) {
@@ -36,11 +36,19 @@ export function runRevalidate(args: ParsedArgs): number {
     persistFindings(run, dossier, res.findings);
 
     if (flagBool(args, "json")) {
-      println(JSON.stringify({ applied: res.applied, stillValid: res.stillValid, fixed: res.fixed, dismissed: res.dismissed, needsHuman: res.needsHuman, flagged: res.flagged }, null, 2));
+      println(
+        JSON.stringify(
+          { applied: res.applied, stillValid: res.stillValid, fixed: res.fixed, dismissed: res.dismissed, needsHuman: res.needsHuman, flagged: res.flagged },
+          null,
+          2,
+        ),
+      );
       return 0;
     }
     println(`ultrasec revalidate --apply → updated ${run}/findings.json`);
-    println(`  applied ${res.applied} verdict(s): ${res.stillValid} still-valid · ${res.fixed} fixed · ${res.dismissed} dismissed · ${res.needsHuman} needs-human`);
+    println(
+      `  applied ${res.applied} verdict(s): ${res.stillValid} still-valid · ${res.fixed} fixed · ${res.dismissed} dismissed · ${res.needsHuman} needs-human`,
+    );
     for (const fl of res.flagged) println(`  ⚠️  ${fl.id}: ${fl.reason}`);
     return 0;
   }

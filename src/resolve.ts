@@ -4,9 +4,34 @@
 // and not matching a repo file) resolve to `undefined` — they become dangling.
 
 const CODE_EXTS = [
-  "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts",
-  "py", "go", "java", "rb", "php", "rs", "c", "h", "cc", "cpp", "hpp",
-  "cs", "kt", "kts", "swift", "scala", "sh", "lua", "ex", "exs",
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "py",
+  "go",
+  "java",
+  "rb",
+  "php",
+  "rs",
+  "c",
+  "h",
+  "cc",
+  "cpp",
+  "hpp",
+  "cs",
+  "kt",
+  "kts",
+  "swift",
+  "scala",
+  "sh",
+  "lua",
+  "ex",
+  "exs",
 ];
 const INDEX_BASENAMES = ["index", "__init__", "mod", "main"];
 

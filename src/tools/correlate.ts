@@ -61,9 +61,7 @@ function bumpConfidence(c: Confidence, agree: number): Confidence {
 /** Merge a cluster of equivalent findings into one representative. */
 function mergeCluster(group: Finding[]): Finding {
   // Representative = most severe, then highest pre-existing risk, then stable id.
-  const rep = group.slice().sort(
-    (a, b) => sevRank(a.severity) - sevRank(b.severity) || (b.risk ?? 0) - (a.risk ?? 0) || byStr(a.id, b.id),
-  )[0]!;
+  const rep = group.slice().sort((a, b) => sevRank(a.severity) - sevRank(b.severity) || (b.risk ?? 0) - (a.risk ?? 0) || byStr(a.id, b.id))[0]!;
 
   const sources = [...new Set(group.flatMap((f) => f.sources ?? [f.tool]))].sort(byStr);
   const references = [...new Set(group.flatMap((f) => f.references ?? []))];

@@ -4,7 +4,17 @@ import type { Finding, Severity } from "../src/types.js";
 import { buildTriageWorklist, applyTriage, parseTriage } from "../src/triage.js";
 
 function f(id: string, severity: Severity, status: Finding["status"] = "open"): Finding {
-  return { id, category: "sast", title: `finding ${id}`, severity, confidence: "low", message: "candidate", tool: "semgrep", status, sink: { file: "src/x.js", line: 3 } };
+  return {
+    id,
+    category: "sast",
+    title: `finding ${id}`,
+    severity,
+    confidence: "low",
+    message: "candidate",
+    tool: "semgrep",
+    status,
+    sink: { file: "src/x.js", line: 3 },
+  };
 }
 
 function dossier(findings: Finding[]): Dossier {
@@ -72,8 +82,14 @@ describe("applyTriage — conservative quick-dismiss", () => {
 
   it("is idempotent on re-apply", () => {
     const d = dossier([f("a", "low"), f("hi", "high")]);
-    const once = applyTriage(d, [{ id: "a", verdict: "noise" }, { id: "hi", verdict: "noise" }]);
-    const twice = applyTriage({ ...d, findings: once.findings }, [{ id: "a", verdict: "noise" }, { id: "hi", verdict: "noise" }]);
+    const once = applyTriage(d, [
+      { id: "a", verdict: "noise" },
+      { id: "hi", verdict: "noise" },
+    ]);
+    const twice = applyTriage({ ...d, findings: once.findings }, [
+      { id: "a", verdict: "noise" },
+      { id: "hi", verdict: "noise" },
+    ]);
     expect(twice.findings).toEqual(once.findings); // stable: low dismissed once, high stays open
     expect(twice.dismissed).toBe(0); // 'a' already dismissed, not re-counted
   });

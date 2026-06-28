@@ -34,7 +34,13 @@ describe("WS6 broadened catalog", () => {
   it("enumerates NoSQL + prototype-pollution candidates end-to-end", () => {
     const scan = scanRepo(FIXTURE);
     const { findings } = enumerateTaint(scan, buildGraph(scan));
-    expect(findings.some((f) => f.cwe === "CWE-943"), "expected a NoSQL candidate").toBe(true);
-    expect(findings.some((f) => f.cwe === "CWE-1321"), "expected a prototype-pollution candidate").toBe(true);
+    expect(
+      findings.some((f) => f.cwe === "CWE-943"),
+      "expected a NoSQL candidate",
+    ).toBe(true);
+    expect(
+      findings.some((f) => f.cwe === "CWE-1321"),
+      "expected a prototype-pollution candidate",
+    ).toBe(true);
   });
 });

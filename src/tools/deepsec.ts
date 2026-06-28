@@ -49,7 +49,9 @@ function slugToCategory(slug: string): Category {
 }
 
 function mapConfidence(raw: string | undefined): Confidence {
-  const c = String(raw ?? "").trim().toLowerCase();
+  const c = String(raw ?? "")
+    .trim()
+    .toLowerCase();
   return (CONFIDENCES as readonly string[]).includes(c) ? (c as Confidence) : "medium";
 }
 

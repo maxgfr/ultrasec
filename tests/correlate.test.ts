@@ -71,7 +71,16 @@ function taintFinding(id: string, severity: Finding["severity"] = "high"): Findi
 
 describe("correlate — invariants", () => {
   it("leaves an un-corroborated taint candidate's fields untouched", () => {
-    const taint: Finding = { id: "t1", category: "taint", title: "flow", severity: "high", confidence: "medium", message: "m", tool: "ultrasec", status: "open" };
+    const taint: Finding = {
+      id: "t1",
+      category: "taint",
+      title: "flow",
+      severity: "high",
+      confidence: "medium",
+      message: "m",
+      tool: "ultrasec",
+      status: "open",
+    };
     const out = correlate([taint]);
     expect(out).toHaveLength(1);
     expect(out[0]!.tool).toBe("ultrasec");

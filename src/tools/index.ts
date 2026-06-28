@@ -13,20 +13,7 @@ import { kingfisher } from "./kingfisher.js";
 
 // Every adapter ultrasec knows how to drive. The runner detects which binaries
 // are installed and runs only those; the rest are skipped gracefully.
-export const ADAPTERS: ToolAdapter[] = [
-  trivy,
-  opengrep,
-  semgrep,
-  gitleaks,
-  osvScanner,
-  cargoAudit,
-  govulncheck,
-  bandit,
-  gosec,
-  checkov,
-  hadolint,
-  kingfisher,
-];
+export const ADAPTERS: ToolAdapter[] = [trivy, opengrep, semgrep, gitleaks, osvScanner, cargoAudit, govulncheck, bandit, gosec, checkov, hadolint, kingfisher];
 
 export const adapterByName = (name: string): ToolAdapter | undefined => ADAPTERS.find((a) => a.name === name);
 

@@ -104,11 +104,7 @@ describe("buildImplementWorklist — root causes", () => {
   });
 
   it("derives groups by (category, cwe) over confirmed findings when no narrative", () => {
-    const d = dossier([
-      f("c1", "confirmed", { cwe: "CWE-89" }),
-      f("c2", "confirmed", { cwe: "CWE-89" }),
-      f("c3", "confirmed", { cwe: "CWE-79" }),
-    ]);
+    const d = dossier([f("c1", "confirmed", { cwe: "CWE-89" }), f("c2", "confirmed", { cwe: "CWE-89" }), f("c3", "confirmed", { cwe: "CWE-79" })]);
     const rc = buildImplementWorklist(d).rootCauses;
     expect(rc).toHaveLength(2);
     const g89 = rc.find((g) => g.cause.includes("CWE-89"))!;
@@ -155,7 +151,15 @@ describe("loadNarrative", () => {
   it("grounds NARRATIVE.json against the dossier (confirmed-only) and returns undefined when absent", () => {
     const dir = mkdtempSync(join(tmpdir(), "ultrasec-impl-"));
     const d = dossier([f("c1", "confirmed"), f("nh1", "needs-human")]);
-    writeFileSync(join(dir, "NARRATIVE.json"), JSON.stringify({ remediations: [{ id: "c1", fix: "x" }, { id: "nh1", fix: "y" }] }));
+    writeFileSync(
+      join(dir, "NARRATIVE.json"),
+      JSON.stringify({
+        remediations: [
+          { id: "c1", fix: "x" },
+          { id: "nh1", fix: "y" },
+        ],
+      }),
+    );
     const n = loadNarrative(dir, d);
     expect(n?.remediations?.map((r) => r.id)).toEqual(["c1"]); // non-confirmed nh1 dropped by grounding
     expect(loadNarrative(join(dir, "absent"), d)).toBeUndefined();

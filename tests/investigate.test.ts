@@ -102,7 +102,10 @@ describe("ingestDiscoveries", () => {
       message: "m",
       file: "src/server.js",
       line: 9,
-      path: [{ file: "src/server.js", line: 9, why: "source" }, { file: "src/db.js", line: 99999, why: "sink out of range" }],
+      path: [
+        { file: "src/server.js", line: 9, why: "source" },
+        { file: "src/db.js", line: 99999, why: "sink out of range" },
+      ],
     };
     const res = ingestDiscoveries(dossier([existing]), [badPath], FIXTURE);
     expect(res.ingested).toBe(0);
@@ -131,7 +134,9 @@ describe("parseDiscoveries", () => {
   });
 
   it("accepts a {discoveries:[]} wrapper and normalizes path steps", () => {
-    const raw = JSON.stringify({ discoveries: [{ title: "t", category: "taint", severity: "high", message: "m", file: "a.js", line: 1, path: [{ file: "a.js", line: 1 }] }] });
+    const raw = JSON.stringify({
+      discoveries: [{ title: "t", category: "taint", severity: "high", message: "m", file: "a.js", line: 1, path: [{ file: "a.js", line: 1 }] }],
+    });
     const out = parseDiscoveries(raw);
     expect(out).toHaveLength(1);
     expect(out[0]!.path![0]).toEqual({ file: "a.js", line: 1, why: "" });

@@ -65,10 +65,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     // can't prefix-filter, but the dossier files are non-source and are skipped by
     // language detection anyway, so leaving them in the changed set is harmless.
     const relOut = relative(repo, out);
-    const changed =
-      relOut && relOut !== "." && !relOut.startsWith("..")
-        ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/"))
-        : changedRaw;
+    const changed = relOut && relOut !== "." && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
     if (existsSync(join(out, "graph.json"))) {
       try {
@@ -101,9 +98,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // BFS can't connect to a source still warrant a look. Emitted as low-confidence
   // `sast` candidates, de-duped against the taint findings, capped + reported.
   const sinksOn = flagBool(args, "sinks");
-  const sinkCand = sinksOn
-    ? enumerateSinkCandidates(scan, taintFindings, { maxCandidates })
-    : { findings: [] as Finding[], truncated: 0, total: 0 };
+  const sinkCand = sinksOn ? enumerateSinkCandidates(scan, taintFindings, { maxCandidates }) : { findings: [] as Finding[], truncated: 0, total: 0 };
 
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
@@ -163,7 +158,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
       mergedNote = ` · merged into ${prev.findings.length} prior finding(s)`;
     } catch (e) {
       // Surface rather than hide — a present-but-unreadable dossier is a real problem.
-      eprintln(`ultrasec: could not merge into the existing dossier at ${out} (${e instanceof Error ? e.message : String(e)}); writing a fresh dossier instead.`);
+      eprintln(
+        `ultrasec: could not merge into the existing dossier at ${out} (${e instanceof Error ? e.message : String(e)}); writing a fresh dossier instead.`,
+      );
     }
   }
   writeDossier(out, final);
@@ -175,7 +172,20 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     const kev = final.findings.filter((f) => f.kev).length;
     println(
       JSON.stringify(
-        { out, counts: fm.counts, languages: fm.languages, files: scan.files.length, toolsRun: fm.toolsRun, kev, risk: riskNote, truncation, scopes: fm.scopes, diff: diffNote, sinks: sinksOn ? sinkCand.findings.length : undefined, merged: mergedNote.trim() || undefined },
+        {
+          out,
+          counts: fm.counts,
+          languages: fm.languages,
+          files: scan.files.length,
+          toolsRun: fm.toolsRun,
+          kev,
+          risk: riskNote,
+          truncation,
+          scopes: fm.scopes,
+          diff: diffNote,
+          sinks: sinksOn ? sinkCand.findings.length : undefined,
+          merged: mergedNote.trim() || undefined,
+        },
         null,
         2,
       ),
@@ -191,10 +201,14 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   } else if (!skipTools) {
     println(`  external tools run: ${tool.toolsRun.join(", ") || "none"}  (\`ultrasec tools\` to see/install more)`);
   }
-  println(`  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""} + ${tool.findings.length} tool this pass`);
+  println(
+    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""} + ${tool.findings.length} tool this pass`,
+  );
   println(`  ${riskNote}`);
   if (truncation?.candidates) {
-    println(`  ⚠️  showing top ${maxCandidates} of ${truncation.total} candidates — ${truncation.candidates} not shown. Raise --max-candidates or narrow --scope.`);
+    println(
+      `  ⚠️  showing top ${maxCandidates} of ${truncation.total} candidates — ${truncation.candidates} not shown. Raise --max-candidates or narrow --scope.`,
+    );
   }
   if (truncation?.files) {
     println(`  ⚠️  file walk hit --max-files (${maxFiles}) — some files were NOT scanned. Raise --max-files or narrow --scope.`);

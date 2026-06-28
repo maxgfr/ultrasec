@@ -9,7 +9,7 @@ export function runPaths(args: ParsedArgs): number {
   const kind = flagStr(args, "kind");
   const sev = flagStr(args, "severity");
 
-  let d;
+  let d: ReturnType<typeof loadDossier>;
   try {
     d = loadDossier(run);
   } catch (e) {
@@ -22,7 +22,13 @@ export function runPaths(args: ParsedArgs): number {
   if (sev) findings = findings.filter((f) => f.severity === sev);
 
   if (flagBool(args, "json")) {
-    println(JSON.stringify(findings.map((f) => ({ id: f.id, severity: f.severity, cwe: f.cwe, path: f.path })), null, 2));
+    println(
+      JSON.stringify(
+        findings.map((f) => ({ id: f.id, severity: f.severity, cwe: f.cwe, path: f.path })),
+        null,
+        2,
+      ),
+    );
     return 0;
   }
 

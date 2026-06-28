@@ -67,11 +67,7 @@ export function parseSarif(raw: string, opts: SarifOptions): Finding[] {
           ? deriveSeverity(String(secSev), fallbackSev)
           : levelSeverity(level, fallbackSev);
 
-      const cwe =
-        cweFromTags(rule.properties?.tags) ??
-        cweFromTags(res.properties?.tags) ??
-        firstCwe(rule.properties?.cwe) ??
-        opts.defaultCwe;
+      const cwe = cweFromTags(rule.properties?.tags) ?? cweFromTags(res.properties?.tags) ?? firstCwe(rule.properties?.cwe) ?? opts.defaultCwe;
 
       const message: string = res.message?.text ?? rule.shortDescription?.text ?? rule.fullDescription?.text ?? ruleId;
       const refs = [rule.helpUri, res.hostedViewerUri].filter((x): x is string => Boolean(x));

@@ -117,7 +117,10 @@ export function renderRevalidateMd(items: RevalidateItem[], context?: string): s
     if (it.currentLine !== null) L.push(`- current line: \`${it.currentLine.trim().slice(0, 200)}\``);
     else if (it.fileExists) L.push(`- current line: **cited line is out of range now (drifted/removed)**`);
     if (it.commitsSinceFinding !== null) L.push(`- commits to file since finding: ${it.commitsSinceFinding}`);
-    if (it.lineLastChanged) L.push(`- line last changed: \`${it.lineLastChanged.commit}\`${it.lineLastChanged.date ? ` (${it.lineLastChanged.date})` : ""}${it.lineLastChanged.author ? ` by ${it.lineLastChanged.author}` : ""}`);
+    if (it.lineLastChanged)
+      L.push(
+        `- line last changed: \`${it.lineLastChanged.commit}\`${it.lineLastChanged.date ? ` (${it.lineLastChanged.date})` : ""}${it.lineLastChanged.author ? ` by ${it.lineLastChanged.author}` : ""}`,
+      );
     if (it.renamedTo) L.push(`- file appears renamed to: \`${it.renamedTo}\``);
     L.push("");
   }
@@ -184,7 +187,11 @@ export function applyRevalidations(dossier: Dossier, inputs: RevalidationInput[]
         fixed++;
         dismissed++;
         const sha = v.fixedIn ?? fixedInById.get(f.id);
-        const next: Finding = { ...f, status: "dismissed" as Status, message: withNote(f, "fixed", `${v.note ? v.note + " " : ""}${sha ? `fixed in ${sha}` : "fixed"}`) };
+        const next: Finding = {
+          ...f,
+          status: "dismissed" as Status,
+          message: withNote(f, "fixed", `${v.note ? v.note + " " : ""}${sha ? `fixed in ${sha}` : "fixed"}`),
+        };
         if (sha) next.fixedIn = sha;
         return next;
       }

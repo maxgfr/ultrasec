@@ -109,7 +109,10 @@ function hardeningNotesHtml(n?: Narrative): string {
 function chainsHtml(n?: Narrative): string {
   if (!n?.attackChains?.length) return "";
   const items = n.attackChains
-    .map((c) => `<div class="ai-block"><h3>${esc(c.title)}</h3><div class="meta">${c.findingIds.map((id) => `<code>${esc(id)}</code>`).join(" → ")}</div><p>${esc(c.narrative)}</p></div>`)
+    .map(
+      (c) =>
+        `<div class="ai-block"><h3>${esc(c.title)}</h3><div class="meta">${c.findingIds.map((id) => `<code>${esc(id)}</code>`).join(" → ")}</div><p>${esc(c.narrative)}</p></div>`,
+    )
     .join("");
   return aiSectionHtml("Attack chains", items);
 }
@@ -117,7 +120,10 @@ function chainsHtml(n?: Narrative): string {
 function rootCausesHtml(n?: Narrative): string {
   if (!n?.rootCauses?.length) return "";
   const items = n.rootCauses
-    .map((g) => `<div class="ai-block"><h3>${esc(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<code>${esc(id)}</code>`).join(", ")}</div><p>${esc(g.note)}</p></div>`)
+    .map(
+      (g) =>
+        `<div class="ai-block"><h3>${esc(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<code>${esc(id)}</code>`).join(", ")}</div><p>${esc(g.note)}</p></div>`,
+    )
     .join("");
   return aiSectionHtml("Root-cause groups", items);
 }
@@ -137,9 +143,7 @@ function aiCss(narrative?: Narrative): string {
 
 export function renderHtml(d: Dossier, narrative?: Narrative): string {
   const c = d.manifest.counts.bySeverity;
-  const fs = d.findings
-    .slice()
-    .sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
+  const fs = d.findings.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
   const shown = fs.filter((f) => f.status !== "dismissed");
   const dismissed = fs.filter((f) => f.status === "dismissed");
   const rem = remediationMap(narrative);

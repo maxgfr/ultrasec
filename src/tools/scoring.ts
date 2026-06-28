@@ -176,10 +176,7 @@ async function loadCached(url: string, file: string, gz: boolean): Promise<strin
 }
 
 export async function loadFeeds(): Promise<Feeds> {
-  const [epssCsv, kevJson] = await Promise.all([
-    loadCached(EPSS_URL, "epss.csv", true),
-    loadCached(KEV_URL, "kev.json", false),
-  ]);
+  const [epssCsv, kevJson] = await Promise.all([loadCached(EPSS_URL, "epss.csv", true), loadCached(KEV_URL, "kev.json", false)]);
   return { epss: parseEpssCsv(epssCsv), kev: parseKev(kevJson) };
 }
 

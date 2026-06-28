@@ -14,7 +14,7 @@ export function runCheck(args: ParsedArgs): number {
   const minSevRaw = flagStr(args, "min-severity");
   const minSeverity = minSevRaw && (SEVERITIES as readonly string[]).includes(minSevRaw) ? (minSevRaw as Severity) : undefined;
 
-  let dossier;
+  let dossier: ReturnType<typeof loadDossier>;
   try {
     dossier = loadDossier(run);
   } catch (e) {
