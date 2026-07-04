@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.8.0](https://github.com/maxgfr/ultrasec/compare/v1.7.1...v1.8.0) (2026-07-04)
+
+
+### Features
+
+* **report:** merge REPORT and FULL tiers into one complete report ([5b9be23](https://github.com/maxgfr/ultrasec/commit/5b9be23f6f3d965757d0a80f90dfd233d570aaa7))
+
 ## [1.7.1](https://github.com/maxgfr/ultrasec/compare/v1.7.0...v1.7.1) (2026-06-28)
 
 
