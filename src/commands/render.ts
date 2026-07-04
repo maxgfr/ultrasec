@@ -2,12 +2,12 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { flagStr, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { renderSummary, renderReport, renderFull } from "../render/report.js";
+import { renderSummary, renderReport } from "../render/report.js";
 import { renderHtml } from "../render/html.js";
 import { parseNarrative, mergeNarrative, hasNarrativeContent } from "../narrative.js";
 import type { Narrative } from "../types.js";
 
-// `ultrasec render --run <dir> [--narrative <file>]` → SUMMARY/REPORT/FULL.md + index.html
+// `ultrasec render --run <dir> [--narrative <file>]` → SUMMARY/REPORT.md + index.html
 // With --narrative, the agent-authored Narrative is folded in as additive,
 // clearly-marked AI sections (grounding-checked: sections citing unknown/non-
 // confirmed ids are dropped). Without --narrative the output is byte-identical.
@@ -42,7 +42,6 @@ export function runRender(args: ParsedArgs): number {
   const outputs: [string, string][] = [
     ["SUMMARY.md", renderSummary(dossier, narrative)],
     ["REPORT.md", renderReport(dossier, narrative)],
-    ["FULL.md", renderFull(dossier, narrative)],
     ["index.html", renderHtml(dossier, narrative)],
   ];
   for (const [name, body] of outputs) writeFileSync(join(run, name), body);

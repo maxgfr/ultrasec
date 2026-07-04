@@ -83,7 +83,7 @@ high-severity finding you can't actually disprove.
 ## 5. Render and present
 
 ```
-node scripts/ultrasec.mjs render --run .ultrasec              # SUMMARY/REPORT/FULL.md + index.html
+node scripts/ultrasec.mjs render --run .ultrasec              # SUMMARY/REPORT.md + index.html
 ```
 
 Present: the SUMMARY counts, each confirmed finding with its cross-file path and

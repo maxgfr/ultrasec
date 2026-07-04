@@ -1,77 +1,5 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
-exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderFull 1`] = `
-"# Security audit — full
-
-repo \`/repo\` · ultrasec 9.9.9  
-findings: **4** — 🟥 CRITICAL 1 · 🟧 HIGH 1 · 🟨 MEDIUM 1 · 🟩 LOW 1 · ⬜ INFO 0  
-tools: semgrep, deepsec  
-_ranked by composite risk (severity ⊕ EPSS ⊕ KEV)_
-
-## Confirmed (1)
-
-### 🟧 HIGH SQL injection in user lookup
-
-\`conf1\` · [CWE-89](https://cwe.mitre.org/data/definitions/89.html) · taint · status **confirmed** · verdict supported · confidence high
-
-**Risk:** risk 72
-
-**Path:** \`src/server.js:10\` → \`src/db.js:6\`
-
-**Provenance:** Alice · 2026-01-02 · @abc1234 · owner @team-api
-
-Tainted req.query.id reaches a raw SQL query.
-
-**Exploit path:** GET /user?id=1 OR 1=1
-
-\`\`\`mermaid
-flowchart LR
-  n0["SOURCE<br/>src/server.js:10"]
-  n1["SINK<br/>src/db.js:6"]
-  n0 --> n1
-  classDef src fill:#fde68a,stroke:#b45309;
-  classDef snk fill:#fecaca,stroke:#b91c1c;
-  class n0 src;
-  class n1 snk;
-\`\`\`
-
-References: <https://cwe.mitre.org/data/definitions/89.html>
-
-## Needs human review (1)
-
-### 🟥 CRITICAL Possible missing authorization on /admin
-
-\`nh1\` · authz · status **needs-human** · confidence medium · via deepsec
-
-**Path:** \`src/admin.js:3\`
-
-Admin route may lack an auth guard.
-
-## Unadjudicated candidates (1)
-
-### 🟨 MEDIUM Reflected XSS candidate
-
-\`open1\` · [CWE-79](https://cwe.mitre.org/) · sast · status **open** · confidence low · agreed by opengrep, semgrep
-
-**Path:** \`src/view.js:20\`
-
-Unescaped value written to response.
-
-## Dismissed (1)
-
-### 🟩 LOW Dismissed false lead
-
-\`dism1\` · taint · status **dismissed** · verdict refuted · confidence low
-
-**Path:** \`src/safe.js:1\`
-
-Looked tainted, proven safe.
-
----
-Engine: ultrasec 9.9.9. deterministic note.
-"
-`;
-
 exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtml 1`] = `
 "<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -187,7 +115,7 @@ findings: **4** — 🟥 CRITICAL 1 · 🟧 HIGH 1 · 🟨 MEDIUM 1 · 🟩 LOW 
 tools: semgrep, deepsec  
 _ranked by composite risk (severity ⊕ EPSS ⊕ KEV)_
 
-Confirmed and to-review findings, most severe first. Dismissed candidates are in FULL.md.
+## Confirmed (1)
 
 ### 🟧 HIGH SQL injection in user lookup
 
@@ -216,7 +144,7 @@ flowchart LR
 
 References: <https://cwe.mitre.org/data/definitions/89.html>
 
----
+## Needs human review (1)
 
 ### 🟥 CRITICAL Possible missing authorization on /admin
 
@@ -226,7 +154,7 @@ References: <https://cwe.mitre.org/data/definitions/89.html>
 
 Admin route may lack an auth guard.
 
----
+## Unadjudicated candidates (1)
 
 ### 🟨 MEDIUM Reflected XSS candidate
 
@@ -236,8 +164,18 @@ Admin route may lack an auth guard.
 
 Unescaped value written to response.
 
----
+## Dismissed (1)
 
+### 🟩 LOW Dismissed false lead
+
+\`dism1\` · taint · status **dismissed** · verdict refuted · confidence low
+
+**Path:** \`src/safe.js:1\`
+
+Looked tainted, proven safe.
+
+---
+Engine: ultrasec 9.9.9. deterministic note.
 "
 `;
 

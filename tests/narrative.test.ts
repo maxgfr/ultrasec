@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import type { Dossier } from "../src/store.js";
 import type { Finding, Narrative } from "../src/types.js";
 import { buildNarrativeWorklist, parseNarrative, mergeNarrative, hasNarrativeContent } from "../src/narrative.js";
-import { renderSummary, renderReport, renderFull } from "../src/render/report.js";
+import { renderSummary, renderReport } from "../src/render/report.js";
 import { renderHtml } from "../src/render/html.js";
 
 function f(id: string, status: Finding["status"], severity: Finding["severity"] = "high"): Finding {
@@ -137,13 +137,6 @@ describe("render — narrative-aware sections appear + are AI-marked", () => {
     expect(out).toContain("not** findings"); // hardening notes are clearly NOT findings
     expect(out).toContain("Add a Content-Security-Policy header.");
     expect(out).toContain("verify against the cited findings");
-  });
-
-  it("FULL carries the AI sections too", () => {
-    const out = renderFull(d, narrative);
-    expect(out).toContain("## Attack chains (AI-authored)");
-    expect(out).toContain("## Hardening notes (AI-authored)");
-    expect(out).toContain("Suggested fix (AI)");
   });
 
   it("HTML wraps AI content (incl. positive patterns + hardening notes) in .ai-narrative and injects its CSS only when present", () => {

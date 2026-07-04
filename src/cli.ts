@@ -75,7 +75,7 @@ COMMANDS
              findings, folding the grounded NARRATIVE.json (fixes, patches, root causes)
              when present. Emit-only — never changes a finding's status. Feed IMPLEMENT.md
              to the 'to-prd' skill or an implementer. Flags: --run · --narrative <file> · --json.
-  render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
+  render     Render SUMMARY/REPORT.md + a self-contained index.html.
              --narrative <file> folds in AI-authored sections (exec summary, fixes,
              attack chains, root causes), clearly marked + grounding-checked.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);

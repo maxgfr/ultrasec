@@ -9,7 +9,7 @@ import { buildAttackSurface } from "../map.js";
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest, type Status } from "../types.js";
 import { isHigh } from "../verify.js";
 import { check } from "../check.js";
-import { renderSummary, renderReport, renderFull } from "../render/report.js";
+import { renderSummary, renderReport } from "../render/report.js";
 import { renderHtml } from "../render/html.js";
 
 import { buildContextScaffold, renderContextScaffoldMd, loadContextDoc } from "../context.js";
@@ -261,7 +261,6 @@ export function runPipeline(opts: PipelineOptions): PipelineResult {
   }
   writeFileSync(join(opts.run, "SUMMARY.md"), renderSummary(dossier, narrative));
   writeFileSync(join(opts.run, "REPORT.md"), renderReport(dossier, narrative));
-  writeFileSync(join(opts.run, "FULL.md"), renderFull(dossier, narrative));
   writeFileSync(join(opts.run, "index.html"), renderHtml(dossier, narrative));
   actions.push("render");
 

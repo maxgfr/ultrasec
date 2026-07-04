@@ -5181,34 +5181,19 @@ function renderFinding(f, opts = {}) {
   return L.join("\n");
 }
 function renderReport(d, narrative) {
-  const fs = sortFindings(d.findings).filter((f) => f.status === "confirmed" || f.status === "needs-human" || f.status === "open");
-  const rem = remediationMap(narrative);
-  const L = [`# Security audit \u2014 report`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
-  if (!fs.length) {
-    L.push(`No actionable findings. (See FULL.md for dismissed candidates.)`);
-    return L.join("\n") + "\n";
-  }
-  L.push(`Confirmed and to-review findings, most severe first. Dismissed candidates are in FULL.md.`);
-  L.push("");
-  for (const f of fs) {
-    L.push(renderFinding(f, { mermaid: true, remediation: rem.get(f.id) }));
-    L.push("");
-    L.push("---");
-    L.push("");
-  }
-  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
-  return L.join("\n") + "\n";
-}
-function renderFull(d, narrative) {
   const fs = sortFindings(d.findings);
   const rem = remediationMap(narrative);
-  const L = [`# Security audit \u2014 full`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
+  const L = [`# Security audit \u2014 report`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
   const groups = [
     ["Confirmed", fs.filter((f) => f.status === "confirmed")],
     ["Needs human review", fs.filter((f) => f.status === "needs-human")],
     ["Unadjudicated candidates", fs.filter((f) => f.status === "open")],
     ["Dismissed", fs.filter((f) => f.status === "dismissed")]
   ];
+  if (!groups.some(([, list]) => list.length)) {
+    L.push(`No findings.`);
+    return L.join("\n") + "\n";
+  }
   for (const [name, list] of groups) {
     if (!list.length) continue;
     L.push(`## ${name} (${list.length})`);
@@ -5406,7 +5391,6 @@ function runRender(args) {
   const outputs = [
     ["SUMMARY.md", renderSummary(dossier, narrative)],
     ["REPORT.md", renderReport(dossier, narrative)],
-    ["FULL.md", renderFull(dossier, narrative)],
     ["index.html", renderHtml(dossier, narrative)]
   ];
   for (const [name, body] of outputs) writeFileSync7(join20(run, name), body);
@@ -5713,7 +5697,6 @@ function runPipeline(opts) {
   }
   writeFileSync8(join21(opts.run, "SUMMARY.md"), renderSummary(dossier, narrative));
   writeFileSync8(join21(opts.run, "REPORT.md"), renderReport(dossier, narrative));
-  writeFileSync8(join21(opts.run, "FULL.md"), renderFull(dossier, narrative));
   writeFileSync8(join21(opts.run, "index.html"), renderHtml(dossier, narrative));
   actions.push("render");
   return { actions, emitted, externalCalls, escalated, errors };
@@ -5844,7 +5827,7 @@ COMMANDS
              findings, folding the grounded NARRATIVE.json (fixes, patches, root causes)
              when present. Emit-only \u2014 never changes a finding's status. Feed IMPLEMENT.md
              to the 'to-prd' skill or an implementer. Flags: --run \xB7 --narrative <file> \xB7 --json.
-  render     Render SUMMARY/REPORT/FULL.md + a self-contained index.html.
+  render     Render SUMMARY/REPORT.md + a self-contained index.html.
              --narrative <file> folds in AI-authored sections (exec summary, fixes,
              attack chains, root causes), clearly marked + grounding-checked.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);

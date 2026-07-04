@@ -4,8 +4,8 @@ import { pathMermaid } from "./mermaid.js";
 import { byStr } from "../util.js";
 import { executiveSummaryMd, positivePatternsMd, suggestedFixMd, attackChainsMd, rootCausesMd, hardeningNotesMd, remediationMap } from "../narrative.js";
 
-// The tiered Markdown report: SUMMARY (TL;DR), REPORT (confirmed + needs-human,
-// actionable), FULL (everything incl. dismissed, with the reasoning trail).
+// The tiered Markdown report: SUMMARY (TL;DR) and REPORT — the complete audit,
+// every finding grouped by status (incl. dismissed), with the reasoning trail.
 
 const BADGE: Record<Severity, string> = {
   critical: "🟥 CRITICAL",
@@ -150,35 +150,19 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Reme
 }
 
 export function renderReport(d: Dossier, narrative?: Narrative): string {
-  const fs = sortFindings(d.findings).filter((f) => f.status === "confirmed" || f.status === "needs-human" || f.status === "open");
-  const rem = remediationMap(narrative);
-  const L: string[] = [`# Security audit — report`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
-  if (!fs.length) {
-    L.push(`No actionable findings. (See FULL.md for dismissed candidates.)`);
-    return L.join("\n") + "\n";
-  }
-  L.push(`Confirmed and to-review findings, most severe first. Dismissed candidates are in FULL.md.`);
-  L.push("");
-  for (const f of fs) {
-    L.push(renderFinding(f, { mermaid: true, remediation: rem.get(f.id) }));
-    L.push("");
-    L.push("---");
-    L.push("");
-  }
-  L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
-  return L.join("\n") + "\n";
-}
-
-export function renderFull(d: Dossier, narrative?: Narrative): string {
   const fs = sortFindings(d.findings);
   const rem = remediationMap(narrative);
-  const L: string[] = [`# Security audit — full`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
+  const L: string[] = [`# Security audit — report`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
   const groups: [string, Finding[]][] = [
     ["Confirmed", fs.filter((f) => f.status === "confirmed")],
     ["Needs human review", fs.filter((f) => f.status === "needs-human")],
     ["Unadjudicated candidates", fs.filter((f) => f.status === "open")],
     ["Dismissed", fs.filter((f) => f.status === "dismissed")],
   ];
+  if (!groups.some(([, list]) => list.length)) {
+    L.push(`No findings.`);
+    return L.join("\n") + "\n";
+  }
   for (const [name, list] of groups) {
     if (!list.length) continue;
     L.push(`## ${name} (${list.length})`);

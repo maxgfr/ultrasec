@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Dossier } from "../src/store.js";
 import type { Finding } from "../src/types.js";
-import { renderSummary, renderReport, renderFull } from "../src/render/report.js";
+import { renderSummary, renderReport } from "../src/render/report.js";
 import { renderHtml } from "../src/render/html.js";
 
 // Back-compat guard for the Phase 3 narrative-aware render: with NO narrative arg
@@ -87,13 +87,11 @@ const dossier: Dossier = {
 describe("render — byte-identical with NO narrative (Phase 3 guard)", () => {
   it("renderSummary", () => expect(renderSummary(dossier)).toMatchSnapshot());
   it("renderReport", () => expect(renderReport(dossier)).toMatchSnapshot());
-  it("renderFull", () => expect(renderFull(dossier)).toMatchSnapshot());
   it("renderHtml", () => expect(renderHtml(dossier)).toMatchSnapshot());
 
   it("explicit undefined narrative == omitted arg", () => {
     expect(renderSummary(dossier, undefined)).toBe(renderSummary(dossier));
     expect(renderReport(dossier, undefined)).toBe(renderReport(dossier));
-    expect(renderFull(dossier, undefined)).toBe(renderFull(dossier));
     expect(renderHtml(dossier, undefined)).toBe(renderHtml(dossier));
   });
 });

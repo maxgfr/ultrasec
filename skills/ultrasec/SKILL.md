@@ -134,7 +134,7 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   (suggested fixes/patches/root causes) when present. **Emit-only — never changes a finding's
   status; persists nothing.** Feed `IMPLEMENT.md` to the local `to-prd` skill to author the
   PRD, or hand it to an implementer/AI.
-- `render --run <dir> [--narrative NARRATIVE.json]` — `SUMMARY/REPORT/FULL.md` + a
+- `render --run <dir> [--narrative NARRATIVE.json]` — `SUMMARY/REPORT.md` + a
   self-contained `index.html` (severity/status badges, the Mermaid taint-path, exploit
   paths). `--narrative` adds clearly-marked **AI-authored** sections (grounding-checked:
   sections citing unknown/non-confirmed ids are dropped; prose never changes status).
