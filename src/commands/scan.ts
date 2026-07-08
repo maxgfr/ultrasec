@@ -8,7 +8,7 @@ import { enumerateSinkCandidates } from "../sinks.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
 import { loadScanCache, saveScanCache } from "../cache.js";
-import { orchestrate } from "../tools/run.js";
+import { orchestrate, toolStatus } from "../tools/run.js";
 import { correlate } from "../tools/correlate.js";
 import { enrichFindings } from "../tools/scoring.js";
 import { ADAPTERS } from "../tools/index.js";
@@ -140,6 +140,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
       ? { candidates: truncatedCount, total: totalCandidates, ...(scan.truncated ? { files: true as const } : {}) }
       : undefined;
   const recordedScopes = [...(scope ?? []), ...(diffRef ? [`diff:${diffRef}`] : [])].sort(byStr);
+  const perToolStatus = tool.results.length ? toolStatus(tool.results) : undefined;
   const manifest: Manifest = {
     version: VERSION,
     schemaVersion: SCHEMA_VERSION,
@@ -147,6 +148,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     generatedNote: "Taint candidates are deterministic; external-tool results depend on installed scanners.",
     languages,
     toolsRun: tool.toolsRun,
+    ...(perToolStatus ? { toolStatus: perToolStatus } : {}),
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
@@ -182,6 +184,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
           languages: fm.languages,
           files: scan.files.length,
           toolsRun: fm.toolsRun,
+          toolStatus: fm.toolStatus,
           kev,
           risk: riskNote,
           truncation,

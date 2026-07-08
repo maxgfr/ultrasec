@@ -2239,6 +2239,14 @@ function withSources(f) {
 }
 
 // src/tools/run.ts
+function toolStatus(results) {
+  return results.map((r) => {
+    if (!r.ran) return { name: r.name, status: "skipped", ...r.note ? { note: r.note } : {} };
+    if (!r.ok) return { name: r.name, status: "failed", ...r.note ? { note: r.note } : {} };
+    const status = r.findings.length ? "ran" : "empty";
+    return { name: r.name, status, findings: r.findings.length, ...r.note ? { note: r.note } : {} };
+  });
+}
 var TIMEOUT_MS = 3e5;
 var MAX_BUFFER = 64 * 1024 * 1024;
 var MOUNT = "/work";
@@ -3048,10 +3056,15 @@ function mergeDossier(prev, next) {
     total: Math.max(pt?.total ?? 0, nt?.total ?? 0),
     ...pt?.files || nt?.files ? { files: true } : {}
   } : void 0 : nt;
+  const statusByName = /* @__PURE__ */ new Map();
+  for (const s of prev.manifest.toolStatus ?? []) statusByName.set(s.name, s);
+  for (const s of next.manifest.toolStatus ?? []) statusByName.set(s.name, s);
+  const toolStatus2 = [...statusByName.values()];
   const manifest = {
     ...next.manifest,
     languages: [.../* @__PURE__ */ new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
     toolsRun: [.../* @__PURE__ */ new Set([...prev.manifest.toolsRun, ...next.manifest.toolsRun])].sort(),
+    ...toolStatus2.length ? { toolStatus: toolStatus2 } : {},
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     ...truncation ? { truncation } : { truncation: void 0 },
     ...scopes.length ? { scopes } : {}
@@ -3071,6 +3084,13 @@ function severityBadge(s) {
 function locationsLine(locations) {
   return locations.map((e) => `${e.version ? `v${e.version} ` : ""}\`${e.file}${e.line !== void 0 ? `:${e.line}` : ""}\``).join(" \xB7 ");
 }
+function toolStatusLines(status) {
+  return status.map((s) => {
+    const count = typeof s.findings === "number" && (s.status === "ran" || s.status === "empty") ? ` (${s.findings})` : "";
+    const why = s.note && (s.status === "skipped" || s.status === "failed") ? ` \u2014 ${s.note}` : "";
+    return `${s.name}: ${s.status}${count}${why}`;
+  });
+}
 function provenanceLine(f) {
   const p = f.provenance;
   if (!p) return "";
@@ -3087,6 +3107,7 @@ function renderDossierMd(d) {
   L.push(`- repo: \`${m.repo}\``);
   L.push(`- languages: ${m.languages.join(", ") || "\u2014"}`);
   L.push(`- external tools run: ${m.toolsRun.join(", ") || "none (graph + taint only)"}`);
+  if (m.toolStatus?.length) for (const line of toolStatusLines(m.toolStatus)) L.push(`  - ${line}`);
   L.push(`- findings: **${m.counts.findings}** \u2014 ${SEVERITIES.map((s) => `${severityBadge(s)} ${c[s]}`).join("  ")}`);
   L.push("");
   L.push(`> Candidates are deterministic and **recall-oriented** \u2014 every one needs`);
@@ -3218,6 +3239,7 @@ async function runScan(args) {
   const totalCandidates = taint.total + sinkCand.total;
   const truncation = truncatedCount > 0 || scan.truncated ? { candidates: truncatedCount, total: totalCandidates, ...scan.truncated ? { files: true } : {} } : void 0;
   const recordedScopes = [...scope ?? [], ...diffRef ? [`diff:${diffRef}`] : []].sort(byStr);
+  const perToolStatus = tool.results.length ? toolStatus(tool.results) : void 0;
   const manifest = {
     version: VERSION,
     schemaVersion: SCHEMA_VERSION,
@@ -3225,6 +3247,7 @@ async function runScan(args) {
     generatedNote: "Taint candidates are deterministic; external-tool results depend on installed scanners.",
     languages,
     toolsRun: tool.toolsRun,
+    ...perToolStatus ? { toolStatus: perToolStatus } : {},
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     ...truncation ? { truncation } : {},
     ...recordedScopes.length ? { scopes: recordedScopes } : {}
@@ -3257,6 +3280,7 @@ async function runScan(args) {
           languages: fm.languages,
           files: scan.files.length,
           toolsRun: fm.toolsRun,
+          toolStatus: fm.toolStatus,
           kev,
           risk: riskNote,
           truncation,
@@ -5153,6 +5177,7 @@ function header(d) {
     `findings: **${d.manifest.counts.findings}** \u2014 ${SEVERITIES.map((s) => `${BADGE[s]} ${c[s]}`).join(" \xB7 ")}${kev ? ` \xB7 \u{1F6A8} ${kev} in CISA KEV` : ""}`,
     `tools: ${d.manifest.toolsRun.join(", ") || "none (graph + taint only)"}`
   ];
+  if (d.manifest.toolStatus?.length) lines.push(`tool status: ${toolStatusLines(d.manifest.toolStatus).join(" \xB7 ")}`);
   if (ranked) lines.push(`_ranked by composite risk (severity \u2295 EPSS \u2295 KEV)_`);
   return lines.join("  \n");
 }
