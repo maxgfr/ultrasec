@@ -1,0 +1,16 @@
+{
+  "cwe": "CWE-120",
+  "cases": [
+    {
+      "name": "vuln",
+      "file": "vuln.c",
+      "vulnerable": true,
+      "note": "recognition-level (intra-file, regex call-graph is weakest for C)"
+    },
+    {
+      "name": "safe",
+      "file": "safe.c",
+      "vulnerable": false
+    }
+  ]
+}

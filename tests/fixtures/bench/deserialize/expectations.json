@@ -1,0 +1,15 @@
+{
+  "cwe": "CWE-502",
+  "cases": [
+    {
+      "name": "vuln",
+      "file": "vuln.py",
+      "vulnerable": true
+    },
+    {
+      "name": "safe",
+      "file": "safe.py",
+      "vulnerable": false
+    }
+  ]
+}
