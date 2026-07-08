@@ -9,6 +9,7 @@ import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
 import { loadScanCache, saveScanCache } from "../cache.js";
 import { orchestrate } from "../tools/run.js";
+import { correlate } from "../tools/correlate.js";
 import { enrichFindings } from "../tools/scoring.js";
 import { ADAPTERS } from "../tools/index.js";
 import { writeDossier, loadDossier, mergeDossier, countBySeverity, type Dossier } from "../store.js";
@@ -112,8 +113,11 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const tool = skipTools ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
 
   // Merge taint candidates, orphan-sink candidates, and tool findings (ids are
-  // disjoint by construction).
-  const merged = [...taintFindings, ...sinkCand.findings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
+  // disjoint by construction), then correlate the WHOLE set: orchestrate only
+  // correlates tool findings among themselves, so without this second (idempotent)
+  // pass a scanner finding sitting exactly on a taint/orphan-sink node would ship
+  // as a duplicate instead of corroborating the candidate.
+  const merged = correlate([...taintFindings, ...sinkCand.findings, ...tool.findings]);
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
