@@ -1,8 +1,10 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { join } from "node:path";
 import { scanRepo } from "../src/scan.js";
 import { buildGraph, reverseDependents, mergeGraphs, type Graph } from "../src/graph.js";
 import { neighbors } from "../src/neighbors.js";
+import { runGraph } from "../src/commands/graph.js";
+import { parseArgs } from "../src/util.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
 
@@ -112,5 +114,29 @@ describe("neighbors", () => {
     const nodes = r.links.map((l) => l.node);
     expect(nodes).toContain("src/server.js"); // inbound (server imports/calls db)
     expect(nodes).toContain("src/sqlite.js"); // outbound (db imports/calls sqlite)
+  });
+});
+
+describe("runGraph — exit codes", () => {
+  // Regression lock (eval P2.8 said these exit 0 — they exit 2 as of v1.8.0 and
+  // must stay that way so a script can detect the error).
+  const stderr = () => vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+  it("exits 2 when the <file|symbol> argument is missing", () => {
+    const spy = stderr();
+    expect(runGraph(parseArgs(["graph", "--repo", FIXTURE]))).toBe(2);
+    spy.mockRestore();
+  });
+
+  it("exits 2 for a target that is neither a file node nor a known symbol", () => {
+    const spy = stderr();
+    expect(runGraph(parseArgs(["graph", "totally-unknown-thing", "--repo", FIXTURE]))).toBe(2);
+    spy.mockRestore();
+  });
+
+  it("exits 0 for a resolvable file node", () => {
+    const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    expect(runGraph(parseArgs(["graph", "src/db.js", "--repo", FIXTURE]))).toBe(0);
+    out.mockRestore();
   });
 });
