@@ -3162,7 +3162,7 @@ async function runScan(args) {
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
   const useDocker = flagBool(args, "docker");
   const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
-  const merged = [...taintFindings, ...sinkCand.findings, ...tool.findings].sort((a, b) => byStr(a.id, b.id));
+  const merged = correlate([...taintFindings, ...sinkCand.findings, ...tool.findings]);
   const enrich = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
   const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
   const blameOn = flagBool(args, "blame") || flagBool(args, "provenance");

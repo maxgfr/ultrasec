@@ -191,4 +191,38 @@ describe("correlate — taint corroboration (Phase 6 relaxation)", () => {
     expect(out).toHaveLength(2);
     expect(out.find((f) => f.tool === "ultrasec")!.sources ?? ["ultrasec"]).toEqual(["ultrasec"]);
   });
+
+  // Orphan-sink candidates are also `tool:"ultrasec"` (category "sast", sink, no
+  // path) — a scanner flagging the same line+CWE corroborates them the same way.
+  it("folds a co-located same-CWE tool finding into an orphan-sink candidate", () => {
+    const orphan: Finding = {
+      id: "sink1",
+      category: "sast",
+      cwe: "CWE-89",
+      title: "SQL injection: query() sink (no source path found)",
+      severity: "high",
+      confidence: "low",
+      message: "m",
+      tool: "ultrasec",
+      status: "open",
+      sink: { file: "src/db.js", line: 11, kind: "sql" },
+    };
+    const out = correlate([orphan, sast("semgrep", "CWE-89", "src/db.js", 11, "medium")]);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.id).toBe("sink1");
+    expect(out[0]!.sources).toEqual(["semgrep", "ultrasec"]);
+  });
+
+  it("is idempotent over a mixed taint + orphan-sink + tool + dep set", () => {
+    const mixed: Finding[] = [
+      taintFinding("t1"),
+      sast("deepsec", "CWE-89", "src/db.js", 6, "high"), // corroborates t1's sink
+      sast("semgrep", "CWE-79", "src/view.js", 3, "medium"), // standalone survivor
+      dep("trivy", "CVE-2021-23337", "high", { pkg: "lodash", version: "4.17.20" }),
+      dep("osv-scanner", "GHSA-35jh-r3h4-6jhm", "medium", { aliases: ["CVE-2021-23337"], pkg: "lodash", version: "4.17.20" }),
+    ];
+    const once = correlate(mixed);
+    const twice = correlate(once);
+    expect(twice).toEqual(once);
+  });
 });
