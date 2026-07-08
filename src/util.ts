@@ -42,6 +42,7 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "gitignore",
   "semantic",
   "keep-output",
+  "all",
 ]);
 
 /** Single-dash short-flag aliases, as documented in the CLI's GLOBAL help. Each

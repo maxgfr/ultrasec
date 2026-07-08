@@ -80,8 +80,11 @@ COMMANDS
              attack chains, root causes), clearly marked + grounding-checked.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
              --semantic also folds in the verify verdicts.
-  clean      Remove the audit dossier and, with --docker, the scanner images +
-             toolbox image + trivy cache volume (--dry-run to preview).
+  clean      Remove the intermediate scan artifacts, KEEPING the rendered
+             deliverables (REPORT/SUMMARY/index.html + findings.json); --all wipes
+             the whole run dir, --keep-output keeps everything. With --docker also
+             removes the scanner images + toolbox image + trivy cache volume
+             (--dry-run to preview).
   run        Orchestrate the AI stages (context → triage → investigate → verify →
              revalidate → narrative → implement → check → render). DEFAULT makes ZERO external
              calls: scans + emits every worklist + prints the agent TODO. --powered

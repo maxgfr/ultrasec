@@ -139,6 +139,13 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   paths). `--narrative` adds clearly-marked **AI-authored** sections (grounding-checked:
   sections citing unknown/non-confirmed ids are dropped; prose never changes status).
   **No `--narrative` ⇒ byte-identical to today.**
+- `clean --run <dir> [--all] [--keep-output] [--docker] [--dry-run]` — tidy up. By
+  **default** it removes only the intermediate scan artifacts and **PRESERVES the
+  rendered deliverables** (`REPORT.md`/`SUMMARY.md`/`index.html` + `findings.json`) so
+  a cleanup never destroys the report you just produced. `--all` wipes the whole run
+  dir (after which it's no longer `check`-able — re-scan for a working run);
+  `--keep-output` keeps everything; `--docker` also removes ultrasec's scanner images +
+  toolbox image + trivy cache volume; `--dry-run` previews.
 - `run --repo <dir> [--out <run>] [--powered] [--agent <name|tpl>] [--cross-check <name|tpl>]
   [--stages …] [--no-scan]` — **orchestrate the AI stages** (context → triage →
   investigate → verify → revalidate → narrative → implement → check → render). The **default
