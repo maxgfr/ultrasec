@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.9.0](https://github.com/maxgfr/ultrasec/compare/v1.8.0...v1.9.0) (2026-07-08)
+
+
+### Bug Fixes
+
+* **check:** accept line 0 as a file-scoped citation; keep rejecting out-of-range and negative lines ([7dbfb34](https://github.com/maxgfr/ultrasec/commit/7dbfb34c8ec0ba78be3471d5ce155c676a11ed33))
+* **correlate:** merge dep advisories per package across installed versions, recording per-version locations ([7b80c9a](https://github.com/maxgfr/ultrasec/commit/7b80c9ac9ca61c225f5d7f8033cd8733195a5f7d))
+* **scan:** correlate taint, orphan-sink and tool findings in one pass so co-located same-CWE findings dedupe ([9ae63d8](https://github.com/maxgfr/ultrasec/commit/9ae63d8d2385474755b5afc27151e4532a1d7e0b))
+
+
+### Features
+
+* **catalog:** receiver-gated SSRF member-call sinks (axios.get, requests.get, session.post, …) ([4caeba1](https://github.com/maxgfr/ultrasec/commit/4caeba15b95ce5fc55a166a9f60b29e5ac819fe3))
+* **clean:** preserve report deliverables by default; add --all for full removal ([8c837b2](https://github.com/maxgfr/ultrasec/commit/8c837b2ba96c485d0b2951e8a0b1194b7bfa6bf3))
+* **scan:** persist and render per-tool run status (ran/empty/skipped/failed) ([64c8128](https://github.com/maxgfr/ultrasec/commit/64c812864f25c37663f8056e84b900e45a9b0665))
+
 # [1.8.0](https://github.com/maxgfr/ultrasec/compare/v1.7.1...v1.8.0) (2026-07-04)
 
 
