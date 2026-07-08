@@ -264,10 +264,13 @@ every worklist and prints a TODO (zero external calls). With your own agent CLI,
   same taint candidates; external-tool results depend on what's installed and may
   hit the network (Trivy/cargo-audit fetch advisory DBs). Nothing external is required.
 - **Risk ranking & correlation are deterministic.** Findings from multiple tools are
-  merged (dep: package@version + shared advisory id; else category+CWE+file:line)
-  and ranked by a composite EPSS/KEV/CVSS `risk`. EPSS/KEV feeds are cached under
-  `~/.cache/ultrasec` (daily TTL); the scoring math is offline. `--no-enrich`/
-  `--offline` makes it fully network-free (severity-only ranking).
+  merged (dep: package + shared advisory id, collapsing per-version/per-lockfile
+  instances into one finding whose `locations[]` keeps each `{file, line, version}`;
+  else category+CWE+file:line — including a scanner finding that lands on a taint
+  node, which corroborates rather than duplicates) and ranked by a composite
+  EPSS/KEV/CVSS `risk`. EPSS/KEV feeds are cached under `~/.cache/ultrasec` (daily
+  TTL); the scoring math is offline. `--no-enrich`/`--offline` makes it fully
+  network-free (severity-only ranking).
 - **~15 languages** for the link-graph (JS/TS, Python, Go, Java, Ruby, PHP, Rust,
   C/C++, C#, Kotlin, Swift, Scala, shell, Lua, Elixir); the sink/source catalog is
   deepest for the web stacks and grows over time.

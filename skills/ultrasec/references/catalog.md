@@ -15,7 +15,7 @@ you a glance; a missed flow is a missed bug.
 | code | CWE-94 | high | `eval`, `Function`, `runInThisContext`, `compile` |
 | ssti | CWE-1336 | high | `from_string`, `renderString`, `Template`, `compileString` |
 | path | CWE-22 | high | `readFile`, `writeFile`, `sendFile`, `open` · + zip-slip: `extractall`, `extract`, `unzip` |
-| ssrf | CWE-918 | high | `fetch`, `request`, `urlopen`, `axios`, `got` |
+| ssrf | CWE-918 | high | bare `fetch`, `request`, `urlopen`, `axios`, `got` · + member calls `axios.get`, `http.get`, `requests.get`, `session.post` (receiver-gated) |
 | xxe | CWE-611 | high | `parseString`, `parseFromString`, `fromstring`, `SAXParser`, `DocumentBuilder` |
 | ldap | CWE-90 | high | `ldap.search`, `client.bind` (receiver-gated) |
 | xss | CWE-79 | medium | `res.send`, `res.write`, `render_template_string` |
@@ -27,9 +27,16 @@ you a glance; a missed flow is a missed bug.
 | buffer | CWE-120 | high | C/C++ best-effort: `strcpy`, `strcat`, `sprintf`, `gets`, `memcpy` |
 
 Receiver-gated rules only match when the call's receiver is in a known set (e.g.
-`db`/`collection`/`Model` for NoSQL) so common look-alikes (`Array.prototype.find`,
-a plain `merge()`) don't flood the candidate list. Coverage is deepest for the web
-stacks; `buffer` is a best-effort C/C++ scaffold — pair it with cppcheck/gosec.
+`db`/`collection`/`Model` for NoSQL, an HTTP client for SSRF member calls) so common
+look-alikes (`Array.prototype.find`, a plain `merge()`, a `cache.get()`) don't flood
+the candidate list. The SSRF member-call rule additionally *requires* a receiver, so
+a bare `get(x)` never matches. Coverage is deepest for the web stacks; `buffer` is a
+best-effort C/C++ scaffold — pair it with cppcheck/gosec.
+
+Every class above is exercised by a labelled per-CWE benchmark
+(`tests/fixtures/bench/`, scored by `tests/bench.test.ts` for per-class TPR/FPR/
+Youden with a safe twin that must not be flagged) — a CI gate against class-specific
+detection regressions.
 
 ## Sources
 
