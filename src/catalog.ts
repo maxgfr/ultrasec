@@ -24,6 +24,9 @@ export interface SinkRule {
   callees: string[];
   /** If set, a call with a *different* known receiver is skipped (reduces FP). */
   receivers?: string[];
+  /** If set, a call with NO receiver (bare `foo(x)`) is skipped — for verb-shaped
+   *  callees (`get`/`post`) that are only a sink as a member call (`axios.get`). */
+  requireReceiver?: boolean;
   title: string;
   note: string;
 }
@@ -105,6 +108,36 @@ export const SINKS: SinkRule[] = [
     callees: ["fetch", "request", "urlopen", "urlretrieve", "got", "axios", "openConnection"],
     title: "Server-side request forgery (SSRF)",
     note: "Tainted data used as a request URL/host. Verify the destination is allow-listed (no internal/metadata endpoints).",
+  },
+  {
+    // Member-call form: `axios.get(u)`, `http.get(u)`, `requests.get(u)`,
+    // `session.post(u)`, Go `http.Get(u)`. Receiver-gated (requireReceiver) so a
+    // bare `get(u)`/`post(u)` — a generic getter/setter — never matches.
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["*"],
+    requireReceiver: true,
+    callees: ["get", "post", "put", "patch", "head", "delete", "request", "Get", "Post", "Head", "PostForm"],
+    receivers: [
+      "axios",
+      "http",
+      "https",
+      "got",
+      "superagent",
+      "fetch",
+      "session",
+      "client",
+      "httpClient",
+      "requests",
+      "httpx",
+      "urllib",
+      "urllib2",
+      "unirest",
+      "Unirest",
+    ],
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a request URL/host via an HTTP-client method. Verify the destination is allow-listed (no internal/metadata endpoints). Receiver is generic (an HTTP client vs. a cache/map getter) — confirm it is a network call.",
   },
   {
     kind: "xss",
@@ -231,6 +264,9 @@ export function findSinks(lang: LangSpec, calls: Call[]): SinkHit[] {
     for (const rule of SINKS) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (!rule.callees.includes(c.callee)) continue;
+      // Verb-shaped callees (get/post/…) are only a sink as a MEMBER call
+      // (`axios.get`) — a bare `get(x)` is a generic getter, so skip it.
+      if (rule.requireReceiver && !c.receiver) continue;
       // If the rule pins receivers and this call has a *different* known one, skip
       // it (cuts false positives like `arr.call(...)` matching the command rule).
       // Rules with no `receivers` (e.g. sql) match any receiver.

@@ -1205,6 +1205,36 @@ var SINKS = [
     note: "Tainted data used as a request URL/host. Verify the destination is allow-listed (no internal/metadata endpoints)."
   },
   {
+    // Member-call form: `axios.get(u)`, `http.get(u)`, `requests.get(u)`,
+    // `session.post(u)`, Go `http.Get(u)`. Receiver-gated (requireReceiver) so a
+    // bare `get(u)`/`post(u)` — a generic getter/setter — never matches.
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["*"],
+    requireReceiver: true,
+    callees: ["get", "post", "put", "patch", "head", "delete", "request", "Get", "Post", "Head", "PostForm"],
+    receivers: [
+      "axios",
+      "http",
+      "https",
+      "got",
+      "superagent",
+      "fetch",
+      "session",
+      "client",
+      "httpClient",
+      "requests",
+      "httpx",
+      "urllib",
+      "urllib2",
+      "unirest",
+      "Unirest"
+    ],
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a request URL/host via an HTTP-client method. Verify the destination is allow-listed (no internal/metadata endpoints). Receiver is generic (an HTTP client vs. a cache/map getter) \u2014 confirm it is a network call."
+  },
+  {
     kind: "xss",
     cwe: "CWE-79",
     severity: "medium",
@@ -1317,6 +1347,7 @@ function findSinks(lang, calls) {
     for (const rule of SINKS) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (!rule.callees.includes(c.callee)) continue;
+      if (rule.requireReceiver && !c.receiver) continue;
       if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) continue;
       out.push({
         line: c.line,
