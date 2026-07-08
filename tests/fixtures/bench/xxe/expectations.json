@@ -1,0 +1,15 @@
+{
+  "cwe": "CWE-611",
+  "cases": [
+    {
+      "name": "vuln",
+      "file": "vuln.js",
+      "vulnerable": true
+    },
+    {
+      "name": "safe",
+      "file": "safe.js",
+      "vulnerable": false
+    }
+  ]
+}

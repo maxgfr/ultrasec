@@ -1,0 +1,21 @@
+{
+  "cwe": "CWE-918",
+  "cases": [
+    {
+      "name": "vuln",
+      "file": "sink.js",
+      "vulnerable": true,
+      "crossFile": true
+    },
+    {
+      "name": "vuln-py",
+      "file": "app.py",
+      "vulnerable": true
+    },
+    {
+      "name": "safe",
+      "file": "safe.js",
+      "vulnerable": false
+    }
+  ]
+}

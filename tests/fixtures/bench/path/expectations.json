@@ -1,0 +1,16 @@
+{
+  "cwe": "CWE-22",
+  "cases": [
+    {
+      "name": "vuln",
+      "file": "sink.js",
+      "vulnerable": true,
+      "crossFile": true
+    },
+    {
+      "name": "safe",
+      "file": "safe.js",
+      "vulnerable": false
+    }
+  ]
+}
