@@ -3,7 +3,7 @@ import { correlate } from "../src/tools/correlate.js";
 import { makeToolFinding } from "../src/tools/normalize.js";
 import type { Finding } from "../src/types.js";
 
-const dep = (tool: string, ident: string, sev: Finding["severity"], opts: { aliases?: string[]; pkg: string; version: string }) =>
+const dep = (tool: string, ident: string, sev: Finding["severity"], opts: { aliases?: string[]; pkg: string; version: string; file?: string; line?: number }) =>
   makeToolFinding({ tool, category: "dep", ident, title: ident, severity: sev, message: `${opts.pkg}@${opts.version}`, ...opts });
 
 const sast = (tool: string, cwe: string, file: string, line: number, sev: Finding["severity"]) =>
@@ -28,10 +28,88 @@ describe("correlate — dep (SCA) cross-tool merge", () => {
     expect(correlate([a, b])).toHaveLength(2);
   });
 
-  it("does NOT merge the same CVE across different package versions", () => {
-    const a = dep("trivy", "CVE-2021-23337", "high", { pkg: "lodash", version: "4.17.20" });
-    const b = dep("osv-scanner", "CVE-2021-23337", "high", { pkg: "lodash", version: "3.0.0" });
+  // NodeGoat regression (eval P0.3b): the same advisory used to be emitted once
+  // per installed version of the package (qs ×5, lodash ×5…) — ~45% headline
+  // inflation. One advisory on one package = ONE finding; per-version instances
+  // are evidence, kept in `locations[]`.
+  it("merges the same CVE across different versions of the same package, recording per-version locations", () => {
+    const a = dep("osv-scanner", "CVE-2021-23337", "medium", { pkg: "lodash", version: "3.0.0", file: "package-lock.json", line: 1 });
+    const b = dep("osv-scanner", "CVE-2021-23337", "high", { pkg: "lodash", version: "4.17.20", file: "package-lock.json", line: 1 });
+    const c = dep("trivy", "CVE-2021-23337", "high", { pkg: "lodash", version: "4.17.20", file: "package-lock.json", line: 1 });
+    const out = correlate([a, b, c]);
+    expect(out).toHaveLength(1);
+    const f = out[0]!;
+    expect(f.severity).toBe("high");
+    expect(f.sources).toEqual(["osv-scanner", "trivy"]);
+    expect(f.locations).toEqual([
+      { file: "package-lock.json", line: 1, version: "3.0.0" },
+      { file: "package-lock.json", line: 1, version: "4.17.20" },
+    ]);
+  });
+
+  it("does NOT merge the same CVE across different packages", () => {
+    const a = dep("trivy", "CVE-2024-0001", "high", { pkg: "lodash", version: "4.17.20" });
+    const b = dep("trivy", "CVE-2024-0001", "high", { pkg: "underscore", version: "1.13.0" });
     expect(correlate([a, b])).toHaveLength(2);
+  });
+
+  it("returns unique ids over the NodeGoat shape (same advisory at the same lockfile, N versions)", () => {
+    const versions = ["0.6.6", "5.2.1", "6.2.1", "6.3.2", "6.5.2"];
+    const input = versions.map((v) => dep("osv-scanner", "CVE-2022-24999", "high", { pkg: "qs", version: v, file: "package-lock.json", line: 1 }));
+    // Pre-correlate the raw findings must already be distinguishable (version in the id hash).
+    expect(new Set(input.map((f) => f.id)).size).toBe(versions.length);
+    const out = correlate(input);
+    expect(out).toHaveLength(1);
+    expect(out[0]!.locations).toHaveLength(versions.length);
+    expect(new Set(out.map((f) => f.id)).size).toBe(out.length);
+  });
+
+  it("is idempotent across the cross-version merge (locations neither duplicated nor lost, incremental instance folds in)", () => {
+    const a = dep("osv-scanner", "CVE-2021-23337", "high", { pkg: "lodash", version: "3.0.0", file: "package-lock.json", line: 1 });
+    const b = dep("osv-scanner", "CVE-2021-23337", "high", { pkg: "lodash", version: "4.17.20", file: "package-lock.json", line: 1 });
+    const once = correlate([a, b]);
+    expect(correlate(once)).toEqual(once);
+    // A later pass surfacing a NEW instance of the same advisory folds into the merged rep.
+    const c = dep("osv-scanner", "CVE-2021-23337", "high", { pkg: "lodash", version: "2.4.2", file: "app/package-lock.json", line: 1 });
+    const merged = correlate([...once, c]);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]!.locations).toEqual([
+      { file: "app/package-lock.json", line: 1, version: "2.4.2" },
+      { file: "package-lock.json", line: 1, version: "3.0.0" },
+      { file: "package-lock.json", line: 1, version: "4.17.20" },
+    ]);
+  });
+});
+
+describe("makeToolFinding — id identity", () => {
+  it("gives distinct ids to the same advisory at the same location for different versions", () => {
+    const a = dep("osv-scanner", "CVE-2022-24999", "high", { pkg: "qs", version: "5.2.1", file: "package-lock.json", line: 1 });
+    const b = dep("osv-scanner", "CVE-2022-24999", "high", { pkg: "qs", version: "6.5.2", file: "package-lock.json", line: 1 });
+    expect(a.id).not.toBe(b.id);
+  });
+
+  it("keeps the id unchanged for version-less findings (sast/secret/config ids stable)", () => {
+    const a = makeToolFinding({
+      tool: "semgrep",
+      category: "sast",
+      ident: "rule:src/a.js:3",
+      title: "rule",
+      severity: "high",
+      message: "m",
+      file: "src/a.js",
+      line: 3,
+    });
+    const b = makeToolFinding({
+      tool: "semgrep",
+      category: "sast",
+      ident: "rule:src/a.js:3",
+      title: "rule",
+      severity: "high",
+      message: "m",
+      file: "src/a.js",
+      line: 3,
+    });
+    expect(a.id).toBe(b.id);
   });
 });
 

@@ -1,4 +1,4 @@
-import type { Dossier } from "../store.js";
+import { locationsLine, type Dossier } from "../store.js";
 import { SEVERITIES, type Finding, type Narrative, type Remediation, type Severity } from "../types.js";
 import { pathMermaid } from "./mermaid.js";
 import { byStr } from "../util.js";
@@ -114,6 +114,10 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Reme
   }
   L.push("");
   L.push(`**Path:** ${pathLine(f)}`);
+  if (f.locations?.length) {
+    L.push("");
+    L.push(`**Affects:** ${locationsLine(f.locations)}`);
+  }
   const pv = provTag(f);
   if (pv) {
     L.push("");

@@ -11,8 +11,11 @@ import { pickCve } from "./normalize.js";
 // agree" becomes a confidence prior for the verify gate.
 //
 // Two findings are "the same" when:
-//   • dep (SCA): same package@version AND they share any advisory id (CVE/GHSA/…)
-//     — a single alias hop, scoped to the package, so distinct vulns never merge.
+//   • dep (SCA): same package AND they share any advisory id (CVE/GHSA/…) — a
+//     single alias hop, scoped to the package, so distinct vulns never merge.
+//     Instances across installed VERSIONS / lockfiles collapse into one finding
+//     with the per-instance evidence kept in `locations[]` (one advisory on one
+//     package = one report entry, not N).
 //   • everything else: same category, same CWE-or-title, same file:line.
 //
 // Engine-enumerated taint candidates (`tool === "ultrasec"`) are left untouched —
@@ -26,7 +29,7 @@ function maxSeverity(a: Severity, b: Severity): Severity {
 }
 
 function pkgKey(f: Finding): string {
-  return `${(f.pkg ?? "").toLowerCase()}@${(f.version ?? "").toLowerCase()}`;
+  return (f.pkg ?? "").toLowerCase();
 }
 
 /** All advisory ids a dep finding is known by (for the shared-id test). */
@@ -83,6 +86,21 @@ function mergeCluster(group: Finding[]): Finding {
   if (cve) out.cve = cve;
   if (cwe) out.cwe = cwe;
   if (verified) out.verified = true;
+
+  // dep clusters can span several installed versions / lockfile paths of the
+  // same package — keep every instance as evidence instead of dropping all but
+  // the representative's. Only attached when there is more than one distinct
+  // instance (the plain same-version cross-tool merge stays field-free).
+  if (rep.category === "dep") {
+    const byKey = new Map<string, NonNullable<Finding["locations"]>[number]>();
+    for (const f of group) {
+      const entries = f.locations ?? (f.sink ? [{ file: f.sink.file, line: f.sink.line, ...(f.version ? { version: f.version } : {}) }] : []);
+      for (const e of entries) byKey.set(`${e.version ?? ""}|${e.file}|${e.line ?? ""}`, e);
+    }
+    const locations = [...byKey.entries()].sort((a, b) => byStr(a[0], b[0])).map(([, e]) => e);
+    if (locations.length > 1) out.locations = locations;
+    else delete out.locations;
+  }
   return out;
 }
 
@@ -130,7 +148,7 @@ export function correlate(findings: Finding[]): Finding[] {
   }
   for (const group of byKey.values()) corr.push(group.length === 1 ? withSources(group[0]!) : mergeCluster(group));
 
-  // 2) dep: union-find over shared advisory ids, scoped to package@version.
+  // 2) dep: union-find over shared advisory ids, scoped to the package.
   const dep = tool.filter((f) => f.category === "dep");
   const dsu = new DSU(dep.length);
   const seen = new Map<string, number>(); // "pkgKey|ID" -> first finding index
