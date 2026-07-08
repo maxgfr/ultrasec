@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { orchestrate, runAdapter, relativizeFindings, type ToolAdapter } from "../src/tools/run.js";
+import { orchestrate, runAdapter, relativizeFindings, toolStatus, type ToolAdapter, type ToolRunResult } from "../src/tools/run.js";
 import type { Finding } from "../src/types.js";
 
 const fake: ToolAdapter = {
@@ -33,6 +33,24 @@ describe("orchestrate (graceful degradation)", () => {
     const r = orchestrate([fake], "/tmp", { useDocker: true }); // fake has no dockerImage
     expect(r.results).toHaveLength(0);
     expect(r.findings).toEqual([]);
+  });
+});
+
+describe("toolStatus (per-tool ran/empty/skipped/failed)", () => {
+  const R = (o: Partial<ToolRunResult> & { name: string }): ToolRunResult => ({ ran: false, ok: false, findings: [], note: "", ...o });
+  it("distinguishes ran-with-findings, ran-but-empty, skipped and failed", () => {
+    const results: ToolRunResult[] = [
+      R({ name: "trivy", ran: true, ok: true, findings: [{} as Finding, {} as Finding], note: "2 finding(s)" }),
+      R({ name: "gitleaks", ran: true, ok: true, findings: [], note: "0 finding(s)" }),
+      R({ name: "osv-scanner", ran: false, ok: false, note: "no target files" }),
+      R({ name: "semgrep", ran: true, ok: false, note: "run failed: boom" }),
+    ];
+    expect(toolStatus(results)).toEqual([
+      { name: "trivy", status: "ran", findings: 2, note: "2 finding(s)" },
+      { name: "gitleaks", status: "empty", findings: 0, note: "0 finding(s)" },
+      { name: "osv-scanner", status: "skipped", note: "no target files" },
+      { name: "semgrep", status: "failed", note: "run failed: boom" },
+    ]);
   });
 });
 

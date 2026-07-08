@@ -1,4 +1,4 @@
-import { locationsLine, type Dossier } from "../store.js";
+import { locationsLine, toolStatusLines, type Dossier } from "../store.js";
 import { SEVERITIES, type Finding, type Narrative, type Remediation, type Severity } from "../types.js";
 import { pathMermaid } from "./mermaid.js";
 import { byStr } from "../util.js";
@@ -65,6 +65,7 @@ function header(d: Dossier): string {
     `findings: **${d.manifest.counts.findings}** — ${SEVERITIES.map((s) => `${BADGE[s]} ${c[s]}`).join(" · ")}${kev ? ` · 🚨 ${kev} in CISA KEV` : ""}`,
     `tools: ${d.manifest.toolsRun.join(", ") || "none (graph + taint only)"}`,
   ];
+  if (d.manifest.toolStatus?.length) lines.push(`tool status: ${toolStatusLines(d.manifest.toolStatus).join(" · ")}`);
   if (ranked) lines.push(`_ranked by composite risk (severity ⊕ EPSS ⊕ KEV)_`);
   return lines.join("  \n");
 }

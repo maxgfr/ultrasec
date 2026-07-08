@@ -210,6 +210,9 @@ export interface Manifest {
   generatedNote: string; // human note; deliberately not a timestamp (reproducible)
   languages: string[];
   toolsRun: string[];
+  /** Per-tool outcome — distinguishes "ran, 0 findings" from "skipped (no target)"
+   *  from "failed". Additive/optional; older dossiers and `--tools none` omit it. */
+  toolStatus?: { name: string; status: "ran" | "empty" | "skipped" | "failed"; findings?: number; note?: string }[];
   counts: { findings: number; bySeverity: Record<Severity, number> };
   /** Coverage truncation — surfaced so a capped run is never mistaken for a full one. */
   truncation?: {

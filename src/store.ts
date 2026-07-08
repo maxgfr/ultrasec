@@ -81,10 +81,18 @@ export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
         }
       : undefined
     : nt;
+  // Per-tool status unions by name, next winning on conflict — so a scoped pass
+  // that re-ran only trivy updates trivy without wiping the other tools' outcomes.
+  const statusByName = new Map<string, NonNullable<Manifest["toolStatus"]>[number]>();
+  for (const s of prev.manifest.toolStatus ?? []) statusByName.set(s.name, s);
+  for (const s of next.manifest.toolStatus ?? []) statusByName.set(s.name, s);
+  const toolStatus = [...statusByName.values()];
+
   const manifest: Manifest = {
     ...next.manifest,
     languages: [...new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
     toolsRun: [...new Set([...prev.manifest.toolsRun, ...next.manifest.toolsRun])].sort(),
+    ...(toolStatus.length ? { toolStatus } : {}),
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     ...(truncation ? { truncation } : { truncation: undefined }),
     ...(scopes.length ? { scopes } : {}),
@@ -112,6 +120,15 @@ export function locationsLine(locations: NonNullable<Finding["locations"]>): str
   return locations.map((e) => `${e.version ? `v${e.version} ` : ""}\`${e.file}${e.line !== undefined ? `:${e.line}` : ""}\``).join(" · ");
 }
 
+/** "trivy: ran (3) · osv-scanner: skipped — no target files" — per-tool outcomes. */
+export function toolStatusLines(status: NonNullable<Manifest["toolStatus"]>): string[] {
+  return status.map((s) => {
+    const count = typeof s.findings === "number" && (s.status === "ran" || s.status === "empty") ? ` (${s.findings})` : "";
+    const why = s.note && (s.status === "skipped" || s.status === "failed") ? ` — ${s.note}` : "";
+    return `${s.name}: ${s.status}${count}${why}`;
+  });
+}
+
 export function provenanceLine(f: Finding): string {
   const p = f.provenance;
   if (!p) return "";
@@ -130,6 +147,7 @@ export function renderDossierMd(d: Dossier): string {
   L.push(`- repo: \`${m.repo}\``);
   L.push(`- languages: ${m.languages.join(", ") || "—"}`);
   L.push(`- external tools run: ${m.toolsRun.join(", ") || "none (graph + taint only)"}`);
+  if (m.toolStatus?.length) for (const line of toolStatusLines(m.toolStatus)) L.push(`  - ${line}`);
   L.push(`- findings: **${m.counts.findings}** — ${SEVERITIES.map((s) => `${severityBadge(s)} ${c[s]}`).join("  ")}`);
   L.push("");
   L.push(`> Candidates are deterministic and **recall-oriented** — every one needs`);

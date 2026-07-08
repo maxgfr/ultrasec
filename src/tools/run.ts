@@ -39,6 +39,25 @@ export interface ToolRunResult {
   note: string;
 }
 
+/** Per-tool outcome, persisted so a report distinguishes "ran, 0 findings" from
+ *  "skipped (not installed / no target)". */
+export interface ToolStatus {
+  name: string;
+  status: "ran" | "empty" | "skipped" | "failed";
+  findings?: number;
+  note?: string;
+}
+
+/** Collapse the rich run results into a persisted per-tool status. */
+export function toolStatus(results: ToolRunResult[]): ToolStatus[] {
+  return results.map((r) => {
+    if (!r.ran) return { name: r.name, status: "skipped", ...(r.note ? { note: r.note } : {}) };
+    if (!r.ok) return { name: r.name, status: "failed", ...(r.note ? { note: r.note } : {}) };
+    const status = r.findings.length ? "ran" : "empty";
+    return { name: r.name, status, findings: r.findings.length, ...(r.note ? { note: r.note } : {}) };
+  });
+}
+
 const TIMEOUT_MS = 300_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 const MOUNT = "/work";
