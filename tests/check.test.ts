@@ -51,6 +51,52 @@ describe("check — grounding", () => {
   });
 });
 
+describe("check — file-scoped (line 0) citations", () => {
+  // Eval P1.4: checkov/IaC config findings normalize to line 0 (a whole-file
+  // finding). The gate used to reject line < 1, so a fresh --docker scan failed
+  // its own mandatory gate. A line-0 citation now means "this file" — only file
+  // existence is checked, not a line range.
+  it("passes a line-0 citation when the file exists", () => {
+    const r = check(dossier([f("a", "src/db.js", 0)]));
+    expect(r.ok).toBe(true);
+    expect(r.dangling).toHaveLength(0);
+  });
+
+  it("still fails a line-0 citation when the file does not exist", () => {
+    const r = check(dossier([f("a", "src/ghost.js", 0)]));
+    expect(r.ok).toBe(false);
+    expect(r.dangling[0]!.reason).toBe("file not found");
+  });
+
+  it("still rejects a negative line and an out-of-range line", () => {
+    expect(check(dossier([f("a", "src/db.js", -1)])).ok).toBe(false);
+    expect(check(dossier([f("a", "src/db.js", 99999)])).ok).toBe(false);
+  });
+
+  it("grounds dep locations[] — file must resolve, line 0/absent is whole-file", () => {
+    const dep: Finding = {
+      id: "d",
+      category: "dep",
+      title: "adv",
+      severity: "high",
+      confidence: "medium",
+      message: "m",
+      tool: "osv-scanner",
+      status: "confirmed",
+      sink: { file: "package.json", line: 1 },
+      locations: [
+        { file: "package.json", line: 0, version: "1.0.0" },
+        { file: "app/package.json", version: "2.0.0" },
+      ],
+    };
+    // app/package.json doesn't exist in the fixture → that instance is a dangling citation.
+    const r = check(dossier([dep]));
+    expect(r.ok).toBe(false);
+    expect(r.dangling.some((d) => d.file === "app/package.json")).toBe(true);
+    expect(r.dangling.some((d) => d.file === "package.json")).toBe(false);
+  });
+});
+
 describe("check — semantic", () => {
   it("fails if a candidate is still unadjudicated", () => {
     const r = check(dossier([f("a", "src/db.js", 6, "open")]), { semantic: true });

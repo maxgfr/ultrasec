@@ -4094,6 +4094,7 @@ function locsOf(f) {
   if (f.source) locs.push(f.source);
   if (f.sink) locs.push(f.sink);
   for (const p of f.path ?? []) locs.push(p);
+  for (const e of f.locations ?? []) locs.push({ file: e.file, line: e.line ?? 0 });
   return locs;
 }
 function atLeast(sev, floor) {
@@ -4115,6 +4116,7 @@ function check(dossier, opts = {}) {
       if (!insideRepo(repo, loc.file)) continue;
       const lc = linesOf(loc.file);
       if (lc === null) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
+      else if (loc.line === 0) continue;
       else if (loc.line < 1 || loc.line > lc) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range (file has ${lc} lines)` });
     }
   }

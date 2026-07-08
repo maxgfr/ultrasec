@@ -7,6 +7,14 @@ Every finding is grounded in real code. The contract:
   `check` fails on any that don't (file missing, or line out of range). This is the
   anti-hallucination gate: don't write a location you haven't seen in the dossier.
 
+- `line: 0` is an explicit **whole-file citation** — for IaC/config checks
+  (checkov, trivy misconfig) that apply to a file, not a line. `check` verifies the
+  file exists but does **not** range-check the line, so a fresh `--docker` scan never
+  fails its own gate on a config finding. A negative or out-of-range positive line
+  still fails. Dep advisories merged across versions keep their per-instance
+  `locations[]` (each `{file, line?, version}`), graded the same way (line 0/absent
+  = whole-file).
+
 - The cross-file path reads source → hop(s) → sink, e.g.
   `src/server.js:10 → src/server.js:11 → src/db.js:6`. Each step's `why` explains
   the propagation ("untrusted input (http): req.query", "calls getUser()",

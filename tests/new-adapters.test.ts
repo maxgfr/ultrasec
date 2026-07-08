@@ -6,6 +6,8 @@ import { gosec } from "../src/tools/gosec.js";
 import { checkov } from "../src/tools/checkov.js";
 import { hadolint } from "../src/tools/hadolint.js";
 import { kingfisher } from "../src/tools/kingfisher.js";
+import { check } from "../src/check.js";
+import type { Dossier } from "../src/store.js";
 
 const fix = (name: string) => readFileSync(join(import.meta.dirname, "fixtures", "tool-output", name), "utf8");
 
@@ -52,6 +54,37 @@ describe("checkov adapter", () => {
     const arr = `[${fix("checkov.json")}]`;
     expect(checkov.parse(arr, "/repo")).toHaveLength(1);
     expect(checkov.parse("{}", "/repo")).toEqual([]);
+  });
+
+  // Eval P1.4: a whole-file/config check normalizes to file_line_range [0,0].
+  // The parser keeps line 0 (a file-scoped citation) and the grounding gate
+  // accepts it — a fresh --docker scan must not fail its own gate on config findings.
+  it("keeps line 0 for a whole-file config finding, and the grounding gate accepts it", () => {
+    const raw = JSON.stringify({
+      results: {
+        failed_checks: [{ check_id: "CKV_DOCKER_2", check_name: "Ensure HEALTHCHECK", file_path: "/Dockerfile", file_line_range: [0, 0], severity: null }],
+      },
+    });
+    const parsed = checkov.parse(raw, "/repo");
+    expect(parsed[0]!.sink).toEqual({ file: "Dockerfile", line: 0 });
+
+    const repo = join(import.meta.dirname, "fixtures", "vuln-express");
+    // Cite an existing file at line 0 (file-scoped) — the gate passes on existence.
+    const finding = { ...parsed[0]!, status: "confirmed" as const, sink: { file: "package.json", line: 0 } };
+    const d: Dossier = {
+      manifest: {
+        version: "0",
+        schemaVersion: 5,
+        repo,
+        generatedNote: "",
+        languages: [],
+        toolsRun: [],
+        counts: { findings: 1, bySeverity: { critical: 0, high: 0, medium: 1, low: 0, info: 0 } },
+      },
+      findings: [finding],
+      graph: { files: [], edges: [], symbolDefs: {} },
+    };
+    expect(check(d, { repo }).ok).toBe(true);
   });
 });
 

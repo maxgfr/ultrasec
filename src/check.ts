@@ -54,6 +54,9 @@ function locsOf(f: Finding): CodeLoc[] {
   if (f.source) locs.push(f.source);
   if (f.sink) locs.push(f.sink);
   for (const p of f.path ?? []) locs.push(p);
+  // Per-instance dep locations are citations too — grade them the same way.
+  // A missing line means a whole-file citation (normalized to line 0 below).
+  for (const e of f.locations ?? []) locs.push({ file: e.file, line: e.line ?? 0 });
   return locs;
 }
 
@@ -88,6 +91,9 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
       if (!insideRepo(repo, loc.file)) continue;
       const lc = linesOf(loc.file);
       if (lc === null) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
+      // Line 0 = an explicit whole-file citation (IaC/config checks like checkov
+      // normalize to it) — the file must exist, but there is no line to range-check.
+      else if (loc.line === 0) continue;
       else if (loc.line < 1 || loc.line > lc) dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range (file has ${lc} lines)` });
     }
   }
