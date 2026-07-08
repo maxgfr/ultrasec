@@ -81,7 +81,11 @@ export function cvesIn(...inputs: unknown[]): string[] {
 }
 
 export function makeToolFinding(i: ToolFindingInput): Finding {
-  const id = shortHash(`${i.tool}:${i.ident}:${i.file ?? ""}:${i.line ?? ""}`);
+  // The version is part of the identity for dep findings: the same advisory at
+  // the same lockfile is one finding PER installed version pre-correlation (the
+  // correlator then merges them into one with `locations[]`). Version-less
+  // findings (sast/secret/config) keep their historical hash input — no id churn.
+  const id = shortHash(`${i.tool}:${i.ident}:${i.file ?? ""}:${i.line ?? ""}${i.version ? `:${i.version}` : ""}`);
   const f: Finding = {
     id,
     category: i.category,

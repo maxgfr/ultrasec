@@ -53,7 +53,7 @@ describe("scan — correlates taint, orphan-sink and tool findings in one pass",
     expect(t.sources).toEqual(["semgrep", "ultrasec"]); // corroboration recorded
     expect(t.confidence).toBe("high"); // ≥2 sources
     expect(t.sink).toMatchObject({ file: "src/report.js", line: 5 }); // path identity untouched
-    expect(t.path && t.path.length).toBeGreaterThan(1);
+    expect(t.path?.length).toBeGreaterThan(1);
   });
 
   it("folds a co-located same-CWE tool finding into an orphan-sink candidate too (--sinks)", async () => {

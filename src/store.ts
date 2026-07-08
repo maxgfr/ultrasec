@@ -106,6 +106,12 @@ function severityBadge(s: Severity): string {
 }
 
 /** "provenance: <author> · <date> · owner <team>" — only the fields present. */
+/** "v0.6.6 `package-lock.json:1` · v6.5.2 `app/package-lock.json:1`" — the
+ *  per-instance evidence of a cross-version-merged dep advisory. */
+export function locationsLine(locations: NonNullable<Finding["locations"]>): string {
+  return locations.map((e) => `${e.version ? `v${e.version} ` : ""}\`${e.file}${e.line !== undefined ? `:${e.line}` : ""}\``).join(" · ");
+}
+
 export function provenanceLine(f: Finding): string {
   const p = f.provenance;
   if (!p) return "";
@@ -177,6 +183,7 @@ export function renderDossierMd(d: Dossier): string {
     } else if (f.sink) {
       L.push(`- at: \`${f.sink.file}:${f.sink.line}\``);
     }
+    if (f.locations?.length) L.push(`- affects: ${locationsLine(f.locations)}`);
     const prov = provenanceLine(f);
     if (prov) L.push(`- ${prov}`);
     L.push(`- ${f.message}`);

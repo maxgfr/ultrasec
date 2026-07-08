@@ -6,7 +6,7 @@ import { pathToFileURL } from "url";
 
 // src/types.ts
 var VERSION = "1.8.0";
-var SCHEMA_VERSION = 4;
+var SCHEMA_VERSION = 5;
 var SEVERITIES = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
 var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "other"];
@@ -1991,7 +1991,7 @@ function cvesIn(...inputs) {
   return [...out];
 }
 function makeToolFinding(i) {
-  const id = shortHash(`${i.tool}:${i.ident}:${i.file ?? ""}:${i.line ?? ""}`);
+  const id = shortHash(`${i.tool}:${i.ident}:${i.file ?? ""}:${i.line ?? ""}${i.version ? `:${i.version}` : ""}`);
   const f = {
     id,
     category: i.category,
@@ -2069,7 +2069,7 @@ function maxSeverity(a, b) {
   return sevRank(a) <= sevRank(b) ? a : b;
 }
 function pkgKey(f) {
-  return `${(f.pkg ?? "").toLowerCase()}@${(f.version ?? "").toLowerCase()}`;
+  return (f.pkg ?? "").toLowerCase();
 }
 function depIds(f) {
   const ids = /* @__PURE__ */ new Set();
@@ -2115,6 +2115,16 @@ function mergeCluster(group) {
   if (cve) out.cve = cve;
   if (cwe) out.cwe = cwe;
   if (verified) out.verified = true;
+  if (rep.category === "dep") {
+    const byKey = /* @__PURE__ */ new Map();
+    for (const f of group) {
+      const entries = f.locations ?? (f.sink ? [{ file: f.sink.file, line: f.sink.line, ...f.version ? { version: f.version } : {} }] : []);
+      for (const e of entries) byKey.set(`${e.version ?? ""}|${e.file}|${e.line ?? ""}`, e);
+    }
+    const locations = [...byKey.entries()].sort((a, b) => byStr(a[0], b[0])).map(([, e]) => e);
+    if (locations.length > 1) out.locations = locations;
+    else delete out.locations;
+  }
   return out;
 }
 function sameCwe(a, b) {
@@ -3026,6 +3036,9 @@ function loadDossier(outDir) {
 function severityBadge(s) {
   return { critical: "\u{1F7E5} CRIT", high: "\u{1F7E7} HIGH", medium: "\u{1F7E8} MED", low: "\u{1F7E9} LOW", info: "\u2B1C INFO" }[s];
 }
+function locationsLine(locations) {
+  return locations.map((e) => `${e.version ? `v${e.version} ` : ""}\`${e.file}${e.line !== void 0 ? `:${e.line}` : ""}\``).join(" \xB7 ");
+}
 function provenanceLine(f) {
   const p = f.provenance;
   if (!p) return "";
@@ -3089,6 +3102,7 @@ function renderDossierMd(d) {
     } else if (f.sink) {
       L.push(`- at: \`${f.sink.file}:${f.sink.line}\``);
     }
+    if (f.locations?.length) L.push(`- affects: ${locationsLine(f.locations)}`);
     const prov = provenanceLine(f);
     if (prov) L.push(`- ${prov}`);
     L.push(`- ${f.message}`);
@@ -5151,6 +5165,10 @@ function renderFinding(f, opts = {}) {
   }
   L.push("");
   L.push(`**Path:** ${pathLine(f)}`);
+  if (f.locations?.length) {
+    L.push("");
+    L.push(`**Affects:** ${locationsLine(f.locations)}`);
+  }
   const pv = provTag(f);
   if (pv) {
     L.push("");

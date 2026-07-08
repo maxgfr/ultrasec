@@ -9,7 +9,10 @@ export const VERSION = "1.8.0";
 // 4: findings gained optional `priorAnalysis` (upstream-agent reasoning ingested
 // as a SIGNAL, e.g. from deepsec) + `fixedIn` (commit a `revalidate` fix folded
 // in). Both additive + optional — older dossiers omit them (back-compat).
-export const SCHEMA_VERSION = 4;
+// 5: dep findings gained optional `locations` (per-version/per-lockfile instances
+// of a cross-version-merged advisory); manifest gained optional `toolStatus`
+// (per-tool ran/empty/skipped/failed). Additive + optional (back-compat).
+export const SCHEMA_VERSION = 5;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -124,6 +127,13 @@ export interface Finding {
   pkg?: string;
   /** Installed/affected version. */
   version?: string;
+  /**
+   * Per-instance evidence of a cross-version-merged dep advisory: every
+   * lockfile location (and installed version) the advisory was reported at.
+   * Grounding-gated like any citation (file must resolve). Set by the
+   * correlator only when the cluster spans more than one distinct instance.
+   */
+  locations?: { file: string; line?: number; version?: string }[];
   // ── Enrichment (deterministic, post-scan) ───────────────────────────────────
   /** EPSS exploitation-probability in [0,1] (FIRST.org), when the CVE is scored. */
   epss?: number;
