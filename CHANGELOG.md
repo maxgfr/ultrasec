@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.10.1](https://github.com/maxgfr/ultrasec/compare/v1.10.0...v1.10.1) (2026-07-09)
+
+
+### Bug Fixes
+
+* **orchestrate:** close the revalidate fold loop + fail-closed --apply parsing ([#5](https://github.com/maxgfr/ultrasec/issues/5)) ([e07b015](https://github.com/maxgfr/ultrasec/commit/e07b015ba7a3e3b526f6aa5b3a5bfa67e9d78a3d))
+
 # [1.10.0](https://github.com/maxgfr/ultrasec/compare/v1.9.0...v1.10.0) (2026-07-09)
 
 
