@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { realpathSync as realpathSync2 } from "fs";
+import { realpathSync as realpathSync3 } from "fs";
 import { pathToFileURL } from "url";
 
 // src/types.ts
@@ -33,7 +33,9 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "gitignore",
   "semantic",
   "keep-output",
-  "all"
+  "all",
+  "eco",
+  "list"
 ]);
 var SHORT_FLAGS = { h: "help", v: "version" };
 function parseArgs(argv) {
@@ -5870,6 +5872,463 @@ function runRun(args) {
   return res.errors.length ? 1 : 0;
 }
 
+// src/commands/orchestrate.ts
+import { existsSync as existsSync15, realpathSync as realpathSync2 } from "fs";
+import { join as join26 } from "path";
+import { fileURLToPath } from "url";
+
+// src/orchestrate.ts
+import { existsSync as existsSync14, mkdirSync as mkdirSync7, readFileSync as readFileSync14, writeFileSync as writeFileSync9 } from "fs";
+import { join as join25, resolve as resolve20 } from "path";
+
+// src/orchestrate-templates.ts
+import { join as join24 } from "path";
+var ONE_WRITER_FOOTER = `
+## Return, don't write
+
+Return ONLY the structured output specified above. Do NOT write, edit, or delete any file; do NOT run any engine command that writes (\`scan\`, \`import\`, any stage's emit or \`--apply\` \u2014 \`verify\`, \`triage\`, \`revalidate\`, \`investigate\`, \`context\`, \`narrative\`, \`implement\`, \`render\`, \`clean\`, \`run\`). The only engine commands you may run are the read-only ones: \`dossier\`, \`graph\`, \`paths\`, \`tools\`. The orchestrator is the sole writer \u2014 it merges your fragments into one apply file itself and runs the conservative \`--apply\` fold. Exception: if a justification is prose too large to return, write ONLY to \`<RUN>/orchestration/out/<role>-<batch>.md\` (a file namespaced to you alone) and return its path.
+`;
+var VERDICT_SCHEMA = {
+  type: "object",
+  required: ["verdicts"],
+  properties: {
+    verdicts: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "verdict", "note"],
+        properties: {
+          id: { type: "string" },
+          verdict: { enum: [...VERDICTS] },
+          note: { type: "string", description: "one line grounded in the source you read, citing [file:line]" },
+          exploitPath: { type: "string", description: "REQUIRED for supported: who \xB7 what they send \xB7 what they get" }
+        }
+      }
+    }
+  }
+};
+var REVALIDATE_SCHEMA = {
+  type: "object",
+  required: ["verdicts"],
+  properties: {
+    verdicts: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["id", "verdict", "note"],
+        properties: {
+          id: { type: "string" },
+          verdict: { enum: [...REVALIDATION_VERDICTS] },
+          fixedIn: { type: "string", description: "the fixing commit sha, when verdict is fixed (else inferred from the git facts)" },
+          note: { type: "string", description: "one line grounded in the git facts / code you read" }
+        }
+      }
+    }
+  }
+};
+var INVESTIGATE_SCHEMA = {
+  type: "object",
+  required: ["discoveries"],
+  properties: {
+    discoveries: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["title", "category", "severity", "message", "file", "line"],
+        properties: {
+          title: { type: "string" },
+          category: { enum: [...CATEGORIES] },
+          severity: { enum: [...SEVERITIES] },
+          cwe: { type: "string" },
+          message: { type: "string", description: "the concrete attacker scenario: who \xB7 what they send \xB7 what they get" },
+          file: { type: "string" },
+          line: { type: "integer" },
+          path: {
+            type: "array",
+            description: "optional cross-file hops, each resolvable",
+            items: {
+              type: "object",
+              required: ["file", "line", "why"],
+              properties: { file: { type: "string" }, line: { type: "integer" }, why: { type: "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+};
+var PHASE_SPECS = {
+  adjudicate: {
+    role: "analyzer",
+    title: "Adjudicate",
+    schema: VERDICT_SCHEMA,
+    description: (n) => `Adjudicate the ${n} open candidate(s) of an ultrasec audit from dossier evidence (analyzer fan-out, conservative fold)`,
+    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join24(run, "orchestration", "out", "adjudicate.verdicts.json")} --run ${run}`,
+    fragmentFile: (run) => join24(run, "orchestration", "out", "adjudicate.verdicts.json")
+  },
+  verify: {
+    role: "skeptic",
+    title: "Verify",
+    schema: VERDICT_SCHEMA,
+    description: (n) => `Adversarially verify the ${n} pending finding(s) of an ultrasec audit (skeptic fan-out, conservative fold)`,
+    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join24(run, "orchestration", "out", "verify.verdicts.json")} --run ${run}`,
+    fragmentFile: (run) => join24(run, "orchestration", "out", "verify.verdicts.json")
+  },
+  revalidate: {
+    role: "revalidator",
+    title: "Revalidate",
+    schema: REVALIDATE_SCHEMA,
+    description: (n) => `Revalidate the ${n} confirmed/needs-human finding(s) against git history (false-positive cut, conservative fold)`,
+    applyHint: (engine, _worklist, run) => `node ${engine} revalidate --apply ${join24(run, "orchestration", "out", "REVALIDATE.json")} --run ${run}`,
+    fragmentFile: (run) => join24(run, "orchestration", "out", "REVALIDATE.json")
+  },
+  investigate: {
+    role: "hunter",
+    title: "Investigate",
+    schema: INVESTIGATE_SCHEMA,
+    description: (n) => `Hunt authz/IDOR, business-logic and multi-hop bugs across ${n} attack-surface region(s) (hunter fan-out, citation-checked ingest)`,
+    applyHint: (engine, _worklist, run) => `node ${engine} investigate --apply ${join24(run, "orchestration", "out", "INVESTIGATE.json")} --run ${run}`,
+    fragmentFile: (run) => join24(run, "orchestration", "out", "INVESTIGATE.json")
+  }
+};
+function phaseSpec(name) {
+  const spec = PHASE_SPECS[name];
+  if (!spec) throw new Error(`no phase spec for "${name}"`);
+  return spec;
+}
+function toBatches(ids, batchSize) {
+  const out = [];
+  for (let i = 0; i < ids.length; i += batchSize) out.push(ids.slice(i, i + batchSize));
+  return out;
+}
+function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize) {
+  const spec = phaseSpec(ph.name);
+  const scriptPath = join24(runAbs, "orchestration", `${ph.name}.workflow.mjs`);
+  const meta = { name: `ultrasec-${ph.name}`, description: spec.description(ph.items), phases: [{ title: spec.title }] };
+  const fragmentKey = ph.name === "investigate" ? "discoveries" : "verdicts";
+  return [
+    `export const meta = ${JSON.stringify(meta)}`,
+    ``,
+    `// NOT a plain Node script: launch via the Workflow tool \u2014 Workflow({ scriptPath: ${JSON.stringify(scriptPath)} }).`,
+    `// Emitted by \`ultrasec orchestrate\` from the CURRENT worklist. The worklist is the source`,
+    `// of truth: if it changes, re-run \`orchestrate --phase ${ph.name}\` before launching.`,
+    ``,
+    `// Constants for THIS run (injected at emit time; no Date.now/Math.random in this harness).`,
+    `const RUN = ${JSON.stringify(runAbs)}`,
+    `const ENGINE = ${JSON.stringify(engineAbs)}`,
+    `const WORKLIST = ${JSON.stringify(ph.worklist)}`,
+    `const AGENTS = RUN + '/orchestration/agents'`,
+    `const BATCHES = ${JSON.stringify(toBatches(ph.ids, batchSize))}`,
+    `const SCHEMA = ${JSON.stringify(spec.schema)}`,
+    ``,
+    `function contract(name, extra) {`,
+    `  return 'Read and follow the dispatch contract at ' + AGENTS + '/' + name + '.md VERBATIM.\\n'`,
+    `    + 'Constants: RUN=' + RUN + '  ENGINE=' + ENGINE + '  WORKLIST=' + WORKLIST + '.\\n'`,
+    `    + 'Invoke the engine only by its ABSOLUTE path: node ' + ENGINE + ' <cmd> \u2014 read-only commands only.'`,
+    `    + (extra ? '\\n' + extra : '')`,
+    `}`,
+    ``,
+    `log('ultrasec ${ph.name}: ' + ${JSON.stringify(String(ph.items))} + ' item(s) across ' + BATCHES.length + ' agent(s)')`,
+    ``,
+    `phase(${JSON.stringify(spec.title)})`,
+    `const results = await pipeline(BATCHES, (batch, _item, i) =>`,
+    `  agent(contract('${spec.role}', 'ITEMS=' + batch.join(',')), { label: '${ph.name}:' + (i + 1), phase: ${JSON.stringify(spec.title)}, agentType: 'general-purpose', schema: SCHEMA }))`,
+    ``,
+    `// One-writer rule: this workflow only COLLECTS ${fragmentKey} fragments. The main agent merges`,
+    `// the returned \`${fragmentKey}\` arrays into ${spec.fragmentFile(runAbs)}, then runs the conservative fold:`,
+    `//   ${spec.applyHint(engineAbs, ph.worklist, runAbs)}`,
+    `return { phase: ${JSON.stringify(ph.name)}, worklist: WORKLIST, results: results.filter(Boolean) }`,
+    ``
+  ].join("\n");
+}
+function agentContracts(runAbs, engineAbs, repoAbs) {
+  const footer = ONE_WRITER_FOOTER.replaceAll("<RUN>", runAbs);
+  return {
+    analyzer: `# Contract: analyzer
+
+You are auditing ONE batch of candidates of an ultrasec security review \u2014 the OPEN candidates the deterministic engine enumerated. They are recall-oriented: many are false positives by design; you decide, from the real code.
+
+Worklist: \`${join24(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`).
+
+For EACH of your candidate ids:
+
+1. Run \`node ${engineAbs} dossier <id> --run ${runAbs}\` (read-only) \u2014 the grounding packet: the real code along the cross-file path, graph neighbours, and how to verify.
+2. Read the code along EVERY hop of the printed path (open the cited files when the excerpts alone cannot decide). Decide: is the SOURCE attacker-controlled? does the value reach the SINK through every hop unchanged? is there a sanitizer/validator/authz guard on the path? is the SINK exploitable with the value that arrives (write the PoC)?
+3. Rule it:
+   - \`supported\` \u2014 the flow is real and exploitable. REQUIRES \`exploitPath\` (who \xB7 what they send \xB7 what they get).
+   - \`partial\` \u2014 a real issue, but weaker or narrower than claimed.
+   - \`unsupported\` \u2014 the evidence does not establish the claim.
+   - \`refuted\` \u2014 the source positively contradicts the claim (name the guard/sanitizer \`[file:line]\`).
+   Default to the harsher verdict ONLY when you can disprove it; otherwise mark \`partial\`/leave it for a human.
+4. Be conservative. The fold never auto-dismisses a high/critical finding on anything short of an explicit \`refuted\` \u2014 an uncertain high-severity finding stays **needs-human**, never dropped. Every claim in your \`note\` must cite resolvable \`[file:line]\` hops you actually read.
+
+Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath" }] }\` \u2014 your ITEMS only.
+${footer}`,
+    skeptic: `# Contract: skeptic
+
+You are an adversarial skeptic verifying the pending findings of an ultrasec audit. Assume each claim is wrong until the source proves it \u2014 try to REFUTE it.
+
+Worklist: \`${join24(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`).
+
+For EACH of your entries:
+
+1. Open every cited \`file:line\` in \`files[]\` and read it in context; run \`node ${engineAbs} dossier <id> --run ${runAbs}\` (read-only) for the full cross-file packet.
+2. Judge the claim against the source \u2014 is the flow **real and exploitable**?
+   - \`supported\` \u2014 real and exploitable exactly as claimed (include \`exploitPath\`).
+   - \`partial\` \u2014 a real issue, but the claim overstates it (wrong hop, narrower reach, weaker impact).
+   - \`unsupported\` \u2014 the source does not establish the claim.
+   - \`refuted\` \u2014 the source contradicts the claim (name the guard/sanitizer \`[file:line]\`).
+3. Be skeptical, but do NOT dismiss a high/critical finding unless you can positively **refute** it \u2014 the fold sends an \`unsupported\`/\`partial\` high-severity finding to **needs-human**, never auto-dropped. Uncertain \u21D2 leave it for a human.
+4. \`note\` is REQUIRED \u2014 one line grounded in what you read, citing resolvable \`[file:line]\`. If the entry carries a \`priorSignal\`, it is a HINT, never a verdict \u2014 adjudicate yourself.
+
+Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath" }] }\` \u2014 your ITEMS only.
+${footer}`,
+    revalidator: `# Contract: revalidator
+
+You revalidate findings already ranked real (confirmed / needs-human) against git history \u2014 the false-positive cut.
+
+Worklist: \`${join24(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`).
+
+For EACH of your entries:
+
+1. Read the git facts, then open the cited file at HEAD (\`at\`, or \`renamedTo\` when the file moved) and check whether the vulnerable code is still there.
+2. Decide whether the issue is still live:
+   - \`still-valid\` \u2014 the cited code is still vulnerable at HEAD.
+   - \`fixed\` \u2014 the code was corrected; include \`fixedIn\` (the fixing commit sha \u2014 else the fold infers it from \`lineLastChanged\`).
+   - \`false-positive\` \u2014 the finding was never a real issue (say why, grounded).
+   - \`uncertain\` \u2014 the facts cannot settle it. A valid, honest verdict.
+3. The fold is conservative: \`fixed\` \u2192 dismissed recording the fixing commit; a high/critical \`false-positive\` \u2192 **needs-human** (never auto-dismissed); \`uncertain\`/unknown \u2192 needs-human; \`still-valid\` keeps the finding (flagged if the cited location drifted at HEAD).
+4. \`note\` is REQUIRED \u2014 one line grounded in the git facts / code you read, citing resolvable \`[file:line]\`.
+
+Return (structured output): \`{ "verdicts": [{ "id", "verdict", "fixedIn", "note" }] }\` \u2014 your ITEMS only.
+${footer}`,
+    hunter: `# Contract: hunter
+
+You hunt the bugs the deterministic engine can't enumerate \u2014 missing/incorrect **authz** & **IDOR**, **business-logic** flaws, and multi-hop taint \u2014 one attack-surface region at a time.
+
+Worklist: \`${join24(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,\u2026>\`).
+
+For EACH of your regions:
+
+1. Read the region's \`files[]\` and \`neighbors[]\` (read-only; \`node ${engineAbs} graph <file> --repo ${repoAbs}\` shows the cross-file links). Follow the region's \`prompt\`.
+2. Hunt what the deterministic pass can't see: missing/incorrect authorization & IDOR, business-logic flaws, feature abuse, and multi-hop taint that crosses these files.
+3. Only report what you can exploit \u2014 a concrete attacker scenario (who \xB7 what they send \xB7 what they get), not "potentially". A defense-in-depth gap another layer already prevents is a hardening note, not a Discovery.
+4. Every citation must resolve: the ingest REJECTS a Discovery whose \`[file:line]\` doesn't exist, and a Discovery at an existing finding's location folds into its \`sources\` (no duplicate). Discoveries land as \`ultrasec-ai\` **open** candidates and are adjudicated like any other \u2014 an uncertain high-severity one stays needs-human downstream, never dropped \u2014 so ground every claim, then don't fear reporting it.
+
+Return (structured output): \`{ "discoveries": [{ "title", "category", "severity", "cwe", "message", "file", "line", "path" }] }\` \u2014 your ITEMS' regions only.
+${footer}`
+  };
+}
+function runbookMd(phases, runAbs, engineAbs, repoAbs) {
+  const status = phases.map((p) => `| ${p.name} | \`${p.worklist}\` | ${p.ready ? `ready (${p.items} item(s))` : "not ready"} | \`${p.prerequisite}\` |`).join("\n");
+  const engine = `node ${engineAbs}`;
+  const agents = (role) => join24(runAbs, "orchestration", "agents", `${role}.md`);
+  const frag = (name) => phaseSpec(name).fragmentFile(runAbs);
+  return `# ultrasec \u2014 sequential RUNBOOK (eco / no-subagent fallback)
+
+Run: \`${runAbs}\` \xB7 Repo: \`${repoAbs}\` \xB7 Engine: \`${engine}\`
+
+Generated by \`ultrasec orchestrate\` from the CURRENT run state. This sequential path is
+correctness-identical to the multi-agent workflows \u2014 same worklists, same contracts, same
+conservative folds; only wall-clock differs. Fan-out is an optimization, not a requirement.
+
+## Phase status
+
+| Phase | Worklist | Status | Produce it with |
+|---|---|---|---|
+${status}
+
+## The loop (play every role yourself, one item at a time)
+
+1. **Scan** (if not done): \`${engine} scan --repo ${repoAbs} --out ${runAbs}\` \u2192 \`${join24(runAbs, "findings.json")}\` (+ optionally prime \`${engine} context\`).
+2. **Investigate the attack surface** (discovery) \u2014 \`${engine} investigate --run ${runAbs}\` writes \`${join24(runAbs, "INVESTIGATE.todo.json")}\`. For EVERY region, apply \`${agents("hunter")}\` yourself; merge the grounded Discovery[] into \`${frag("investigate")}\`. Then ingest (citation-checked): \`${phaseSpec("investigate").applyHint(engineAbs, "", runAbs)}\`.
+3. **Adjudicate the open candidates** \u2014 the worklist is \`${join24(runAbs, "findings.json")}\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`${agents("analyzer")}\` yourself (\`${engine} dossier <id> --run ${runAbs}\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`${frag("adjudicate")}\`. Then fold, conservatively: \`${phaseSpec("adjudicate").applyHint(engineAbs, "", runAbs)}\`.
+4. **Verify adversarially** \u2014 \`${engine} verify --run ${runAbs}\` writes \`${join24(runAbs, "VERIFY.todo.json")}\` (the still-pending findings). For EVERY entry, apply \`${agents("skeptic")}\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`${frag("verify")}\`. Then: \`${phaseSpec("verify").applyHint(engineAbs, "", runAbs)}\`.
+5. **Revalidate against git history** \u2014 \`${engine} revalidate --run ${runAbs}\` writes \`${join24(runAbs, "REVALIDATE.todo.json")}\`. For EVERY entry, apply \`${agents("revalidator")}\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`${frag("revalidate")}\`. Then: \`${phaseSpec("revalidate").applyHint(engineAbs, "", runAbs)}\`.
+6. **Gate**: \`${engine} check --run ${runAbs} --semantic\` must exit 0 before presenting anything.
+7. **Render**: \`${engine} render --run ${runAbs}\` (optionally author the narrative first: \`${engine} narrative --run ${runAbs}\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
+
+With subagents available, prefer the emitted workflows instead: \`orchestrate --run ${runAbs} --phase <p>\` then \`Workflow({ scriptPath: "${join24(runAbs, "orchestration", "<p>.workflow.mjs")}" })\` \u2014 you stay the sole writer either way.
+`;
+}
+
+// src/orchestrate.ts
+var PHASES = ["adjudicate", "verify", "revalidate", "investigate"];
+var SMALL_WORKLIST = 3;
+var BATCH_SIZE = 8;
+function readIds(path, id) {
+  if (!existsSync14(path)) return null;
+  try {
+    const items = JSON.parse(readFileSync14(path, "utf8"));
+    if (!Array.isArray(items)) return null;
+    return items.map((i) => String(id(i)));
+  } catch {
+    return null;
+  }
+}
+function listPhases(runDir, engineAbs) {
+  const run = resolve20(runDir);
+  const findingsPath = join25(run, "findings.json");
+  const allIds = readIds(findingsPath, (f) => f.id);
+  let adjIds = [];
+  if (allIds !== null) {
+    try {
+      const findings = JSON.parse(readFileSync14(findingsPath, "utf8"));
+      adjIds = findings.filter((f) => f.status === "open").map((f) => f.id);
+    } catch {
+    }
+  }
+  const verPath = join25(run, "VERIFY.todo.json");
+  const verIds = readIds(verPath, (i) => i.id);
+  const revPath = join25(run, "REVALIDATE.todo.json");
+  const revIds = readIds(revPath, (i) => i.id);
+  const invPath = join25(run, "INVESTIGATE.todo.json");
+  const invIds = readIds(invPath, (r) => r.region);
+  return [
+    {
+      name: "adjudicate",
+      ready: allIds !== null,
+      worklist: findingsPath,
+      items: adjIds.length,
+      ids: adjIds,
+      prerequisite: `node ${engineAbs} scan --repo <repo> --out ${run}`
+    },
+    {
+      name: "verify",
+      ready: verIds !== null,
+      worklist: verPath,
+      items: verIds?.length ?? 0,
+      ids: verIds ?? [],
+      prerequisite: `node ${engineAbs} verify --run ${run}`
+    },
+    {
+      name: "revalidate",
+      ready: revIds !== null,
+      worklist: revPath,
+      items: revIds?.length ?? 0,
+      ids: revIds ?? [],
+      prerequisite: `node ${engineAbs} revalidate --run ${run}`
+    },
+    {
+      name: "investigate",
+      ready: invIds !== null,
+      worklist: invPath,
+      items: invIds?.length ?? 0,
+      ids: invIds ?? [],
+      prerequisite: `node ${engineAbs} investigate --run ${run}`
+    }
+  ];
+}
+function repoOf(run) {
+  try {
+    const m = JSON.parse(readFileSync14(join25(run, "manifest.json"), "utf8"));
+    if (typeof m.repo === "string" && m.repo) return m.repo;
+  } catch {
+  }
+  return "<repo>";
+}
+function orchestrateRun(runDir, engineAbs, opts = {}) {
+  const run = resolve20(runDir);
+  if (!existsSync14(run)) {
+    return { exitCode: 2, written: [], notices: [], errors: [`run dir not found: ${run}`], phases: [] };
+  }
+  const phases = listPhases(run, engineAbs);
+  let selected = phases.filter((p) => p.ready);
+  if (opts.phase !== void 0) {
+    const ph = phases.find((p) => p.name === opts.phase);
+    if (!ph) {
+      return {
+        exitCode: 2,
+        written: [],
+        notices: [],
+        errors: [`unknown phase "${opts.phase}" \u2014 expected one of: ${PHASES.join(", ")}.`],
+        phases
+      };
+    }
+    if (!ph.ready) {
+      return {
+        exitCode: 2,
+        written: [],
+        notices: [],
+        errors: [`phase "${ph.name}" is not ready \u2014 its worklist ${ph.worklist} does not exist yet. Produce it first: ${ph.prerequisite}`],
+        phases
+      };
+    }
+    selected = [ph];
+  }
+  const repoAbs = repoOf(run);
+  const orchDir = join25(run, "orchestration");
+  const agentsDir = join25(orchDir, "agents");
+  mkdirSync7(join25(orchDir, "out"), { recursive: true });
+  mkdirSync7(agentsDir, { recursive: true });
+  const written = [];
+  const notices = [];
+  for (const [name, content] of Object.entries(agentContracts(run, engineAbs, repoAbs))) {
+    const p = join25(agentsDir, `${name}.md`);
+    writeFileSync9(p, content);
+    written.push(p);
+  }
+  if (!opts.eco) {
+    for (const ph of selected) {
+      if (ph.items === 0) {
+        notices.push(`phase "${ph.name}": worklist is empty \u2014 nothing to orchestrate.`);
+        continue;
+      }
+      if (ph.items <= SMALL_WORKLIST) {
+        notices.push(`phase "${ph.name}": only ${ph.items} item(s) \u2014 the sequential --eco path is equivalent and cheaper.`);
+      }
+      const p = join25(orchDir, `${ph.name}.workflow.mjs`);
+      writeFileSync9(p, phaseWorkflowScript(ph, run, engineAbs, BATCH_SIZE));
+      written.push(p);
+    }
+  }
+  const rb = join25(orchDir, "RUNBOOK.md");
+  writeFileSync9(rb, runbookMd(phases, run, engineAbs, repoAbs));
+  written.push(rb);
+  return { exitCode: 0, written, notices, errors: [], phases };
+}
+
+// src/commands/orchestrate.ts
+function runOrchestrate(args) {
+  const runFlag = flagStr(args, "run");
+  if (!runFlag) {
+    eprintln("ultrasec orchestrate: --run <dir> is required (the run dir holding the audit dossier + worklists).");
+    return 2;
+  }
+  const engineAbs = realpathSync2(fileURLToPath(import.meta.url));
+  if (flagBool(args, "list")) {
+    if (!existsSync15(runFlag)) {
+      eprintln(`ultrasec orchestrate: run dir not found: ${runFlag}.`);
+      return 2;
+    }
+    println(JSON.stringify({ phases: listPhases(runFlag, engineAbs) }, null, 2));
+    return 0;
+  }
+  const res = orchestrateRun(runFlag, engineAbs, {
+    phase: flagStr(args, "phase"),
+    eco: flagBool(args, "eco")
+  });
+  if (res.exitCode !== 0) {
+    for (const e of res.errors) eprintln(`ultrasec orchestrate: ${e}`);
+    return res.exitCode;
+  }
+  println("ultrasec orchestrate: generated");
+  for (const w of res.written) println(`  ${w}`);
+  for (const n of res.notices) eprintln(`ultrasec orchestrate: note \u2014 ${n}`);
+  const workflows = res.written.filter((w) => w.endsWith(".workflow.mjs"));
+  if (workflows.length) {
+    println("");
+    for (const w of workflows) println(`Launch: Workflow({ scriptPath: ${JSON.stringify(w)} })`);
+    println("Then merge the returned fragments into one apply file and run the `--apply` fold shown at the end of each workflow (you stay the sole writer).");
+  } else {
+    println(`Follow ${join26(runFlag, "orchestration", "RUNBOOK.md")} sequentially (the eco path).`);
+  }
+  if (flagStr(args, "phase") === void 0 && workflows.length === 0 && !flagBool(args, "eco")) {
+    eprintln(`ultrasec orchestrate: no ready phase \u2014 phases are ${PHASES.join(", ")} (see --list).`);
+  }
+  return 0;
+}
+
 // src/cli.ts
 var HELP = `ultrasec ${VERSION} \u2014 cross-file security audit (taint + AI + tool orchestration)
 
@@ -5942,6 +6401,14 @@ COMMANDS
              --cross-check <cli> escalates high/critical verify/revalidate
              disagreement to needs-human. Flags: --repo \xB7 --out \xB7 --powered \xB7
              --agent <name|tpl> \xB7 --cross-check <name|tpl> \xB7 --stages \xB7 --no-scan.
+  orchestrate Emit the run's multi-agent orchestration from its CURRENT worklists
+             into <run>/orchestration/: one <phase>.workflow.mjs per ready phase
+             (adjudicate | verify | revalidate | investigate, real ids batched
+             8/agent), the dispatch contracts (agents/<role>.md) and a sequential
+             RUNBOOK.md fallback. Subagents RETURN verdict/discovery fragments;
+             every conservative --apply fold stays with you (one writer).
+             Flags: --run \xB7 --phase <name> \xB7 --eco (runbook + contracts only) \xB7
+             --list (phase status as JSON).
 
 GLOBAL
   --help, -h     Show this help.
@@ -5968,7 +6435,8 @@ var COMMAND_HANDLERS = {
   check: runCheck,
   render: runRender,
   clean: runClean,
-  run: runRun
+  run: runRun,
+  orchestrate: runOrchestrate
 };
 async function dispatch(cmd, args) {
   if (cmd === void 0 || cmd === "help") {
@@ -6004,7 +6472,7 @@ function isEntrypoint() {
   const argv1 = process.argv[1];
   if (!argv1) return false;
   try {
-    return import.meta.url === pathToFileURL(realpathSync2(argv1)).href;
+    return import.meta.url === pathToFileURL(realpathSync3(argv1)).href;
   } catch {
     return false;
   }

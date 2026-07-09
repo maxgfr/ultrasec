@@ -20,6 +20,7 @@ import { runCheck } from "./commands/check.js";
 import { runRender } from "./commands/render.js";
 import { runClean } from "./commands/clean.js";
 import { runRun } from "./commands/run.js";
+import { runOrchestrate } from "./commands/orchestrate.js";
 
 export const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
 
@@ -92,6 +93,14 @@ COMMANDS
              --cross-check <cli> escalates high/critical verify/revalidate
              disagreement to needs-human. Flags: --repo · --out · --powered ·
              --agent <name|tpl> · --cross-check <name|tpl> · --stages · --no-scan.
+  orchestrate Emit the run's multi-agent orchestration from its CURRENT worklists
+             into <run>/orchestration/: one <phase>.workflow.mjs per ready phase
+             (adjudicate | verify | revalidate | investigate, real ids batched
+             8/agent), the dispatch contracts (agents/<role>.md) and a sequential
+             RUNBOOK.md fallback. Subagents RETURN verdict/discovery fragments;
+             every conservative --apply fold stays with you (one writer).
+             Flags: --run · --phase <name> · --eco (runbook + contracts only) ·
+             --list (phase status as JSON).
 
 GLOBAL
   --help, -h     Show this help.
@@ -124,6 +133,7 @@ export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   render: runRender,
   clean: runClean,
   run: runRun,
+  orchestrate: runOrchestrate,
 };
 
 export async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<number> {
