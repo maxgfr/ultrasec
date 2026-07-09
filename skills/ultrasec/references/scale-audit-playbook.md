@@ -79,8 +79,12 @@ in the manifest.)
 ## Fan-out (optional, same as deep-audit)
 
 With a subagent harness, run step 3–4 per target in parallel: one analyzer subagent
-per scoped target, one skeptic per `verify --shards N --shard i` slice, all merging
-into the **same** `--out` run. Without subagents, the identical commands run in a
+per scoped target. Subagents stay READ-ONLY (`dossier`, `graph`, `paths`, `tools`)
+and return verdict fragments — YOU, the orchestrator, are the sole writer and run
+every `--apply` fold yourself. For the verify pass, `orchestrate --run <run>
+--phase verify` batches the ids of the ONE emitted `VERIFY.todo.json` into skeptic
+subagents (never have a subagent run `verify --shards` — each shard invocation
+WRITES into the run dir). Without subagents, the identical commands run in a
 sequential loop — same artifacts, only wall-clock differs.
 
 > Per-run emission: `ultrasec orchestrate --run <run>` EMITS the adjudicate/verify/

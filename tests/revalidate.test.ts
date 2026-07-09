@@ -97,6 +97,16 @@ describe("applyRevalidations — conservative policy", () => {
     expect(r.applied).toBe(0);
   });
 
+  it("reports stale ids — unknown or out-of-scope — as ignored, never silently dropped", () => {
+    const r = applyRevalidations(dossier([finding("a", "high", "confirmed"), finding("z", "low", "dismissed")]), [
+      { id: "a", verdict: "still-valid" },
+      { id: "ghost", verdict: "fixed" },
+      { id: "z", verdict: "fixed" }, // dismissed → no longer in the revalidate worklist
+    ]);
+    expect(r.applied).toBe(1);
+    expect(r.ignored).toEqual(["ghost", "z"]);
+  });
+
   it("drift guard: still-valid on a gone location is KEPT but flagged", () => {
     const r = applyRevalidations(dossier([finding("a", "high", "confirmed")]), [{ id: "a", verdict: "still-valid" }], { unresolved: new Set(["a"]) });
     expect(r.findings[0]!.status).toBe("confirmed"); // kept
@@ -146,5 +156,23 @@ describe("parseRevalidations", () => {
       { id: "a", verdict: "fixed", fixedIn: "sha1", note: undefined },
     ]);
     expect(parseRevalidations('{"revalidations":[{"id":"c","verdict":"still-valid"}]}')[0]!.id).toBe("c");
+  });
+
+  it("accepts the {verdicts:[...]} shape the orchestrate REVALIDATE_SCHEMA emits", () => {
+    expect(parseRevalidations('{"verdicts":[{"id":"c","verdict":"fixed","fixedIn":"sha9","note":"n"}]}')).toEqual([
+      { id: "c", verdict: "fixed", fixedIn: "sha9", note: "n" },
+    ]);
+  });
+
+  it("fails closed on an unrecognized container shape instead of yielding 0 rows", () => {
+    expect(() => parseRevalidations('{"pairs":[{"id":"a","verdict":"fixed"}]}')).toThrow(/expected a JSON array/i);
+  });
+
+  it("fails closed when rows exist but none are usable", () => {
+    expect(() => parseRevalidations('[{"id":"a","verdict":"bogus"},{"noid":1}]')).toThrow(/none usable/i);
+  });
+
+  it("still accepts a genuinely empty array (a no-op fragment)", () => {
+    expect(parseRevalidations("[]")).toEqual([]);
   });
 });

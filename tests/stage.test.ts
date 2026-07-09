@@ -45,6 +45,18 @@ describe("collectApplyFiles — apply-file resolution", () => {
     expect(files).toEqual([join(dir, "shard.verdict.0.json"), join(dir, "shard.verdict.1.json")]);
   });
 
+  it("returns directory matches in sorted order (deterministic fold, whatever readdir yields)", () => {
+    const dir = tmp();
+    for (const n of ["c.verdicts.json", "a.verdicts.json", "b.verdicts.json"]) writeFileSync(join(dir, n), "[]");
+    expect(collectApplyFiles(dir, /verdict.*\.json$/i)).toEqual([join(dir, "a.verdicts.json"), join(dir, "b.verdicts.json"), join(dir, "c.verdicts.json")]);
+  });
+
+  it("fails closed when a directory contains no matching apply file", () => {
+    const dir = tmp();
+    writeFileSync(join(dir, "notes.txt"), "not an apply file");
+    expect(() => collectApplyFiles(dir, /verdict.*\.json$/i)).toThrow(/no apply file matching/i);
+  });
+
   it("treats a single non-directory path as one file", () => {
     const f = join(tmp(), "one.json");
     writeFileSync(f, "[]");

@@ -13,7 +13,7 @@ conservative folds; only wall-clock differs. Fan-out is an optimization, not a r
 
 | Phase | Worklist | Status | Produce it with |
 |---|---|---|---|
-| adjudicate | \`<RUN>/findings.json\` | ready (1 item(s)) | \`node <ENGINE> scan --repo <repo> --out <RUN>\` |
+| adjudicate | \`<RUN>/findings.json\` | ready (1 item(s)) | \`node <ENGINE> scan --repo <REPO> --out <RUN>\` |
 | verify | \`<RUN>/VERIFY.todo.json\` | ready (2 item(s)) | \`node <ENGINE> verify --run <RUN>\` |
 | revalidate | \`<RUN>/REVALIDATE.todo.json\` | ready (2 item(s)) | \`node <ENGINE> revalidate --run <RUN>\` |
 | investigate | \`<RUN>/INVESTIGATE.todo.json\` | ready (1 item(s)) | \`node <ENGINE> investigate --run <RUN>\` |
@@ -21,10 +21,10 @@ conservative folds; only wall-clock differs. Fan-out is an optimization, not a r
 ## The loop (play every role yourself, one item at a time)
 
 1. **Scan** (if not done): \`node <ENGINE> scan --repo <REPO> --out <RUN>\` → \`<RUN>/findings.json\` (+ optionally prime \`node <ENGINE> context\`).
-2. **Investigate the attack surface** (discovery) — \`node <ENGINE> investigate --run <RUN>\` writes \`<RUN>/INVESTIGATE.todo.json\`. For EVERY region, apply \`<RUN>/orchestration/agents/hunter.md\` yourself; merge the grounded Discovery[] into \`<RUN>/orchestration/out/INVESTIGATE.json\`. Then ingest (citation-checked): \`node <ENGINE> investigate --apply <RUN>/orchestration/out/INVESTIGATE.json --run <RUN>\`.
-3. **Adjudicate the open candidates** — the worklist is \`<RUN>/findings.json\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`<RUN>/orchestration/agents/analyzer.md\` yourself (\`node <ENGINE> dossier <id> --run <RUN>\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`<RUN>/orchestration/out/adjudicate.verdicts.json\`. Then fold, conservatively: \`node <ENGINE> verify --apply <RUN>/orchestration/out/adjudicate.verdicts.json --run <RUN>\`.
-4. **Verify adversarially** — \`node <ENGINE> verify --run <RUN>\` writes \`<RUN>/VERIFY.todo.json\` (the still-pending findings). For EVERY entry, apply \`<RUN>/orchestration/agents/skeptic.md\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`<RUN>/orchestration/out/verify.verdicts.json\`. Then: \`node <ENGINE> verify --apply <RUN>/orchestration/out/verify.verdicts.json --run <RUN>\`.
-5. **Revalidate against git history** — \`node <ENGINE> revalidate --run <RUN>\` writes \`<RUN>/REVALIDATE.todo.json\`. For EVERY entry, apply \`<RUN>/orchestration/agents/revalidator.md\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`<RUN>/orchestration/out/REVALIDATE.json\`. Then: \`node <ENGINE> revalidate --apply <RUN>/orchestration/out/REVALIDATE.json --run <RUN>\`.
+2. **Investigate the attack surface** (discovery) — \`node <ENGINE> investigate --run <RUN>\` writes \`<RUN>/INVESTIGATE.todo.json\`. For EVERY region, apply \`<RUN>/orchestration/agents/hunter.md\` yourself; merge the grounded Discovery[] into \`<RUN>/orchestration/out/investigate/INVESTIGATE.json\`. Then ingest (citation-checked): \`node <ENGINE> investigate --apply <RUN>/orchestration/out/investigate/INVESTIGATE.json --run <RUN>\`.
+3. **Adjudicate the open candidates** — the worklist is \`<RUN>/findings.json\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`<RUN>/orchestration/agents/analyzer.md\` yourself (\`node <ENGINE> dossier <id> --run <RUN>\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`<RUN>/orchestration/out/adjudicate/verdicts.json\`. Then fold, conservatively: \`node <ENGINE> verify --apply <RUN>/orchestration/out/adjudicate/verdicts.json --run <RUN>\`.
+4. **Verify adversarially** — \`node <ENGINE> verify --run <RUN>\` writes \`<RUN>/VERIFY.todo.json\` (the still-pending findings). For EVERY entry, apply \`<RUN>/orchestration/agents/skeptic.md\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`<RUN>/orchestration/out/verify/verdicts.json\`. Then: \`node <ENGINE> verify --apply <RUN>/orchestration/out/verify/verdicts.json --run <RUN>\`.
+5. **Revalidate against git history** — \`node <ENGINE> revalidate --run <RUN>\` writes \`<RUN>/REVALIDATE.todo.json\`. For EVERY entry, apply \`<RUN>/orchestration/agents/revalidator.md\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`<RUN>/orchestration/out/revalidate/REVALIDATE.json\`. Then: \`node <ENGINE> revalidate --apply <RUN>/orchestration/out/revalidate/REVALIDATE.json --run <RUN>\`.
 6. **Gate**: \`node <ENGINE> check --run <RUN> --semantic\` must exit 0 before presenting anything.
 7. **Render**: \`node <ENGINE> render --run <RUN>\` (optionally author the narrative first: \`node <ENGINE> narrative --run <RUN>\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
 
@@ -61,8 +61,8 @@ const results = await pipeline(BATCHES, (batch, _item, i) =>
   agent(contract('analyzer', 'ITEMS=' + batch.join(',')), { label: 'adjudicate:' + (i + 1), phase: "Adjudicate", agentType: 'general-purpose', schema: SCHEMA }))
 
 // One-writer rule: this workflow only COLLECTS verdicts fragments. The main agent merges
-// the returned \`verdicts\` arrays into <RUN>/orchestration/out/adjudicate.verdicts.json, then runs the conservative fold:
-//   node <ENGINE> verify --apply <RUN>/orchestration/out/adjudicate.verdicts.json --run <RUN>
+// the returned \`verdicts\` arrays into <RUN>/orchestration/out/adjudicate/verdicts.json, then runs the conservative fold:
+//   node <ENGINE> verify --apply <RUN>/orchestration/out/adjudicate/verdicts.json --run <RUN>
 return { phase: "adjudicate", worklist: WORKLIST, results: results.filter(Boolean) }
 "
 `;
@@ -72,7 +72,7 @@ exports[`orchestrate — contracts & runbook > golden shape (paths normalized) >
 
 You are an adversarial skeptic verifying the pending findings of an ultrasec audit. Assume each claim is wrong until the source proves it — try to REFUTE it.
 
-Worklist: \`<RUN>/VERIFY.todo.json\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`<REPO>\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,…>\`).
+Worklist: \`<RUN>/VERIFY.todo.json\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`<REPO>\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,…>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 

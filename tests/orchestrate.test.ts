@@ -1,10 +1,11 @@
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { Script } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { dispatch } from "../src/cli.js";
-import { BATCH_SIZE, PHASES, SMALL_WORKLIST, listPhases, orchestrateRun } from "../src/orchestrate.js";
+import { BATCH_SIZE, PHASES, SMALL_WORKLIST, listPhases, orchestrateRun, type PhaseInfo } from "../src/orchestrate.js";
+import { phaseWorkflowScript } from "../src/orchestrate-templates.js";
 import type { Finding } from "../src/types.js";
 import type { VerifyItem } from "../src/verify.js";
 import { parseArgs } from "../src/util.js";
@@ -393,5 +394,197 @@ describe("orchestrate — CLI wiring", () => {
 
   it("orchestrate --run <missing dir> exits 2", async () => {
     expect(await engine("orchestrate", "--run", join(tmpdir(), "usec-does-not-exist-xyz"))).toBe(2);
+  });
+});
+
+/** Run an engine command in-process capturing stdout (stderr silenced). */
+async function engineCaptured(...argv: string[]): Promise<{ code: number; out: string }> {
+  let printed = "";
+  const out = vi.spyOn(process.stdout, "write").mockImplementation((c: unknown) => {
+    printed += String(c);
+    return true;
+  });
+  const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  try {
+    return { code: await dispatch(argv[0], parseArgs(argv)), out: printed };
+  } finally {
+    out.mockRestore();
+    err.mockRestore();
+  }
+}
+
+/** The fold step exactly as the emitted workflow dictates: the fragment path +
+ *  container key from `const SCHEMA`, the batched ids, and the `--apply` command
+ *  printed in the workflow's one-writer comment. */
+function emittedFold(run: string, phase: string): { argv: string[]; fragment: string; key: string; batches: string[][] } {
+  const src = readWf(run, phase);
+  const cmd = src.match(/^\/\/ {3}node \S+ (.+)$/m);
+  expect(cmd, `no fold command comment in ${phase}.workflow.mjs`).not.toBeNull();
+  const argv = cmd![1]!.split(" ");
+  const fragment = argv[argv.indexOf("--apply") + 1]!;
+  const schema = JSON.parse(src.match(/^const SCHEMA = (.+)$/m)![1]!) as { required: string[] };
+  const batches = JSON.parse(src.match(/const BATCHES = (\[.*?\])\n/s)![1]!) as string[][];
+  return { argv, fragment, key: schema.required[0]!, batches };
+}
+
+// The bug class these lock out: an emitted contract promises one fragment shape,
+// the `--apply` parser accepts another, and the fold silently applies 0 rows with
+// exit 0. Each phase builds its fragment EXACTLY as the emitted workflow dictates,
+// runs the REAL --apply, and asserts a non-zero effect on findings.json.
+describe("orchestrate — emitted fragments fold back through the real --apply (per phase)", () => {
+  it("adjudicate: a schema-shaped {verdicts:[...]} fragment confirms the open candidate", async () => {
+    const run = await makeRun({ scan: true });
+    expect(orchestrateRun(run, ENGINE, { phase: "adjudicate" }).exitCode).toBe(0);
+    const { argv, fragment, key, batches } = emittedFold(run, "adjudicate");
+    const id = batches[0]![0]!;
+    writeFileSync(fragment, JSON.stringify({ [key]: [{ id, verdict: "supported", note: "t [src/server.js:9]", exploitPath: "GET /x?q=;id" }] }));
+    expect(await engine(...argv)).toBe(0);
+    expect(findings(run).find((f) => f.id === id)!.status).toBe("confirmed");
+  });
+
+  it("verify: a schema-shaped {verdicts:[...]} fragment folds a refutation", async () => {
+    const run = await makeRun({ scan: true, confirm: "some", verify: true });
+    expect(orchestrateRun(run, ENGINE, { phase: "verify" }).exitCode).toBe(0);
+    const { argv, fragment, key, batches } = emittedFold(run, "verify");
+    const id = batches[0]![0]!;
+    writeFileSync(fragment, JSON.stringify({ [key]: [{ id, verdict: "refuted", note: "guard at [src/server.js:1]" }] }));
+    expect(await engine(...argv)).toBe(0);
+    expect(findings(run).find((f) => f.id === id)!.status).toBe("dismissed");
+  });
+
+  it("revalidate: a schema-shaped {verdicts:[...]} fragment dismisses a fixed finding (the loop can close)", async () => {
+    const run = await makeRun({ scan: true, confirm: "some", revalidate: true });
+    expect(orchestrateRun(run, ENGINE, { phase: "revalidate" }).exitCode).toBe(0);
+    const { argv, fragment, key, batches } = emittedFold(run, "revalidate");
+    const id = batches[0]![0]!;
+    writeFileSync(fragment, JSON.stringify({ [key]: [{ id, verdict: "fixed", fixedIn: "deadbeef", note: "rewritten at HEAD" }] }));
+    expect(await engine(...argv)).toBe(0);
+    const f = findings(run).find((x) => x.id === id)!;
+    expect(f.status).toBe("dismissed");
+    expect(f.fixedIn).toBe("deadbeef");
+  });
+
+  it("investigate: a schema-shaped {discoveries:[...]} fragment ingests an ultrasec-ai candidate", async () => {
+    const run = await makeRun({ scan: true, investigate: true });
+    expect(orchestrateRun(run, ENGINE, { phase: "investigate" }).exitCode).toBe(0);
+    const { argv, fragment, key } = emittedFold(run, "investigate");
+    const disc = {
+      title: "Fold-integration authz gap",
+      category: "authz",
+      severity: "medium",
+      message: "handler lacks an authorization check",
+      file: "src/server.js",
+      line: 5,
+    };
+    writeFileSync(fragment, JSON.stringify({ [key]: [disc] }));
+    expect(await engine(...argv)).toBe(0);
+    expect(findings(run).some((f) => f.tool === "ultrasec-ai" && f.title === disc.title)).toBe(true);
+  });
+
+  it("adjudicate and verify fragments live in distinct per-phase dirs (no cross-phase pickup)", async () => {
+    const run = await fullRun();
+    orchestrateRun(run, ENGINE);
+    const adj = emittedFold(run, "adjudicate").fragment;
+    const ver = emittedFold(run, "verify").fragment;
+    expect(dirname(adj)).not.toBe(dirname(ver));
+    expect(adj).toContain(join("orchestration", "out", "adjudicate"));
+    expect(ver).toContain(join("orchestration", "out", "verify"));
+  });
+
+  it("emission creates every per-phase fragment dir under orchestration/out/", async () => {
+    const run = await makeRun({ scan: true });
+    orchestrateRun(run, ENGINE);
+    for (const phase of PHASES) expect(existsSync(join(run, "orchestration", "out", phase))).toBe(true);
+  });
+});
+
+describe("orchestrate — apply fail-closed & stale ids", () => {
+  it("verify --apply exits non-zero when rows exist but none are usable", async () => {
+    const run = await makeRun({ scan: true });
+    const p = join(run, "bad.verdicts.json");
+    writeFileSync(p, JSON.stringify([{ id: "x", verdict: "NOT-A-VERDICT" }]));
+    expect(await engine("verify", "--apply", p, "--run", run)).toBe(2);
+  });
+
+  it("revalidate --apply exits non-zero when rows exist but none are usable", async () => {
+    const run = await makeRun({ scan: true, confirm: "some" });
+    const p = join(run, "bad.REVALIDATE.json");
+    writeFileSync(p, JSON.stringify([{ id: "x", verdict: "bogus" }]));
+    expect(await engine("revalidate", "--apply", p, "--run", run, "--repo", REPO)).toBe(2);
+  });
+
+  it("verify --apply on a directory with no matching fragment exits non-zero", async () => {
+    const run = await makeRun({ scan: true });
+    const empty = mkdtempSync(join(tmpdir(), "usec-empty-"));
+    expect(await engine("verify", "--apply", empty, "--run", run)).toBe(2);
+  });
+
+  it("verify --apply exits non-zero when EVERY verdict targets an unknown id (stale fragment)", async () => {
+    const run = await makeRun({ scan: true });
+    const before = JSON.stringify(findings(run));
+    const p = join(run, "stale.verdicts.json");
+    writeFileSync(p, JSON.stringify({ verdicts: [{ id: "ghost1", verdict: "refuted", note: "t" }] }));
+    expect(await engine("verify", "--apply", p, "--run", run)).toBe(2);
+    expect(JSON.stringify(findings(run))).toBe(before); // nothing folded
+  });
+
+  it("verify --apply folds known ids and REPORTS the stale ones", async () => {
+    const run = await makeRun({ scan: true });
+    const id = findings(run).find((f) => f.status === "open")!.id;
+    const p = join(run, "mixed.verdicts.json");
+    writeFileSync(
+      p,
+      JSON.stringify({
+        verdicts: [
+          { id, verdict: "supported", note: "t", exploitPath: "GET /x" },
+          { id: "ghost1", verdict: "refuted", note: "t" },
+        ],
+      }),
+    );
+    const r = await engineCaptured("verify", "--apply", p, "--run", run);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("1 verdict(s) ignored (unknown id)");
+    expect(findings(run).find((f) => f.id === id)!.status).toBe("confirmed");
+  });
+
+  it("revalidate --apply exits non-zero when EVERY verdict targets an unknown id", async () => {
+    const run = await makeRun({ scan: true, confirm: "some" });
+    const p = join(run, "stale.REVALIDATE.json");
+    writeFileSync(p, JSON.stringify({ verdicts: [{ id: "ghost1", verdict: "fixed", note: "t" }] }));
+    expect(await engine("revalidate", "--apply", p, "--run", run, "--repo", REPO)).toBe(2);
+  });
+
+  it("investigate --apply of an empty {discoveries:[]} fragment stays a legitimate no-op", async () => {
+    const run = await makeRun({ scan: true });
+    const p = join(run, "empty.INVESTIGATE.json");
+    writeFileSync(p, JSON.stringify({ discoveries: [] }));
+    expect(await engine("investigate", "--apply", p, "--run", run, "--repo", REPO)).toBe(0);
+  });
+});
+
+describe("orchestrate — emission hardening", () => {
+  it("a run path containing a newline cannot break the emitted script (comment interpolations are sanitized)", () => {
+    const evilRun = join(tmpdir(), "evil\nrun");
+    const ph: PhaseInfo = { name: "verify", ready: true, worklist: join(evilRun, "VERIFY.todo.json"), items: 1, ids: ["x1"], prerequisite: "" };
+    const src = phaseWorkflowScript(ph, evilRun, join(tmpdir(), "engine.mjs"), 8);
+    const [, ...body] = src.split("\n");
+    expect(() => new Script(`(async () => {\n${body.join("\n")}\n})`)).not.toThrow();
+  });
+
+  it("adjudicate's prerequisite names the manifest's repo once known (placeholder only pre-scan)", async () => {
+    const empty = await makeRun();
+    expect(listPhases(empty, ENGINE)[0]!.prerequisite).toContain("--repo <repo>");
+    const run = await makeRun({ scan: true });
+    const pre = listPhases(run, ENGINE)[0]!.prerequisite;
+    expect(pre).toContain(`--repo ${REPO}`);
+    expect(pre).not.toContain("<repo>");
+  });
+
+  it("every contract says what to do with a stale ITEMS id (skip it, note it)", async () => {
+    const run = await fullRun();
+    orchestrateRun(run, ENGINE);
+    for (const role of ["analyzer", "skeptic", "revalidator", "hunter"]) {
+      expect(readFileSync(join(run, "orchestration", "agents", `${role}.md`), "utf8")).toMatch(/no longer in the worklist/);
+    }
   });
 });

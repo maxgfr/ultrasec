@@ -89,7 +89,8 @@ export function listPhases(runDir: string, engineAbs: string): PhaseInfo[] {
       worklist: findingsPath,
       items: adjIds.length,
       ids: adjIds,
-      prerequisite: `node ${engineAbs} scan --repo <repo> --out ${run}`,
+      // The manifest knows the audited repo once a scan ran; placeholder pre-scan.
+      prerequisite: `node ${engineAbs} scan --repo ${repoOf(run)} --out ${run}`,
     },
     {
       name: "verify",
@@ -178,7 +179,10 @@ export function orchestrateRun(runDir: string, engineAbs: string, opts: Orchestr
   const repoAbs = repoOf(run);
   const orchDir = join(run, "orchestration");
   const agentsDir = join(orchDir, "agents");
-  mkdirSync(join(orchDir, "out"), { recursive: true });
+  // One fragment dir per phase: `verify --apply` serves both adjudicate and
+  // verify, so fragments must not share a flat out/ a directory apply could
+  // cross-pick from. The runbook cites every phase's path — create them all.
+  for (const p of PHASES) mkdirSync(join(orchDir, "out", p), { recursive: true });
   mkdirSync(agentsDir, { recursive: true });
 
   const written: string[] = [];

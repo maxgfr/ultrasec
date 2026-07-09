@@ -113,6 +113,8 @@ export interface ApplyResult {
   needsHuman: number;
   /** Conservative overrides: unsupported/partial high-severity kept for a human. */
   keptForHuman: { id: string; verdict: Verdict; severity: string }[];
+  /** Stale verdicts: ids that resolve to no finding (sorted) — reported, never silently dropped. */
+  ignored: string[];
 }
 
 /** Critical/high — the tier the conservative policy refuses to auto-dismiss on
@@ -142,6 +144,8 @@ export function nextStatus(verdict: Verdict, severity: string): Status {
 export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): ApplyResult {
   const byId = new Map<string, VerdictInput>();
   for (const v of verdicts) byId.set(v.id, v); // last-wins on dupes
+  const known = new Set(dossier.findings.map((f) => f.id));
+  const ignored = [...byId.keys()].filter((id) => !known.has(id)).sort(byStr);
 
   let confirmed = 0,
     dismissed = 0,
@@ -169,14 +173,24 @@ export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): Apply
     return next;
   });
 
-  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman };
+  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored };
 }
 
-/** Parse a verdicts file body: a JSON array, or {verdicts:[...]}, tolerant. */
+/**
+ * Parse a verdicts file body: a JSON array or {verdicts:[...]} (the shape the
+ * orchestrate-emitted contracts return). FAIL-CLOSED: an unrecognized container
+ * shape, or rows that all get dropped, throws instead of yielding 0 rows — a
+ * fold that silently applies nothing is exactly the bug the gate exists to stop.
+ */
 export function parseVerdicts(raw: string): VerdictInput[] {
   const data = JSON.parse(raw) as unknown;
-  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.verdicts) ? (data as any).verdicts : [];
-  return (arr as any[])
+  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.verdicts) ? (data as any).verdicts : null;
+  if (arr === null) throw new Error(`unrecognized verdicts shape — expected a JSON array or {"verdicts":[...]} (fail-closed)`);
+  const out = (arr as any[])
     .filter((v) => v && typeof v.id === "string" && (VERDICTS as readonly string[]).includes(v.verdict))
     .map((v) => ({ id: v.id, verdict: v.verdict as Verdict, note: v.note, exploitPath: v.exploitPath }));
+  if (arr.length > 0 && out.length === 0) {
+    throw new Error(`${arr.length} row(s), none usable — each needs a string "id" and a "verdict" among ${VERDICTS.join("|")} (fail-closed)`);
+  }
+  return out;
 }

@@ -136,6 +136,9 @@ export interface ApplyRevalResult {
   needsHuman: number;
   /** Drift guards + escalations the human should re-check. */
   flagged: { id: string; reason: string }[];
+  /** Stale verdicts: ids not in the revalidation scope (unknown, or no longer
+   *  confirmed/needs-human), sorted — reported, never silently dropped. */
+  ignored: string[];
 }
 
 export interface ApplyRevalOptions {
@@ -154,6 +157,8 @@ export interface ApplyRevalOptions {
 export function applyRevalidations(dossier: Dossier, inputs: RevalidationInput[], opts: ApplyRevalOptions = {}): ApplyRevalResult {
   const byId = new Map<string, RevalidationInput>();
   for (const v of inputs) byId.set(v.id, v); // last-wins on dupes
+  const inScopeIds = new Set(dossier.findings.filter(inScope).map((f) => f.id));
+  const ignored = [...byId.keys()].filter((id) => !inScopeIds.has(id)).sort(byStr);
   const unresolved = opts.unresolved ?? new Set<string>();
   const fixedInById = opts.fixedInById ?? new Map<string, string>();
 
@@ -213,14 +218,27 @@ export function applyRevalidations(dossier: Dossier, inputs: RevalidationInput[]
     }
   });
 
-  return { findings, applied, stillValid, fixed, dismissed, needsHuman, flagged };
+  return { findings, applied, stillValid, fixed, dismissed, needsHuman, flagged, ignored };
 }
 
-/** Parse a REVALIDATE.json body: a JSON array or {revalidations:[...]}, tolerant. */
+/**
+ * Parse a REVALIDATE.json body: a JSON array, {revalidations:[...]}, or
+ * {verdicts:[...]} — the shape the orchestrate-emitted REVALIDATE_SCHEMA and
+ * revalidator contract return. FAIL-CLOSED: an unrecognized container shape, or
+ * rows that all get dropped, throws instead of yielding 0 rows — otherwise the
+ * false-positive cut silently never happens ("applied 0", exit 0).
+ */
 export function parseRevalidations(raw: string): RevalidationInput[] {
   const data = JSON.parse(raw) as unknown;
-  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.revalidations) ? (data as any).revalidations : [];
-  return (arr as any[])
+  const arr = Array.isArray(data)
+    ? data
+    : Array.isArray((data as any)?.revalidations)
+      ? (data as any).revalidations
+      : Array.isArray((data as any)?.verdicts)
+        ? (data as any).verdicts
+        : null;
+  if (arr === null) throw new Error(`unrecognized revalidations shape — expected a JSON array, {"verdicts":[...]} or {"revalidations":[...]} (fail-closed)`);
+  const out = (arr as any[])
     .filter((v) => v && typeof v.id === "string" && (REVALIDATION_VERDICTS as readonly string[]).includes(v.verdict))
     .map((v) => ({
       id: v.id as string,
@@ -228,6 +246,10 @@ export function parseRevalidations(raw: string): RevalidationInput[] {
       fixedIn: typeof v.fixedIn === "string" ? v.fixedIn : undefined,
       note: typeof v.note === "string" ? v.note : undefined,
     }));
+  if (arr.length > 0 && out.length === 0) {
+    throw new Error(`${arr.length} row(s), none usable — each needs a string "id" and a "verdict" among ${REVALIDATION_VERDICTS.join("|")} (fail-closed)`);
+  }
+  return out;
 }
 
 /** Derive the apply-time git-fact helpers (drift set + inferred fixing commits)

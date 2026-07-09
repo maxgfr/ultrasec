@@ -107,38 +107,43 @@ interface PhaseSpec {
   fragmentFile: (runAbs: string) => string;
 }
 
+// Each phase's merged fragment lives in its OWN out/<phase>/ dir: `verify --apply`
+// serves two phases (adjudicate + verify), so a shared flat out/ would let a
+// directory apply pick up the OTHER phase's fragments (readdir + a loose regex).
 const PHASE_SPECS: Record<string, PhaseSpec> = {
   adjudicate: {
     role: "analyzer",
     title: "Adjudicate",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adjudicate the ${n} open candidate(s) of an ultrasec audit from dossier evidence (analyzer fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join(run, "orchestration", "out", "adjudicate.verdicts.json")} --run ${run}`,
-    fragmentFile: (run) => join(run, "orchestration", "out", "adjudicate.verdicts.json"),
+    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join(run, "orchestration", "out", "adjudicate", "verdicts.json")} --run ${run}`,
+    fragmentFile: (run) => join(run, "orchestration", "out", "adjudicate", "verdicts.json"),
   },
   verify: {
     role: "skeptic",
     title: "Verify",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adversarially verify the ${n} pending finding(s) of an ultrasec audit (skeptic fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join(run, "orchestration", "out", "verify.verdicts.json")} --run ${run}`,
-    fragmentFile: (run) => join(run, "orchestration", "out", "verify.verdicts.json"),
+    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join(run, "orchestration", "out", "verify", "verdicts.json")} --run ${run}`,
+    fragmentFile: (run) => join(run, "orchestration", "out", "verify", "verdicts.json"),
   },
   revalidate: {
     role: "revalidator",
     title: "Revalidate",
     schema: REVALIDATE_SCHEMA,
     description: (n) => `Revalidate the ${n} confirmed/needs-human finding(s) against git history (false-positive cut, conservative fold)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} revalidate --apply ${join(run, "orchestration", "out", "REVALIDATE.json")} --run ${run}`,
-    fragmentFile: (run) => join(run, "orchestration", "out", "REVALIDATE.json"),
+    applyHint: (engine, _worklist, run) =>
+      `node ${engine} revalidate --apply ${join(run, "orchestration", "out", "revalidate", "REVALIDATE.json")} --run ${run}`,
+    fragmentFile: (run) => join(run, "orchestration", "out", "revalidate", "REVALIDATE.json"),
   },
   investigate: {
     role: "hunter",
     title: "Investigate",
     schema: INVESTIGATE_SCHEMA,
     description: (n) => `Hunt authz/IDOR, business-logic and multi-hop bugs across ${n} attack-surface region(s) (hunter fan-out, citation-checked ingest)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} investigate --apply ${join(run, "orchestration", "out", "INVESTIGATE.json")} --run ${run}`,
-    fragmentFile: (run) => join(run, "orchestration", "out", "INVESTIGATE.json"),
+    applyHint: (engine, _worklist, run) =>
+      `node ${engine} investigate --apply ${join(run, "orchestration", "out", "investigate", "INVESTIGATE.json")} --run ${run}`,
+    fragmentFile: (run) => join(run, "orchestration", "out", "investigate", "INVESTIGATE.json"),
   },
 };
 
@@ -153,6 +158,12 @@ export function toBatches(ids: string[], batchSize: number): string[][] {
   const out: string[][] = [];
   for (let i = 0; i < ids.length; i += batchSize) out.push(ids.slice(i, i + batchSize));
   return out;
+}
+
+/** Comment-safe interpolation: a path containing a newline would otherwise spill
+ *  the rest of an emitted `//` comment onto a bare code line and break the script. */
+function oneLine(s: string): string {
+  return s.replace(/[\r\n\u2028\u2029]+/g, " ");
 }
 
 export function phaseWorkflowScript(ph: PhaseInfo, runAbs: string, engineAbs: string, batchSize: number): string {
@@ -189,8 +200,8 @@ export function phaseWorkflowScript(ph: PhaseInfo, runAbs: string, engineAbs: st
     `  agent(contract('${spec.role}', 'ITEMS=' + batch.join(',')), { label: '${ph.name}:' + (i + 1), phase: ${JSON.stringify(spec.title)}, agentType: 'general-purpose', schema: SCHEMA }))`,
     ``,
     `// One-writer rule: this workflow only COLLECTS ${fragmentKey} fragments. The main agent merges`,
-    `// the returned \`${fragmentKey}\` arrays into ${spec.fragmentFile(runAbs)}, then runs the conservative fold:`,
-    `//   ${spec.applyHint(engineAbs, ph.worklist, runAbs)}`,
+    `// the returned \`${fragmentKey}\` arrays into ${oneLine(spec.fragmentFile(runAbs))}, then runs the conservative fold:`,
+    `//   ${oneLine(spec.applyHint(engineAbs, ph.worklist, runAbs))}`,
     `return { phase: ${JSON.stringify(ph.name)}, worklist: WORKLIST, results: results.filter(Boolean) }`,
     ``,
   ].join("\n");
@@ -203,7 +214,7 @@ export function agentContracts(runAbs: string, engineAbs: string, repoAbs: strin
 
 You are auditing ONE batch of candidates of an ultrasec security review — the OPEN candidates the deterministic engine enumerated. They are recall-oriented: many are false positives by design; you decide, from the real code.
 
-Worklist: \`${join(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,…>\`).
+Worklist: \`${join(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,…>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your candidate ids:
 
@@ -223,7 +234,7 @@ ${footer}`,
 
 You are an adversarial skeptic verifying the pending findings of an ultrasec audit. Assume each claim is wrong until the source proves it — try to REFUTE it.
 
-Worklist: \`${join(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,…>\`).
+Worklist: \`${join(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,…>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 
@@ -242,7 +253,7 @@ ${footer}`,
 
 You revalidate findings already ranked real (confirmed / needs-human) against git history — the false-positive cut.
 
-Worklist: \`${join(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,…>\`).
+Worklist: \`${join(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,…>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 
@@ -261,7 +272,7 @@ ${footer}`,
 
 You hunt the bugs the deterministic engine can't enumerate — missing/incorrect **authz** & **IDOR**, **business-logic** flaws, and multi-hop taint — one attack-surface region at a time.
 
-Worklist: \`${join(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,…>\`).
+Worklist: \`${join(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,…>\`). If an \`ITEMS\` region is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your regions:
 

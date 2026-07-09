@@ -33,12 +33,28 @@ export function runRevalidate(args: ParsedArgs): number {
     // fixing commits reflect HEAD, not whatever was emitted earlier.
     const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo));
     const res = applyRevalidations(dossier, inputs, facts);
+    // Fail closed on an entirely stale fragment: every verdict targeting an id
+    // outside the revalidation scope means the false-positive cut never engaged.
+    if (res.applied === 0 && res.ignored.length > 0) {
+      eprintln(
+        `ultrasec revalidate --apply: all ${res.ignored.length} verdict(s) target unknown ids (${res.ignored.join(", ")}) — stale fragment? Re-emit the worklist (\`revalidate --run ${run}\`) and re-adjudicate; nothing was folded.`,
+      );
+      return 2;
+    }
     persistFindings(run, dossier, res.findings);
 
     if (flagBool(args, "json")) {
       println(
         JSON.stringify(
-          { applied: res.applied, stillValid: res.stillValid, fixed: res.fixed, dismissed: res.dismissed, needsHuman: res.needsHuman, flagged: res.flagged },
+          {
+            applied: res.applied,
+            stillValid: res.stillValid,
+            fixed: res.fixed,
+            dismissed: res.dismissed,
+            needsHuman: res.needsHuman,
+            flagged: res.flagged,
+            ignored: res.ignored,
+          },
           null,
           2,
         ),
@@ -49,6 +65,7 @@ export function runRevalidate(args: ParsedArgs): number {
     println(
       `  applied ${res.applied} verdict(s): ${res.stillValid} still-valid · ${res.fixed} fixed · ${res.dismissed} dismissed · ${res.needsHuman} needs-human`,
     );
+    if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
     for (const fl of res.flagged) println(`  ⚠️  ${fl.id}: ${fl.reason}`);
     return 0;
   }

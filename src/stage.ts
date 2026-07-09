@@ -35,20 +35,28 @@ export function emitWorklist(run: string, files: StageFiles, items: unknown, md:
  * Resolve an `--apply` argument to a list of files (generalizes verify's
  * `collectVerdictFiles`):
  *   - a comma list "a,b,c" → each path, trimmed + resolved;
- *   - a directory → every entry whose name matches `dirRegex`, joined to it;
+ *   - a directory → every entry whose name matches `dirRegex`, joined to it,
+ *     SORTED (readdir order is filesystem-dependent; the fold must be
+ *     deterministic) — and FAIL-CLOSED: a directory yielding no match throws
+ *     instead of silently folding nothing;
  *   - else a single file.
  */
 export function collectApplyFiles(applyPath: string, dirRegex: RegExp): string[] {
   if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve(s.trim()));
   const abs = resolve(applyPath);
+  let isDir = false;
   try {
-    if (statSync(abs).isDirectory()) {
-      return readdirSync(abs)
-        .filter((n) => dirRegex.test(n))
-        .map((n) => join(abs, n));
-    }
+    isDir = statSync(abs).isDirectory();
   } catch {
-    /* fall through to single-file */
+    /* fall through to single-file (caller surfaces the read error) */
+  }
+  if (isDir) {
+    const matches = readdirSync(abs)
+      .filter((n) => dirRegex.test(n))
+      .sort()
+      .map((n) => join(abs, n));
+    if (matches.length === 0) throw new Error(`${abs}: no apply file matching ${dirRegex} in this directory — nothing to fold (fail-closed)`);
+    return matches;
   }
   return [abs];
 }
