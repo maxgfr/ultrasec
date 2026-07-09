@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.10.0](https://github.com/maxgfr/ultrasec/compare/v1.9.0...v1.10.0) (2026-07-09)
+
+
+### Features
+
+* **orchestrate:** emit multi-agent workflows + contracts + runbook per run ([#4](https://github.com/maxgfr/ultrasec/issues/4)) ([5a40628](https://github.com/maxgfr/ultrasec/commit/5a40628d602926bea2dcdcbb9a9d0bc96988af5f)), closes [hi#severity](https://github.com/hi/issues/severity)
+
 # [1.9.0](https://github.com/maxgfr/ultrasec/compare/v1.8.0...v1.9.0) (2026-07-08)
 
 
