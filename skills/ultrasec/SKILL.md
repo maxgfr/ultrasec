@@ -154,6 +154,16 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   keys live in **that CLI**, not ultrasec); `--cross-check <cli>` runs a second agent
   whose high/critical verify/revalidate disagreement escalates a finding to needs-human.
   See [references/powered-mode.md](references/powered-mode.md).
+- `orchestrate --run <dir> [--phase adjudicate|verify|revalidate|investigate] [--eco] [--list]` —
+  emit the run's **multi-agent orchestration** from its CURRENT worklists into
+  `<run>/orchestration/`: one `<phase>.workflow.mjs` per ready phase (the real worklist
+  ids batched 8/agent, absolute paths baked in), the dispatch contracts
+  (`agents/analyzer|skeptic|revalidator|hunter.md`) and a sequential `RUNBOOK.md`
+  fallback. Subagents RETURN verdict/discovery fragments — the orchestrator merges
+  them and runs every conservative `--apply` fold itself (one writer). `--eco` emits
+  only RUNBOOK + contracts; `--list` prints phase readiness as JSON; `--phase <p>`
+  before its worklist exists exits 2 naming the command that produces it. See
+  **Orchestration — route by harness** below.
 
 ## Route by situation
 
@@ -162,6 +172,8 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
 2. **High-assurance / "be thorough"** — decompose by vulnerability class and entry
    point, fan out analyzer + skeptic subagents, loop until dry:
    [references/deep-audit-playbook.md](references/deep-audit-playbook.md).
+   `orchestrate --run <run>` emits the launchable fan-out (workflows + contracts)
+   from the run's current worklists — see **Orchestration — route by harness**.
 3. **Billion-line / monorepo / "audit the whole platform"** — too big to scan whole:
    `map` the attack surface, then drill in target-by-target under a budget, merging
    into one run: [references/scale-audit-playbook.md](references/scale-audit-playbook.md).
@@ -179,6 +191,33 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
    [references/revalidate-playbook.md](references/revalidate-playbook.md) (git-history
    FP cut) and [references/investigate-playbook.md](references/investigate-playbook.md)
    (agentic discovery of authz/business-logic bugs).
+
+## Orchestration — route by harness
+
+The judgment stages fan out: the open candidates in `findings.json` (adjudicate),
+`VERIFY.todo.json` (skeptic pass), `REVALIDATE.todo.json` (git-history FP cut) and
+`INVESTIGATE.todo.json` (region hunt) are independent per-item worklists. The engine
+manages the fan-out — `orchestrate` emits the orchestration from the CURRENT worklists,
+with absolute paths and the real item ids baked in:
+
+```
+node scripts/ultrasec.mjs orchestrate --run <dir> [--phase adjudicate|verify|revalidate|investigate] [--eco] [--list]
+```
+
+| Your harness | How to run each judgment phase |
+|---|---|
+| Has the Workflow tool | `orchestrate --run <RUN> --phase <p>`, then `Workflow({ scriptPath: "<RUN>/orchestration/<p>.workflow.mjs" })`. Subagents RETURN verdict/discovery fragments; merge them into one apply file yourself, then run the `--apply` fold shown at the end of the workflow. |
+| Subagents but no Workflow tool | Same `orchestrate`; dispatch one subagent per batch following `<RUN>/orchestration/agents/<role>.md` (the workflow script shows batches + prompts). One writer: you merge and fold. |
+| Eco mode, or no subagents | `orchestrate --run <RUN> --eco` → follow `<RUN>/orchestration/RUNBOOK.md` sequentially, playing each role yourself. Correctness-identical; only wall-clock differs. |
+
+Fan-out is an optimization, never a requirement — the gates (`check --semantic`, the
+conservative `--apply` folds) are harness-independent and every phase has a sequential
+fallback with identical artifacts. Subagents never write: the emitted contracts end with
+the one-writer rule (read-only engine commands only — `dossier`, `graph`, `paths`), and
+`--apply` always stays with you, the orchestrator — so an uncertain high-severity finding
+still lands needs-human, never dropped, whoever adjudicated it. Re-run `orchestrate`
+whenever a worklist changes (emission is deterministic and idempotent); `--phase <p>`
+before its worklist exists fails and names the command that produces it.
 
 ## Workflow (standard audit)
 
@@ -214,23 +253,28 @@ a worklist → you **fill** it → `--apply` folds it back in under a conservati
    and the non-taint attack-class taxonomy in
    [references/hunting-heuristics.md](references/hunting-heuristics.md). They land
    `ultrasec-ai` `open` and are adjudicated like any candidate; out-of-range citations
-   are rejected, so don't fear over-reporting.
+   are rejected, so don't fear over-reporting. (Fan out:
+   `orchestrate --run <run> --phase investigate` dispatches one hunter per region batch.)
 
 6. **Adjudicate each candidate from evidence.** For each, run `dossier <id>` and read
    the **real code along the path**. Decide: is the SOURCE attacker-controlled? does the
    value reach the SINK through every hop unchanged? is there a sanitizer/validator/authz
    guard on the path? is the SINK exploitable with the value that arrives (write the PoC)?
+   (Fan out: `orchestrate --run <run> --phase adjudicate` dispatches one analyzer per
+   batch of open candidates; you merge their verdicts and run `verify --apply`.)
 
 7. **Verify.** `verify --run <run>` → worklist; record a verdict per finding
    (`supported|partial|unsupported|refuted` + a note, and an `exploitPath` when
    supported), then `verify --apply`. Be a skeptic, but don't refute a high-severity
    finding you can't actually disprove (uncertain ⇒ leave it needs-human).
+   (Fan out: `orchestrate --run <run> --phase verify` — one skeptic per batch.)
 
 8. **Revalidate against git history (cuts false positives).** `revalidate --run <run>`
    gives compact git facts per confirmed/needs-human finding; decide
    `still-valid|fixed|false-positive|uncertain`, then `revalidate --apply`. `fixed`
    dismisses with the fixing commit; a high/critical `false-positive` escalates to
    needs-human (never auto-dismissed).
+   (Fan out: `orchestrate --run <run> --phase revalidate` — one revalidator per batch.)
 
 9. **Gate.** `check --run <run> --semantic`. Fix any dangling citation; adjudicate any
    remaining candidate until it passes.

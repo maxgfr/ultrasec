@@ -32,6 +32,12 @@ an **optimization, not a requirement**:
 - **No subagents**: run the same commands in a sequential loop. Identical
   artifacts; only wall-clock differs.
 
+> `ultrasec orchestrate --run <run>` now EMITS this fan-out ready to launch — the
+> analyzer/skeptic contracts below (as `<run>/orchestration/agents/analyzer.md` /
+> `skeptic.md`, plus revalidator + hunter), one `<phase>.workflow.mjs` per ready
+> worklist with the real item ids batched in, and a sequential `RUNBOOK.md` fallback
+> (`--eco`). Subagents return fragments; every `--apply` fold stays with you.
+
 ## The loop
 
 0. **(Huge repo?) Map first.** If the repo is too big to scan whole, run

@@ -83,6 +83,11 @@ per scoped target, one skeptic per `verify --shards N --shard i` slice, all merg
 into the **same** `--out` run. Without subagents, the identical commands run in a
 sequential loop — same artifacts, only wall-clock differs.
 
+> Per-run emission: `ultrasec orchestrate --run <run>` EMITS the adjudicate/verify/
+> revalidate/investigate fan-out (workflows + the dispatch contracts + a sequential
+> RUNBOOK) from the run's CURRENT worklists — re-run it after each merged pass so the
+> batched ids stay in sync with the dossier.
+
 ## What stays the AI's job
 
 The engine narrows the repo and proves the boring half mechanically. Reachability,
