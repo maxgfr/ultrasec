@@ -78,12 +78,15 @@ an **optimization, not a requirement**:
 4. **Merge.** Collect the facets' findings. New findings you discovered (not in
    the dossier) get appended; for enumerated candidates, collect the verdicts.
 
-5. **Verify adversarially.** `verify --run <run> --shards N --shard i` gives each
-   skeptic subagent a disjoint slice. Each opens the cited code and tries to
-   **refute** the claim; needs ≥ majority to kill. Reassemble:
-   `verify --apply <run> --run <run>` (a directory picks up every
-   `*verdict*.json`). The conservative policy keeps uncertain high-severity items
-   as needs-human.
+5. **Verify adversarially.** `verify --run <run>` emits the ONE
+   `VERIFY.todo.json`; `orchestrate --run <run> --phase verify` batches its ids
+   into read-only skeptic subagents (contract + workflow, emitted). Each skeptic
+   opens the cited code, tries to **refute** the claim (needs ≥ majority to
+   kill), and RETURNS its verdicts — subagents never write. You, the sole
+   writer, merge the fragments and reassemble:
+   `verify --apply <fragments> --run <run>` (a directory picks up every
+   `*verdict*.json`, sorted). The conservative policy keeps uncertain
+   high-severity items as needs-human.
 
 6. **Gate.** `check --run <run> --semantic`. Fix dangling citations; adjudicate
    leftovers. Re-run until it passes.
@@ -100,9 +103,10 @@ an **optimization, not a requirement**:
 ## Mapping to a workflow primitive
 
 If your harness has an orchestration primitive, the shape is a `pipeline` over the
-facets (each: analyze → propose verdicts) feeding a `verify` fan-out (skeptic
-shards) into the reassembling `--apply`, then `check --semantic`. The CLI calls
-are identical; the primitive only schedules them.
+facets (each: analyze → propose verdicts) feeding a `verify` fan-out (the read-only
+skeptic batches `orchestrate --phase verify` emits) into the reassembling
+`--apply`, then `check --semantic`. The CLI calls are identical; the primitive
+only schedules them.
 
 ## Signals to act on
 

@@ -52,12 +52,28 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
   }
 
   const res = applyVerdicts(dossier, verdicts);
+  // Fail closed on an entirely stale fragment: every verdict targeting an
+  // unknown id means the fold never engaged — exiting green would silently
+  // discard the whole adjudication.
+  if (res.applied === 0 && res.ignored.length > 0) {
+    eprintln(
+      `ultrasec verify --apply: all ${res.ignored.length} verdict(s) target unknown ids (${res.ignored.join(", ")}) — stale fragment? Re-emit the worklist and re-adjudicate; nothing was folded.`,
+    );
+    return 2;
+  }
   persistFindings(run, dossier, res.findings);
 
   if (flagBool(args, "json")) {
     println(
       JSON.stringify(
-        { applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman },
+        {
+          applied: res.applied,
+          confirmed: res.confirmed,
+          dismissed: res.dismissed,
+          needsHuman: res.needsHuman,
+          keptForHuman: res.keptForHuman,
+          ignored: res.ignored,
+        },
         null,
         2,
       ),
@@ -66,6 +82,7 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
   }
   println(`ultrasec verify --apply → updated ${join(run, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed · ${res.dismissed} dismissed · ${res.needsHuman} needs-human`);
+  if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
   if (res.keptForHuman.length) {
     println(`  kept for human (high-severity, only 'unsupported' — not auto-dismissed):`);
     for (const k of res.keptForHuman) println(`    - ${k.id} [${k.severity}]`);

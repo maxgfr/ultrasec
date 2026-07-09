@@ -198,11 +198,17 @@ export function ingestDiscoveries(dossier: Dossier, discoveries: Discovery[], re
   return { findings, ingested, folded, rejected };
 }
 
-/** Parse an INVESTIGATE.json body into validated Discovery[]. Tolerant: drops
- *  entries missing required fields or with an unknown category/severity. */
+/**
+ * Parse an INVESTIGATE.json body into validated Discovery[]. Row-tolerant (drops
+ * entries missing required fields or with an unknown category/severity) but
+ * FAIL-CLOSED on the container: an unrecognized shape, or rows that ALL get
+ * dropped, throws instead of silently ingesting nothing. An empty
+ * {discoveries:[]} stays valid — a hunter finding nothing is a real outcome.
+ */
 export function parseDiscoveries(raw: string): Discovery[] {
   const data = JSON.parse(raw) as unknown;
-  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.discoveries) ? (data as any).discoveries : [];
+  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.discoveries) ? (data as any).discoveries : null;
+  if (arr === null) throw new Error(`unrecognized discoveries shape — expected a JSON array or {"discoveries":[...]} (fail-closed)`);
   const out: Discovery[] = [];
   for (const d of arr as any[]) {
     if (!d || typeof d !== "object") continue;
@@ -225,6 +231,11 @@ export function parseDiscoveries(raw: string): Discovery[] {
       line: d.line,
       ...(path && path.length ? { path } : {}),
     });
+  }
+  if ((arr as any[]).length > 0 && out.length === 0) {
+    throw new Error(
+      `${(arr as any[]).length} row(s), none usable — each needs title/message/file (strings), line ≥ 1, a category among ${CATEGORIES.join("|")} and a severity among ${SEVERITIES.join("|")} (fail-closed)`,
+    );
   }
   return out;
 }

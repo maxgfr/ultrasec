@@ -117,4 +117,32 @@ describe("parseVerdicts", () => {
     expect(parseVerdicts('[{"id":"a","verdict":"supported"},{"bad":1}]')).toEqual([{ id: "a", verdict: "supported", note: undefined, exploitPath: undefined }]);
     expect(parseVerdicts('{"verdicts":[{"id":"b","verdict":"refuted"}]}')[0]!.id).toBe("b");
   });
+
+  it("fails closed on an unrecognized container shape instead of yielding 0 rows", () => {
+    expect(() => parseVerdicts('{"pairs":[{"id":"a","verdict":"supported"}]}')).toThrow(/expected a JSON array/i);
+  });
+
+  it("fails closed when rows exist but none are usable", () => {
+    expect(() => parseVerdicts('[{"id":"a","verdict":"INVALID"},{"bad":1}]')).toThrow(/none usable/i);
+  });
+
+  it("still accepts a genuinely empty array (a no-op fragment)", () => {
+    expect(parseVerdicts("[]")).toEqual([]);
+  });
+});
+
+describe("applyVerdicts — stale ids", () => {
+  it("reports verdicts targeting unknown ids as ignored, folding the known ones", () => {
+    const r = applyVerdicts(dossier([finding("a", "high")]), [
+      { id: "a", verdict: "supported" },
+      { id: "ghost", verdict: "refuted" },
+    ]);
+    expect(r.applied).toBe(1);
+    expect(r.ignored).toEqual(["ghost"]);
+    expect(r.findings[0]!.status).toBe("confirmed");
+  });
+
+  it("ignored is empty when every id resolves", () => {
+    expect(applyVerdicts(dossier([finding("a", "high")]), [{ id: "a", verdict: "partial" }]).ignored).toEqual([]);
+  });
 });

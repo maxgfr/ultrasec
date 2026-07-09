@@ -3845,11 +3845,15 @@ function emitWorklist(run, files, items, md) {
 function collectApplyFiles(applyPath, dirRegex) {
   if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve7(s.trim()));
   const abs = resolve7(applyPath);
+  let isDir = false;
   try {
-    if (statSync3(abs).isDirectory()) {
-      return readdirSync2(abs).filter((n) => dirRegex.test(n)).map((n) => join16(abs, n));
-    }
+    isDir = statSync3(abs).isDirectory();
   } catch {
+  }
+  if (isDir) {
+    const matches = readdirSync2(abs).filter((n) => dirRegex.test(n)).sort().map((n) => join16(abs, n));
+    if (matches.length === 0) throw new Error(`${abs}: no apply file matching ${dirRegex} in this directory \u2014 nothing to fold (fail-closed)`);
+    return matches;
   }
   return [abs];
 }
@@ -3949,6 +3953,8 @@ function nextStatus(verdict, severity) {
 function applyVerdicts(dossier, verdicts) {
   const byId = /* @__PURE__ */ new Map();
   for (const v of verdicts) byId.set(v.id, v);
+  const known = new Set(dossier.findings.map((f) => f.id));
+  const ignored = [...byId.keys()].filter((id) => !known.has(id)).sort(byStr);
   let confirmed = 0, dismissed = 0, needsHuman = 0, applied = 0;
   const keptForHuman = [];
   const findings = dossier.findings.map((f) => {
@@ -3972,12 +3978,17 @@ function applyVerdicts(dossier, verdicts) {
 Verdict (${v.verdict}): ${v.note}`;
     return next;
   });
-  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman };
+  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored };
 }
 function parseVerdicts(raw) {
   const data = JSON.parse(raw);
-  const arr = Array.isArray(data) ? data : Array.isArray(data?.verdicts) ? data.verdicts : [];
-  return arr.filter((v) => v && typeof v.id === "string" && VERDICTS.includes(v.verdict)).map((v) => ({ id: v.id, verdict: v.verdict, note: v.note, exploitPath: v.exploitPath }));
+  const arr = Array.isArray(data) ? data : Array.isArray(data?.verdicts) ? data.verdicts : null;
+  if (arr === null) throw new Error(`unrecognized verdicts shape \u2014 expected a JSON array or {"verdicts":[...]} (fail-closed)`);
+  const out = arr.filter((v) => v && typeof v.id === "string" && VERDICTS.includes(v.verdict)).map((v) => ({ id: v.id, verdict: v.verdict, note: v.note, exploitPath: v.exploitPath }));
+  if (arr.length > 0 && out.length === 0) {
+    throw new Error(`${arr.length} row(s), none usable \u2014 each needs a string "id" and a "verdict" among ${VERDICTS.join("|")} (fail-closed)`);
+  }
+  return out;
 }
 
 // src/triage.ts
@@ -4299,7 +4310,8 @@ function ingestDiscoveries(dossier, discoveries, repo) {
 }
 function parseDiscoveries(raw) {
   const data = JSON.parse(raw);
-  const arr = Array.isArray(data) ? data : Array.isArray(data?.discoveries) ? data.discoveries : [];
+  const arr = Array.isArray(data) ? data : Array.isArray(data?.discoveries) ? data.discoveries : null;
+  if (arr === null) throw new Error(`unrecognized discoveries shape \u2014 expected a JSON array or {"discoveries":[...]} (fail-closed)`);
   const out = [];
   for (const d of arr) {
     if (!d || typeof d !== "object") continue;
@@ -4318,6 +4330,11 @@ function parseDiscoveries(raw) {
       line: d.line,
       ...path && path.length ? { path } : {}
     });
+  }
+  if (arr.length > 0 && out.length === 0) {
+    throw new Error(
+      `${arr.length} row(s), none usable \u2014 each needs title/message/file (strings), line \u2265 1, a category among ${CATEGORIES.join("|")} and a severity among ${SEVERITIES.join("|")} (fail-closed)`
+    );
   }
   return out;
 }
@@ -4463,11 +4480,24 @@ function applyMode(run, dossier, applyPath, args) {
     return 2;
   }
   const res = applyVerdicts(dossier, verdicts);
+  if (res.applied === 0 && res.ignored.length > 0) {
+    eprintln(
+      `ultrasec verify --apply: all ${res.ignored.length} verdict(s) target unknown ids (${res.ignored.join(", ")}) \u2014 stale fragment? Re-emit the worklist and re-adjudicate; nothing was folded.`
+    );
+    return 2;
+  }
   persistFindings(run, dossier, res.findings);
   if (flagBool(args, "json")) {
     println(
       JSON.stringify(
-        { applied: res.applied, confirmed: res.confirmed, dismissed: res.dismissed, needsHuman: res.needsHuman, keptForHuman: res.keptForHuman },
+        {
+          applied: res.applied,
+          confirmed: res.confirmed,
+          dismissed: res.dismissed,
+          needsHuman: res.needsHuman,
+          keptForHuman: res.keptForHuman,
+          ignored: res.ignored
+        },
         null,
         2
       )
@@ -4476,6 +4506,7 @@ function applyMode(run, dossier, applyPath, args) {
   }
   println(`ultrasec verify --apply \u2192 updated ${join18(run, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
+  if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
   if (res.keptForHuman.length) {
     println(`  kept for human (high-severity, only 'unsupported' \u2014 not auto-dismissed):`);
     for (const k of res.keptForHuman) println(`    - ${k.id} [${k.severity}]`);
@@ -4561,6 +4592,8 @@ function renderRevalidateMd(items, context) {
 function applyRevalidations(dossier, inputs, opts = {}) {
   const byId = /* @__PURE__ */ new Map();
   for (const v of inputs) byId.set(v.id, v);
+  const inScopeIds = new Set(dossier.findings.filter(inScope).map((f) => f.id));
+  const ignored = [...byId.keys()].filter((id) => !inScopeIds.has(id)).sort(byStr);
   const unresolved = opts.unresolved ?? /* @__PURE__ */ new Set();
   const fixedInById = opts.fixedInById ?? /* @__PURE__ */ new Map();
   let applied = 0, stillValid = 0, fixed = 0, dismissed = 0, needsHuman = 0;
@@ -4612,17 +4645,22 @@ Revalidation (${label})${note ? `: ${note}` : ""}`;
       }
     }
   });
-  return { findings, applied, stillValid, fixed, dismissed, needsHuman, flagged };
+  return { findings, applied, stillValid, fixed, dismissed, needsHuman, flagged, ignored };
 }
 function parseRevalidations(raw) {
   const data = JSON.parse(raw);
-  const arr = Array.isArray(data) ? data : Array.isArray(data?.revalidations) ? data.revalidations : [];
-  return arr.filter((v) => v && typeof v.id === "string" && REVALIDATION_VERDICTS.includes(v.verdict)).map((v) => ({
+  const arr = Array.isArray(data) ? data : Array.isArray(data?.revalidations) ? data.revalidations : Array.isArray(data?.verdicts) ? data.verdicts : null;
+  if (arr === null) throw new Error(`unrecognized revalidations shape \u2014 expected a JSON array, {"verdicts":[...]} or {"revalidations":[...]} (fail-closed)`);
+  const out = arr.filter((v) => v && typeof v.id === "string" && REVALIDATION_VERDICTS.includes(v.verdict)).map((v) => ({
     id: v.id,
     verdict: v.verdict,
     fixedIn: typeof v.fixedIn === "string" ? v.fixedIn : void 0,
     note: typeof v.note === "string" ? v.note : void 0
   }));
+  if (arr.length > 0 && out.length === 0) {
+    throw new Error(`${arr.length} row(s), none usable \u2014 each needs a string "id" and a "verdict" among ${REVALIDATION_VERDICTS.join("|")} (fail-closed)`);
+  }
+  return out;
 }
 function revalFactsFromWorklist(items) {
   const unresolved = /* @__PURE__ */ new Set();
@@ -4656,11 +4694,25 @@ function runRevalidate(args) {
     }
     const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo));
     const res = applyRevalidations(dossier, inputs, facts);
+    if (res.applied === 0 && res.ignored.length > 0) {
+      eprintln(
+        `ultrasec revalidate --apply: all ${res.ignored.length} verdict(s) target unknown ids (${res.ignored.join(", ")}) \u2014 stale fragment? Re-emit the worklist (\`revalidate --run ${run}\`) and re-adjudicate; nothing was folded.`
+      );
+      return 2;
+    }
     persistFindings(run, dossier, res.findings);
     if (flagBool(args, "json")) {
       println(
         JSON.stringify(
-          { applied: res.applied, stillValid: res.stillValid, fixed: res.fixed, dismissed: res.dismissed, needsHuman: res.needsHuman, flagged: res.flagged },
+          {
+            applied: res.applied,
+            stillValid: res.stillValid,
+            fixed: res.fixed,
+            dismissed: res.dismissed,
+            needsHuman: res.needsHuman,
+            flagged: res.flagged,
+            ignored: res.ignored
+          },
           null,
           2
         )
@@ -4671,6 +4723,7 @@ function runRevalidate(args) {
     println(
       `  applied ${res.applied} verdict(s): ${res.stillValid} still-valid \xB7 ${res.fixed} fixed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`
     );
+    if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
     for (const fl of res.flagged) println(`  \u26A0\uFE0F  ${fl.id}: ${fl.reason}`);
     return 0;
   }
@@ -5963,32 +6016,32 @@ var PHASE_SPECS = {
     title: "Adjudicate",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adjudicate the ${n} open candidate(s) of an ultrasec audit from dossier evidence (analyzer fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join24(run, "orchestration", "out", "adjudicate.verdicts.json")} --run ${run}`,
-    fragmentFile: (run) => join24(run, "orchestration", "out", "adjudicate.verdicts.json")
+    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join24(run, "orchestration", "out", "adjudicate", "verdicts.json")} --run ${run}`,
+    fragmentFile: (run) => join24(run, "orchestration", "out", "adjudicate", "verdicts.json")
   },
   verify: {
     role: "skeptic",
     title: "Verify",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adversarially verify the ${n} pending finding(s) of an ultrasec audit (skeptic fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join24(run, "orchestration", "out", "verify.verdicts.json")} --run ${run}`,
-    fragmentFile: (run) => join24(run, "orchestration", "out", "verify.verdicts.json")
+    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join24(run, "orchestration", "out", "verify", "verdicts.json")} --run ${run}`,
+    fragmentFile: (run) => join24(run, "orchestration", "out", "verify", "verdicts.json")
   },
   revalidate: {
     role: "revalidator",
     title: "Revalidate",
     schema: REVALIDATE_SCHEMA,
     description: (n) => `Revalidate the ${n} confirmed/needs-human finding(s) against git history (false-positive cut, conservative fold)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} revalidate --apply ${join24(run, "orchestration", "out", "REVALIDATE.json")} --run ${run}`,
-    fragmentFile: (run) => join24(run, "orchestration", "out", "REVALIDATE.json")
+    applyHint: (engine, _worklist, run) => `node ${engine} revalidate --apply ${join24(run, "orchestration", "out", "revalidate", "REVALIDATE.json")} --run ${run}`,
+    fragmentFile: (run) => join24(run, "orchestration", "out", "revalidate", "REVALIDATE.json")
   },
   investigate: {
     role: "hunter",
     title: "Investigate",
     schema: INVESTIGATE_SCHEMA,
     description: (n) => `Hunt authz/IDOR, business-logic and multi-hop bugs across ${n} attack-surface region(s) (hunter fan-out, citation-checked ingest)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} investigate --apply ${join24(run, "orchestration", "out", "INVESTIGATE.json")} --run ${run}`,
-    fragmentFile: (run) => join24(run, "orchestration", "out", "INVESTIGATE.json")
+    applyHint: (engine, _worklist, run) => `node ${engine} investigate --apply ${join24(run, "orchestration", "out", "investigate", "INVESTIGATE.json")} --run ${run}`,
+    fragmentFile: (run) => join24(run, "orchestration", "out", "investigate", "INVESTIGATE.json")
   }
 };
 function phaseSpec(name) {
@@ -6000,6 +6053,9 @@ function toBatches(ids, batchSize) {
   const out = [];
   for (let i = 0; i < ids.length; i += batchSize) out.push(ids.slice(i, i + batchSize));
   return out;
+}
+function oneLine(s) {
+  return s.replace(/[\r\n\u2028\u2029]+/g, " ");
 }
 function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize) {
   const spec = phaseSpec(ph.name);
@@ -6035,8 +6091,8 @@ function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize) {
     `  agent(contract('${spec.role}', 'ITEMS=' + batch.join(',')), { label: '${ph.name}:' + (i + 1), phase: ${JSON.stringify(spec.title)}, agentType: 'general-purpose', schema: SCHEMA }))`,
     ``,
     `// One-writer rule: this workflow only COLLECTS ${fragmentKey} fragments. The main agent merges`,
-    `// the returned \`${fragmentKey}\` arrays into ${spec.fragmentFile(runAbs)}, then runs the conservative fold:`,
-    `//   ${spec.applyHint(engineAbs, ph.worklist, runAbs)}`,
+    `// the returned \`${fragmentKey}\` arrays into ${oneLine(spec.fragmentFile(runAbs))}, then runs the conservative fold:`,
+    `//   ${oneLine(spec.applyHint(engineAbs, ph.worklist, runAbs))}`,
     `return { phase: ${JSON.stringify(ph.name)}, worklist: WORKLIST, results: results.filter(Boolean) }`,
     ``
   ].join("\n");
@@ -6048,7 +6104,7 @@ function agentContracts(runAbs, engineAbs, repoAbs) {
 
 You are auditing ONE batch of candidates of an ultrasec security review \u2014 the OPEN candidates the deterministic engine enumerated. They are recall-oriented: many are false positives by design; you decide, from the real code.
 
-Worklist: \`${join24(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`).
+Worklist: \`${join24(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your candidate ids:
 
@@ -6068,7 +6124,7 @@ ${footer}`,
 
 You are an adversarial skeptic verifying the pending findings of an ultrasec audit. Assume each claim is wrong until the source proves it \u2014 try to REFUTE it.
 
-Worklist: \`${join24(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`).
+Worklist: \`${join24(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 
@@ -6087,7 +6143,7 @@ ${footer}`,
 
 You revalidate findings already ranked real (confirmed / needs-human) against git history \u2014 the false-positive cut.
 
-Worklist: \`${join24(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`).
+Worklist: \`${join24(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 
@@ -6106,7 +6162,7 @@ ${footer}`,
 
 You hunt the bugs the deterministic engine can't enumerate \u2014 missing/incorrect **authz** & **IDOR**, **business-logic** flaws, and multi-hop taint \u2014 one attack-surface region at a time.
 
-Worklist: \`${join24(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,\u2026>\`).
+Worklist: \`${join24(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,\u2026>\`). If an \`ITEMS\` region is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your regions:
 
@@ -6191,7 +6247,8 @@ function listPhases(runDir, engineAbs) {
       worklist: findingsPath,
       items: adjIds.length,
       ids: adjIds,
-      prerequisite: `node ${engineAbs} scan --repo <repo> --out ${run}`
+      // The manifest knows the audited repo once a scan ran; placeholder pre-scan.
+      prerequisite: `node ${engineAbs} scan --repo ${repoOf(run)} --out ${run}`
     },
     {
       name: "verify",
@@ -6259,7 +6316,7 @@ function orchestrateRun(runDir, engineAbs, opts = {}) {
   const repoAbs = repoOf(run);
   const orchDir = join25(run, "orchestration");
   const agentsDir = join25(orchDir, "agents");
-  mkdirSync7(join25(orchDir, "out"), { recursive: true });
+  for (const p of PHASES) mkdirSync7(join25(orchDir, "out", p), { recursive: true });
   mkdirSync7(agentsDir, { recursive: true });
   const written = [];
   const notices = [];

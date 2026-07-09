@@ -141,4 +141,17 @@ describe("parseDiscoveries", () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.path![0]).toEqual({ file: "a.js", line: 1, why: "" });
   });
+
+  it("fails closed on an unrecognized container shape instead of yielding 0 rows", () => {
+    expect(() => parseDiscoveries('{"findings":[{"title":"t"}]}')).toThrow(/expected a JSON array/i);
+  });
+
+  it("fails closed when rows exist but none are usable", () => {
+    expect(() => parseDiscoveries('[{"title":"bad-cat","category":"nope","severity":"high","message":"m","file":"a.js","line":3}]')).toThrow(/none usable/i);
+  });
+
+  it("still accepts an empty {discoveries:[]} fragment — a hunter finding nothing is legitimate", () => {
+    expect(parseDiscoveries('{"discoveries":[]}')).toEqual([]);
+    expect(parseDiscoveries("[]")).toEqual([]);
+  });
 });
