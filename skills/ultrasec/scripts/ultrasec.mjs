@@ -1839,12 +1839,20 @@ function blameLine(repo, file, line) {
 }
 var LOG_CAP = 50;
 var HUGE_FILE_LINES = 2e4;
+var prefixCache = /* @__PURE__ */ new Map();
+function worktreePrefix(repo) {
+  const cached = prefixCache.get(repo);
+  if (cached !== void 0) return cached;
+  const p = git(repo, ["rev-parse", "--show-prefix"])?.trim() ?? "";
+  prefixCache.set(repo, p);
+  return p;
+}
 function fileExistsAtHead(repo, file) {
-  return git(repo, ["cat-file", "-e", `HEAD:${file}`]) !== null;
+  return git(repo, ["cat-file", "-e", `HEAD:${worktreePrefix(repo)}${file}`]) !== null;
 }
 function lineContentAtHead(repo, file, line) {
   if (!Number.isInteger(line) || line < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${file}`]);
+  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
   if (blob === null) return null;
   const lines = blob.split(/\r?\n/);
   return line <= lines.length ? lines[line - 1] : null;
@@ -1864,7 +1872,7 @@ function parseLineLog(raw) {
 }
 function lineLastChanged(repo, file, line) {
   if (!Number.isInteger(line) || line < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${file}`]);
+  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
   if (blob === null) return null;
   const total = blob.split(/\r?\n/).length;
   if (line > total || total > HUGE_FILE_LINES) return null;

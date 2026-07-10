@@ -103,16 +103,34 @@ export function blameLine(repo: string, file: string, line: number): BlameInfo |
 const LOG_CAP = 50;
 const HUGE_FILE_LINES = 20000;
 
+// A subdir `--repo` (e.g. one package of a monorepo) resolves the file paths here
+// relative to that subdir, but a `HEAD:<path>` rev-expression is resolved relative
+// to the worktree ROOT — so `HEAD:src/a.js` misses `<root>/pkg/src/a.js`. Prepend
+// the worktree prefix (`git rev-parse --show-prefix`, e.g. "pkg/") so cat-file/show
+// see the real object path. Empty for a repo AT the worktree root (unchanged
+// behaviour) and empty when git is unavailable (helpers then degrade to false/null
+// exactly as before). Pathspecs (`-- <file>`) and `-L a,b:<file>` are already
+// cwd-relative under `git -C <repo>`, so they must NOT be prefixed. Memoized per
+// repo — the prefix is stable for the lifetime of a run.
+const prefixCache = new Map<string, string>();
+function worktreePrefix(repo: string): string {
+  const cached = prefixCache.get(repo);
+  if (cached !== undefined) return cached;
+  const p = git(repo, ["rev-parse", "--show-prefix"])?.trim() ?? "";
+  prefixCache.set(repo, p);
+  return p;
+}
+
 /** True when `file` exists in the committed tree at HEAD. (`HEAD:<file>` is a single
  *  argv rev-expression, never a shell string — same injection-hardening as blame.) */
 export function fileExistsAtHead(repo: string, file: string): boolean {
-  return git(repo, ["cat-file", "-e", `HEAD:${file}`]) !== null;
+  return git(repo, ["cat-file", "-e", `HEAD:${worktreePrefix(repo)}${file}`]) !== null;
 }
 
 /** The content of `file` line `line` at HEAD, or `null` if the file/line is gone. */
 export function lineContentAtHead(repo: string, file: string, line: number): string | null {
   if (!Number.isInteger(line) || line < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${file}`]);
+  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
   if (blob === null) return null;
   const lines = blob.split(/\r?\n/);
   return line <= lines.length ? lines[line - 1]! : null;
@@ -159,10 +177,12 @@ export function parseLineLog(raw: string): LineChange | null {
  */
 export function lineLastChanged(repo: string, file: string, line: number): LineChange | null {
   if (!Number.isInteger(line) || line < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${file}`]);
+  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
   if (blob === null) return null;
   const total = blob.split(/\r?\n/).length;
   if (line > total || total > HUGE_FILE_LINES) return null;
+  // `-L a,b:<file>` is cwd-relative under `git -C <repo>` (unlike the rev-expression
+  // above), so the subdir-relative path is already correct — do NOT prefix it.
   const out = git(repo, ["log", "-n", "1", "--format=%h%x00%an%x00%ad", "--date=short", "-L", `${line},${line}:${file}`]);
   return out === null ? null : parseLineLog(out);
 }
