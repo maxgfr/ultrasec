@@ -1,12 +1,13 @@
+import { resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { scanRepo } from "../scan.js";
-import { buildGraph } from "../graph.js";
+import { buildGraph, type Graph } from "../graph.js";
+import { loadDossier } from "../store.js";
 import { neighbors } from "../neighbors.js";
 
-// `ultrasec graph <file|symbol> [--repo .] [--depth 1] [--json]`
+// `ultrasec graph <file|symbol> [--run <run> | --repo .] [--depth 1] [--json]`
 // Show the cross-file links into/out of a file (or the file defining a symbol).
 export function runGraph(args: ParsedArgs): number {
-  const repo = flagStr(args, "repo") ?? ".";
   const target = args._[1];
   const depth = Number(flagStr(args, "depth") ?? "1") || 1;
   if (!target) {
@@ -14,7 +15,23 @@ export function runGraph(args: ParsedArgs): number {
     return 2;
   }
 
-  const graph = buildGraph(scanRepo(repo));
+  // Run-scoped like every sibling (dossier/paths/triage/verify): when `--run` is
+  // given, resolve the graph from that run's graph.json instead of silently
+  // re-scanning the CWD — otherwise a node the run plainly lists reports the
+  // misleading "not a file node nor a known exported symbol". Without `--run`,
+  // fall back to a live `--repo` scan (default CWD), preserving prior behaviour.
+  const runFlag = flagStr(args, "run");
+  let graph: Graph;
+  if (runFlag) {
+    try {
+      graph = loadDossier(resolve(runFlag)).graph;
+    } catch (e) {
+      eprintln(`ultrasec graph: ${(e as Error).message}`);
+      return 2;
+    }
+  } else {
+    graph = buildGraph(scanRepo(flagStr(args, "repo") ?? "."));
+  }
 
   // Resolve a symbol name to its defining file if the target isn't a file node.
   let node = target;

@@ -1,5 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
 import { join } from "node:path";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { scanRepo } from "../src/scan.js";
 import { buildGraph, reverseDependents, mergeGraphs, type Graph } from "../src/graph.js";
 import { neighbors } from "../src/neighbors.js";
@@ -138,5 +140,51 @@ describe("runGraph — exit codes", () => {
     const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     expect(runGraph(parseArgs(["graph", "src/db.js", "--repo", FIXTURE]))).toBe(0);
     out.mockRestore();
+  });
+});
+
+// Regression for B2: `graph <file|symbol> --run <run>` must resolve the node from
+// the RUN's graph (like every sibling command: dossier/paths/triage/verify), not
+// silently ignore --run and re-scan the CWD (which then prints a misleading "not a
+// file node nor a known exported symbol" error even though the run's graph.json
+// lists the node).
+describe("runGraph — --run resolves from the run's dossier (B2)", () => {
+  let runDir: string;
+
+  beforeAll(() => {
+    runDir = mkdtempSync(join(tmpdir(), "ultrasec-graphrun-"));
+    const graph = buildGraph(scanRepo(FIXTURE));
+    // Minimal dossier on disk: graph command only consumes graph.json.
+    writeFileSync(join(runDir, "graph.json"), JSON.stringify(graph));
+    writeFileSync(join(runDir, "findings.json"), "[]");
+    writeFileSync(join(runDir, "manifest.json"), JSON.stringify({ repo: FIXTURE }));
+  });
+  afterAll(() => rmSync(runDir, { recursive: true, force: true }));
+
+  it("resolves a file node listed in the run's graph.json (not the CWD)", () => {
+    const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const code = runGraph(parseArgs(["graph", "src/db.js", "--run", runDir]));
+    out.mockRestore();
+    err.mockRestore();
+    expect(code).toBe(0);
+  });
+
+  it("resolves an exported symbol from the run's graph.json", () => {
+    const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const code = runGraph(parseArgs(["graph", "getUser", "--run", runDir]));
+    out.mockRestore();
+    err.mockRestore();
+    expect(code).toBe(0);
+  });
+
+  it("errors cleanly (exit 2) when --run points at a directory with no dossier", () => {
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const empty = mkdtempSync(join(tmpdir(), "ultrasec-emptyrun-"));
+    const code = runGraph(parseArgs(["graph", "src/db.js", "--run", empty]));
+    err.mockRestore();
+    rmSync(empty, { recursive: true, force: true });
+    expect(code).toBe(2);
   });
 });
