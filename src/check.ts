@@ -102,6 +102,13 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
   const confirmed = findings.filter((f) => f.status === "confirmed").length;
   const dismissed = findings.filter((f) => f.status === "dismissed").length;
   const needsHuman = findings.filter((f) => f.status === "needs-human").length;
+  // Fail-closed: a finding is "adjudicated" only in a recognized terminal status.
+  // Anything else — the literal `open`, a MISSING status, or a foreign/unknown
+  // value (version skew, a tampered/corrupted dossier) — carries no real verdict
+  // and must trip the semantic gate. Keying only off `=== "open"` would wave a
+  // status-less or unknown-status finding through as "adjudicated" (fail-open).
+  const ADJUDICATED = new Set<string>(["confirmed", "dismissed", "needs-human"]);
+  const unadjudicated = findings.filter((f) => !ADJUDICATED.has(f.status as string)).length;
 
   const messages: string[] = [];
   let ok = true;
@@ -111,9 +118,9 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     messages.push(`${dangling.length} dangling citation(s) — a cited [file:line] does not resolve (hallucinated or stale).`);
   }
   if (opts.semantic) {
-    if (open > 0) {
+    if (unadjudicated > 0) {
       ok = false;
-      messages.push(`${open} candidate(s) still unadjudicated — run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
+      messages.push(`${unadjudicated} candidate(s) still unadjudicated — run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
     }
     if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human — review required (not auto-failing).`);
   }

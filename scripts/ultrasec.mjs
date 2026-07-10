@@ -4162,6 +4162,8 @@ function check(dossier, opts = {}) {
   const confirmed = findings.filter((f) => f.status === "confirmed").length;
   const dismissed = findings.filter((f) => f.status === "dismissed").length;
   const needsHuman = findings.filter((f) => f.status === "needs-human").length;
+  const ADJUDICATED = /* @__PURE__ */ new Set(["confirmed", "dismissed", "needs-human"]);
+  const unadjudicated = findings.filter((f) => !ADJUDICATED.has(f.status)).length;
   const messages = [];
   let ok = true;
   if (dangling.length) {
@@ -4169,9 +4171,9 @@ function check(dossier, opts = {}) {
     messages.push(`${dangling.length} dangling citation(s) \u2014 a cited [file:line] does not resolve (hallucinated or stale).`);
   }
   if (opts.semantic) {
-    if (open > 0) {
+    if (unadjudicated > 0) {
       ok = false;
-      messages.push(`${open} candidate(s) still unadjudicated \u2014 run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
+      messages.push(`${unadjudicated} candidate(s) still unadjudicated \u2014 run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
     }
     if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human \u2014 review required (not auto-failing).`);
   }

@@ -108,4 +108,23 @@ describe("check — semantic", () => {
     const r = check(dossier([f("a", "src/db.js", 6, "confirmed"), f("b", "src/report.js", 5, "dismissed")]), { semantic: true });
     expect(r.ok).toBe(true);
   });
+
+  // Gate integrity (fail-closed): the semantic gate must treat ANY non-adjudicated
+  // status as unadjudicated — not only the literal "open". A finding whose status
+  // is unknown/foreign (version skew, a tampered/corrupted findings.json, an
+  // externally-authored dossier) carries no real verdict, yet an equality-on-"open"
+  // check would wave it through ("audit adjudicated"). That is the stale-ledger
+  // fail-open class: the gate must detect unadjudicated claims, not just refuted ones.
+  it("fails on an unknown/foreign status (not just literal open)", () => {
+    const r = check(dossier([f("a", "src/db.js", 6, "reviewed" as Finding["status"])]), { semantic: true });
+    expect(r.ok).toBe(false);
+    expect(r.messages.join(" ")).toMatch(/unadjudicated/);
+  });
+
+  it("fails when a finding carries no status field at all", () => {
+    const bare = { id: "a", category: "taint", title: "a", severity: "high", confidence: "high", message: "m", tool: "ultrasec", sink: { file: "src/db.js", line: 6 } } as unknown as Finding;
+    const r = check(dossier([bare]), { semantic: true });
+    expect(r.ok).toBe(false);
+    expect(r.messages.join(" ")).toMatch(/unadjudicated/);
+  });
 });
