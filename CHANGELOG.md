@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.10.2](https://github.com/maxgfr/ultrasec/compare/v1.10.1...v1.10.2) (2026-07-10)
+
+
+### Bug Fixes
+
+* **check:** fail-closed on unknown/missing status in the semantic gate ([77e7c6b](https://github.com/maxgfr/ultrasec/commit/77e7c6b007e09b99e2c858fed5fae91029f82111))
+* **git:** worktree-prefix the HEAD rev-expressions so subdir --repo git facts resolve ([d663b96](https://github.com/maxgfr/ultrasec/commit/d663b961a08d999ff59c5ce86a930f3838ceb59f))
+* **graph:** honor --run so `graph <file|symbol> --run <run>` resolves from the run ([1b77a08](https://github.com/maxgfr/ultrasec/commit/1b77a088761b52ac7778ade3f5ca29d75a6d4756))
+
 ## [1.10.1](https://github.com/maxgfr/ultrasec/compare/v1.10.0...v1.10.1) (2026-07-09)
 
 
