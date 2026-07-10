@@ -122,7 +122,16 @@ describe("check — semantic", () => {
   });
 
   it("fails when a finding carries no status field at all", () => {
-    const bare = { id: "a", category: "taint", title: "a", severity: "high", confidence: "high", message: "m", tool: "ultrasec", sink: { file: "src/db.js", line: 6 } } as unknown as Finding;
+    const bare = {
+      id: "a",
+      category: "taint",
+      title: "a",
+      severity: "high",
+      confidence: "high",
+      message: "m",
+      tool: "ultrasec",
+      sink: { file: "src/db.js", line: 6 },
+    } as unknown as Finding;
     const r = check(dossier([bare]), { semantic: true });
     expect(r.ok).toBe(false);
     expect(r.messages.join(" ")).toMatch(/unadjudicated/);
