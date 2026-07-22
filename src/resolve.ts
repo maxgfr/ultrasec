@@ -7,6 +7,7 @@
 // (verified differentially before adoption); on real repos it resolves strictly
 // more edges (documented as an accepted, more-correct divergence).
 import type { RepoScan } from "./scan.js";
+import { walk } from "./walk.js";
 import { buildResolveContext, resolveImport as engineResolveImport, type ResolveContext } from "./vendor/codeindex-engine.mjs";
 
 function extOf(rel: string): string {
@@ -14,13 +15,33 @@ function extOf(rel: string): string {
   return i < 0 ? "" : rel.slice(i).toLowerCase();
 }
 
+// Manifest basenames buildResolveContext discovers FROM THE FILE LIST (its
+// content it then reads from disk): tsconfig/jsconfig path aliases, package
+// exports/workspaces, go.mod, Cargo crates, composer PSR-4, python roots.
+// ultrasec's scan keeps code files only, so these must be surfaced explicitly —
+// without them the engine context is empty and alias resolution is inert.
+const MANIFEST_BASES = new Set([
+  "tsconfig.json", "jsconfig.json", "package.json", "go.mod", "cargo.toml", "composer.json",
+  "pyproject.toml", "setup.py",
+]);
+
 /** Adapt ultrasec's RepoScan to the minimal engine scan shape buildResolveContext
- *  consumes: it reads only `root`, and per file `rel`/`ext`/`pkg` (the last two
- *  only for Java/C# namespace roots). Everything else it reads from disk via
- *  `root`. Cast through the engine's expected type — the extra FileRecord fields
- *  are never touched. */
+ *  consumes: per file `rel`/`ext` (+`pkg` for Java/C# roots), with the repo's
+ *  manifest files APPENDED so the engine can discover tsconfig paths, package
+ *  exports, go/cargo/composer roots (their content is read from disk via
+ *  `root`). Manifests are collected by an unscoped walk on purpose: a root
+ *  tsconfig must configure alias resolution even when the scan is scoped to a
+ *  subdirectory. Cast through the engine's expected type — the extra FileRecord
+ *  fields are never touched. */
 function engineScan(scan: RepoScan): Parameters<typeof buildResolveContext>[0] {
-  const files = scan.files.map((f) => ({ rel: f.rel, ext: extOf(f.rel) }));
+  const files: { rel: string; ext: string }[] = scan.files.map((f) => ({ rel: f.rel, ext: extOf(f.rel) }));
+  const seen = new Set(scan.files.map((f) => f.rel));
+  for (const f of walk(scan.repo)) {
+    const base = f.rel.slice(f.rel.lastIndexOf("/") + 1).toLowerCase();
+    if (!MANIFEST_BASES.has(base) || seen.has(f.rel)) continue;
+    seen.add(f.rel);
+    files.push({ rel: f.rel, ext: extOf(f.rel) });
+  }
   return { root: scan.repo, files } as unknown as Parameters<typeof buildResolveContext>[0];
 }
 

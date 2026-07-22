@@ -10164,8 +10164,25 @@ function extOf(rel) {
   const i2 = rel.lastIndexOf(".");
   return i2 < 0 ? "" : rel.slice(i2).toLowerCase();
 }
+var MANIFEST_BASES = /* @__PURE__ */ new Set([
+  "tsconfig.json",
+  "jsconfig.json",
+  "package.json",
+  "go.mod",
+  "cargo.toml",
+  "composer.json",
+  "pyproject.toml",
+  "setup.py"
+]);
 function engineScan(scan2) {
   const files = scan2.files.map((f) => ({ rel: f.rel, ext: extOf(f.rel) }));
+  const seen = new Set(scan2.files.map((f) => f.rel));
+  for (const f of walk(scan2.repo)) {
+    const base = f.rel.slice(f.rel.lastIndexOf("/") + 1).toLowerCase();
+    if (!MANIFEST_BASES.has(base) || seen.has(f.rel)) continue;
+    seen.add(f.rel);
+    files.push({ rel: f.rel, ext: extOf(f.rel) });
+  }
   return { root: scan2.repo, files };
 }
 function buildFileResolver(scan2) {
