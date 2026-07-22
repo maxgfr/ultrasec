@@ -1,5 +1,5 @@
 import type { RepoScan } from "./scan.js";
-import { resolveImport } from "./resolve.js";
+import { buildFileResolver } from "./resolve.js";
 import { byStr } from "./util.js";
 
 export type EdgeKind = "import" | "call";
@@ -75,11 +75,12 @@ export function buildGraph(scan: RepoScan): Graph {
 
   const edgeMap = new Map<string, Edge>();
   const callers = new Map<string, CallerRef[]>();
+  const resolve = buildFileResolver(scan);
 
   for (const f of scan.files) {
     // Import edges (resolved to repo files only).
     for (const imp of f.imports) {
-      const to = resolveImport(f.rel, imp.spec, fileSet);
+      const to = resolve(f.rel, imp.spec);
       if (to && to !== f.rel) add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
     }
     for (const c of f.calls) {
