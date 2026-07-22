@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.10.3](https://github.com/maxgfr/ultrasec/compare/v1.10.2...v1.10.3) (2026-07-22)
+
+
+### Bug Fixes
+
+* **resolve:** surface manifest files to the engine resolver ([7191b6b](https://github.com/maxgfr/ultrasec/commit/7191b6b011f60876afecadc25943d77e1007ba7b))
+
 ## [1.10.2](https://github.com/maxgfr/ultrasec/compare/v1.10.1...v1.10.2) (2026-07-10)
 
 
