@@ -20,10 +20,7 @@ function extOf(rel: string): string {
 // exports/workspaces, go.mod, Cargo crates, composer PSR-4, python roots.
 // ultrasec's scan keeps code files only, so these must be surfaced explicitly —
 // without them the engine context is empty and alias resolution is inert.
-const MANIFEST_BASES = new Set([
-  "tsconfig.json", "jsconfig.json", "package.json", "go.mod", "cargo.toml", "composer.json",
-  "pyproject.toml", "setup.py",
-]);
+const MANIFEST_BASES = new Set(["tsconfig.json", "jsconfig.json", "package.json", "go.mod", "cargo.toml", "composer.json", "pyproject.toml", "setup.py"]);
 
 /** Adapt ultrasec's RepoScan to the minimal engine scan shape buildResolveContext
  *  consumes: per file `rel`/`ext` (+`pkg` for Java/C# roots), with the repo's
