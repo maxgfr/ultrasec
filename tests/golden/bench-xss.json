@@ -1,0 +1,113 @@
+{
+  "findings": [
+    {
+      "id": "af5a6d6a1af5",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "title": "Cross-site scripting (reflected): untrusted input reaches send()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 2,
+        "kind": "xss",
+        "symbol": "renderSearch"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle",
+          "why": "calls renderSearch()"
+        },
+        {
+          "file": "sink.js",
+          "line": 2,
+          "symbol": "renderSearch",
+          "why": "xss sink: send()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the xss sink send() at sink.js:2 through 2 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/79.html"
+      ],
+      "status": "open",
+      "risk": 30
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "renderSearch"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handle": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "renderSearch": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "json": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        }
+      ],
+      "renderSearch": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        }
+      ],
+      "send": [
+        {
+          "file": "sink.js",
+          "line": 2,
+          "symbol": "renderSearch"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "findings": [
+    {
+      "id": "c4c671872ff5",
+      "category": "taint",
+      "cwe": "CWE-93",
+      "title": "HTTP response splitting / header (CRLF) injection: untrusted input reaches setHeader()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.js",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.js",
+        "line": 3,
+        "kind": "crlf",
+        "symbol": "handle"
+      },
+      "path": [
+        {
+          "file": "vuln.js",
+          "line": 2,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "vuln.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "crlf sink: setHeader()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at vuln.js:2 may reach the crlf sink setHeader() at vuln.js:3 through 1 hop(s). Tainted data written into a response header. Strip CR/LF (\\r\\n) or use an API that rejects them. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/93.html"
+      ],
+      "status": "open",
+      "risk": 30
+    }
+  ],
+  "graph": {
+    "files": [
+      "safe.js",
+      "vuln.js"
+    ],
+    "edges": [],
+    "symbolDefs": {
+      "handle": [
+        "safe.js",
+        "vuln.js"
+      ]
+    },
+    "callersBySymbol": {
+      "setHeader": [
+        {
+          "file": "vuln.js",
+          "line": 3,
+          "symbol": "handle"
+        }
+      ],
+      "status": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "handle"
+        }
+      ]
+    }
+  }
+}

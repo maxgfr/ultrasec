@@ -1,0 +1,122 @@
+{
+  "findings": [
+    {
+      "id": "e8f2f2eb14e7",
+      "category": "taint",
+      "cwe": "CWE-943",
+      "title": "NoSQL injection: untrusted input reaches find()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 3,
+        "kind": "nosql",
+        "symbol": "lookup"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle",
+          "why": "calls lookup()"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "lookup",
+          "why": "nosql sink: find()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the nosql sink find() at sink.js:3 through 2 hop(s). Tainted data shaped into a NoSQL query object/operator ($where, $ne, $gt …). Coerce types and reject operator keys (mongo-sanitize); never pass a raw request object as a filter. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/943.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "lookup"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handle": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "lookup": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "find": [
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "lookup"
+        }
+      ],
+      "findById": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        }
+      ],
+      "lookup": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        },
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        },
+        {
+          "file": "sink.js",
+          "line": 1
+        }
+      ]
+    }
+  }
+}

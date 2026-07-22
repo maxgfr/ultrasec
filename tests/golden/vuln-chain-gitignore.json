@@ -1,0 +1,645 @@
+{
+  "findings": [
+    {
+      "id": "22fb96504e71",
+      "category": "taint",
+      "cwe": "CWE-78",
+      "title": "OS command injection: untrusted input reaches execSync()",
+      "severity": "critical",
+      "confidence": "low",
+      "source": {
+        "file": "src/routes.js",
+        "line": 19,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/report.js",
+        "line": 5,
+        "kind": "command",
+        "symbol": "buildReport"
+      },
+      "path": [
+        {
+          "file": "src/routes.js",
+          "line": 19,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/routes.js",
+          "line": 20,
+          "why": "calls buildReport()"
+        },
+        {
+          "file": "src/report.js",
+          "line": 5,
+          "symbol": "buildReport",
+          "why": "command sink: execSync()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at src/routes.js:19 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/78.html"
+      ],
+      "status": "open",
+      "risk": 60
+    },
+    {
+      "id": "409b0c792964",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "title": "Cross-site scripting (reflected): untrusted input reaches send()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "src/routes.js",
+        "line": 25,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/routes.js",
+        "line": 26,
+        "kind": "xss"
+      },
+      "path": [
+        {
+          "file": "src/routes.js",
+          "line": 25,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/routes.js",
+          "line": 26,
+          "why": "xss sink: send()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at src/routes.js:25 may reach the xss sink send() at src/routes.js:26 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/79.html"
+      ],
+      "status": "open",
+      "risk": 30
+    },
+    {
+      "id": "558bbf00b3b0",
+      "category": "taint",
+      "cwe": "CWE-22",
+      "title": "Path traversal / archive extraction (zip-slip): untrusted input reaches readFileSync()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "src/routes.js",
+        "line": 25,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/files.js",
+        "line": 5,
+        "kind": "path",
+        "symbol": "readDoc"
+      },
+      "path": [
+        {
+          "file": "src/routes.js",
+          "line": 25,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/routes.js",
+          "line": 26,
+          "why": "calls readDoc()"
+        },
+        {
+          "file": "src/files.js",
+          "line": 5,
+          "symbol": "readDoc",
+          "why": "path sink: readFileSync()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at src/routes.js:25 may reach the path sink readFileSync() at src/files.js:5 through 2 hop(s). Tainted data used as a filesystem path, or an archive extracted without validating entry names (zip-slip). Confine to a base dir (basename/realpath + allow-list) and reject entries that escape it. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/22.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "698bfe9e0eac",
+      "category": "taint",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery (SSRF): untrusted input reaches get()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "src/routes.js",
+        "line": 32,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/fetcher.js",
+        "line": 8,
+        "kind": "ssrf",
+        "symbol": "fetchUrl"
+      },
+      "path": [
+        {
+          "file": "src/routes.js",
+          "line": 32,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/routes.js",
+          "line": 33,
+          "why": "calls fetchUrl()"
+        },
+        {
+          "file": "src/fetcher.js",
+          "line": 8,
+          "symbol": "fetchUrl",
+          "why": "ssrf sink: get()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at src/routes.js:32 may reach the ssrf sink get() at src/fetcher.js:8 through 2 hop(s). Tainted data used as a request URL/host via an HTTP-client method. Verify the destination is allow-listed (no internal/metadata endpoints). Receiver is generic (an HTTP client vs. a cache/map getter) — confirm it is a network call. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/918.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "71729017b48f",
+      "category": "sast",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery (SSRF): get() sink (no source path found)",
+      "severity": "high",
+      "confidence": "low",
+      "sink": {
+        "file": "src/fetcher.js",
+        "line": 4,
+        "kind": "ssrf"
+      },
+      "message": "Dangerous ssrf sink get() at src/fetcher.js:4 that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). Tainted data used as a request URL/host via an HTTP-client method. Verify the destination is allow-listed (no internal/metadata endpoints). Receiver is generic (an HTTP client vs. a cache/map getter) — confirm it is a network call. Confirm whether attacker-controlled data can reach it before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/918.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "7e51071c4783",
+      "category": "taint",
+      "cwe": "CWE-89",
+      "title": "SQL injection: untrusted input reaches query()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "src/routes.js",
+        "line": 12,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/db.js",
+        "line": 7,
+        "kind": "sql",
+        "symbol": "runQuery"
+      },
+      "path": [
+        {
+          "file": "src/routes.js",
+          "line": 12,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/routes.js",
+          "line": 13,
+          "why": "calls lookupUser()"
+        },
+        {
+          "file": "src/service.js",
+          "line": 6,
+          "symbol": "lookupUser",
+          "why": "calls runQuery()"
+        },
+        {
+          "file": "src/db.js",
+          "line": 7,
+          "symbol": "runQuery",
+          "why": "sql sink: query()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at src/routes.js:12 may reach the sql sink query() at src/db.js:7 through 3 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "c85a1991ecd1",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "title": "Cross-site scripting (reflected): untrusted input reaches send()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "src/routes.js",
+        "line": 19,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/routes.js",
+        "line": 20,
+        "kind": "xss"
+      },
+      "path": [
+        {
+          "file": "src/routes.js",
+          "line": 19,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/routes.js",
+          "line": 20,
+          "why": "xss sink: send()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at src/routes.js:19 may reach the xss sink send() at src/routes.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/79.html"
+      ],
+      "status": "open",
+      "risk": 30
+    },
+    {
+      "id": "c86c5b931be4",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "title": "Cross-site scripting (reflected): untrusted input reaches send()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "src/routes.js",
+        "line": 32,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/routes.js",
+        "line": 33,
+        "kind": "xss"
+      },
+      "path": [
+        {
+          "file": "src/routes.js",
+          "line": 32,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/routes.js",
+          "line": 33,
+          "why": "xss sink: send()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at src/routes.js:32 may reach the xss sink send() at src/routes.js:33 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/79.html"
+      ],
+      "status": "open",
+      "risk": 30
+    }
+  ],
+  "graph": {
+    "files": [
+      "src/db.js",
+      "src/fetcher.js",
+      "src/files.js",
+      "src/report.js",
+      "src/routes.js",
+      "src/service.js"
+    ],
+    "edges": [
+      {
+        "from": "src/routes.js",
+        "to": "src/fetcher.js",
+        "kind": "call",
+        "weight": 1,
+        "toSymbol": "fetchUrl"
+      },
+      {
+        "from": "src/routes.js",
+        "to": "src/fetcher.js",
+        "kind": "call",
+        "weight": 5,
+        "toSymbol": "get"
+      },
+      {
+        "from": "src/routes.js",
+        "to": "src/fetcher.js",
+        "kind": "import",
+        "weight": 1
+      },
+      {
+        "from": "src/routes.js",
+        "to": "src/files.js",
+        "kind": "call",
+        "weight": 1,
+        "toSymbol": "readDoc"
+      },
+      {
+        "from": "src/routes.js",
+        "to": "src/files.js",
+        "kind": "import",
+        "weight": 1
+      },
+      {
+        "from": "src/routes.js",
+        "to": "src/report.js",
+        "kind": "call",
+        "weight": 1,
+        "toSymbol": "buildReport"
+      },
+      {
+        "from": "src/routes.js",
+        "to": "src/report.js",
+        "kind": "import",
+        "weight": 1
+      },
+      {
+        "from": "src/routes.js",
+        "to": "src/service.js",
+        "kind": "call",
+        "weight": 1,
+        "toSymbol": "lookupUser"
+      },
+      {
+        "from": "src/routes.js",
+        "to": "src/service.js",
+        "kind": "import",
+        "weight": 1
+      },
+      {
+        "from": "src/service.js",
+        "to": "src/db.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "lookupUser",
+        "toSymbol": "runQuery"
+      },
+      {
+        "from": "src/service.js",
+        "to": "src/db.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "runQuery": [
+        "src/db.js"
+      ],
+      "fetchUrl": [
+        "src/fetcher.js"
+      ],
+      "get": [
+        "src/fetcher.js"
+      ],
+      "readDoc": [
+        "src/files.js"
+      ],
+      "buildReport": [
+        "src/report.js"
+      ],
+      "lookupUser": [
+        "src/service.js"
+      ]
+    },
+    "callersBySymbol": {
+      "Map": [
+        {
+          "file": "src/fetcher.js",
+          "line": 2
+        }
+      ],
+      "VULN": [
+        {
+          "file": "src/routes.js",
+          "line": 9
+        },
+        {
+          "file": "src/routes.js",
+          "line": 17
+        },
+        {
+          "file": "src/routes.js",
+          "line": 23
+        },
+        {
+          "file": "src/routes.js",
+          "line": 29
+        }
+      ],
+      "async": [
+        {
+          "file": "src/routes.js",
+          "line": 31
+        }
+      ],
+      "buildReport": [
+        {
+          "file": "src/routes.js",
+          "line": 20
+        }
+      ],
+      "createConnection": [
+        {
+          "file": "src/db.js",
+          "line": 3
+        }
+      ],
+      "execSync": [
+        {
+          "file": "src/report.js",
+          "line": 5,
+          "symbol": "buildReport"
+        }
+      ],
+      "express": [
+        {
+          "file": "src/routes.js",
+          "line": 7
+        }
+      ],
+      "fetchUrl": [
+        {
+          "file": "src/routes.js",
+          "line": 33
+        }
+      ],
+      "get": [
+        {
+          "file": "src/fetcher.js",
+          "line": 4
+        },
+        {
+          "file": "src/fetcher.js",
+          "line": 5
+        },
+        {
+          "file": "src/fetcher.js",
+          "line": 8,
+          "symbol": "fetchUrl"
+        },
+        {
+          "file": "src/fetcher.js",
+          "line": 12,
+          "symbol": "get"
+        },
+        {
+          "file": "src/routes.js",
+          "line": 11
+        },
+        {
+          "file": "src/routes.js",
+          "line": 18
+        },
+        {
+          "file": "src/routes.js",
+          "line": 24
+        },
+        {
+          "file": "src/routes.js",
+          "line": 30
+        },
+        {
+          "file": "src/routes.js",
+          "line": 31
+        }
+      ],
+      "json": [
+        {
+          "file": "src/routes.js",
+          "line": 14
+        }
+      ],
+      "listen": [
+        {
+          "file": "src/routes.js",
+          "line": 36
+        }
+      ],
+      "lookupUser": [
+        {
+          "file": "src/routes.js",
+          "line": 13
+        }
+      ],
+      "query": [
+        {
+          "file": "src/db.js",
+          "line": 7,
+          "symbol": "runQuery"
+        }
+      ],
+      "readDoc": [
+        {
+          "file": "src/routes.js",
+          "line": 26
+        }
+      ],
+      "readFileSync": [
+        {
+          "file": "src/files.js",
+          "line": 5,
+          "symbol": "readDoc"
+        }
+      ],
+      "require": [
+        {
+          "file": "src/db.js",
+          "line": 1
+        },
+        {
+          "file": "src/fetcher.js",
+          "line": 1
+        },
+        {
+          "file": "src/files.js",
+          "line": 1
+        },
+        {
+          "file": "src/report.js",
+          "line": 1
+        },
+        {
+          "file": "src/routes.js",
+          "line": 1
+        },
+        {
+          "file": "src/routes.js",
+          "line": 2
+        },
+        {
+          "file": "src/routes.js",
+          "line": 3
+        },
+        {
+          "file": "src/routes.js",
+          "line": 4
+        },
+        {
+          "file": "src/routes.js",
+          "line": 5
+        },
+        {
+          "file": "src/service.js",
+          "line": 1
+        }
+      ],
+      "rule": [
+        {
+          "file": "src/fetcher.js",
+          "line": 5
+        }
+      ],
+      "runQuery": [
+        {
+          "file": "src/service.js",
+          "line": 6,
+          "symbol": "lookupUser"
+        }
+      ],
+      "send": [
+        {
+          "file": "src/routes.js",
+          "line": 20
+        },
+        {
+          "file": "src/routes.js",
+          "line": 26
+        },
+        {
+          "file": "src/routes.js",
+          "line": 33
+        }
+      ],
+      "sink": [
+        {
+          "file": "src/routes.js",
+          "line": 30
+        }
+      ],
+      "toString": [
+        {
+          "file": "src/report.js",
+          "line": 5,
+          "symbol": "buildReport"
+        }
+      ]
+    }
+  }
+}

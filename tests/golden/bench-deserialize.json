@@ -1,0 +1,71 @@
+{
+  "findings": [
+    {
+      "id": "86510f76877b",
+      "category": "taint",
+      "cwe": "CWE-502",
+      "title": "Insecure deserialization: untrusted input reaches loads()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.py",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.py",
+        "line": 4,
+        "kind": "deserialize",
+        "symbol": "handler"
+      },
+      "path": [
+        {
+          "file": "vuln.py",
+          "line": 3,
+          "symbol": "handler",
+          "why": "untrusted input (http): request.data"
+        },
+        {
+          "file": "vuln.py",
+          "line": 4,
+          "symbol": "handler",
+          "why": "deserialize sink: loads()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at vuln.py:3 may reach the deserialize sink loads() at vuln.py:4 through 1 hop(s). Tainted data deserialized into objects. Use a safe loader (yaml.safe_load, JSON) and never unpickle untrusted input. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/502.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "safe.py",
+      "vuln.py"
+    ],
+    "edges": [],
+    "symbolDefs": {
+      "handler": [
+        "safe.py",
+        "vuln.py"
+      ]
+    },
+    "callersBySymbol": {
+      "loads": [
+        {
+          "file": "safe.py",
+          "line": 4,
+          "symbol": "handler"
+        },
+        {
+          "file": "vuln.py",
+          "line": 4,
+          "symbol": "handler"
+        }
+      ]
+    }
+  }
+}

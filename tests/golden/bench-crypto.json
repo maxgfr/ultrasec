@@ -1,0 +1,83 @@
+{
+  "findings": [
+    {
+      "id": "6aa8eaa9aee5",
+      "category": "taint",
+      "cwe": "CWE-327",
+      "title": "Weak cryptography: untrusted input reaches md5()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.js",
+        "line": 4,
+        "kind": "crypto",
+        "symbol": "store"
+      },
+      "path": [
+        {
+          "file": "vuln.js",
+          "line": 3,
+          "symbol": "store",
+          "why": "untrusted input (http): req.body"
+        },
+        {
+          "file": "vuln.js",
+          "line": 4,
+          "symbol": "store",
+          "why": "crypto sink: md5()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at vuln.js:3 may reach the crypto sink md5() at vuln.js:4 through 1 hop(s). Broken/weak primitive. Use SHA-256+/bcrypt/argon2 and authenticated encryption (AES-GCM). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/327.html"
+      ],
+      "status": "open",
+      "risk": 30
+    }
+  ],
+  "graph": {
+    "files": [
+      "safe.js",
+      "vuln.js"
+    ],
+    "edges": [],
+    "symbolDefs": {
+      "store": [
+        "safe.js",
+        "vuln.js"
+      ]
+    },
+    "callersBySymbol": {
+      "md5": [
+        {
+          "file": "vuln.js",
+          "line": 4,
+          "symbol": "store"
+        }
+      ],
+      "require": [
+        {
+          "file": "safe.js",
+          "line": 1
+        },
+        {
+          "file": "vuln.js",
+          "line": 1
+        }
+      ],
+      "sha256": [
+        {
+          "file": "safe.js",
+          "line": 4,
+          "symbol": "store"
+        }
+      ]
+    }
+  }
+}

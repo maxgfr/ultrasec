@@ -1,0 +1,2 @@
+# The scratch/ tree is developer debris: a gitignore-honouring scan skips it.
+scratch/

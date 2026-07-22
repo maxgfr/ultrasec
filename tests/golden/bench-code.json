@@ -1,0 +1,113 @@
+{
+  "findings": [
+    {
+      "id": "3ab0ce0f1a22",
+      "category": "taint",
+      "cwe": "CWE-94",
+      "title": "Code injection / eval: untrusted input reaches eval()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 3,
+        "kind": "code",
+        "symbol": "evaluate"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle",
+          "why": "calls evaluate()"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "evaluate",
+          "why": "code sink: eval()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the code sink eval() at sink.js:3 through 2 hop(s). Tainted data evaluated as code. Almost never safe; verify the argument is a constant. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/94.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "evaluate"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handle": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "evaluate": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "eval": [
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "evaluate"
+        }
+      ],
+      "evaluate": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle"
+        }
+      ],
+      "parse": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        }
+      ]
+    }
+  }
+}

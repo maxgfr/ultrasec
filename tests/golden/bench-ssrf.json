@@ -1,0 +1,174 @@
+{
+  "findings": [
+    {
+      "id": "ba35e7b1798c",
+      "category": "taint",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery (SSRF): untrusted input reaches get()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "app.py",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "app.py",
+        "line": 4,
+        "kind": "ssrf",
+        "symbol": "handler"
+      },
+      "path": [
+        {
+          "file": "app.py",
+          "line": 3,
+          "symbol": "handler",
+          "why": "untrusted input (http): request.args"
+        },
+        {
+          "file": "app.py",
+          "line": 4,
+          "symbol": "handler",
+          "why": "ssrf sink: get()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at app.py:3 may reach the ssrf sink get() at app.py:4 through 1 hop(s). Tainted data used as a request URL/host via an HTTP-client method. Verify the destination is allow-listed (no internal/metadata endpoints). Receiver is generic (an HTTP client vs. a cache/map getter) — confirm it is a network call. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/918.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "db62faaa4505",
+      "category": "taint",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery (SSRF): untrusted input reaches get()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 3,
+        "kind": "ssrf",
+        "symbol": "fetchUrl"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle",
+          "why": "calls fetchUrl()"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "fetchUrl",
+          "why": "ssrf sink: get()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the ssrf sink get() at sink.js:3 through 2 hop(s). Tainted data used as a request URL/host via an HTTP-client method. Verify the destination is allow-listed (no internal/metadata endpoints). Receiver is generic (an HTTP client vs. a cache/map getter) — confirm it is a network call. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/918.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "app.py",
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "fetchUrl"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handler": [
+        "app.py"
+      ],
+      "handle": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "fetchUrl": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "fetchUrl": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle"
+        }
+      ],
+      "get": [
+        {
+          "file": "app.py",
+          "line": 3,
+          "symbol": "handler"
+        },
+        {
+          "file": "app.py",
+          "line": 4,
+          "symbol": "handler"
+        },
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "fetchUrl"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        },
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        },
+        {
+          "file": "sink.js",
+          "line": 1
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,79 @@
+{
+  "findings": [
+    {
+      "id": "ad6c069e3cad",
+      "category": "taint",
+      "cwe": "CWE-611",
+      "title": "XML external entity (XXE): untrusted input reaches parseXml()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.js",
+        "line": 4,
+        "kind": "xxe",
+        "symbol": "ingest"
+      },
+      "path": [
+        {
+          "file": "vuln.js",
+          "line": 3,
+          "symbol": "ingest",
+          "why": "untrusted input (http): req.body"
+        },
+        {
+          "file": "vuln.js",
+          "line": 4,
+          "symbol": "ingest",
+          "why": "xxe sink: parseXml()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at vuln.js:3 may reach the xxe sink parseXml() at vuln.js:4 through 1 hop(s). Tainted XML parsed with external entities/DTDs enabled. Disable entity resolution (resolve_entities=False / FEATURE_SECURE_PROCESSING / noent off). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/611.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "safe.js",
+      "vuln.js"
+    ],
+    "edges": [],
+    "symbolDefs": {
+      "ingest": [
+        "safe.js",
+        "vuln.js"
+      ]
+    },
+    "callersBySymbol": {
+      "parse": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "ingest"
+        }
+      ],
+      "parseXml": [
+        {
+          "file": "vuln.js",
+          "line": 4,
+          "symbol": "ingest"
+        }
+      ],
+      "require": [
+        {
+          "file": "vuln.js",
+          "line": 1
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,140 @@
+{
+  "findings": [
+    {
+      "id": "1e8ebec58209",
+      "category": "sast",
+      "cwe": "CWE-89",
+      "title": "SQL injection: query() sink (no source path found)",
+      "severity": "high",
+      "confidence": "low",
+      "sink": {
+        "file": "safe.js",
+        "line": 3,
+        "kind": "sql",
+        "symbol": "safe"
+      },
+      "message": "Dangerous sql sink query() at safe.js:3 that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. A possible sanitizer is present on the line (looks parameterized (placeholder present)) — confirm it neutralizes any untrusted input. Confirm whether attacker-controlled data can reach it before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "8b93be422154",
+      "category": "taint",
+      "cwe": "CWE-89",
+      "title": "SQL injection: untrusted input reaches query()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 3,
+        "kind": "sql",
+        "symbol": "lookup"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle",
+          "why": "calls lookup()"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "lookup",
+          "why": "sql sink: query()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the sql sink query() at sink.js:3 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "lookup"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handle": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "lookup": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "lookup": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle"
+        }
+      ],
+      "query": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "lookup"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        },
+        {
+          "file": "safe.js",
+          "line": 1
+        },
+        {
+          "file": "sink.js",
+          "line": 1
+        }
+      ]
+    }
+  }
+}

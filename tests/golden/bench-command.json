@@ -1,0 +1,122 @@
+{
+  "findings": [
+    {
+      "id": "0a58aadd5e19",
+      "category": "taint",
+      "cwe": "CWE-78",
+      "title": "OS command injection: untrusted input reaches execSync()",
+      "severity": "critical",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 3,
+        "kind": "command",
+        "symbol": "runReport"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle",
+          "why": "calls runReport()"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "runReport",
+          "why": "command sink: execSync()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the command sink execSync() at sink.js:3 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/78.html"
+      ],
+      "status": "open",
+      "risk": 60
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "runReport"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handle": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "runReport": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "execFile": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        }
+      ],
+      "execSync": [
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "runReport"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        },
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        },
+        {
+          "file": "sink.js",
+          "line": 1
+        }
+      ],
+      "runReport": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle"
+        }
+      ]
+    }
+  }
+}

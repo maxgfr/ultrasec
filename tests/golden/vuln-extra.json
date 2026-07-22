@@ -1,0 +1,238 @@
+{
+  "findings": [
+    {
+      "id": "4b340d33af22",
+      "category": "taint",
+      "cwe": "CWE-1321",
+      "title": "Prototype pollution: untrusted input reaches merge()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "src/app.js",
+        "line": 13,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/app.js",
+        "line": 13,
+        "kind": "proto",
+        "symbol": "update"
+      },
+      "path": [
+        {
+          "file": "src/app.js",
+          "line": 13,
+          "symbol": "update",
+          "why": "untrusted input (http): req.body"
+        },
+        {
+          "file": "src/app.js",
+          "line": 13,
+          "symbol": "update",
+          "why": "proto sink: merge()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at src/app.js:13 may reach the proto sink merge() at src/app.js:13 through 1 hop(s). Tainted keys deep-merged into an object can reach Object.prototype (__proto__/constructor/prototype). Reject those keys or use a null-prototype target / Map. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/1321.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "973ff8ae9843",
+      "category": "taint",
+      "cwe": "CWE-943",
+      "title": "NoSQL injection: untrusted input reaches find()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "src/app.js",
+        "line": 6,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/app.js",
+        "line": 7,
+        "kind": "nosql",
+        "symbol": "search"
+      },
+      "path": [
+        {
+          "file": "src/app.js",
+          "line": 6,
+          "symbol": "search",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/app.js",
+          "line": 7,
+          "symbol": "search",
+          "why": "nosql sink: find()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at src/app.js:6 may reach the nosql sink find() at src/app.js:7 through 1 hop(s). Tainted data shaped into a NoSQL query object/operator ($where, $ne, $gt …). Coerce types and reject operator keys (mongo-sanitize); never pass a raw request object as a filter. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/943.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "c9943a768f9c",
+      "category": "taint",
+      "cwe": "CWE-943",
+      "title": "NoSQL injection: untrusted input reaches find()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "src/app.js",
+        "line": 6,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/db.js",
+        "line": 5,
+        "kind": "nosql",
+        "symbol": "find"
+      },
+      "path": [
+        {
+          "file": "src/app.js",
+          "line": 6,
+          "symbol": "search",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/app.js",
+          "line": 7,
+          "symbol": "search",
+          "why": "calls find()"
+        },
+        {
+          "file": "src/db.js",
+          "line": 5,
+          "symbol": "find",
+          "why": "nosql sink: find()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at src/app.js:6 may reach the nosql sink find() at src/db.js:5 through 2 hop(s). Tainted data shaped into a NoSQL query object/operator ($where, $ne, $gt …). Coerce types and reject operator keys (mongo-sanitize); never pass a raw request object as a filter. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/943.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "eee16b7815c3",
+      "category": "sast",
+      "cwe": "CWE-89",
+      "title": "SQL injection: query() sink (no source path found)",
+      "severity": "high",
+      "confidence": "low",
+      "sink": {
+        "file": "src/app.js",
+        "line": 4,
+        "kind": "sql"
+      },
+      "message": "Dangerous sql sink query() at src/app.js:4 that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Confirm whether attacker-controlled data can reach it before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "src/app.js",
+      "src/db.js"
+    ],
+    "edges": [
+      {
+        "from": "src/app.js",
+        "to": "src/db.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "search",
+        "toSymbol": "find"
+      },
+      {
+        "from": "src/app.js",
+        "to": "src/db.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "search": [
+        "src/app.js"
+      ],
+      "update": [
+        "src/app.js"
+      ],
+      "find": [
+        "src/db.js"
+      ]
+    },
+    "callersBySymbol": {
+      "collection": [
+        {
+          "file": "src/db.js",
+          "line": 5,
+          "symbol": "find"
+        }
+      ],
+      "find": [
+        {
+          "file": "src/app.js",
+          "line": 7,
+          "symbol": "search"
+        },
+        {
+          "file": "src/db.js",
+          "line": 5,
+          "symbol": "find"
+        }
+      ],
+      "merge": [
+        {
+          "file": "src/app.js",
+          "line": 13,
+          "symbol": "update"
+        }
+      ],
+      "object": [
+        {
+          "file": "src/app.js",
+          "line": 10,
+          "symbol": "search"
+        }
+      ],
+      "query": [
+        {
+          "file": "src/app.js",
+          "line": 4
+        }
+      ],
+      "require": [
+        {
+          "file": "src/app.js",
+          "line": 1
+        },
+        {
+          "file": "src/app.js",
+          "line": 2
+        },
+        {
+          "file": "src/db.js",
+          "line": 1
+        }
+      ]
+    }
+  }
+}

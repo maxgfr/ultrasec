@@ -1,0 +1,73 @@
+{
+  "findings": [
+    {
+      "id": "6cd1db9327e7",
+      "category": "taint",
+      "cwe": "CWE-601",
+      "title": "Open redirect: untrusted input reaches redirect()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.js",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.js",
+        "line": 3,
+        "kind": "redirect",
+        "symbol": "handle"
+      },
+      "path": [
+        {
+          "file": "vuln.js",
+          "line": 2,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "vuln.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "redirect sink: redirect()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at vuln.js:2 may reach the redirect sink redirect() at vuln.js:3 through 1 hop(s). Tainted data used as a redirect target. Allow-list the destination or only permit relative paths. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/601.html"
+      ],
+      "status": "open",
+      "risk": 30
+    }
+  ],
+  "graph": {
+    "files": [
+      "safe.js",
+      "vuln.js"
+    ],
+    "edges": [],
+    "symbolDefs": {
+      "handle": [
+        "safe.js",
+        "vuln.js"
+      ]
+    },
+    "callersBySymbol": {
+      "redirect": [
+        {
+          "file": "vuln.js",
+          "line": 3,
+          "symbol": "handle"
+        }
+      ],
+      "render": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "handle"
+        }
+      ]
+    }
+  }
+}

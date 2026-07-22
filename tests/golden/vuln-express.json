@@ -1,0 +1,326 @@
+{
+  "findings": [
+    {
+      "id": "3ffa0917b004",
+      "category": "taint",
+      "cwe": "CWE-78",
+      "title": "OS command injection: untrusted input reaches execSync()",
+      "severity": "critical",
+      "confidence": "low",
+      "source": {
+        "file": "src/server.js",
+        "line": 18,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/report.js",
+        "line": 5,
+        "kind": "command",
+        "symbol": "runReport"
+      },
+      "path": [
+        {
+          "file": "src/server.js",
+          "line": 18,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/server.js",
+          "line": 19,
+          "why": "calls runReport()"
+        },
+        {
+          "file": "src/report.js",
+          "line": 5,
+          "symbol": "runReport",
+          "why": "command sink: execSync()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/78.html"
+      ],
+      "status": "open",
+      "risk": 60
+    },
+    {
+      "id": "54b733703450",
+      "category": "taint",
+      "cwe": "CWE-89",
+      "title": "SQL injection: untrusted input reaches query()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "src/server.js",
+        "line": 10,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/db.js",
+        "line": 6,
+        "kind": "sql",
+        "symbol": "getUser"
+      },
+      "path": [
+        {
+          "file": "src/server.js",
+          "line": 10,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/server.js",
+          "line": 11,
+          "why": "calls getUser()"
+        },
+        {
+          "file": "src/db.js",
+          "line": 6,
+          "symbol": "getUser",
+          "why": "sql sink: query()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "9b0bcc91ea6a",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "title": "Cross-site scripting (reflected): untrusted input reaches send()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "src/server.js",
+        "line": 18,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "src/server.js",
+        "line": 20,
+        "kind": "xss"
+      },
+      "path": [
+        {
+          "file": "src/server.js",
+          "line": 18,
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "src/server.js",
+          "line": 20,
+          "why": "xss sink: send()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/79.html"
+      ],
+      "status": "open",
+      "risk": 30
+    },
+    {
+      "id": "ef65f0c42c1c",
+      "category": "sast",
+      "cwe": "CWE-89",
+      "title": "SQL injection: query() sink (no source path found)",
+      "severity": "high",
+      "confidence": "low",
+      "sink": {
+        "file": "src/db.js",
+        "line": 11,
+        "kind": "sql",
+        "symbol": "getUserSafe"
+      },
+      "message": "Dangerous sql sink query() at src/db.js:11 that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. A possible sanitizer is present on the line (looks parameterized (placeholder present)) — confirm it neutralizes any untrusted input. Confirm whether attacker-controlled data can reach it before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "src/db.js",
+      "src/report.js",
+      "src/server.js",
+      "src/sqlite.js"
+    ],
+    "edges": [
+      {
+        "from": "src/db.js",
+        "to": "src/sqlite.js",
+        "kind": "call",
+        "weight": 2,
+        "fromSymbol": "getUser",
+        "toSymbol": "query"
+      },
+      {
+        "from": "src/db.js",
+        "to": "src/sqlite.js",
+        "kind": "import",
+        "weight": 1
+      },
+      {
+        "from": "src/server.js",
+        "to": "src/db.js",
+        "kind": "call",
+        "weight": 1,
+        "toSymbol": "getUser"
+      },
+      {
+        "from": "src/server.js",
+        "to": "src/db.js",
+        "kind": "import",
+        "weight": 1
+      },
+      {
+        "from": "src/server.js",
+        "to": "src/report.js",
+        "kind": "call",
+        "weight": 1,
+        "toSymbol": "runReport"
+      },
+      {
+        "from": "src/server.js",
+        "to": "src/report.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "getUser": [
+        "src/db.js"
+      ],
+      "getUserSafe": [
+        "src/db.js"
+      ],
+      "runReport": [
+        "src/report.js"
+      ],
+      "query": [
+        "src/sqlite.js"
+      ]
+    },
+    "callersBySymbol": {
+      "VULN": [
+        {
+          "file": "src/server.js",
+          "line": 7
+        },
+        {
+          "file": "src/server.js",
+          "line": 15
+        }
+      ],
+      "execSync": [
+        {
+          "file": "src/report.js",
+          "line": 5,
+          "symbol": "runReport"
+        }
+      ],
+      "express": [
+        {
+          "file": "src/server.js",
+          "line": 5
+        }
+      ],
+      "get": [
+        {
+          "file": "src/server.js",
+          "line": 9
+        },
+        {
+          "file": "src/server.js",
+          "line": 17
+        }
+      ],
+      "getUser": [
+        {
+          "file": "src/server.js",
+          "line": 11
+        }
+      ],
+      "json": [
+        {
+          "file": "src/server.js",
+          "line": 12
+        }
+      ],
+      "listen": [
+        {
+          "file": "src/server.js",
+          "line": 23
+        }
+      ],
+      "query": [
+        {
+          "file": "src/db.js",
+          "line": 6,
+          "symbol": "getUser"
+        },
+        {
+          "file": "src/db.js",
+          "line": 11,
+          "symbol": "getUserSafe"
+        }
+      ],
+      "require": [
+        {
+          "file": "src/db.js",
+          "line": 1
+        },
+        {
+          "file": "src/report.js",
+          "line": 1
+        },
+        {
+          "file": "src/server.js",
+          "line": 1
+        },
+        {
+          "file": "src/server.js",
+          "line": 2
+        },
+        {
+          "file": "src/server.js",
+          "line": 3
+        }
+      ],
+      "runReport": [
+        {
+          "file": "src/server.js",
+          "line": 19
+        }
+      ],
+      "send": [
+        {
+          "file": "src/server.js",
+          "line": 20
+        }
+      ],
+      "sink": [
+        {
+          "file": "src/report.js",
+          "line": 3
+        }
+      ],
+      "toString": [
+        {
+          "file": "src/report.js",
+          "line": 5,
+          "symbol": "runReport"
+        }
+      ]
+    }
+  }
+}

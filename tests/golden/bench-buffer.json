@@ -1,0 +1,85 @@
+{
+  "findings": [
+    {
+      "id": "cf04e6fe80a1",
+      "category": "taint",
+      "cwe": "CWE-120",
+      "title": "Classic buffer overflow (unbounded copy): untrusted input reaches strcpy()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.c",
+        "line": 5,
+        "kind": "env"
+      },
+      "sink": {
+        "file": "vuln.c",
+        "line": 6,
+        "kind": "buffer",
+        "symbol": "load"
+      },
+      "path": [
+        {
+          "file": "vuln.c",
+          "line": 5,
+          "symbol": "load",
+          "why": "untrusted input (env): getenv("
+        },
+        {
+          "file": "vuln.c",
+          "line": 6,
+          "symbol": "load",
+          "why": "buffer sink: strcpy()"
+        }
+      ],
+      "message": "Intra-file candidate: env input at vuln.c:5 may reach the buffer sink strcpy() at vuln.c:6 through 1 hop(s). Best-effort (C/C++): tainted data into an unbounded copy. Prefer the bounded forms (strncpy/snprintf/memcpy with a checked length). Pair with cppcheck/gosec. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/120.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "safe.c",
+      "vuln.c"
+    ],
+    "edges": [],
+    "symbolDefs": {
+      "load": [
+        "safe.c",
+        "vuln.c"
+      ]
+    },
+    "callersBySymbol": {
+      "getenv": [
+        {
+          "file": "safe.c",
+          "line": 5,
+          "symbol": "load"
+        },
+        {
+          "file": "vuln.c",
+          "line": 5,
+          "symbol": "load"
+        }
+      ],
+      "strcpy": [
+        {
+          "file": "vuln.c",
+          "line": 6,
+          "symbol": "load"
+        }
+      ],
+      "strncpy": [
+        {
+          "file": "safe.c",
+          "line": 6,
+          "symbol": "load"
+        }
+      ]
+    }
+  }
+}

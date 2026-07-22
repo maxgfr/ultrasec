@@ -1,0 +1,140 @@
+{
+  "findings": [
+    {
+      "id": "665bbbfcc462",
+      "category": "taint",
+      "cwe": "CWE-22",
+      "title": "Path traversal / archive extraction (zip-slip): untrusted input reaches readFileSync()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 3,
+        "kind": "path",
+        "symbol": "readDoc"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle",
+          "why": "calls readDoc()"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "readDoc",
+          "why": "path sink: readFileSync()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the path sink readFileSync() at sink.js:3 through 2 hop(s). Tainted data used as a filesystem path, or an archive extracted without validating entry names (zip-slip). Confine to a base dir (basename/realpath + allow-list) and reject entries that escape it. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/22.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "d4990e283537",
+      "category": "sast",
+      "cwe": "CWE-22",
+      "title": "Path traversal / archive extraction (zip-slip): readFileSync() sink (no source path found)",
+      "severity": "high",
+      "confidence": "low",
+      "sink": {
+        "file": "safe.js",
+        "line": 3,
+        "kind": "path",
+        "symbol": "safe"
+      },
+      "message": "Dangerous path sink readFileSync() at safe.js:3 that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). Tainted data used as a filesystem path, or an archive extracted without validating entry names (zip-slip). Confine to a base dir (basename/realpath + allow-list) and reject entries that escape it. Confirm whether attacker-controlled data can reach it before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/22.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "readDoc"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handle": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "readDoc": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "readDoc": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle"
+        }
+      ],
+      "readFileSync": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "readDoc"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        },
+        {
+          "file": "safe.js",
+          "line": 1
+        },
+        {
+          "file": "sink.js",
+          "line": 1
+        }
+      ]
+    }
+  }
+}

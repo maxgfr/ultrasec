@@ -1,0 +1,117 @@
+{
+  "findings": [
+    {
+      "id": "747aad3a0307",
+      "category": "taint",
+      "cwe": "CWE-1321",
+      "title": "Prototype pollution: untrusted input reaches merge()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 3,
+        "kind": "proto",
+        "symbol": "applyConfig"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handle",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle",
+          "why": "calls applyConfig()"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "applyConfig",
+          "why": "proto sink: merge()"
+        }
+      ],
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the proto sink merge() at sink.js:3 through 2 hop(s). Tainted keys deep-merged into an object can reach Object.prototype (__proto__/constructor/prototype). Reject those keys or use a null-prototype target / Map. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/1321.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "applyConfig"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handle": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "applyConfig": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "applyConfig": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handle"
+        }
+      ],
+      "assign": [
+        {
+          "file": "safe.js",
+          "line": 3,
+          "symbol": "safe"
+        }
+      ],
+      "merge": [
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "applyConfig"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        },
+        {
+          "file": "sink.js",
+          "line": 1
+        }
+      ]
+    }
+  }
+}

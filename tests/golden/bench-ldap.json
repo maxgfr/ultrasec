@@ -1,0 +1,92 @@
+{
+  "findings": [
+    {
+      "id": "45dc0afd6e40",
+      "category": "taint",
+      "cwe": "CWE-90",
+      "title": "LDAP injection: untrusted input reaches search()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.js",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.js",
+        "line": 3,
+        "kind": "ldap",
+        "symbol": "find"
+      },
+      "path": [
+        {
+          "file": "vuln.js",
+          "line": 2,
+          "symbol": "find",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "vuln.js",
+          "line": 3,
+          "symbol": "find",
+          "why": "ldap sink: search()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at vuln.js:2 may reach the ldap sink search() at vuln.js:3 through 1 hop(s). Tainted data concatenated into an LDAP filter/DN. Escape with the LDAP escaping API (ldap.escape / escapeFilter / escapeDN). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/90.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "95d6cf628c8b",
+      "category": "sast",
+      "cwe": "CWE-90",
+      "title": "LDAP injection: search() sink (no source path found)",
+      "severity": "high",
+      "confidence": "low",
+      "sink": {
+        "file": "safe.js",
+        "line": 2,
+        "kind": "ldap",
+        "symbol": "find"
+      },
+      "message": "Dangerous ldap sink search() at safe.js:2 that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). Tainted data concatenated into an LDAP filter/DN. Escape with the LDAP escaping API (ldap.escape / escapeFilter / escapeDN). Confirm whether attacker-controlled data can reach it before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/90.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "safe.js",
+      "vuln.js"
+    ],
+    "edges": [],
+    "symbolDefs": {
+      "find": [
+        "safe.js",
+        "vuln.js"
+      ]
+    },
+    "callersBySymbol": {
+      "search": [
+        {
+          "file": "safe.js",
+          "line": 2,
+          "symbol": "find"
+        },
+        {
+          "file": "vuln.js",
+          "line": 3,
+          "symbol": "find"
+        }
+      ]
+    }
+  }
+}

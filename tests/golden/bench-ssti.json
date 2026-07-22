@@ -1,0 +1,83 @@
+{
+  "findings": [
+    {
+      "id": "feb256823d13",
+      "category": "taint",
+      "cwe": "CWE-1336",
+      "title": "Server-side template injection (SSTI): untrusted input reaches renderString()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.js",
+        "line": 4,
+        "kind": "ssti",
+        "symbol": "view"
+      },
+      "path": [
+        {
+          "file": "vuln.js",
+          "line": 3,
+          "symbol": "view",
+          "why": "untrusted input (http): req.body"
+        },
+        {
+          "file": "vuln.js",
+          "line": 4,
+          "symbol": "view",
+          "why": "ssti sink: renderString()"
+        }
+      ],
+      "message": "Intra-file candidate: http input at vuln.js:3 may reach the ssti sink renderString() at vuln.js:4 through 1 hop(s). Tainted data compiled into a template. Render data as context VALUES, never concatenate into the template source; enable autoescaping. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/1336.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "safe.js",
+      "vuln.js"
+    ],
+    "edges": [],
+    "symbolDefs": {
+      "view": [
+        "safe.js",
+        "vuln.js"
+      ]
+    },
+    "callersBySymbol": {
+      "render": [
+        {
+          "file": "safe.js",
+          "line": 4,
+          "symbol": "view"
+        }
+      ],
+      "renderString": [
+        {
+          "file": "vuln.js",
+          "line": 4,
+          "symbol": "view"
+        }
+      ],
+      "require": [
+        {
+          "file": "safe.js",
+          "line": 1
+        },
+        {
+          "file": "vuln.js",
+          "line": 1
+        }
+      ]
+    }
+  }
+}
