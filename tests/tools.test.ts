@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { TOOLS, detect, toolStatuses } from "../src/tools/registry.js";
+import { TOOLS, detect, toolStatuses, type ToolSpec } from "../src/tools/registry.js";
 import { CATEGORIES } from "../src/types.js";
 
 describe("tool registry", () => {
@@ -40,5 +40,25 @@ describe("toolStatuses", () => {
     expect(s.length).toBe(TOOLS.length);
     expect(s.map((t) => t.name)).toEqual([...s.map((t) => t.name)].sort());
     for (const t of s) expect(typeof t.installed).toBe("boolean");
+  });
+
+  it("a spec's own detect() overrides the PATH probe (e.g. a vendored, non-PATH script)", () => {
+    const fake: ToolSpec = {
+      name: "zzz-fake-vendored-tool",
+      category: "sast",
+      description: "d",
+      languages: ["*"],
+      install: { url: "https://example.invalid" },
+      runHint: "n/a",
+      detect: () => ({ installed: true, version: "9.9.9" }),
+    };
+    TOOLS.push(fake);
+    try {
+      const found = toolStatuses().find((t) => t.name === "zzz-fake-vendored-tool");
+      expect(found?.installed).toBe(true);
+      expect(found?.version).toBe("9.9.9");
+    } finally {
+      TOOLS.pop();
+    }
   });
 });

@@ -273,7 +273,7 @@ function detect(name2) {
   }
 }
 function toolStatuses() {
-  return TOOLS.map((t) => ({ ...t, ...detect(t.name) })).sort((a, b) => byStr(a.name, b.name));
+  return TOOLS.map((t) => ({ ...t, ...t.detect?.() ?? detect(t.name) })).sort((a, b) => byStr(a.name, b.name));
 }
 
 // src/commands/tools.ts
@@ -13888,25 +13888,46 @@ function relativizeFindings(findings, base) {
     path: f.path ? f.path.map((p) => relLoc(p, base)) : f.path
   }));
 }
-function buildArgv(adapter, repo, target) {
-  const base = adapter.argv(target);
+function buildArgv(adapter, repo, target, ctx) {
+  const base = adapter.argv(target, ctx);
   if (!adapter.enumerate) return base;
   const files = adapter.enumerate(repo);
   if (!files.length) return null;
   return [...base, ...files];
 }
-function runNative(adapter, repo) {
-  if (!detect(adapter.name).installed) {
-    return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
+function blockedOffline(adapter, ctx) {
+  if (!ctx.offline) return false;
+  return typeof adapter.network === "function" ? adapter.network() : adapter.network === true;
+}
+function runNative(adapter, repo, ctx) {
+  if (blockedOffline(adapter, ctx)) {
+    return { name: adapter.name, ran: false, ok: false, findings: [], note: "offline (network required)" };
   }
-  const argv = buildArgv(adapter, repo, repo);
+  let cmd;
+  if (adapter.command) {
+    cmd = adapter.command();
+    if (!cmd) return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
+  } else {
+    if (!detect(adapter.name).installed) {
+      return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
+    }
+    cmd = [adapter.name];
+  }
+  const applicableNote = adapter.applicable?.(repo);
+  if (applicableNote) return { name: adapter.name, ran: false, ok: false, findings: [], note: applicableNote };
+  const argv = buildArgv(adapter, repo, repo, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
-  const { stdout, failed: failed2, err: err2 } = exec(adapter.name, argv, repo);
+  const { stdout, failed: failed2, err: err2 } = exec(cmd[0], [...cmd.slice(1), ...argv], repo);
   return finish(adapter, repo, stdout, failed2, err2, false);
 }
-function runDocker(adapter, repo) {
+function runDocker(adapter, repo, ctx) {
+  if (blockedOffline(adapter, ctx)) {
+    return { name: adapter.name, ran: false, ok: false, findings: [], note: "offline (network required)" };
+  }
   if (!adapter.dockerImage) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no docker image" };
-  const argv = buildArgv(adapter, repo, MOUNT);
+  const applicableNote = adapter.applicable?.(repo);
+  if (applicableNote) return { name: adapter.name, ran: false, ok: false, findings: [], note: applicableNote };
+  const argv = buildArgv(adapter, repo, MOUNT, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
   const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
   const args2 = ["run", "--rm", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
@@ -13923,16 +13944,17 @@ function finish(adapter, repo, stdout, failed2, err2, docker2) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };
   }
 }
-function runAdapter(adapter, repo, useDocker = false) {
-  return useDocker ? runDocker(adapter, repo) : runNative(adapter, repo);
+function runAdapter(adapter, repo, useDocker = false, ctx = {}) {
+  return useDocker ? runDocker(adapter, repo, ctx) : runNative(adapter, repo, ctx);
 }
 function orchestrate(adapters, repo, opts = {}) {
   let selected = opts.which && opts.which.length ? adapters.filter((a) => opts.which.includes(a.name)) : adapters;
   if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
+  const ctx = { offline: opts.offline, sbom: opts.sbom };
   const results = [];
   const all = [];
   for (const a of selected) {
-    const r = runAdapter(a, repo, opts.useDocker);
+    const r = runAdapter(a, repo, opts.useDocker, ctx);
     results.push(r);
     all.push(...r.findings);
   }
@@ -14679,9 +14701,10 @@ async function runScan(args2) {
   const skipTools = flagBool(args2, "no-tools") || toolsFlag === "none" || toolsAutoSkipped;
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
   const useDocker = flagBool(args2, "docker");
-  const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
+  const offline = flagBool(args2, "offline");
+  const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker, offline });
   const merged = correlate([...taintFindings, ...sinkCand.findings, ...tool.findings]);
-  const enrich = !(flagBool(args2, "no-enrich") || flagBool(args2, "offline"));
+  const enrich = !(flagBool(args2, "no-enrich") || offline);
   const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
   const blameOn = flagBool(args2, "blame") || flagBool(args2, "provenance");
   const findings = blameOn ? addProvenance(enriched, repo, { blame: true }) : enriched;

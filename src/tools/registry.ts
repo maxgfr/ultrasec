@@ -33,6 +33,9 @@ export interface ToolSpec {
   runHint: string;
   /** Whether ultrasec considers this a primary tool for its category. */
   primary?: boolean;
+  /** Display-only presence override for the tool-status listing (e.g. a vendored
+   *  script that isn't a PATH binary). Falls back to the PATH probe when absent. */
+  detect?: () => { installed: boolean; version?: string };
 }
 
 export const TOOLS: ToolSpec[] = [
@@ -205,5 +208,5 @@ export function detect(name: string): { installed: boolean; version?: string } {
 
 /** The full registry with live presence/version filled in, name-sorted. */
 export function toolStatuses(): ToolStatus[] {
-  return TOOLS.map((t) => ({ ...t, ...detect(t.name) })).sort((a, b) => byStr(a.name, b.name));
+  return TOOLS.map((t) => ({ ...t, ...(t.detect?.() ?? detect(t.name)) })).sort((a, b) => byStr(a.name, b.name));
 }

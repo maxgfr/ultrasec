@@ -110,7 +110,8 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const skipTools = flagBool(args, "no-tools") || toolsFlag === "none" || toolsAutoSkipped;
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : undefined;
   const useDocker = flagBool(args, "docker");
-  const tool = skipTools ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
+  const offline = flagBool(args, "offline");
+  const tool = skipTools ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker, offline });
 
   // Merge taint candidates, orphan-sink candidates, and tool findings (ids are
   // disjoint by construction), then correlate the WHOLE set: orchestrate only
@@ -121,7 +122,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
-  const enrich = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
+  const enrich = !(flagBool(args, "no-enrich") || offline);
   const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
 
   // Provenance (opt-in `--blame`/`--provenance`): deterministic git-blame author/
