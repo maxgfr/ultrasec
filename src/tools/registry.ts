@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import type { Category } from "../types.js";
 import { byStr } from "../util.js";
 import { PACKAGE_CHECKER_TAG } from "../vendor/package-checker-script.js";
@@ -40,6 +41,17 @@ export interface ToolSpec {
   /** Display-only presence override for the tool-status listing (e.g. a vendored
    *  script that isn't a PATH binary). Falls back to the PATH probe when absent. */
   detect?: () => { installed: boolean; version?: string };
+  /** The actual PATH binary to probe/upgrade when it differs from `name` (e.g.
+   *  `npm-audit`'s real binary is `npm`). Falls back to `name` when absent. Used
+   *  by `tools --upgrade` (src/commands/tools.ts) — never by `detect()` itself,
+   *  which entries with this field override via their own `detect`/`command`. */
+  binaryName?: string;
+  /** Package identifiers per install manager, when they differ from `name` (e.g.
+   *  a Go module path vs. the binary it builds: `golang.org/x/vuln/cmd/govulncheck`).
+   *  A manager absent here defaults to `name`. Consumed by `inferOrigin`
+   *  (src/tools/origin.ts) to build the exact `tools --upgrade` command —
+   *  extends this registry rather than a parallel upgrade-only table. */
+  packageIds?: Partial<Record<"brew" | "pipx" | "pip" | "go" | "cargo" | "npm", string>>;
 }
 
 export const TOOLS: ToolSpec[] = [
@@ -63,6 +75,7 @@ export const TOOLS: ToolSpec[] = [
       url: "https://google.github.io/osv-scanner/",
     },
     runHint: "osv-scanner --format json -r <repo>",
+    packageIds: { go: "github.com/google/osv-scanner/cmd/osv-scanner@latest" },
   },
   {
     name: "grype",
@@ -121,6 +134,7 @@ export const TOOLS: ToolSpec[] = [
     languages: ["go"],
     install: { go: "go install golang.org/x/vuln/cmd/govulncheck@latest", url: "https://go.dev/security/vuln/" },
     runHint: "govulncheck -json ./...",
+    packageIds: { go: "golang.org/x/vuln/cmd/govulncheck@latest" },
   },
   {
     name: "pip-audit",
@@ -138,6 +152,7 @@ export const TOOLS: ToolSpec[] = [
     install: { url: "https://docs.npmjs.com/cli/v10/commands/npm-audit" }, // ships with Node — nothing to install
     runHint: "npm audit --json",
     detect: () => detect("npm"),
+    binaryName: "npm",
   },
   {
     name: "pnpm-audit",
@@ -147,6 +162,7 @@ export const TOOLS: ToolSpec[] = [
     install: { corepack: "corepack enable pnpm", url: "https://pnpm.io/cli/audit" },
     runHint: "pnpm audit --json",
     detect: () => detect("pnpm"),
+    binaryName: "pnpm",
   },
   {
     name: "yarn-audit",
@@ -156,6 +172,7 @@ export const TOOLS: ToolSpec[] = [
     install: { corepack: "corepack enable yarn", url: "https://yarnpkg.com/cli/npm/audit" },
     runHint: "yarn audit --json (classic) / yarn npm audit --json --recursive (berry)",
     detect: () => detect("yarn"),
+    binaryName: "yarn",
   },
   {
     name: "package-checker",
@@ -204,6 +221,7 @@ export const TOOLS: ToolSpec[] = [
       url: "https://github.com/securego/gosec",
     },
     runHint: "gosec -fmt json -quiet -no-fail ./...",
+    packageIds: { go: "github.com/securego/gosec/v2/cmd/gosec@latest" },
   },
   {
     name: "hadolint",
@@ -229,6 +247,22 @@ export interface ToolStatus extends ToolSpec {
   version?: string;
 }
 
+/** `which`/`where` <name> -> its first resolved path, or undefined when it isn't
+ *  on PATH. The one place that shells out to which/where — shared by `detect()`'s
+ *  existence fallback and `resolveBinaryPath()` below (`tools --upgrade`'s origin
+ *  inference, src/tools/origin.ts) so there is exactly one probe to maintain. */
+function whichPath(name: string): string | undefined {
+  try {
+    const out = execFileSync(process.platform === "win32" ? "where" : "which", [name], {
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5000,
+    }).toString();
+    return out.split(/\r?\n/)[0]?.trim() || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Probe whether a binary is on PATH (and grab a version line if cheap). */
 export function detect(name: string): { installed: boolean; version?: string } {
   try {
@@ -243,15 +277,27 @@ export function detect(name: string): { installed: boolean; version?: string } {
     return { installed: true, version: out || undefined };
   } catch {
     // Some tools (cargo-audit) are subcommands; try a `which`-style probe.
-    try {
-      execFileSync(process.platform === "win32" ? "where" : "which", [name], {
-        stdio: ["ignore", "ignore", "ignore"],
-        timeout: 5000,
-      });
-      return { installed: true };
-    } catch {
-      return { installed: false };
-    }
+    return { installed: whichPath(name) !== undefined };
+  }
+}
+
+/**
+ * Resolve a binary's real, symlink-resolved absolute path — needed by
+ * `tools --upgrade`'s origin inference (src/tools/origin.ts), which reasons
+ * about install-manager ownership from the path itself. Symlinks are followed
+ * (`realpathSync`) because e.g. pipx shims `~/.local/bin/<tool>` as a symlink
+ * into `~/.local/pipx/venvs/<tool>/bin/<tool>` — the shim path alone doesn't
+ * contain anything pipx-shaped. Returns undefined when the binary isn't on
+ * PATH; falls back to the un-resolved shim path if `realpathSync` itself fails
+ * (dangling symlink, permission denied) rather than losing the signal entirely.
+ */
+export function resolveBinaryPath(name: string): string | undefined {
+  const shim = whichPath(name);
+  if (!shim) return undefined;
+  try {
+    return realpathSync(shim);
+  } catch {
+    return shim;
   }
 }
 

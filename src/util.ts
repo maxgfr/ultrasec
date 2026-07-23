@@ -32,6 +32,7 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "no-tools",
   "docker",
   "dry-run",
+  "upgrade",
   "blame",
   "provenance",
   "sinks",

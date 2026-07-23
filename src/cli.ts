@@ -64,7 +64,13 @@ COMMANDS
              default (secrets/PII never land in a finding message). Flags:
              --out · --format · --budget quick|standard|thorough ·
              --max-lines · --window <sec> · --no-redact · --json.
-  tools      List known external scanners, which are installed, and how to get them.
+  tools      List known external scanners, which are installed, and how to get
+             them. --upgrade drives each INSTALLED native tool's own package
+             manager (brew/pipx/go/cargo/corepack/npm, inferred from its binary
+             path) to latest; apt-owned/unknown origins print a hint instead —
+             never sudo. Docker scans and package-checker already self-refresh.
+             Flags: --upgrade · --dry-run (print the commands, run nothing) ·
+             --json.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source→sink chains.
   dossier    Print the grounding packet for one finding (real code + neighbours).
