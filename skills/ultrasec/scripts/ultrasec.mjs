@@ -14651,7 +14651,7 @@ var grype = {
     }
     const matches = Array.isArray(data?.matches) ? data.matches : [];
     const out2 = [];
-    for (const m of matches) {
+    for (const m of matches.filter(Boolean)) {
       const v = m?.vulnerability ?? {};
       const artifact = m?.artifact ?? {};
       const related = (m?.relatedVulnerabilities ?? []).map((r) => r?.id).filter(Boolean);
@@ -14698,7 +14698,7 @@ var pipAudit = {
     for (const dep of deps) {
       const name2 = dep?.name;
       const version = dep?.version;
-      for (const v of dep?.vulns ?? []) {
+      for (const v of (dep?.vulns ?? []).filter(Boolean)) {
         const fixed = (v.fix_versions ?? []).join(", ");
         out2.push(
           makeToolFinding({

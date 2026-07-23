@@ -33,7 +33,7 @@ export const grype: ToolAdapter = {
     }
     const matches = Array.isArray(data?.matches) ? data.matches : [];
     const out: Finding[] = [];
-    for (const m of matches) {
+    for (const m of matches.filter(Boolean)) {
       const v = m?.vulnerability ?? {};
       const artifact = m?.artifact ?? {};
       const related: string[] = (m?.relatedVulnerabilities ?? []).map((r: any) => r?.id).filter(Boolean);

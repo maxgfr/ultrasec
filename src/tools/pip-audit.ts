@@ -28,7 +28,7 @@ export const pipAudit: ToolAdapter = {
     for (const dep of deps) {
       const name = dep?.name;
       const version = dep?.version;
-      for (const v of dep?.vulns ?? []) {
+      for (const v of (dep?.vulns ?? []).filter(Boolean)) {
         const fixed = (v.fix_versions ?? []).join(", ");
         out.push(
           makeToolFinding({

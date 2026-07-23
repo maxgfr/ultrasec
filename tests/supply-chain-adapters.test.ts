@@ -38,6 +38,11 @@ describe("grype adapter", () => {
     expect(grype.parse("not json", "/repo")).toEqual([]);
   });
 
+  it("tolerates falsy matches entries (null/undefined)", () => {
+    expect(grype.parse(JSON.stringify({ matches: [null] }), "/repo")).toEqual([]);
+    expect(grype.parse(JSON.stringify({ matches: [undefined] }), "/repo")).toEqual([]);
+  });
+
   it("argv: switches to the SBOM target when ctx.sbom is set, else scans the dir", () => {
     expect(grype.argv("/repo")).toEqual(["dir:/repo", "-o", "json", "-q"]);
     expect(grype.argv("/repo", {})).toEqual(["dir:/repo", "-o", "json", "-q"]);
@@ -69,6 +74,11 @@ describe("pip-audit adapter", () => {
     expect(pipAudit.parse("", "/repo")).toEqual([]);
     expect(pipAudit.parse("{}", "/repo")).toEqual([]);
     expect(pipAudit.parse("not json", "/repo")).toEqual([]);
+  });
+
+  it("tolerates falsy vuln entries (null/undefined) — regression for parse contract", () => {
+    expect(pipAudit.parse(JSON.stringify({ dependencies: [{ name: "x", version: "1.0", vulns: [null] }] }), "/repo")).toEqual([]);
+    expect(pipAudit.parse(JSON.stringify({ dependencies: [{ name: "x", version: "1.0", vulns: [undefined] }] }), "/repo")).toEqual([]);
   });
 
   it("applicable(): null (run) when requirements.txt exists, a skip note otherwise", () => {
