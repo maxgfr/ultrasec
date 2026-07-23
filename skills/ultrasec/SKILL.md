@@ -62,8 +62,9 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   installed external scanners → **correlate** their findings across tools (one
   issue, not three; `sources[]` records every producer) → **risk-rank** every
   finding by EPSS · CISA KEV · CVSS → write the **audit dossier** (`findings.json`,
-  `graph.json`, `manifest.json`, `DOSSIER.md`, ordered by risk). `--tools`
-  defaults to **auto** (every installed scanner); `none` for graph+taint only.
+  `graph.json`, `manifest.json`, `DOSSIER.md`, ordered by risk; plus a CycloneDX
+  **SBOM** `sbom.cdx.json` when `syft` is installed, fed to grype/package-checker).
+  `--tools` defaults to **auto** (every installed scanner); `none` for graph+taint only.
   `--no-enrich`/`--offline` skips the EPSS/KEV network fetch (ranks by severity).
   - **Focus (large repos):** `--scope <subdir|glob>` (prune the walk),
     `--include`/`--exclude <glob>`, `--max-files <n>`, `--gitignore`.

@@ -88,6 +88,9 @@ kingfisher**, …) are an automatic bonus, normalized into one finding model,
 **de-duplicated across tools**, and **risk-ranked** (EPSS exploit-probability +
 CISA KEV + CVSS). Risk scoring uses cached, offline-friendly feeds — add
 `--no-enrich`/`--offline` to skip the network and rank by severity alone.
+When `syft` is installed, `scan` also emits a CycloneDX SBOM (`sbom.cdx.json`)
+as a dossier deliverable, fed straight into grype (`sbom:` mode) and
+package-checker (`--source`).
 
 See [`assets/example-audit/`](assets/example-audit/) for a complete run, and
 [`SKILL.md`](skills/ultrasec/SKILL.md) + [`references/`](skills/ultrasec/references/) for the agent workflow

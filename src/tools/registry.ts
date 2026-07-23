@@ -73,6 +73,14 @@ export const TOOLS: ToolSpec[] = [
     runHint: "grype dir:<repo> -o json",
   },
   {
+    name: "syft",
+    category: "dep",
+    description: "CycloneDX SBOM generator — dossier deliverable + grype/package-checker input",
+    languages: ["*"],
+    install: { brew: "brew install syft", url: "https://github.com/anchore/syft" },
+    runHint: "syft <repo> -o cyclonedx-json -q",
+  },
+  {
     name: "opengrep",
     category: "sast",
     description: "Free fork of Semgrep with cross-function taint restored — pattern + dataflow SAST.",

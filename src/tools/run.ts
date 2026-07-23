@@ -76,8 +76,10 @@ export function toolStatus(results: ToolRunResult[]): ToolStatus[] {
   });
 }
 
-const TIMEOUT_MS = 300_000;
-const MAX_BUFFER = 64 * 1024 * 1024;
+// Exported for reuse by other execFileSync callers outside the adapter runner
+// (e.g. src/tools/sbom.ts's syft invocation) that want the same bounds.
+export const TIMEOUT_MS = 300_000;
+export const MAX_BUFFER = 64 * 1024 * 1024;
 const MOUNT = "/work";
 
 function exec(name: string, args: string[], cwd: string): { stdout: string; failed: boolean; err?: string } {

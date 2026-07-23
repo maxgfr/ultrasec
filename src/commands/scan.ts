@@ -11,6 +11,7 @@ import { loadScanCache, saveScanCache } from "../cache.js";
 import { orchestrate, toolStatus } from "../tools/run.js";
 import { correlate } from "../tools/correlate.js";
 import { enrichFindings } from "../tools/scoring.js";
+import { generateSbom } from "../tools/sbom.js";
 import { ADAPTERS } from "../tools/index.js";
 import { writeDossier, loadDossier, mergeDossier, countBySeverity, type Dossier } from "../store.js";
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest } from "../types.js";
@@ -111,7 +112,14 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : undefined;
   const useDocker = flagBool(args, "docker");
   const offline = flagBool(args, "offline");
-  const tool = skipTools ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker, offline });
+  // Produce the CycloneDX SBOM (when `syft` is installed) before running the
+  // adapters that can consume it faster than re-walking the tree themselves
+  // (grype's `sbom:` mode, package-checker's `--source`) — skipped right along
+  // with the adapters when tools aren't going to run this pass.
+  const sbomResult = skipTools ? undefined : generateSbom(repo, out);
+  const tool = skipTools
+    ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] }
+    : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path });
 
   // Merge taint candidates, orphan-sink candidates, and tool findings (ids are
   // disjoint by construction), then correlate the WHOLE set: orchestrate only
@@ -153,6 +161,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
+    ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),
   };
 
   const nextDossier: Dossier = { manifest, findings, graph };
@@ -209,6 +218,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   } else if (!skipTools) {
     println(`  external tools run: ${tool.toolsRun.join(", ") || "none"}  (\`ultrasec tools\` to see/install more)`);
   }
+  if (sbomResult) println(`  sbom: ${sbomResult.note}`);
   println(
     `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""} + ${tool.findings.length} tool this pass`,
   );

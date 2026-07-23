@@ -5,9 +5,13 @@ import { CATEGORIES } from "../src/types.js";
 
 // Deliberate exceptions to "every TOOLS entry has a runnable adapter" — a TOOLS
 // row that documents a scanner ultrasec knows about but doesn't (yet) drive.
-// Empty today: this is where a future one gets recorded, not a place to quietly
-// grow drift back in.
-const TOOLS_WITHOUT_ADAPTER: string[] = [];
+// This is where a future one gets recorded, not a place to quietly grow drift
+// back in.
+const TOOLS_WITHOUT_ADAPTER: string[] = [
+  // syft is an SBOM GENERATOR (src/tools/sbom.ts's generateSbom), not a findings
+  // producer — it has no ToolAdapter/argv/parse, so it never appears in ADAPTERS.
+  "syft",
+];
 
 describe("tool registry", () => {
   it("every tool has a valid category and at least one install hint", () => {

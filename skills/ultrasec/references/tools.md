@@ -13,6 +13,7 @@ always-on core. `node scripts/ultrasec.mjs tools` shows status + install hints.
 | gitleaks | secret | hardcoded secrets (git history when present, else working tree) | `brew install gitleaks` |
 | osv-scanner | dep | OSV.dev lockfile CVEs | `brew install osv-scanner` |
 | grype | dep | Anchore SBOM-based CVEs (pairs with the SBOM a run already generates) | `brew install grype` |
+| syft | dep | Anchore CycloneDX SBOM generator — a dossier deliverable AND grype/package-checker input | `brew install syft` |
 | cargo-audit | dep | RustSec advisories (Cargo.lock) | `cargo install cargo-audit` |
 | govulncheck | dep | reachability-aware Go vulns | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
 | pip-audit | dep | PyPI/OSV advisories for `requirements.txt` (network on every run) | `pipx install pip-audit` |
@@ -45,7 +46,16 @@ they're `network: true` and skipped under `--offline`. **v1 limitation**: only
 the root lockfile is audited, not per-workspace sub-lockfiles in a monorepo;
 trivy/osv-scanner already walk the tree recursively and cover that gap.
 
-## Supply-chain audit: package-checker
+## Supply-chain audit: SBOM (syft) + package-checker
+
+When `syft` is installed, `scan` generates a CycloneDX SBOM (`sbom.cdx.json`)
+before running the adapters — a dossier deliverable in its own right (linked
+from `DOSSIER.md`), and faster input for the two adapters that can consume it
+instead of re-walking the tree themselves: grype switches its `argv` to
+`sbom:<path>` mode, and package-checker appends it as an extra `--source`
+alongside its default GHSA/OSV feed. Absence is the normal path — most hosts
+don't ship `syft` — so a scan without it just falls back to each adapter
+scanning the repo directory directly; nothing is fatal either way.
 
 package-checker ([maxgfr/package-checker.sh](https://github.com/maxgfr/package-checker.sh),
 same author as ultrasec) is vendored and pinned exactly like the codeindex

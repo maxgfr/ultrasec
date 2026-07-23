@@ -12,7 +12,8 @@ export const VERSION = "1.10.3";
 // 5: dep findings gained optional `locations` (per-version/per-lockfile instances
 // of a cross-version-merged advisory); manifest gained optional `toolStatus`
 // (per-tool ran/empty/skipped/failed). Additive + optional (back-compat).
-export const SCHEMA_VERSION = 5;
+// 6: manifest gained optional `sbom` (CycloneDX deliverable); additive, back-compat.
+export const SCHEMA_VERSION = 6;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -225,4 +226,9 @@ export interface Manifest {
   };
   /** Every scope/diff that has contributed to this (possibly merged) run. */
   scopes?: string[];
+  /** Basename of the CycloneDX SBOM generated this run (`src/tools/sbom.ts`), a
+   *  dossier deliverable in its own right and the input grype/package-checker
+   *  prefer over re-walking the tree. Additive/optional; older dossiers and
+   *  hosts without `syft` omit it. */
+  sbom?: string;
 }
