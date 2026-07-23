@@ -1,0 +1,125 @@
+name: Update package-checker
+
+# package-checker.sh (src/vendor/package-checker.sh) is vendored and
+# sha256-pinned. src/tools/package-checker.ts resolves upstream's latest
+# release over the network at scan time and falls back to this vendored copy
+# on ANY resolution failure — offline, rate-limited, or explicitly forced via
+# ULTRASEC_PACKAGE_CHECKER_PINNED=1 (see that file's "Runtime
+# latest-with-fallback resolution" comment) — so the vendored copy is the
+# offline/failure path, not the only path, but it still needs to stay
+# reasonably fresh. This workflow checks daily for a newer upstream release
+# and opens a PR re-pinning it (regenerated bundles included, gated by the
+# same typecheck/test the CI workflow runs) — it never pushes to main
+# directly, and is idempotent: re-running it while a PR for the same tag is
+# already open is a no-op.
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+env:
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  update-package-checker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Decide whether a re-pin is needed (and not already in flight)
+        id: decide
+        run: |
+          set -euo pipefail
+          CURRENT="$(jq -r .tag src/vendor/package-checker.meta.json)"
+          LATEST="$(gh api repos/maxgfr/package-checker.sh/releases/latest --jq .tag_name)"
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "latest=$LATEST" >> "$GITHUB_OUTPUT"
+
+          if [ "$CURRENT" = "$LATEST" ]; then
+            echo "package-checker is already pinned at $CURRENT — nothing to do."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          BRANCH="chore/package-checker-${LATEST}"
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          OPEN="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
+          if [ "$OPEN" != "0" ]; then
+            echo "a PR re-pinning package-checker at $LATEST is already open on $BRANCH — nothing to do."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+
+      - uses: pnpm/action-setup@v6
+        if: steps.decide.outputs.proceed == 'true'
+
+      - uses: actions/setup-node@v6
+        if: steps.decide.outputs.proceed == 'true'
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        if: steps.decide.outputs.proceed == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Re-pin package-checker.sh at the new tag
+        if: steps.decide.outputs.proceed == 'true'
+        run: node scripts/sync-package-checker.mjs --ref "${{ steps.decide.outputs.latest }}"
+
+      - name: Rebuild both bundles (must ship with the re-pin or check:build fails it)
+        if: steps.decide.outputs.proceed == 'true'
+        run: pnpm run build
+
+      - name: Sanity gate
+        if: steps.decide.outputs.proceed == 'true'
+        run: pnpm run typecheck && pnpm test
+
+      - name: Open the PR
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          LATEST: ${{ steps.decide.outputs.latest }}
+          BRANCH: ${{ steps.decide.outputs.branch }}
+        run: |
+          set -euo pipefail
+          SHA_SH="$(jq -r '.sha256["package-checker.sh"]' src/vendor/package-checker.meta.json)"
+          SHA_TS="$(jq -r '.sha256["package-checker-script.ts"]' src/vendor/package-checker.meta.json)"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Belt-and-suspenders idempotency: the "already open" check above covers
+          # a re-run while a PR is in flight; this covers a STALE branch left over
+          # from an earlier run whose PR was closed without merging (rare, but
+          # would otherwise reject this push as a non-fast-forward). We fully own
+          # chore/package-checker-* branches, so deleting-then-recreating is safe.
+          git push origin --delete "$BRANCH" 2>/dev/null || true
+          git checkout -b "$BRANCH"
+          git add src/vendor/package-checker.sh src/vendor/package-checker-script.ts src/vendor/package-checker.meta.json \
+            scripts/ultrasec.mjs skills/ultrasec/scripts/ultrasec.mjs
+          git commit -m "feat(deps): re-pin package-checker at ${LATEST}"
+          git push -u origin "$BRANCH"
+
+          gh pr create \
+            --title "feat(deps): re-pin package-checker at ${LATEST}" \
+            --body "$(cat <<EOF
+          Re-pins the vendored, sha256-pinned \`package-checker.sh\` (the offline/failure fallback for the \`package-checker\` adapter — see \`src/tools/package-checker.ts\`) at upstream's latest release.
+
+          - tag: \`${LATEST}\`
+          - package-checker.sh sha256: \`${SHA_SH}\`
+          - package-checker-script.ts sha256: \`${SHA_TS}\`
+
+          Both bundles (\`scripts/ultrasec.mjs\`, \`skills/ultrasec/scripts/ultrasec.mjs\`) were regenerated so \`check:build\`'s byte-identity gate stays green. Opened automatically by \`.github/workflows/update-package-checker.yml\`.
+          EOF
+          )"
+
+      - name: Enable auto-merge (only takes effect if the repo has it enabled; never fails the workflow)
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          BRANCH: ${{ steps.decide.outputs.branch }}
+        run: gh pr merge "$BRANCH" --auto --squash || true
