@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { detect } from "./registry.js";
 import { TIMEOUT_MS, MAX_BUFFER } from "./run.js";
 
@@ -33,6 +33,24 @@ function componentCount(cdxJson: string): number | undefined {
 }
 
 /**
+ * syft `--exclude` argv for the run's own `outDir` — prevents a repeat scan
+ * from re-cataloging a PRIOR run's `sbom.cdx.json` (or any other dossier
+ * artifact sitting inside e.g. `.ultrasec/`) as if it were a real dependency
+ * manifest. `--exclude` takes a repeatable glob that syft resolves relative
+ * to the scan target and requires to start with a `./`, a `*` + `/`, or a
+ * double-`*` + `/` prefix (see `syft --help` / the anchore/syft "Excluding
+ * File Paths" wiki page — the pinned version here supports it:
+ * docker/Dockerfile's `SYFT_VERSION`). Returns [] when `outDir` isn't inside
+ * `repo` — same guard `scan.ts`'s `--diff` output filter uses — since
+ * there's nothing to exclude in that case.
+ */
+export function syftExcludeArgs(repo: string, outDir: string): string[] {
+  const rel = relative(repo, outDir);
+  if (!rel || rel === "." || rel.startsWith("..")) return [];
+  return ["--exclude", `./${rel}/**`];
+}
+
+/**
  * Generate `sbom.cdx.json` under `outDir` via `syft`, when installed. Never
  * throws: a missing binary, a failing run, or a write error all collapse into
  * a graceful `{ note }` with no `path` — the caller (scan) treats that as
@@ -42,7 +60,7 @@ function componentCount(cdxJson: string): number | undefined {
 export function generateSbom(repo: string, outDir: string): SbomResult {
   if (!detect("syft").installed) return { note: "syft not installed — no SBOM" };
   try {
-    const stdout = execFileSync("syft", [repo, "-o", "cyclonedx-json", "-q"], {
+    const stdout = execFileSync("syft", [repo, "-o", "cyclonedx-json", "-q", ...syftExcludeArgs(repo, outDir)], {
       encoding: "utf8",
       timeout: TIMEOUT_MS,
       maxBuffer: MAX_BUFFER,

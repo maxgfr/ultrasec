@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { generateSbom } from "../src/tools/sbom.js";
+import { generateSbom, syftExcludeArgs } from "../src/tools/sbom.js";
 import { mergeDossier, renderDossierMd, type Dossier } from "../src/store.js";
 import { runScan } from "../src/commands/scan.js";
 import { parseArgs } from "../src/util.js";
@@ -44,6 +44,28 @@ describe("generateSbom (syft producer)", () => {
     expect(result!).toEqual({ note: "syft not installed — no SBOM" });
     expect(existsSync(join(dir, "sbom.cdx.json"))).toBe(false);
     rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// MINOR 7: exclude the run's own out dir from syft's argv so a re-scan never
+// re-catalogs a PRIOR run's sbom.cdx.json (or any other dossier artifact
+// under e.g. `.ultrasec/`) as if it were a real dependency manifest.
+describe("syftExcludeArgs — repo-relative --exclude glob for the run's out dir", () => {
+  it("excludes the out dir when it lives inside the repo (the common case: --out .ultrasec)", () => {
+    expect(syftExcludeArgs("/repo", "/repo/.ultrasec")).toEqual(["--exclude", "./.ultrasec/**"]);
+  });
+
+  it("excludes a nested out dir with its full relative path", () => {
+    expect(syftExcludeArgs("/repo", "/repo/nested/out")).toEqual(["--exclude", "./nested/out/**"]);
+  });
+
+  it("returns [] when the out dir IS the repo root (nothing to exclude)", () => {
+    expect(syftExcludeArgs("/repo", "/repo")).toEqual([]);
+  });
+
+  it("returns [] when the out dir is outside the repo entirely", () => {
+    expect(syftExcludeArgs("/repo", "/tmp/somewhere-else")).toEqual([]);
+    expect(syftExcludeArgs("/repo/nested", "/repo/sibling-out")).toEqual([]);
   });
 });
 
