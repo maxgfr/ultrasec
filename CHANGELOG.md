@@ -2,6 +2,41 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.12.0](https://github.com/maxgfr/ultrasec/compare/v1.11.0...v1.12.0) (2026-07-23)
+
+
+### Bug Fixes
+
+* **check:** stream-count lines so huge log files don't misreport as missing ([082a6ea](https://github.com/maxgfr/ultrasec/commit/082a6ea0dc6bccbb2042bf064f17053d4da90e99))
+* **logs:** cap hygiene's embedded evidence line at 200 chars ([4169112](https://github.com/maxgfr/ultrasec/commit/4169112f6d547d1e006d09ec2df88948797f4df0))
+* **logs:** match actuator/<endpoint> probe paths, not just bare /actuator/ ([6e1379b](https://github.com/maxgfr/ultrasec/commit/6e1379bbf68623c8bfd526d887eea937b8ac8e52))
+* **logs:** redact query-string secrets before counting into stats.topPaths ([21b4be8](https://github.com/maxgfr/ultrasec/commit/21b4be88387946fccacac1b10957a24e239fe967))
+* **logs:** reject unknown --format values instead of silently degrading ([6d26cd4](https://github.com/maxgfr/ultrasec/commit/6d26cd40c9b64b0b420b9e8db45c96d489b03238))
+* **logs:** replace scan-only truncation advice with logs-appropriate wording ([52dcfde](https://github.com/maxgfr/ultrasec/commit/52dcfdec575e0c3c75c88a150ab319b19f590a04))
+* **package-checker:** guard cache dir materialization to prevent scan crash ([4accf38](https://github.com/maxgfr/ultrasec/commit/4accf38d0b7fb317ded6b92b021e62031ac309d0))
+* **package-checker:** skip the adapter on a repo-local data/*.purl feed ([7be31ca](https://github.com/maxgfr/ultrasec/commit/7be31cac0b809ded1bab47aefd7682eb2c6f48e0))
+* **pm-audit:** guard Array.isArray for wrong-typed cves/via fields ([831412f](https://github.com/maxgfr/ultrasec/commit/831412fd9ebf1d95b5712ae7038b47ca07f48d15))
+* **scan:** preserve the pre-adoption walk surface (byte cap, dossier dir) ([4d03162](https://github.com/maxgfr/ultrasec/commit/4d03162a6744597fc9df064f0a12dabf1106c7f3))
+* **scan:** surface sbom field in --json output ([3e1f195](https://github.com/maxgfr/ultrasec/commit/3e1f195290622c9f6c28bdb02bb648289b43f715))
+* **scan:** wire --max-candidates into the --log-hygiene pass ([cb656e8](https://github.com/maxgfr/ultrasec/commit/cb656e86a00fe6996890e7c01a5ecb7c39005b35))
+* **tools:** address deferred review minors ([1543a19](https://github.com/maxgfr/ultrasec/commit/1543a199d4f92771a73eee0451be075be4cba37a))
+* **tools:** exclude the run's out dir from syft's SBOM scan ([6ba02e6](https://github.com/maxgfr/ultrasec/commit/6ba02e60e4741d0359f2e88e6a3b934de3e42e60))
+* **tools:** gate cargo-audit on Cargo.lock ([31ee57c](https://github.com/maxgfr/ultrasec/commit/31ee57cd207c4136d2ea9368070e2ac230f5b1da))
+* **tools:** guard falsy entries in pip-audit and grype parse methods ([81848ff](https://github.com/maxgfr/ultrasec/commit/81848ff5de4770afcad5f546c55d882e4e8678d5))
+
+
+### Features
+
+* **docker:** bake grype/syft/pip-audit into the toolbox image ([3da671a](https://github.com/maxgfr/ultrasec/commit/3da671ae37c4db51dd82110c49f5dbb9bd597272))
+* **logs:** add blue-team log-forensics command ([cb8a3f8](https://github.com/maxgfr/ultrasec/commit/cb8a3f823c9abfb5e9b7d2360549287f4791a2a9))
+* **logs:** syslog/auth.log, behavioral aggregation, secret/PII leak findings ([8177321](https://github.com/maxgfr/ultrasec/commit/81773213dcbbd531d993dfd16cce232ef9f60a00))
+* **sbom:** add syft SBOM producer + wire RunContext.sbom into scan ([9b8fe6f](https://github.com/maxgfr/ultrasec/commit/9b8fe6f9d0eaa379de86ba564239eca0b85ddba5))
+* **scan:** add opt-in --log-hygiene static logging checks (CWE-117/CWE-532) ([a05cb7f](https://github.com/maxgfr/ultrasec/commit/a05cb7ff7292cb2664c67740e9e89a3d5095ab73))
+* **tools:** add npm-audit/pnpm-audit/yarn-audit native adapters ([e95abb0](https://github.com/maxgfr/ultrasec/commit/e95abb0356e0d5134d8a8832d3a4358b2c6fa8cc))
+* **tools:** add package-checker adapter for 12-ecosystem GHSA/OSV scanning ([765939a](https://github.com/maxgfr/ultrasec/commit/765939a8eb98b2e890789b5a13357540797dc6f1))
+* **tools:** extend the runner contract for non-PATH adapters ([ea66a1d](https://github.com/maxgfr/ultrasec/commit/ea66a1da995acf054aaf1f3659d5880732e56e29))
+* **tools:** wire grype and pip-audit adapters, drop osv-scalibr ([a9f642b](https://github.com/maxgfr/ultrasec/commit/a9f642bdff4fb2610044de6aa2e3df152b610295))
+
 # [1.11.0](https://github.com/maxgfr/ultrasec/compare/v1.10.3...v1.11.0) (2026-07-23)
 
 
