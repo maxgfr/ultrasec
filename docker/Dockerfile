@@ -64,11 +64,21 @@ RUN set -eux; \
   GOSEC_VERSION="${GOSEC_VERSION:-$(curl -fsSL https://api.github.com/repos/securego/gosec/releases/latest | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')}"; \
   curl -sSfL "https://github.com/securego/gosec/releases/download/v${GOSEC_VERSION}/gosec_${GOSEC_VERSION}_linux_${GSA}.tar.gz" \
     | tar -xz -C /usr/local/bin gosec; \
-  # hadolint (single release binary — asset name is also version-less, same
-  # `/latest/download/` trick as osv-scanner).
-  if [ -n "${HADOLINT_VERSION}" ]; then HAD_URL="https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-Linux-${HAD}"; \
-  else HAD_URL="https://github.com/hadolint/hadolint/releases/latest/download/hadolint-linux-${HAD}"; fi; \
-  curl -sSfL -o /usr/local/bin/hadolint "$HAD_URL"; \
+  # hadolint (single release binary). Upstream renamed the linux asset from
+  # `hadolint-Linux-<arch>` (releases <=2.12.x) to `hadolint-linux-<arch>`
+  # (releases >=2.13.1, the first stable tag after the rename), so a fixed
+  # asset name only works for one era. The empty-ARG (latest) branch always
+  # resolves to a current release via GitHub's `/latest/download/` alias, so
+  # it only ever needs the lowercase name; a pin, though, can target either
+  # era, so it tries today's lowercase asset first and falls back to the
+  # pre-2.13 capitalized one on a 404.
+  if [ -n "${HADOLINT_VERSION}" ]; then \
+    HAD_BASE="https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}"; \
+    curl -sSfL -o /usr/local/bin/hadolint "${HAD_BASE}/hadolint-linux-${HAD}" \
+      || curl -sSfL -o /usr/local/bin/hadolint "${HAD_BASE}/hadolint-Linux-${HAD}"; \
+  else \
+    curl -sSfL -o /usr/local/bin/hadolint "https://github.com/hadolint/hadolint/releases/latest/download/hadolint-linux-${HAD}"; \
+  fi; \
   chmod +x /usr/local/bin/hadolint; \
   # Semgrep + bandit + checkov + pip-audit (pip): an empty ARG drops the
   # `==version` pin entirely, so pip resolves each package's latest release.
