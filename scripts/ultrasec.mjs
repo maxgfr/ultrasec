@@ -939,6 +939,7 @@ import { mkdirSync, readdirSync as readdirSync22, readFileSync as readFileSync4,
 import { dirname as dirname2, join as join7 } from "path";
 import { existsSync as existsSync2, readdirSync as readdirSync3, statSync as statSync3 } from "fs";
 import { join as join8 } from "path";
+import { createHash as createHash22 } from "crypto";
 import { existsSync as existsSync3, readFileSync as readFileSync5 } from "fs";
 import { join as join10 } from "path";
 import { join as join11 } from "path";
@@ -962,9 +963,9 @@ var EXTRACTOR_VERSION;
 var init_types = __esm({
   "src/types.ts"() {
     "use strict";
-    ENGINE_VERSION = "2.11.0";
+    ENGINE_VERSION = "2.12.0";
     SCHEMA_VERSION2 = 4;
-    EXTRACTOR_VERSION = 7;
+    EXTRACTOR_VERSION = 9;
   }
 });
 function sh(cmd, args2, opts = {}) {
@@ -1668,7 +1669,59 @@ function scan(rel, content, lang, rules) {
 function extToLang(ext) {
   return EXT_LANG[ext] ?? "other";
 }
+function extractReexports(rel, content, localSymbols) {
+  if (!REEXPORT_EXTS.has(rel.slice(rel.lastIndexOf(".")))) return [];
+  const lang = /\.(ts|tsx|mts|cts)$/.test(rel) ? "typescript" : "javascript";
+  const out2 = [];
+  const seen = /* @__PURE__ */ new Set();
+  const lineAt = (idx) => content.slice(0, idx).split(/\r?\n/).length;
+  const localDeclOf = /* @__PURE__ */ new Map();
+  for (const s of localSymbols) if (!localDeclOf.has(s.name)) localDeclOf.set(s.name, s);
+  const named = /export\s*\{([\s\S]*?)\}\s*(?:from\s*['"]([^'"]+)['"])?\s*;?/g;
+  let m;
+  while ((m = named.exec(content)) && out2.length < 60) {
+    const from = m[2];
+    for (const part of m[1].split(",")) {
+      const p = part.trim().replace(/^type\s+/, "");
+      const as = /^(\S+)\s+as\s+([A-Za-z_$][\w$]*)$/.exec(p);
+      const orig = as ? as[1] : p;
+      const name2 = as ? as[2] : p;
+      if (!/^[A-Za-z_$][\w$]*$/.test(name2) || name2 === "default" || seen.has(name2)) continue;
+      seen.add(name2);
+      const decl = !from ? localDeclOf.get(orig) : void 0;
+      out2.push({
+        name: name2,
+        kind: decl?.kind ?? "reexport",
+        file: rel,
+        line: decl ? decl.line : lineAt(m.index),
+        ...decl?.endLine !== void 0 ? { endLine: decl.endLine } : {},
+        signature: from ? `export { ${name2} } from "${from}"` : `export { ${name2} }`,
+        exported: true,
+        lang
+      });
+    }
+  }
+  const star = /export\s*\*\s*(?:as\s+([A-Za-z_$][\w$]*)\s+)?from\s*['"]([^'"]+)['"]/g;
+  while ((m = star.exec(content)) && out2.length < 60) {
+    const ns = m[1];
+    const from = m[2];
+    const key = "*" + (ns ?? from);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out2.push({
+      name: ns ?? `* (${from})`,
+      kind: ns ? "reexport" : "reexport-all",
+      file: rel,
+      line: lineAt(m.index),
+      signature: `export * ${ns ? `as ${ns} ` : ""}from "${from}"`,
+      exported: true,
+      lang
+    });
+  }
+  return out2;
+}
 var EXT_LANG;
+var REEXPORT_EXTS;
 var init_common = __esm({
   "src/lang/common.ts"() {
     "use strict";
@@ -1736,6 +1789,7 @@ var init_common = __esm({
       ".svelte": "svelte",
       ".astro": "astro"
     };
+    REEXPORT_EXTS = /* @__PURE__ */ new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
   }
 });
 function stemOf(rel) {
@@ -2164,12 +2218,18 @@ var init_scala = __esm({
 });
 function extractSymbols(rel, ext, content) {
   const extractor = BY_EXT.get(ext);
-  if (!extractor) return [];
-  try {
-    return extractor.extract(rel, content);
-  } catch {
-    return [];
+  let symbols;
+  if (!extractor) symbols = [];
+  else {
+    try {
+      symbols = extractor.extract(rel, content);
+    } catch {
+      symbols = [];
+    }
   }
+  const known = new Set(symbols.map((s) => s.name));
+  const reexports = extractReexports(rel, content, symbols).filter((s) => !known.has(s.name));
+  return reexports.length ? [...symbols, ...reexports] : symbols;
 }
 function languageOf(ext) {
   return BY_EXT.get(ext)?.lang ?? extToLang(ext);
@@ -7312,58 +7372,9 @@ function extractImports(ext, content) {
   }
   return [...specs].map((spec) => ({ kind: "import", spec }));
 }
-function extractReexports(rel, content, localSymbols) {
-  if (!JS_TS.has(rel.slice(rel.lastIndexOf(".")))) return [];
-  const lang = /\.(ts|tsx|mts|cts)$/.test(rel) ? "typescript" : "javascript";
-  const out2 = [];
-  const seen = /* @__PURE__ */ new Set();
-  const lineAt = (idx) => content.slice(0, idx).split(/\r?\n/).length;
-  const localKindOf = /* @__PURE__ */ new Map();
-  for (const s of localSymbols) if (!localKindOf.has(s.name)) localKindOf.set(s.name, s.kind);
-  const named = /export\s*\{([\s\S]*?)\}\s*(?:from\s*['"]([^'"]+)['"])?\s*;?/g;
-  let m;
-  while ((m = named.exec(content)) && out2.length < 60) {
-    const from = m[2];
-    for (const part of m[1].split(",")) {
-      const p = part.trim().replace(/^type\s+/, "");
-      const as = /^(\S+)\s+as\s+([A-Za-z_$][\w$]*)$/.exec(p);
-      const orig = as ? as[1] : p;
-      const name2 = as ? as[2] : p;
-      if (!/^[A-Za-z_$][\w$]*$/.test(name2) || name2 === "default" || seen.has(name2)) continue;
-      seen.add(name2);
-      const mirroredKind = !from ? localKindOf.get(orig) : void 0;
-      out2.push({
-        name: name2,
-        kind: mirroredKind ?? "reexport",
-        file: rel,
-        line: lineAt(m.index),
-        signature: from ? `export { ${name2} } from "${from}"` : `export { ${name2} }`,
-        exported: true,
-        lang
-      });
-    }
-  }
-  const star = /export\s*\*\s*(?:as\s+([A-Za-z_$][\w$]*)\s+)?from\s*['"]([^'"]+)['"]/g;
-  while ((m = star.exec(content)) && out2.length < 60) {
-    const ns = m[1];
-    const from = m[2];
-    const key = "*" + (ns ?? from);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out2.push({
-      name: ns ?? `* (${from})`,
-      kind: ns ? "reexport" : "reexport-all",
-      file: rel,
-      line: lineAt(m.index),
-      signature: `export * ${ns ? `as ${ns} ` : ""}from "${from}"`,
-      exported: true,
-      lang
-    });
-  }
-  return out2;
-}
-function collectCallsRegex(content) {
+function collectCallsRegex(content, symbols = []) {
   const out2 = /* @__PURE__ */ new Map();
+  const ownDefLines = new Set(symbols.map((s) => `${s.name} ${s.line}`));
   const lines = content.split("\n");
   const CALL_RE = /(?:\bnew\s+)?(?:([A-Za-z_$][\w$]*)\s*\.\s*)?([A-Za-z_$][\w$]*)\s*\(/g;
   for (let i2 = 0; i2 < lines.length && out2.size < 512; i2++) {
@@ -7371,13 +7382,28 @@ function collectCallsRegex(content) {
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*")) continue;
     CALL_RE.lastIndex = 0;
+    let probe;
+    const introducerCaught = /* @__PURE__ */ new Set();
+    while ((probe = CALL_RE.exec(line)) !== null) {
+      const name2 = probe[2];
+      const key = `${name2} ${i2 + 1}`;
+      if (ownDefLines.has(key) && DEF_INTRODUCERS.test(line.slice(0, probe.index))) introducerCaught.add(key);
+    }
+    CALL_RE.lastIndex = 0;
     let m;
+    const fallbackExcluded = /* @__PURE__ */ new Set();
     while ((m = CALL_RE.exec(line)) !== null && out2.size < 512) {
       const receiver = m[1];
       const name2 = m[2];
       if (name2.length < 2 || CALL_KEYWORDS.has(name2)) continue;
       if (DEF_INTRODUCERS.test(line.slice(0, m.index))) continue;
       const key = `${name2} ${i2 + 1}`;
+      if (ownDefLines.has(key) && !introducerCaught.has(key)) {
+        if (!fallbackExcluded.has(key)) {
+          fallbackExcluded.add(key);
+          continue;
+        }
+      }
       if (!out2.has(key)) out2.set(key, receiver ? { name: name2, line: i2 + 1, receiver } : { name: name2, line: i2 + 1 });
     }
   }
@@ -7398,7 +7424,9 @@ function extractCode(rel, ext, content) {
     idents: ast?.idents,
     // AST call sites when a grammar parsed the file; the conservative regex
     // collector otherwise, so caller indexes exist without the wasm sidecar.
-    calls: ast ? ast.calls : collectCallsRegex(content),
+    // `symbols` (this file's own regex-extracted defs) lets the collector
+    // exclude a definition's own name+line from its call candidates.
+    calls: ast ? ast.calls : collectCallsRegex(content, symbols),
     importedNames: ast?.importedNames
   };
 }
@@ -7415,6 +7443,7 @@ var init_code = __esm({
     "use strict";
     init_registry();
     init_extract();
+    init_common();
     JS_TS = /* @__PURE__ */ new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
     PY = /* @__PURE__ */ new Set([".py", ".pyi"]);
     C_CPP = /* @__PURE__ */ new Set([".c", ".h", ".cc", ".cpp", ".cxx", ".hpp", ".hh"]);
@@ -8681,8 +8710,11 @@ function buildCallerIndex(scan2, importPairs, opts = {}) {
 function enclosingSymbol(scan2, file, line) {
   const f = scan2.files.find((x) => x.rel === file);
   if (!f?.symbols.length) return void 0;
+  return enclosingAmong(f.symbols, line);
+}
+function enclosingAmong(symbols, line) {
   let best;
-  for (const s of f.symbols) {
+  for (const s of symbols) {
     if (REFERENCE_KINDS3.has(s.kind)) continue;
     if (s.line > line) continue;
     if (s.endLine !== void 0 && line > s.endLine) continue;
@@ -8691,6 +8723,29 @@ function enclosingSymbol(scan2, file, line) {
     }
   }
   return best;
+}
+function buildRawCallerIndex(scan2) {
+  const byName = /* @__PURE__ */ new Map();
+  for (const f of scan2.files) {
+    if (!f.calls?.length) continue;
+    const symbols = f.symbols.filter((s) => !REFERENCE_KINDS3.has(s.kind));
+    for (const c2 of f.calls) {
+      const site = { file: f.rel, line: c2.line };
+      if (c2.receiver !== void 0) site.receiver = c2.receiver;
+      const enc = enclosingAmong(symbols, c2.line);
+      if (enc) site.enclosingSymbol = enc;
+      let arr = byName.get(c2.name);
+      if (!arr) byName.set(c2.name, arr = []);
+      arr.push(site);
+    }
+  }
+  const index = /* @__PURE__ */ new Map();
+  for (const name2 of [...byName.keys()].sort(byStr2)) {
+    const sites = byName.get(name2);
+    sites.sort((a, b) => byStr2(a.file, b.file) || a.line - b.line);
+    index.set(name2, sites);
+  }
+  return index;
 }
 var REFERENCE_KINDS3;
 var init_callers = __esm({
@@ -10349,16 +10404,33 @@ function loadEmbedModel(dir) {
   return { modelId, dim, unk, unkId, vocabSize, vocab: vmap, weights: flat };
 }
 function resolveEmbedPullUrl() {
-  const url = process.env.CODEINDEX_EMBED_URL;
-  return url && url.trim() ? url.trim() : void 0;
+  const env = process.env.CODEINDEX_EMBED_URL;
+  if (env && env.trim()) return { url: env.trim() };
+  return { url: DEFAULT_EMBED_URL, sha256: EMBED_ASSET_SHA256 };
+}
+async function fetchEmbedModel(url, expectedSha256) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status} from ${url}`);
+  const body2 = await res.text();
+  if (expectedSha256) {
+    const got = createHash22("sha256").update(body2).digest("hex");
+    if (got !== expectedSha256) {
+      throw new Error(`sha256 mismatch: expected ${expectedSha256}, got ${got}`);
+    }
+  }
+  return body2;
 }
 var EMBED_VERSION;
 var DEFAULT_EMBED_DIRNAME;
+var DEFAULT_EMBED_URL;
+var EMBED_ASSET_SHA256;
 var init_model = __esm({
   "src/embed/model.ts"() {
     "use strict";
     EMBED_VERSION = 1;
     DEFAULT_EMBED_DIRNAME = "models";
+    DEFAULT_EMBED_URL = "https://github.com/maxgfr/codeindex/releases/download/embed-model-v1/model.json";
+    EMBED_ASSET_SHA256 = "163ad053eab4e9a80d421ed4164f32292c83290f02fbbe6fe4b9b1cd6ea18d34";
   }
 });
 function basicTokenize(text) {
@@ -11042,13 +11114,28 @@ var init_viz = __esm({
 });
 var mcp_exports = {};
 __export(mcp_exports, {
-  runMcpServer: () => runMcpServer
+  memoizedEmbeddingIndex: () => memoizedEmbeddingIndex,
+  runMcpServer: () => runMcpServer,
+  scanFingerprint: () => scanFingerprint
 });
 function str(v) {
   return typeof v === "string" && v ? v : void 0;
 }
 function strArray(v) {
   return Array.isArray(v) && v.every((x) => typeof x === "string") && v.length ? v : void 0;
+}
+function errMessage(e) {
+  return e instanceof Error ? e.message : String(e);
+}
+function scanFingerprint(scan2) {
+  return sha1(scan2.files.map((f) => `${f.rel}:${f.hash}`).join("\n"));
+}
+async function memoizedEmbeddingIndex(key, build) {
+  const cacheKey = `${key.mode}:${key.identity}:${scanFingerprint(key.scan)}`;
+  if (embeddingIndexCache && embeddingIndexCache.key === cacheKey) return embeddingIndexCache.index;
+  const index = await build();
+  embeddingIndexCache = { key: cacheKey, index };
+  return index;
 }
 async function callTool(name2, args2) {
   const repo = str(args2.repo);
@@ -11190,19 +11277,35 @@ async function callTool(name2, args2) {
       const endpoint = resolveEmbedEndpoint();
       if (endpoint) {
         try {
-          const index = await buildEndpointIndex(scan2);
+          const index = await memoizedEmbeddingIndex({ mode: "endpoint", identity: endpoint, scan: scan2 }, () => buildEndpointIndex(scan2));
           const queryVec = await encodeQueryViaEndpoint(query);
-          return JSON.stringify(searchSemantic(scan2, query, index, { queryVec, limit, fuzzy }), null, 2);
-        } catch {
-          return JSON.stringify(searchIndex(scan2, query, { limit, fuzzy }), null, 2);
+          const results2 = searchSemantic(scan2, query, index, { queryVec, limit, fuzzy });
+          return JSON.stringify({ results: results2, tier: "endpoint" }, null, 2);
+        } catch (e) {
+          const results2 = searchIndex(scan2, query, { limit, fuzzy });
+          return JSON.stringify(
+            { results: results2, tier: "lexical", degradedReason: `embedding endpoint failed: ${errMessage(e)}` },
+            null,
+            2
+          );
         }
       }
       const modelDir = resolveEmbedModelDir(repo);
       const model = modelDir ? loadEmbedModel(modelDir) : void 0;
       if (model) {
-        const index = buildEmbeddingIndex(scan2, model);
-        return JSON.stringify(searchSemantic(scan2, query, index, { model, limit, fuzzy }), null, 2);
+        const index = await memoizedEmbeddingIndex(
+          { mode: "static", identity: `${modelDir}#${model.modelId}`, scan: scan2 },
+          () => buildEmbeddingIndex(scan2, model)
+        );
+        const results2 = searchSemantic(scan2, query, index, { model, limit, fuzzy });
+        return JSON.stringify({ results: results2, tier: "static" }, null, 2);
       }
+      const results = searchIndex(scan2, query, { limit, fuzzy });
+      return JSON.stringify(
+        { results, tier: "lexical", degradedReason: "no embedding endpoint or static model configured \u2014 see embed_status" },
+        null,
+        2
+      );
     }
     return JSON.stringify(searchIndex(scan2, query, { limit, fuzzy }), null, 2);
   }
@@ -11286,6 +11389,7 @@ async function runMcpServer() {
 var repoProp;
 var scopeProps;
 var TOOLS2;
+var embeddingIndexCache;
 var init_mcp = __esm({
   "src/mcp.ts"() {
     "use strict";
@@ -11312,6 +11416,7 @@ var init_mcp = __esm({
     init_embed();
     init_search();
     init_endpoint();
+    init_hash();
     repoProp = { repo: { type: "string", description: "Absolute path to the repository root" } };
     scopeProps = {
       scope: { type: "string", description: "Restrict to one directory (repo-relative)" },
@@ -11524,7 +11629,7 @@ var init_mcp = __esm({
       },
       {
         name: "search",
-        description: 'Natural-language-ish lexical search: BM25 ranking (k1=1.2, b=0.75) over symbol names (camelCase/snake_case subtokens), file path segments, markdown headings and summary lines. NOT embeddings by default \u2014 deterministic, diacritic-folded, zero API keys. Answers "where is auth handled?"-style queries with ranked files, matched terms and top symbols. Query terms with zero document frequency get a deterministic trigram-fuzzy fallback (typo-tolerant) unless `fuzzy: false`. Set `semantic: true` to RRF-fuse the deterministic static-embedding tier when a model asset is present (degrades to lexical otherwise \u2014 see embed_status).',
+        description: 'Natural-language-ish lexical search: BM25 ranking (k1=1.2, b=0.75) over symbol names (camelCase/snake_case subtokens), file path segments, markdown headings and summary lines. NOT embeddings by default \u2014 deterministic, diacritic-folded, zero API keys. Answers "where is auth handled?"-style queries with ranked files, matched terms and top symbols. Query terms with zero document frequency get a deterministic trigram-fuzzy fallback (typo-tolerant) unless `fuzzy: false`. Set `semantic: true` to RRF-fuse an embedding tier (HTTP endpoint, else a local static model) with lexical \u2014 the response then wraps the ranked list as `{ results, tier, degradedReason? }`, `tier` being "endpoint"/"static" when fusion happened or "lexical" (with `degradedReason`) when it did not (see embed_status). Without `semantic`, the response is the bare ranked array, unchanged.',
         inputSchema: {
           type: "object",
           properties: {
@@ -11538,7 +11643,7 @@ var init_mcp = __esm({
             },
             semantic: {
               type: "boolean",
-              description: "RRF-fuse an embedding tier with lexical (default false). Precedence: the HTTP endpoint (CODEINDEX_EMBED_ENDPOINT) if set, else a local static model. Degrades silently to lexical-only when neither is available/reachable \u2014 see embed_status."
+              description: 'RRF-fuse an embedding tier with lexical (default false). Precedence: the HTTP endpoint (CODEINDEX_EMBED_ENDPOINT) if set, else a local static model. The response reports the effective tier as a top-level `tier` field ("endpoint"/"static" on success, "lexical" plus `degradedReason` when neither is available/reachable) instead of degrading silently \u2014 see embed_status.'
             }
           },
           required: ["repo", "query"]
@@ -12014,8 +12119,9 @@ Commands:
                 embed status   Effective mode (none/static/endpoint), model +
                                EMBED_VERSION, and endpoint reachability (JSON)
                 embed build    Write embeddings.bin into --out <dir> (static tier)
-                embed pull     Fetch the model asset into CODEINDEX_EMBED_DIR (or
-                               <repo>/.codeindex/models/) \u2014 needs CODEINDEX_EMBED_URL
+                embed pull     Fetch the official model asset into CODEINDEX_EMBED_DIR
+                               (or <repo>/.codeindex/models/); sha256-verified. Override
+                               the source with CODEINDEX_EMBED_URL
                 embed serve    Print (or --run) the docker command that starts the
                                containerized embedding server (rich tier)
   rules       Architecture rules (forbidden edges, cycles, orphans) validated
@@ -12295,26 +12401,20 @@ async function runCli(argv) {
       process.stderr.write(`codeindex: ${index.records.length} embedding records \u2192 ${flags2.out}/embeddings.bin (model ${model.modelId})
 `);
     } else if (sub === "pull") {
-      const url = resolveEmbedPullUrl();
-      if (!url) {
-        process.stderr.write(
-          "codeindex: no model URL configured. The official static-embedding asset is not published yet.\nSet CODEINDEX_EMBED_URL to a model.json URL (optionally CODEINDEX_EMBED_DIR as the destination), then re-run `codeindex embed pull`.\n"
-        );
-        process.exitCode = 1;
-        return;
-      }
+      const { url, sha256 } = resolveEmbedPullUrl();
       const destDir = process.env.CODEINDEX_EMBED_DIR ?? join12(flags2.repo, ".codeindex", "models");
       mkdirSync2(destDir, { recursive: true });
       process.stderr.write(`codeindex: fetching model from ${url} \u2192 ${join12(destDir, "model.json")}
 `);
-      const res = await fetch(url);
-      if (!res.ok) {
-        process.stderr.write(`codeindex: pull failed \u2014 HTTP ${res.status} from ${url}
+      let body2;
+      try {
+        body2 = await fetchEmbedModel(url, sha256);
+      } catch (e) {
+        process.stderr.write(`codeindex: pull failed \u2014 ${e instanceof Error ? e.message : String(e)} (nothing written)
 `);
         process.exitCode = 1;
         return;
       }
-      const body2 = await res.text();
       try {
         JSON.parse(body2);
       } catch {
