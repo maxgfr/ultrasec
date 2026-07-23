@@ -1,9 +1,8 @@
 // Format detection + line parsing for `ultrasec logs`. Pure functions, no I/O —
 // the streaming engine (`analyze.ts`) owns reading files; this module only turns
-// text into structured events. Kept extensible: syslog lands in a follow-up task
-// by adding a union member + a vote/parse branch, nothing here restructures.
+// text into structured events.
 
-export const LOG_FORMATS = ["nginx-combined", "common", "json-lines", "generic", "raw"] as const;
+export const LOG_FORMATS = ["nginx-combined", "common", "json-lines", "syslog", "generic", "raw"] as const;
 export type LogFormat = (typeof LOG_FORMATS)[number];
 
 /** One parsed log line. Everything but `message`/`raw` is best-effort — a line
@@ -28,6 +27,25 @@ const BRACKET_TS_RE = /^\[\d{4}-\d{2}-\d{2}/;
 const GENERIC_ISO_RE = /^(\d{4}-\d{2}-\d{2}[T ][0-9:.,Z+-]*)/;
 const GENERIC_BRACKET_RE = /^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]/;
 
+// Classic BSD syslog header, e.g. `Oct 10 13:55:01 host sshd[1234]: Failed
+// password ...`. One capturing regex serves BOTH detection (`.test()`) and
+// parsing (`.exec()`) — its captures are a strict superset of the literal shape
+// (ts/host/process/pid/rest instead of the bare month+pid brief spec), so it
+// matches exactly what the brief's detection regex matches, nothing looser.
+// No year/timezone on the wire — `ts` stays exactly the substring on the line
+// (never fabricate a year to make it look ISO-normalized; see `parseTsEpochMs`
+// in analyze.ts, which refuses to turn this into an epoch for the same reason).
+const SYSLOG_CLASSIC_RE = /^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+([\w./-]+)(\[\d+\])?:\s?(.*)$/;
+// RFC5424 header prefix: `<PRI>VERSION ` (VERSION is optional/absent in some
+// producers). Reused for both detection (`.test()`) and, in `parseSyslogLine`,
+// to find where the PRI/VERSION prefix ends (`.exec()[0].length`).
+const SYSLOG_RFC5424_RE = /^<\d+>\d?\s/;
+// sshd's common phrasing: "... from <ip> port <port> ...". Anchored on the
+// literal "from" so we don't pick up an unrelated IP-shaped token elsewhere in
+// the message (e.g. a forwarded listen address) — same boundary discipline as
+// the probe-path signature in patterns.ts.
+const SSHD_FROM_IP_RE = /\bfrom\s+(\d{1,3}(?:\.\d{1,3}){3})\b/;
+
 const MAX_VOTE_SAMPLE = 50;
 
 /** Vote over the first ~50 non-blank sample lines to pick a format. A format
@@ -40,6 +58,7 @@ export function detectFormat(sampleLines: string[]): LogFormat {
   let combined = 0;
   let common = 0;
   let json = 0;
+  let syslog = 0;
   let generic = 0;
 
   for (const line of lines) {
@@ -47,6 +66,10 @@ export function detectFormat(sampleLines: string[]): LogFormat {
     if (m) {
       if (m[8] !== undefined) combined++;
       else common++;
+      continue;
+    }
+    if (SYSLOG_CLASSIC_RE.test(line) || SYSLOG_RFC5424_RE.test(line)) {
+      syslog++;
       continue;
     }
     const trimmed = line.trimStart();
@@ -71,6 +94,7 @@ export function detectFormat(sampleLines: string[]): LogFormat {
     ["nginx-combined", combined],
     ["common", common],
     ["json-lines", json],
+    ["syslog", syslog],
     ["generic", generic],
   ];
   tally.sort((a, b) => b[1] - a[1]);
@@ -134,6 +158,30 @@ function parseJsonLine(line: string): ParsedEvent {
   };
 }
 
+function parseSyslogLine(line: string): ParsedEvent {
+  const classic = SYSLOG_CLASSIC_RE.exec(line);
+  if (classic) {
+    const [, ts, host, proc, pid, rest] = classic;
+    const ip = SSHD_FROM_IP_RE.exec(rest ?? "")?.[1];
+    // Host + process fold INTO `message` (ParsedEvent has no dedicated fields
+    // for them) — everything from the line except the leading timestamp.
+    return {
+      ts,
+      ...(ip ? { ip } : {}),
+      message: `${host} ${proc}${pid ?? ""}: ${rest ?? ""}`,
+      raw: line,
+    };
+  }
+  const rfcPrefix = SYSLOG_RFC5424_RE.exec(line);
+  if (rfcPrefix) {
+    const remainder = line.slice(rfcPrefix[0].length);
+    const ts = remainder.trimStart().split(/\s+/, 1)[0];
+    const ip = SSHD_FROM_IP_RE.exec(remainder)?.[1];
+    return { ts, ...(ip ? { ip } : {}), message: remainder, raw: line };
+  }
+  return { message: line, raw: line };
+}
+
 function parseGenericLine(line: string): ParsedEvent {
   const iso = GENERIC_ISO_RE.exec(line);
   const bracket = GENERIC_BRACKET_RE.exec(line);
@@ -150,6 +198,8 @@ export function parseLine(fmt: LogFormat, line: string): ParsedEvent {
       return parseAccessLine(line);
     case "json-lines":
       return parseJsonLine(line);
+    case "syslog":
+      return parseSyslogLine(line);
     case "generic":
       return parseGenericLine(line);
     default:

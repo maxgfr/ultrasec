@@ -54,12 +54,15 @@ COMMANDS
              ultrasec never runs it — data ingest only. Flags: --run · --format
              deepsec-json · --no-enrich/--offline · --blame.
   logs       Blue-team log forensics: ingest existing log files (nginx/access,
-             JSON-lines, generic-timestamped, raw) and run deterministic attack-
-             signature detection (SQLi/XSS/traversal/cmdinj/probe-path + known
-             scanner user-agents) into its OWN dossier, findings citing
-             [logfile:line]. Evidence is redacted by default (secrets/PII never
-             land in a finding message). Flags: --out · --format · --budget
-             quick|standard|thorough · --max-lines · --no-redact · --json.
+             JSON-lines, syslog/auth.log, generic-timestamped, raw) and run
+             deterministic attack-signature detection (SQLi/XSS/traversal/
+             cmdinj/probe-path + known scanner user-agents), per-IP behavioral
+             aggregation (brute-force/credential-compromise, request bursts,
+             scan/recon→hit), and secret/PII-leak detection into its OWN
+             dossier, findings citing [logfile:line]. Evidence is redacted by
+             default (secrets/PII never land in a finding message). Flags:
+             --out · --format · --budget quick|standard|thorough ·
+             --max-lines · --window <sec> · --no-redact · --json.
   tools      List known external scanners, which are installed, and how to get them.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source→sink chains.

@@ -15687,12 +15687,15 @@ import { createInterface as createInterface2 } from "readline";
 import { relative as relative3, sep as sep3 } from "path";
 
 // src/logs/detect.ts
-var LOG_FORMATS = ["nginx-combined", "common", "json-lines", "generic", "raw"];
+var LOG_FORMATS = ["nginx-combined", "common", "json-lines", "syslog", "generic", "raw"];
 var ACCESS_RE = /^(\S+) \S+ (\S+) \[([^\]]+)\] "(\S+) ([^" ]+)[^"]*" (\d{3}) (\d+|-)(?: "([^"]*)" "([^"]*)")?/;
 var ISO_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]/;
 var BRACKET_TS_RE = /^\[\d{4}-\d{2}-\d{2}/;
 var GENERIC_ISO_RE = /^(\d{4}-\d{2}-\d{2}[T ][0-9:.,Z+-]*)/;
 var GENERIC_BRACKET_RE = /^\[(\d{4}-\d{2}-\d{2}[^\]]*)\]/;
+var SYSLOG_CLASSIC_RE = /^(\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2})\s+(\S+)\s+([\w./-]+)(\[\d+\])?:\s?(.*)$/;
+var SYSLOG_RFC5424_RE = /^<\d+>\d?\s/;
+var SSHD_FROM_IP_RE = /\bfrom\s+(\d{1,3}(?:\.\d{1,3}){3})\b/;
 var MAX_VOTE_SAMPLE = 50;
 function detectFormat(sampleLines) {
   const lines = sampleLines.filter((l) => l.trim().length > 0).slice(0, MAX_VOTE_SAMPLE);
@@ -15700,12 +15703,17 @@ function detectFormat(sampleLines) {
   let combined = 0;
   let common = 0;
   let json = 0;
+  let syslog = 0;
   let generic = 0;
   for (const line of lines) {
     const m = ACCESS_RE.exec(line);
     if (m) {
       if (m[8] !== void 0) combined++;
       else common++;
+      continue;
+    }
+    if (SYSLOG_CLASSIC_RE.test(line) || SYSLOG_RFC5424_RE.test(line)) {
+      syslog++;
       continue;
     }
     const trimmed = line.trimStart();
@@ -15728,6 +15736,7 @@ function detectFormat(sampleLines) {
     ["nginx-combined", combined],
     ["common", common],
     ["json-lines", json],
+    ["syslog", syslog],
     ["generic", generic]
   ];
   tally.sort((a, b) => b[1] - a[1]);
@@ -15783,6 +15792,27 @@ function parseJsonLine(line) {
     raw: line
   };
 }
+function parseSyslogLine(line) {
+  const classic = SYSLOG_CLASSIC_RE.exec(line);
+  if (classic) {
+    const [, ts, host, proc, pid, rest] = classic;
+    const ip = SSHD_FROM_IP_RE.exec(rest ?? "")?.[1];
+    return {
+      ts,
+      ...ip ? { ip } : {},
+      message: `${host} ${proc}${pid ?? ""}: ${rest ?? ""}`,
+      raw: line
+    };
+  }
+  const rfcPrefix = SYSLOG_RFC5424_RE.exec(line);
+  if (rfcPrefix) {
+    const remainder = line.slice(rfcPrefix[0].length);
+    const ts = remainder.trimStart().split(/\s+/, 1)[0];
+    const ip = SSHD_FROM_IP_RE.exec(remainder)?.[1];
+    return { ts, ...ip ? { ip } : {}, message: remainder, raw: line };
+  }
+  return { message: line, raw: line };
+}
 function parseGenericLine(line) {
   const iso = GENERIC_ISO_RE.exec(line);
   const bracket = GENERIC_BRACKET_RE.exec(line);
@@ -15796,6 +15826,8 @@ function parseLine(fmt, line) {
       return parseAccessLine(line);
     case "json-lines":
       return parseJsonLine(line);
+    case "syslog":
+      return parseSyslogLine(line);
     case "generic":
       return parseGenericLine(line);
     default:
@@ -15804,6 +15836,7 @@ function parseLine(fmt, line) {
 }
 
 // src/logs/patterns.ts
+var PROBE_PATH_RE = /(^|\/)(\.env|\.git\/config|wp-login\.php|xmlrpc\.php|phpmyadmin|\.aws\/credentials|actuator\/[\w-]*|server-status|\.ssh\/|vendor\/phpunit|id_rsa)([/?"]|$)/i;
 var ATTACK_SIGNATURES = [
   // ── sqli ──────────────────────────────────────────────────────────────────
   {
@@ -15889,7 +15922,7 @@ var ATTACK_SIGNATURES = [
     // discipline as the rest of this alternation. It still requires a literal
     // `/` right after "actuator", so `/blog/actuator-tips` (hyphen, no slash)
     // does not match — see the benign-twin fixture line + test.
-    re: /(^|\/)(\.env|\.git\/config|wp-login\.php|xmlrpc\.php|phpmyadmin|\.aws\/credentials|actuator\/[\w-]*|server-status|\.ssh\/|vendor\/phpunit|id_rsa)([/?"]|$)/i,
+    re: PROBE_PATH_RE,
     title: "Sensitive-path probe",
     note: "A request for a well-known sensitive/config path (.env, .git/config, wp-login.php, cloud credentials, actuator\u2026)."
   }
@@ -15917,6 +15950,22 @@ var FAMILY_CWE = {
   cmdinj: "CWE-78",
   "probe-path": void 0
 };
+var AUTH_EVENTS = [
+  // sshd: "Failed password for [invalid user] X from IP port P ssh2",
+  // "pam_unix(sshd:auth): authentication failure; ...", or a standalone
+  // "Invalid user X from IP port P" line (sshd logs this before the
+  // corresponding "Failed password" line for a not-a-real-account attempt).
+  { kind: "auth-fail", re: /\b(Failed password|authentication failure|Invalid user)\b/i },
+  // sshd: "Accepted password for X from IP port P ssh2" / "Accepted publickey ...".
+  { kind: "auth-success", re: /\bAccepted (password|publickey)\b/i },
+  // Generic application login phrasing — literal, not just "failed"/"succeeded".
+  { kind: "auth-fail", re: /\b(login failed|authentication failed)\b/i },
+  { kind: "auth-success", re: /\blogin succeeded\b/i }
+];
+function classifyAuthEvent(text) {
+  for (const ev of AUTH_EVENTS) if (ev.re.test(text)) return ev.kind;
+  return void 0;
+}
 
 // src/logs/secrets.ts
 var SECRET_PATTERNS = [
@@ -15987,6 +16036,15 @@ var FAMILY_CAP = 50;
 var MAX_DISTINCT = 1e5;
 var EVIDENCE_MAX = 200;
 var TOP_N = 10;
+var MAX_TRACKED_IPS = 1e5;
+var BRUTE_FORCE_FAIL_THRESHOLD = 20;
+var DEFAULT_WINDOW_SECONDS = 60;
+var LINE_PROXY_WINDOW = 500;
+var REQUEST_BURST_THRESHOLD = 300;
+var ERROR_SPIKE_THRESHOLD = 15;
+var SECRET_FILE_CAP = 25;
+var EMAIL_BULK_THRESHOLD = 5;
+var EMAIL_HASH_CAP = 1e4;
 function decodeOnce(path) {
   if (!path) return void 0;
   try {
@@ -16022,7 +16080,111 @@ var BoundedCounter = class {
     return [...this.counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([key, count]) => ({ key, count }));
   }
 };
-function newState(maxLines) {
+var NGINX_BRACKET_TS_RE = /^(\d{1,2})\/(\w{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2})\s+([+-]\d{4})$/;
+var ISO_TZ_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})$/i;
+var MONTH_INDEX = {
+  Jan: 0,
+  Feb: 1,
+  Mar: 2,
+  Apr: 3,
+  May: 4,
+  Jun: 5,
+  Jul: 6,
+  Aug: 7,
+  Sep: 8,
+  Oct: 9,
+  Nov: 10,
+  Dec: 11
+};
+function parseTsEpochMs(ts) {
+  if (!ts) return void 0;
+  const nginx = NGINX_BRACKET_TS_RE.exec(ts);
+  if (nginx) {
+    const [, day, mon, year, hh, mm, ss, tz] = nginx;
+    const month = MONTH_INDEX[mon];
+    if (month === void 0) return void 0;
+    const base = Date.UTC(Number(year), month, Number(day), Number(hh), Number(mm), Number(ss));
+    const sign = tz[0] === "-" ? 1 : -1;
+    const offsetMin = Number(tz.slice(1, 3)) * 60 + Number(tz.slice(3, 5));
+    return base + sign * offsetMin * 6e4;
+  }
+  if (ISO_TZ_TS_RE.test(ts)) {
+    const parsed = Date.parse(ts);
+    return Number.isNaN(parsed) ? void 0 : parsed;
+  }
+  return void 0;
+}
+var SlidingWindowTracker = class {
+  constructor(windowSeconds, lineProxySize) {
+    this.windowSeconds = windowSeconds;
+    this.lineProxySize = lineProxySize;
+  }
+  windowSeconds;
+  lineProxySize;
+  marks = [];
+  mode;
+  add(mark) {
+    if (this.mode === void 0) this.mode = mark.tsMs !== void 0 ? "time" : "line-proxy";
+    this.marks.push(mark);
+    if (this.mode === "time" && mark.tsMs !== void 0) {
+      const cutoff = mark.tsMs - this.windowSeconds * 1e3;
+      while (this.marks.length > 1 && (this.marks[0].tsMs ?? mark.tsMs) < cutoff) this.marks.shift();
+    } else {
+      const cutoff = mark.idx - this.lineProxySize;
+      while (this.marks.length > 1 && this.marks[0].idx < cutoff) this.marks.shift();
+    }
+    return { count: this.marks.length, oldest: this.marks[0], usedLineProxy: this.mode === "line-proxy" };
+  }
+  /** Drop every held mark — called once a detector has fired (one finding per
+   *  (IP, detector) per run) so a hot IP's queue doesn't keep growing for the
+   *  rest of the run for no further benefit. */
+  clear() {
+    this.marks.length = 0;
+  }
+};
+function windowDescription(usedLineProxy, windowSeconds) {
+  return usedLineProxy ? `the last ${LINE_PROXY_WINDOW.toLocaleString("en-US")} lines (no parseable timestamp on this source \u2014 falling back to a line-count proxy window)` : `a ${windowSeconds}s window`;
+}
+function newIpBehaviorState(windowSeconds) {
+  return {
+    authFail: new SlidingWindowTracker(windowSeconds, LINE_PROXY_WINDOW),
+    bruteForceFired: false,
+    sawAnyAuthFail: false,
+    hadQualifyingAuthRun: false,
+    compromiseFired: false,
+    request: new SlidingWindowTracker(windowSeconds, LINE_PROXY_WINDOW),
+    burstFired: false,
+    error4xx: new SlidingWindowTracker(windowSeconds, LINE_PROXY_WINDOW),
+    spikeFired: false,
+    hadQualifyingErrorRun: false,
+    reconHitFired: false
+  };
+}
+var BoundedIpStates = class {
+  constructor(cap, windowSeconds) {
+    this.cap = cap;
+    this.windowSeconds = windowSeconds;
+  }
+  cap;
+  windowSeconds;
+  map = /* @__PURE__ */ new Map();
+  overflowed = false;
+  get(ip) {
+    const existing = this.map.get(ip);
+    if (existing) return existing;
+    if (this.map.size >= this.cap) {
+      this.overflowed = true;
+      return void 0;
+    }
+    const fresh2 = newIpBehaviorState(this.windowSeconds);
+    this.map.set(ip, fresh2);
+    return fresh2;
+  }
+  get trackedCount() {
+    return this.map.size;
+  }
+};
+function newState(maxLines, windowSeconds) {
   return {
     findings: [],
     seenSignatureHits: /* @__PURE__ */ new Set(),
@@ -16035,7 +16197,14 @@ function newState(maxLines) {
     totalLines: 0,
     files: [],
     truncation: [],
-    budgetRemaining: maxLines
+    budgetRemaining: maxLines,
+    ipStates: new BoundedIpStates(MAX_TRACKED_IPS, windowSeconds),
+    authFailures: 0,
+    authSuccessAfterFailure: 0,
+    windowSeconds,
+    secretCountByFile: /* @__PURE__ */ new Map(),
+    secretOverflowByFile: /* @__PURE__ */ new Map(),
+    emailHashesByFile: /* @__PURE__ */ new Map()
   };
 }
 function addSignatureFinding(state, sig, relPath, lineNo, ev, redactOn) {
@@ -16092,6 +16261,171 @@ function addScannerUaFinding(state, uaName, relPath, lineNo, uaRaw, redactOn) {
   if (f.sink) f.sink.kind = "scanner-ua";
   state.findings.push(f);
 }
+var SECRET_KIND_SET = new Set(SECRET_PATTERNS.map((p) => p.kind));
+var EMAIL_PATTERN = PII_PATTERNS.find((p) => p.kind === "email").re;
+function addLeakFinding(state, kind, relPath, lineNo, evidence) {
+  const cur = state.secretCountByFile.get(relPath) ?? 0;
+  if (cur >= SECRET_FILE_CAP) {
+    state.secretOverflowByFile.set(relPath, (state.secretOverflowByFile.get(relPath) ?? 0) + 1);
+    return;
+  }
+  state.secretCountByFile.set(relPath, cur + 1);
+  const severity = SECRET_KIND_SET.has(kind) ? "high" : "medium";
+  const f = makeToolFinding({
+    tool: "ultrasec",
+    category: "logs",
+    ident: `${SECRET_LEAK_KIND_PREFIX}${kind}:${relPath}:${lineNo}`,
+    title: `Secret/PII leak in log \u2014 ${kind}`,
+    severity,
+    message: `A ${kind} value appears in the clear in this log line: ${evidence}`,
+    file: relPath,
+    line: lineNo,
+    cwe: "CWE-532",
+    confidence: "low"
+  });
+  if (f.sink) f.sink.kind = `${SECRET_LEAK_KIND_PREFIX}${kind}`;
+  state.findings.push(f);
+}
+function trackDistinctEmails(state, relPath, raw) {
+  let set = state.emailHashesByFile.get(relPath);
+  if (!set) {
+    set = /* @__PURE__ */ new Set();
+    state.emailHashesByFile.set(relPath, set);
+  }
+  const matches = raw.match(EMAIL_PATTERN) ?? [];
+  for (const email of matches) {
+    if (set.size >= EMAIL_HASH_CAP) break;
+    set.add(shortHash(email.toLowerCase()));
+  }
+  return set.size;
+}
+function processSecrets(state, relPath, lineNo, ev, opts) {
+  const { redacted, hits } = redact(ev.raw);
+  if (!hits.length) return;
+  const evidenceSrc = opts.redact ? redacted : ev.raw;
+  const evidence = truncateEvidence(evidenceSrc);
+  const kindsOnLine = new Set(hits.map((h) => h.kind));
+  for (const kind of kindsOnLine) {
+    if (kind === "email") {
+      const distinctCount = trackDistinctEmails(state, relPath, ev.raw);
+      if (distinctCount < EMAIL_BULK_THRESHOLD) continue;
+    }
+    addLeakFinding(state, kind, relPath, lineNo, evidence);
+  }
+}
+var KIND_BRUTE_FORCE = "brute-force";
+var KIND_CREDENTIAL_COMPROMISE = "credential-compromise";
+var KIND_REQUEST_BURST = "request-burst";
+var KIND_SCAN_BEHAVIOR = "scan-behavior";
+var KIND_RECON_HIT = "recon-hit";
+var SECRET_LEAK_KIND_PREFIX = "log-secret-";
+function addBehaviorFinding(state, a) {
+  const f = makeToolFinding({
+    tool: "ultrasec",
+    category: "logs",
+    ident: `${a.kind}:${a.ip}:${a.relPath}`,
+    title: a.title,
+    severity: a.severity,
+    message: a.message,
+    file: a.relPath,
+    line: a.lineNo,
+    confidence: "low"
+  });
+  if (f.sink) f.sink.kind = a.kind;
+  state.findings.push(f);
+}
+function processBehavior(state, relPath, lineNo, ev, windowSeconds) {
+  if (!ev.ip) return;
+  const mark = { idx: state.totalLines, tsMs: parseTsEpochMs(ev.ts), relPath, lineNo };
+  const ipState = state.ipStates.get(ev.ip);
+  const authKind = classifyAuthEvent(ev.raw);
+  if (authKind === "auth-fail") state.authFailures++;
+  if (ipState && !ipState.burstFired) {
+    const { count, oldest, usedLineProxy } = ipState.request.add(mark);
+    if (count > REQUEST_BURST_THRESHOLD) {
+      ipState.burstFired = true;
+      ipState.request.clear();
+      addBehaviorFinding(state, {
+        kind: KIND_REQUEST_BURST,
+        title: "Request burst",
+        severity: "low",
+        message: `Request burst: ${count} requests from ${ev.ip} within ${windowDescription(usedLineProxy, windowSeconds)} (starting at ${oldest.relPath}:${oldest.lineNo}) \u2014 possible recon/DoS indicator.`,
+        relPath: oldest.relPath,
+        lineNo: oldest.lineNo,
+        ip: ev.ip
+      });
+    }
+  }
+  if (ipState && !ipState.spikeFired && typeof ev.status === "number" && (ev.status === 404 || ev.status === 403)) {
+    const { count, oldest, usedLineProxy } = ipState.error4xx.add(mark);
+    if (count >= ERROR_SPIKE_THRESHOLD) {
+      ipState.spikeFired = true;
+      ipState.hadQualifyingErrorRun = true;
+      ipState.error4xx.clear();
+      addBehaviorFinding(state, {
+        kind: KIND_SCAN_BEHAVIOR,
+        title: "Scanning behavior",
+        severity: "low",
+        message: `Scanning behavior: ${count} 404/403 responses from ${ev.ip} within ${windowDescription(usedLineProxy, windowSeconds)} (starting at ${oldest.relPath}:${oldest.lineNo}).`,
+        relPath: oldest.relPath,
+        lineNo: oldest.lineNo,
+        ip: ev.ip
+      });
+    }
+  }
+  if (ipState && ipState.hadQualifyingErrorRun && !ipState.reconHitFired && typeof ev.status === "number" && ev.status >= 200 && ev.status < 300) {
+    const decoded = decodeOnce(ev.path);
+    const probeTargets = [ev.path, decoded].filter((t) => typeof t === "string");
+    if (probeTargets.some((t) => PROBE_PATH_RE.test(t))) {
+      ipState.reconHitFired = true;
+      addBehaviorFinding(state, {
+        kind: KIND_RECON_HIT,
+        title: "Recon followed by hit",
+        severity: "medium",
+        message: `Recon followed by hit: ${ev.ip} scanned for sensitive paths, then got a 2xx on a sensitive path at ${relPath}:${lineNo} \u2014 confirm what was disclosed.`,
+        relPath,
+        lineNo,
+        ip: ev.ip
+      });
+    }
+  }
+  if (authKind === "auth-fail" && ipState) {
+    ipState.sawAnyAuthFail = true;
+    if (!ipState.bruteForceFired) {
+      const { count, oldest, usedLineProxy } = ipState.authFail.add(mark);
+      if (count >= BRUTE_FORCE_FAIL_THRESHOLD) {
+        ipState.bruteForceFired = true;
+        ipState.hadQualifyingAuthRun = true;
+        ipState.qualifyingAuthMark = oldest;
+        ipState.authFail.clear();
+        addBehaviorFinding(state, {
+          kind: KIND_BRUTE_FORCE,
+          title: "Brute-force authentication attempts",
+          severity: "medium",
+          message: `Brute-force pattern: ${count} failed auth attempts from ${ev.ip} within ${windowDescription(usedLineProxy, windowSeconds)} (starting at ${oldest.relPath}:${oldest.lineNo}).`,
+          relPath: oldest.relPath,
+          lineNo: oldest.lineNo,
+          ip: ev.ip
+        });
+      }
+    }
+  } else if (authKind === "auth-success" && ipState) {
+    if (ipState.sawAnyAuthFail) state.authSuccessAfterFailure++;
+    if (ipState.hadQualifyingAuthRun && !ipState.compromiseFired) {
+      ipState.compromiseFired = true;
+      const q = ipState.qualifyingAuthMark;
+      addBehaviorFinding(state, {
+        kind: KIND_CREDENTIAL_COMPROMISE,
+        title: "Possible credential compromise",
+        severity: "high",
+        message: `Possible credential compromise: ${ev.ip} had a qualifying brute-force run starting at ${q.relPath}:${q.lineNo}, followed by a successful authentication at ${relPath}:${lineNo}. needs-human: confirm this wasn't the legitimate user succeeding after mistyping a password before treating it as a compromise.`,
+        relPath: q.relPath,
+        lineNo: q.lineNo,
+        ip: ev.ip
+      });
+    }
+  }
+}
 function processEvent(state, relPath, lineNo, ev, opts) {
   state.totalLines++;
   if (ev.ts) {
@@ -16117,6 +16451,8 @@ function processEvent(state, relPath, lineNo, ev, opts) {
       }
     }
   }
+  processSecrets(state, relPath, lineNo, ev, opts);
+  processBehavior(state, relPath, lineNo, ev, state.windowSeconds);
 }
 function estimateTotalLines(sizeBytes, bytesRead, linesRead) {
   if (linesRead <= 0 || bytesRead <= 0) return linesRead;
@@ -16177,11 +16513,16 @@ async function analyzeFile(absPath, relPath, opts, state) {
   if (stoppedAtBudget) {
     state.truncation.push(`${relPath}: stopped at line ${lineNo} of ~${estimateTotalLines(sizeBytes, bytesRead, lineNo)}`);
   }
+  const secretOverflow = state.secretOverflowByFile.get(relPath);
+  if (secretOverflow) {
+    state.truncation.push(`${relPath}: ${secretOverflow} further secret/PII leak hit(s) not emitted (per-file cap ${SECRET_FILE_CAP})`);
+  }
   state.files.push({ path: relPath, lines: lineNo, format: fmt });
 }
 async function analyzeLogs(paths, opts) {
   const maxLines = opts.maxLines ?? BUDGETS2[opts.budget];
-  const state = newState(maxLines);
+  const windowSeconds = opts.windowSec ?? DEFAULT_WINDOW_SECONDS;
+  const state = newState(maxLines, windowSeconds);
   for (const absPath of paths) {
     const relPath = relative3(opts.base, absPath).split(sep3).join("/");
     if (state.budgetRemaining <= 0) {
@@ -16193,6 +16534,11 @@ async function analyzeLogs(paths, opts) {
   for (const [family, overflow] of state.familyOverflow) {
     if (overflow > 0) state.truncation.push(`family ${family}: ${overflow} further hit(s) not emitted (per-family cap ${FAMILY_CAP})`);
   }
+  if (state.ipStates.overflowed) {
+    state.truncation.push(
+      `behavioral aggregation: distinct-IP cap (${MAX_TRACKED_IPS.toLocaleString("en-US")}) reached \u2014 brute-force/burst/recon detection was skipped for IPs beyond the cap`
+    );
+  }
   const stats = {
     files: state.files,
     topIps: state.ipCounter.top(TOP_N).map(({ key, count }) => ({ ip: key, count })),
@@ -16200,7 +16546,11 @@ async function analyzeLogs(paths, opts) {
     statusCounts: state.statusCounts,
     ...state.firstTs !== void 0 ? { firstTs: state.firstTs } : {},
     ...state.lastTs !== void 0 ? { lastTs: state.lastTs } : {},
-    totalLines: state.totalLines
+    totalLines: state.totalLines,
+    authFailures: state.authFailures,
+    authSuccessAfterFailure: state.authSuccessAfterFailure,
+    distinctIpsSeen: state.ipStates.trackedCount,
+    distinctIpsOverflowed: state.ipStates.overflowed
   };
   return { findings: state.findings, stats, truncation: state.truncation };
 }
@@ -16247,7 +16597,13 @@ async function runLogs(args2) {
   }
   const maxLines = numFlag(args2, "max-lines");
   const redactOn = !flagBool(args2, "no-redact");
-  const { findings, stats, truncation } = await analyzeLogs(files, { budget, format, maxLines, redact: redactOn, base });
+  const windowFlag = numFlag(args2, "window");
+  if (windowFlag !== void 0 && windowFlag <= 0) {
+    eprintln(`ultrasec logs: --window must be a positive number of seconds (got '${flagStr(args2, "window")}').`);
+    return 2;
+  }
+  const windowSec = windowFlag ?? DEFAULT_WINDOW_SECONDS;
+  const { findings, stats, truncation } = await analyzeLogs(files, { budget, format, maxLines, redact: redactOn, base, windowSec });
   findings.sort((a, b) => byStr(a.id, b.id));
   const graph = buildGraph2({ repo: base, files: [] });
   const familyOverflow = truncation.map((t) => /^family \S+: (\d+) further hit/.exec(t)).filter((m) => m !== null).reduce((sum, m) => sum + Number(m[1]), 0);
@@ -16256,7 +16612,7 @@ async function runLogs(args2) {
     version: VERSION,
     schemaVersion: SCHEMA_VERSION,
     repo: base,
-    generatedNote: "Log-forensics run: deterministic attack-signature + scanner-UA detection over ingested log files \u2014 candidates only, YOU judge each (see the log-forensics playbook). No dataflow reasoning, no behavioral aggregation (yet).",
+    generatedNote: "Log-forensics run: deterministic attack-signature + scanner-UA detection, per-IP behavioral aggregation (brute-force/compromise, request bursts, scan/recon\u2192hit), and secret/PII-leak detection over ingested log files \u2014 candidates only, YOU judge each (see the log-forensics playbook). No dataflow reasoning.",
     languages: [],
     toolsRun: [],
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
@@ -16292,6 +16648,18 @@ async function runLogs(args2) {
     println(
       `  top IPs: ${stats.topIps.slice(0, 3).map((i2) => `${i2.ip} (${i2.count})`).join(", ")}`
     );
+  const countKind = (kind) => findings.filter((f) => f.sink?.kind === kind).length;
+  const bruteForce = countKind(KIND_BRUTE_FORCE);
+  const compromise = countKind(KIND_CREDENTIAL_COMPROMISE);
+  const bursts = countKind(KIND_REQUEST_BURST);
+  const scanning = countKind(KIND_SCAN_BEHAVIOR);
+  const reconHits = countKind(KIND_RECON_HIT);
+  const leaks = findings.filter((f) => f.sink?.kind?.startsWith(SECRET_LEAK_KIND_PREFIX)).length;
+  if (bruteForce || compromise || bursts || scanning || reconHits || leaks) {
+    println(
+      `  behavior: brute-force IPs: ${bruteForce}, compromise: ${compromise}, bursts: ${bursts}, scanning: ${scanning}, recon\u2192hit: ${reconHits}, leaks: ${leaks}`
+    );
+  }
   if (truncation.length) {
     println(`  \u26A0\uFE0F coverage notes (${truncation.length}):`);
     for (const t of truncation.slice(0, 10)) println(`    - ${t}`);
@@ -19072,12 +19440,15 @@ COMMANDS
              ultrasec never runs it \u2014 data ingest only. Flags: --run \xB7 --format
              deepsec-json \xB7 --no-enrich/--offline \xB7 --blame.
   logs       Blue-team log forensics: ingest existing log files (nginx/access,
-             JSON-lines, generic-timestamped, raw) and run deterministic attack-
-             signature detection (SQLi/XSS/traversal/cmdinj/probe-path + known
-             scanner user-agents) into its OWN dossier, findings citing
-             [logfile:line]. Evidence is redacted by default (secrets/PII never
-             land in a finding message). Flags: --out \xB7 --format \xB7 --budget
-             quick|standard|thorough \xB7 --max-lines \xB7 --no-redact \xB7 --json.
+             JSON-lines, syslog/auth.log, generic-timestamped, raw) and run
+             deterministic attack-signature detection (SQLi/XSS/traversal/
+             cmdinj/probe-path + known scanner user-agents), per-IP behavioral
+             aggregation (brute-force/credential-compromise, request bursts,
+             scan/recon\u2192hit), and secret/PII-leak detection into its OWN
+             dossier, findings citing [logfile:line]. Evidence is redacted by
+             default (secrets/PII never land in a finding message). Flags:
+             --out \xB7 --format \xB7 --budget quick|standard|thorough \xB7
+             --max-lines \xB7 --window <sec> \xB7 --no-redact \xB7 --json.
   tools      List known external scanners, which are installed, and how to get them.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source\u2192sink chains.

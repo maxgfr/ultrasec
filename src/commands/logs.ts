@@ -1,7 +1,17 @@
 import { resolve, join, dirname, extname, sep } from "node:path";
 import { existsSync, statSync, readdirSync, mkdirSync, writeFileSync, openSync, readSync, closeSync } from "node:fs";
 import { flagStr, flagBool, numFlag, println, eprintln, byStr, type ParsedArgs } from "../util.js";
-import { analyzeLogs, type AnalyzeOptions } from "../logs/analyze.js";
+import {
+  analyzeLogs,
+  DEFAULT_WINDOW_SECONDS,
+  KIND_BRUTE_FORCE,
+  KIND_CREDENTIAL_COMPROMISE,
+  KIND_REQUEST_BURST,
+  KIND_RECON_HIT,
+  KIND_SCAN_BEHAVIOR,
+  SECRET_LEAK_KIND_PREFIX,
+  type AnalyzeOptions,
+} from "../logs/analyze.js";
 import { LOG_FORMATS, type LogFormat } from "../logs/detect.js";
 import { buildGraph } from "../graph.js";
 import { writeDossier, countBySeverity } from "../store.js";
@@ -68,8 +78,14 @@ export async function runLogs(args: ParsedArgs): Promise<number> {
   }
   const maxLines = numFlag(args, "max-lines");
   const redactOn = !flagBool(args, "no-redact");
+  const windowFlag = numFlag(args, "window");
+  if (windowFlag !== undefined && windowFlag <= 0) {
+    eprintln(`ultrasec logs: --window must be a positive number of seconds (got '${flagStr(args, "window")}').`);
+    return 2;
+  }
+  const windowSec = windowFlag ?? DEFAULT_WINDOW_SECONDS;
 
-  const { findings, stats, truncation } = await analyzeLogs(files, { budget, format, maxLines, redact: redactOn, base });
+  const { findings, stats, truncation } = await analyzeLogs(files, { budget, format, maxLines, redact: redactOn, base, windowSec });
   findings.sort((a, b) => byStr(a.id, b.id));
 
   const graph = buildGraph({ repo: base, files: [] });
@@ -97,7 +113,7 @@ export async function runLogs(args: ParsedArgs): Promise<number> {
     schemaVersion: SCHEMA_VERSION,
     repo: base,
     generatedNote:
-      "Log-forensics run: deterministic attack-signature + scanner-UA detection over ingested log files — candidates only, YOU judge each (see the log-forensics playbook). No dataflow reasoning, no behavioral aggregation (yet).",
+      "Log-forensics run: deterministic attack-signature + scanner-UA detection, per-IP behavioral aggregation (brute-force/compromise, request bursts, scan/recon→hit), and secret/PII-leak detection over ingested log files — candidates only, YOU judge each (see the log-forensics playbook). No dataflow reasoning.",
     languages: [],
     toolsRun: [],
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
@@ -150,6 +166,20 @@ export async function runLogs(args: ParsedArgs): Promise<number> {
         .map((i) => `${i.ip} (${i.count})`)
         .join(", ")}`,
     );
+
+  const countKind = (kind: string) => findings.filter((f) => f.sink?.kind === kind).length;
+  const bruteForce = countKind(KIND_BRUTE_FORCE);
+  const compromise = countKind(KIND_CREDENTIAL_COMPROMISE);
+  const bursts = countKind(KIND_REQUEST_BURST);
+  const scanning = countKind(KIND_SCAN_BEHAVIOR);
+  const reconHits = countKind(KIND_RECON_HIT);
+  const leaks = findings.filter((f) => f.sink?.kind?.startsWith(SECRET_LEAK_KIND_PREFIX)).length;
+  if (bruteForce || compromise || bursts || scanning || reconHits || leaks) {
+    println(
+      `  behavior: brute-force IPs: ${bruteForce}, compromise: ${compromise}, bursts: ${bursts}, scanning: ${scanning}, recon→hit: ${reconHits}, leaks: ${leaks}`,
+    );
+  }
+
   if (truncation.length) {
     println(`  ⚠️ coverage notes (${truncation.length}):`);
     for (const t of truncation.slice(0, 10)) println(`    - ${t}`);

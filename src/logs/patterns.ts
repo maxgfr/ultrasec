@@ -21,6 +21,13 @@ export interface AttackSignature {
   note: string;
 }
 
+// Hoisted so `analyze.ts`'s recon→hit behavioral detector can reuse the exact
+// same regex object the probe-path signature uses below — one source of truth
+// for "what counts as a sensitive path", never a second near-identical copy
+// that could drift.
+export const PROBE_PATH_RE =
+  /(^|\/)(\.env|\.git\/config|wp-login\.php|xmlrpc\.php|phpmyadmin|\.aws\/credentials|actuator\/[\w-]*|server-status|\.ssh\/|vendor\/phpunit|id_rsa)([/?"]|$)/i;
+
 export const ATTACK_SIGNATURES: AttackSignature[] = [
   // ── sqli ──────────────────────────────────────────────────────────────────
   {
@@ -106,7 +113,7 @@ export const ATTACK_SIGNATURES: AttackSignature[] = [
     // discipline as the rest of this alternation. It still requires a literal
     // `/` right after "actuator", so `/blog/actuator-tips` (hyphen, no slash)
     // does not match — see the benign-twin fixture line + test.
-    re: /(^|\/)(\.env|\.git\/config|wp-login\.php|xmlrpc\.php|phpmyadmin|\.aws\/credentials|actuator\/[\w-]*|server-status|\.ssh\/|vendor\/phpunit|id_rsa)([/?"]|$)/i,
+    re: PROBE_PATH_RE,
     title: "Sensitive-path probe",
     note: "A request for a well-known sensitive/config path (.env, .git/config, wp-login.php, cloud credentials, actuator…).",
   },
@@ -145,3 +152,40 @@ export const FAMILY_CWE: Record<SignatureFamily, string | undefined> = {
   cmdinj: "CWE-78",
   "probe-path": undefined,
 };
+
+// ── auth events (behavioral aggregation input) ───────────────────────────────
+// One line's auth outcome, when it has one. Feeds the brute-force/credential-
+// compromise detectors in `analyze.ts` — this module stays data-only (the
+// window/state machinery lives with the rest of the behavioral aggregator).
+export type AuthEventKind = "auth-fail" | "auth-success";
+
+export interface AuthEventSignature {
+  kind: AuthEventKind;
+  re: RegExp;
+}
+
+// Conservative on purpose (same "precision over recall" stance as
+// ATTACK_SIGNATURES above): literal sshd/PAM phrasing first, then a narrow
+// generic-app fallback — never bare "failed"/"succeeded", which would fire on
+// unrelated application errors.
+export const AUTH_EVENTS: AuthEventSignature[] = [
+  // sshd: "Failed password for [invalid user] X from IP port P ssh2",
+  // "pam_unix(sshd:auth): authentication failure; ...", or a standalone
+  // "Invalid user X from IP port P" line (sshd logs this before the
+  // corresponding "Failed password" line for a not-a-real-account attempt).
+  { kind: "auth-fail", re: /\b(Failed password|authentication failure|Invalid user)\b/i },
+  // sshd: "Accepted password for X from IP port P ssh2" / "Accepted publickey ...".
+  { kind: "auth-success", re: /\bAccepted (password|publickey)\b/i },
+  // Generic application login phrasing — literal, not just "failed"/"succeeded".
+  { kind: "auth-fail", re: /\b(login failed|authentication failed)\b/i },
+  { kind: "auth-success", re: /\blogin succeeded\b/i },
+];
+
+/** First AUTH_EVENTS pattern that matches `text`, or `undefined` for a line
+ *  with no recognizable auth outcome. A line matches at most one kind in
+ *  practice (the sshd/generic phrasings are mutually exclusive), so "first
+ *  match wins" never has to arbitrate a real conflict. */
+export function classifyAuthEvent(text: string): AuthEventKind | undefined {
+  for (const ev of AUTH_EVENTS) if (ev.re.test(text)) return ev.kind;
+  return undefined;
+}

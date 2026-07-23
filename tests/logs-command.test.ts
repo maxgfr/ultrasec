@@ -54,7 +54,7 @@ describe("runLogs — end to end", () => {
     expect(stats.topIps.length).toBeGreaterThan(0);
     expect(typeof stats.statusCounts).toBe("object");
     expect(Object.keys(stats.statusCounts).length).toBeGreaterThan(0);
-    expect(stats.files.length).toBe(2);
+    expect(stats.files.length).toBe(3);
   });
 
   it("--json prints a machine-readable summary", async () => {
@@ -99,6 +99,64 @@ describe("runLogs — end to end", () => {
     expect(code).toBe(2);
   });
 
+  it("errors on a non-positive --window value", async () => {
+    const restore = silence();
+    const code = await runLogs(parseArgs(["logs", FIXTURES_DIR, "--out", join(dir, "run"), "--window", "0"]));
+    restore();
+    expect(code).toBe(2);
+  });
+
+  it("auth.log alone produces grounded brute-force + credential-compromise findings, with a 'behavior' stdout summary", async () => {
+    const out = join(dir, "run");
+    let printed = "";
+    const o = vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {
+      printed += String(c);
+      return true;
+    });
+    const code = await runLogs(parseArgs(["logs", join(FIXTURES_DIR, "auth.log"), "--out", out]));
+    o.mockRestore();
+    expect(code).toBe(0);
+
+    const dossier = loadDossier(out);
+    expect(dossier.findings.some((f) => f.sink?.kind === "brute-force")).toBe(true);
+    expect(dossier.findings.some((f) => f.sink?.kind === "credential-compromise")).toBe(true);
+
+    const res = check(dossier);
+    expect(res.dangling).toEqual([]);
+    expect(res.ok).toBe(true);
+
+    expect(printed).toContain("behavior: brute-force IPs: 1");
+  });
+
+  it("--window threads through to the aggregator (a wide window flips a below-default-window case to firing)", async () => {
+    const spacedDir = mkdtempSync(join(tmpdir(), "ultrasec-logs-window-cmd-"));
+    try {
+      const file = join(spacedDir, "spaced.jsonl");
+      const lines: string[] = [];
+      for (let i = 0; i < 20; i++) {
+        const ts = new Date(Date.UTC(2024, 0, 1, 0, 0, i * 5)).toISOString();
+        lines.push(JSON.stringify({ timestamp: ts, message: "login failed for user bob", ip: "203.0.113.230" }));
+      }
+      writeFileSync(file, lines.join("\n") + "\n");
+
+      const outDefault = join(spacedDir, "run-default");
+      const restore1 = silence();
+      const code1 = await runLogs(parseArgs(["logs", file, "--out", outDefault]));
+      restore1();
+      expect(code1).toBe(0);
+      expect(loadDossier(outDefault).findings.some((f) => f.sink?.kind === "brute-force")).toBe(false);
+
+      const outWide = join(spacedDir, "run-wide");
+      const restore2 = silence();
+      const code2 = await runLogs(parseArgs(["logs", file, "--out", outWide, "--window", "120"]));
+      restore2();
+      expect(code2).toBe(0);
+      expect(loadDossier(outWide).findings.some((f) => f.sink?.kind === "brute-force")).toBe(true);
+    } finally {
+      rmSync(spacedDir, { recursive: true, force: true });
+    }
+  });
+
   it("errors when given a path that does not exist", async () => {
     const restore = silence();
     const code = await runLogs(parseArgs(["logs", join(dir, "nope.log"), "--out", join(dir, "run")]));
@@ -135,7 +193,7 @@ describe("runLogs — end to end", () => {
   });
 
   it("accepts every real LogFormat value for --format", async () => {
-    for (const fmt of ["nginx-combined", "common", "json-lines", "generic", "raw"]) {
+    for (const fmt of ["nginx-combined", "common", "json-lines", "syslog", "generic", "raw"]) {
       const out = join(dir, `run-${fmt}`);
       const restore = silence();
       const code = await runLogs(parseArgs(["logs", FIXTURES_DIR, "--out", out, "--format", fmt]));
@@ -176,7 +234,7 @@ describe("runLogs — end to end", () => {
 describe("expandInputs", () => {
   it("expands a directory to its *.log/*.jsonl files, non-recursively, sorted", () => {
     const files = expandInputs([FIXTURES_DIR]);
-    expect(files).toEqual([join(FIXTURES_DIR, "app.jsonl"), join(FIXTURES_DIR, "nginx-combined.log")]);
+    expect(files).toEqual([join(FIXTURES_DIR, "app.jsonl"), join(FIXTURES_DIR, "auth.log"), join(FIXTURES_DIR, "nginx-combined.log")]);
   });
 
   it("passes an explicit file through unchanged", () => {

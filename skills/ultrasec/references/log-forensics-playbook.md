@@ -2,9 +2,18 @@
 
 `logs` is the **blue-team** sibling of `scan`: instead of hunting for bugs in
 source code, it ingests log files you already have (nginx/access logs,
-JSON-lines app logs, generic-timestamped text, raw) and runs deterministic
-attack-signature detection over them — SQLi, XSS, path traversal, command
-injection, sensitive-path probes, and known scanner/attack-tool user-agents.
+JSON-lines app logs, syslog/auth.log, generic-timestamped text, raw) and runs
+three detector layers over them, in one streaming pass:
+
+1. **per-line attack signatures** — SQLi, XSS, path traversal, command
+   injection, sensitive-path probes, and known scanner/attack-tool user-agents;
+2. **per-line secret/PII-leak detection** — a secret or PII value appearing in
+   the clear in a log line (see §3's `log-secret-*` family);
+3. **per-IP behavioral aggregation** — brute-force auth attempts, a possible
+   credential compromise, request bursts, and scan→hit recon patterns, each
+   built from bounded sliding-window state over the whole file (see §3's
+   behavioral families).
+
 Findings land in their **own dossier** (never the code-scan pipeline) and cite
 `[logfile:line]` exactly like a source-code finding cites `[file:line]` — so
 the same grounding gate (`check`), `verify`, and `render` you already use work
@@ -25,7 +34,7 @@ decide.
 ## 2. Emit and read
 
 ```
-node scripts/ultrasec.mjs logs <path…> [--out .ultrasec-logs] [--budget quick|standard|thorough]
+node scripts/ultrasec.mjs logs <path…> [--out .ultrasec-logs] [--budget quick|standard|thorough] [--window <sec>]
 ```
 
 - `<path…>` — one or more log files and/or directories (directories expand to
@@ -33,8 +42,14 @@ node scripts/ultrasec.mjs logs <path…> [--out .ultrasec-logs] [--budget quick|
 - Writes a **standard dossier** (`manifest.json`, `findings.json`, `graph.json`
   — intentionally empty, `DOSSIER.md`) at `--out` (default `.ultrasec-logs`),
   plus **`LOGSTATS.json`**: per-file line counts/formats, top IPs, top request
-  paths, HTTP status distribution, and the run's first/last timestamps —
-  read this for the traffic context a single finding can't show you.
+  paths, HTTP status distribution, the run's first/last timestamps,
+  `authFailures`/`authSuccessAfterFailure` (raw auth-outcome counts, not
+  gated by any threshold), and `distinctIpsSeen`/`distinctIpsOverflowed` (the
+  behavioral aggregator's bounded per-IP state — see §6) — read this for the
+  traffic context a single finding can't show you.
+- `--window <sec>` (default 60) — the sliding-window size the behavioral
+  detectors (§3) use. Widen it to catch a slower/low-and-slow attacker;
+  narrow it to tighten what counts as "one burst."
 - Evidence in every finding message is **redacted by default** (secrets/PII —
   AWS keys, JWTs, `Authorization:` headers, query-string passwords/tokens,
   emails, Luhn-valid card numbers — become `‹REDACTED:<kind>›`). Pass
@@ -60,8 +75,50 @@ node scripts/ultrasec.mjs logs <path…> [--out .ultrasec-logs] [--budget quick|
   test or a false positive than a real campaign; many hits from one source
   across many endpoints is a real attacker.
 - Cross-reference `sink.kind` (the family) and the finding's evidence against
-  `topIps`/`topPaths`/`statusCounts` before calling anything — the engine
-  doesn't correlate across lines for you (yet — see §6).
+  `topIps`/`topPaths`/`statusCounts` before calling anything.
+
+**Behavioral families** (`sink.kind`, cross-line — built from a bounded
+per-IP sliding window; the exact thresholds are heuristics, tuned to be
+conservative but still HEURISTICS — verify before reporting, exactly like any
+other candidate):
+
+- **`brute-force`** — ≥20 failed-auth events from one IP inside the window
+  (default 60s; falls back to a 500-line proxy window on a source with no
+  parseable timestamp — classic BSD syslog has no year, so `auth.log` almost
+  always uses this fallback; the finding's message says so explicitly). Cites
+  the first failing line. A real distributed/slow-and-low attack can stay
+  under this per-IP threshold — cross-check `LOGSTATS.json`'s `authFailures`
+  (a raw, non-thresholded count) if the per-finding picture looks too clean.
+- **`credential-compromise`** — a successful auth for an IP that already had a
+  qualifying brute-force run. **Always `confidence: "low"`, always
+  needs-human** (see §5) — a successful login after failures is EVIDENCE, not
+  proof; the legitimate user mistyping their password before getting it right
+  produces the exact same signature.
+- **`request-burst`** — >300 requests from one IP inside the window. A
+  recon/DoS indicator, not an attack confirmation — a legitimate but
+  misbehaving client (a retry storm, a broken integration) produces the same
+  shape.
+- **`scan-behavior`** — ≥15 404/403 responses from one IP inside the window
+  (directory/endpoint enumeration).
+- **`recon-hit`** — the SAME IP, after qualifying as `scan-behavior`, later
+  gets a 2xx on a sensitive path (the same probe-path signature family as
+  §3's `probe-path`). This is the strongest of the behavioral findings —
+  recon that found something — investigate what was disclosed.
+
+**`log-secret-<kind>`** (e.g. `log-secret-aws-access-key`,
+`log-secret-jwt`, `log-secret-email`) — a secret or PII value appearing in the
+clear in a log line: `CWE-532`, capped at 25 per file. Secrets (AWS keys,
+private keys, JWTs, query-string tokens, `Authorization:` headers, Slack/Google
+API keys) are **high** severity; PII (Luhn-valid card numbers, and emails —
+only once a file has ≥5 DISTINCT addresses, a bulk-leak heuristic that ignores
+one-off appearances) is **medium**. The finding message is redacted by
+default, same as every other family — but the underlying secret is REAL and
+live on disk. **Rotate/invalidate every credential a `log-secret-*` finding
+points at** (this is defensive guidance for YOU to relay, not something
+ultrasec does): treat it the same way you'd treat a `gitleaks`/`kingfisher`
+hit from `scan` — assume compromise, rotate the credential at its source
+(AWS/IAM console, the app's secret store, …), then confirm the log itself gets
+scrubbed or access-restricted so the plaintext doesn't linger.
 
 ## 4. Timeline reconstruction
 
@@ -82,12 +139,16 @@ For anything you decide is worth writing up:
 Some patterns are serious enough that an uncertain verdict must stay
 **`needs-human`**, never `dismissed`:
 
-- A successful authentication **after** a burst of failures from the same
-  source (credential stuffing that worked).
-- A real secret or token appearing **in the clear** in a log line (the engine
-  already redacts evidence in the finding message — but if you're reading the
-  raw file directly and see one, that's its own incident, independent of any
-  signature hit).
+- A `credential-compromise` finding (§3) — a successful authentication
+  **after** a qualifying burst of failures from the same source. The engine
+  now surfaces this automatically (`confidence: "low"` by construction) —
+  treat that low confidence as a floor, not a downgrade: it stays
+  needs-human until a human confirms which side of "mistyped password" vs.
+  "credential stuffing that worked" it's on.
+- A `log-secret-*` finding, or a real secret/token you spot **in the clear**
+  reading the raw file directly (the engine already redacts evidence in the
+  finding message — a raw-file sighting is its own incident, independent of
+  any finding).
 - A traversal/probe-path hit that **succeeded** (2xx) against a genuinely
   sensitive target (`/etc/passwd`, `.env`, cloud credentials, `.git/config`).
 - Any of the above corroborated across **multiple log sources** for the same
@@ -99,13 +160,21 @@ verdict with an `exploitPath`, or leave it `needs-human` if you can't rule
 either way. **Never** `dismiss` a high/critical finding you can't positively
 refute.
 
-## 6. Scope — what this pass does NOT do (yet)
+## 6. Scope — what this pass does NOT do
 
-- **No behavioral aggregation.** Brute-force/burst detection (many failures
-  from one IP in a short window) is a follow-up engine capability — for now,
-  do that correlation yourself from `LOGSTATS.json` + the per-line findings.
-- **No syslog format** (yet) — nginx/access, JSON-lines, generic-timestamped,
-  and raw are supported today.
+- **Behavioral state is per-IP and bounded.** The aggregator tracks at most
+  100,000 distinct IPs (first-seen; beyond the cap, an IP keeps its per-line
+  signature/UA/secret findings but is not behaviorally aggregated —
+  `LOGSTATS.json`'s `distinctIpsOverflowed` and a `truncation[]` entry say so
+  when it happens). It also does not correlate ACROSS IPs (e.g. a botnet
+  spreading a brute-force run across many low-volume sources each under
+  threshold) — that's still a human correlation over `LOGSTATS.json` +
+  `authFailures`.
+- **No cross-file/cross-source correlation beyond shared IP state.** Findings
+  from different log files in one run share the same bounded per-IP state (so
+  a brute-force run split across an app log and an access log for the same IP
+  is caught), but the engine doesn't reason about causality across sources —
+  that narrative is still yours to write (§4).
 - **"Missing security logging"** as a *code-audit* finding (an endpoint with
   no audit trail at all) is judgment guidance for a `scan`/`investigate` pass
   over the **application source**, not something this engine detects from log

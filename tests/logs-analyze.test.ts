@@ -2,17 +2,25 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { analyzeLogs } from "../src/logs/analyze.js";
+import { analyzeLogs, KIND_BRUTE_FORCE, KIND_CREDENTIAL_COMPROMISE, KIND_REQUEST_BURST, KIND_SCAN_BEHAVIOR, KIND_RECON_HIT } from "../src/logs/analyze.js";
 import { SEVERITIES } from "../src/types.js";
 
 const FIXTURES = join(import.meta.dirname, "fixtures", "logs");
 const NGINX = join(FIXTURES, "nginx-combined.log");
 const JSONL = join(FIXTURES, "app.jsonl");
+const AUTH = join(FIXTURES, "auth.log");
 
 const nginxRaw = readFileSync(NGINX, "utf8").split("\n");
 // 1-based line number of the first raw line containing `needle`.
 function lineOf(needle: string): number {
   const i = nginxRaw.findIndex((l) => l.includes(needle));
+  if (i < 0) throw new Error(`fixture line containing ${JSON.stringify(needle)} not found`);
+  return i + 1;
+}
+
+const authRaw = readFileSync(AUTH, "utf8").split("\n");
+function authLineOf(needle: string): number {
+  const i = authRaw.findIndex((l) => l.includes(needle));
   if (i < 0) throw new Error(`fixture line containing ${JSON.stringify(needle)} not found`);
   return i + 1;
 }
@@ -127,6 +135,17 @@ describe("analyzeLogs — redaction guarantee", () => {
     // At least one of the planted secrets must show up in the clear once redaction is off.
     expect(PLANTED_SECRETS.some((s) => blob.includes(s))).toBe(true);
   });
+
+  it("the planted secrets actually produce log-secret-* leak findings (not just silently redacted elsewhere), and those findings are themselves redacted", async () => {
+    const { findings } = await analyzeLogs([NGINX, JSONL], { budget: "standard", redact: true, base: FIXTURES });
+    const leaks = findings.filter((f) => f.sink?.kind?.startsWith("log-secret-"));
+    expect(leaks.length).toBeGreaterThan(0);
+    expect(leaks.every((f) => f.cwe === "CWE-532")).toBe(true);
+    expect(leaks.every((f) => f.confidence === "low")).toBe(true);
+    const blob = JSON.stringify(leaks);
+    for (const secret of PLANTED_SECRETS) expect(blob).not.toContain(secret);
+    expect(blob).toContain("REDACTED");
+  });
 });
 
 describe("analyzeLogs — per-family cap + truncation", () => {
@@ -163,5 +182,273 @@ describe("analyzeLogs — stats", () => {
     expect(stats.topIps.length).toBeLessThanOrEqual(10);
     expect(stats.topPaths.length).toBeGreaterThan(0);
     expect(Object.keys(stats.statusCounts).length).toBeGreaterThan(0);
+  });
+
+  it("reports authFailures/authSuccessAfterFailure/distinctIpsSeen for auth.log", async () => {
+    const { stats } = await analyzeLogs([AUTH], { budget: "standard", redact: true, base: FIXTURES });
+    // 25 (brute-force ip) + 5+5+5 (scattered) + 4 (invalid-user run) = 44.
+    expect(stats.authFailures).toBe(44);
+    expect(stats.authSuccessAfterFailure).toBeGreaterThanOrEqual(1);
+    expect(stats.distinctIpsSeen).toBeGreaterThan(0);
+    expect(stats.distinctIpsOverflowed).toBe(false);
+  });
+});
+
+describe("analyzeLogs — behavioral aggregation: brute force + credential compromise", () => {
+  const BRUTE_FORCE_IP = "198.51.100.200";
+
+  it("fires a brute-force finding for the IP with >=20 failures, citing the first failing line", async () => {
+    const { findings } = await analyzeLogs([AUTH], { budget: "standard", redact: true, base: FIXTURES });
+    const hit = findings.find((f) => f.sink?.kind === KIND_BRUTE_FORCE);
+    expect(hit).toBeDefined();
+    expect(hit!.severity).toBe("medium");
+    expect(hit!.confidence).toBe("low");
+    expect(hit!.sink!.file).toBe("auth.log");
+    expect(hit!.sink!.line).toBe(authLineOf(`from ${BRUTE_FORCE_IP} port 51200`));
+    expect(hit!.message).toContain(BRUTE_FORCE_IP);
+  });
+
+  it("does NOT fire brute-force for IPs below the threshold (scattered failures, invalid-user run)", async () => {
+    const { findings } = await analyzeLogs([AUTH], { budget: "standard", redact: true, base: FIXTURES });
+    const bruteForceIps = findings.filter((f) => f.sink?.kind === KIND_BRUTE_FORCE).map((f) => f.message);
+    expect(bruteForceIps).toHaveLength(1); // only the qualifying IP, never the below-threshold ones
+    for (const ip of ["198.51.100.201", "198.51.100.202", "198.51.100.203", "198.51.100.204"]) {
+      expect(bruteForceIps.some((m) => m.includes(ip))).toBe(false);
+    }
+  });
+
+  it("fires a high-severity, needs-human 'possible credential compromise' finding after the brute-force run's success", async () => {
+    const { findings } = await analyzeLogs([AUTH], { budget: "standard", redact: true, base: FIXTURES });
+    const hit = findings.find((f) => f.sink?.kind === KIND_CREDENTIAL_COMPROMISE);
+    expect(hit).toBeDefined();
+    expect(hit!.severity).toBe("high");
+    expect(hit!.confidence).toBe("low");
+    expect(hit!.message.toLowerCase()).toContain("needs-human");
+    expect(hit!.message).toContain(BRUTE_FORCE_IP);
+    // Cites the first failing line; mentions the success line number in the message.
+    const successLine = authLineOf("Accepted password for root");
+    expect(hit!.sink!.line).toBe(authLineOf(`from ${BRUTE_FORCE_IP} port 51200`));
+    expect(hit!.message).toContain(String(successLine));
+  });
+
+  it("line-proxy fallback: syslog has no year, so the window falls back to a line-count proxy — stated honestly in the message", async () => {
+    const { findings } = await analyzeLogs([AUTH], { budget: "standard", redact: true, base: FIXTURES });
+    const hit = findings.find((f) => f.sink?.kind === KIND_BRUTE_FORCE);
+    expect(hit!.message).toContain("line-count proxy window");
+    expect(hit!.message).toContain("500");
+  });
+
+  it("one finding per (IP, detector) per run — the same run never double-fires brute-force for one IP", async () => {
+    const { findings } = await analyzeLogs([AUTH], { budget: "standard", redact: true, base: FIXTURES });
+    const hits = findings.filter((f) => f.sink?.kind === KIND_BRUTE_FORCE && f.message.includes(BRUTE_FORCE_IP));
+    expect(hits).toHaveLength(1);
+  });
+});
+
+describe("analyzeLogs — behavioral aggregation: window honored (--window / windowSec)", () => {
+  let dir: string;
+  let file: string;
+  const IP = "203.0.113.230";
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "ultrasec-logs-window-"));
+    file = join(dir, "spaced.jsonl");
+    // 20 auth-fail events, 5s apart (span: 19*5 = 95s), real ISO-Z timestamps
+    // (deterministic epoch — see analyze.ts's parseTsEpochMs).
+    const lines: string[] = [];
+    for (let i = 0; i < 20; i++) {
+      const ts = new Date(Date.UTC(2024, 0, 1, 0, 0, i * 5)).toISOString();
+      lines.push(JSON.stringify({ timestamp: ts, message: "login failed for user bob", ip: IP }));
+    }
+    writeFileSync(file, lines.join("\n") + "\n");
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("does not fire with the default 60s window (95s span never has 20 events inside any 60s slice)", async () => {
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    expect(findings.some((f) => f.sink?.kind === KIND_BRUTE_FORCE)).toBe(false);
+  });
+
+  it("fires with a wider --window that covers the whole 95s span", async () => {
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir, windowSec: 120 });
+    const hit = findings.find((f) => f.sink?.kind === KIND_BRUTE_FORCE);
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("120s window");
+    expect(hit!.message).not.toContain("line-count proxy");
+  });
+});
+
+describe("analyzeLogs — behavioral aggregation: request burst", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "ultrasec-logs-burst-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("fires a low-severity request-burst finding for >300 requests/60s from one IP", async () => {
+    const file = join(dir, "burst.log");
+    const ip = "203.0.113.240";
+    const lines: string[] = [];
+    for (let i = 0; i < 301; i++) {
+      lines.push(`${ip} - - [10/Oct/2023:15:00:00 +0000] "GET /shop HTTP/1.1" 200 100 "-" "Mozilla/5.0"`);
+    }
+    writeFileSync(file, lines.join("\n") + "\n");
+
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    const hit = findings.find((f) => f.sink?.kind === KIND_REQUEST_BURST);
+    expect(hit).toBeDefined();
+    expect(hit!.severity).toBe("low");
+    expect(hit!.message).toContain(ip);
+    expect(hit!.message).toContain("301");
+  });
+
+  it("does not fire below the 300-request threshold", async () => {
+    const file = join(dir, "no-burst.log");
+    const ip = "203.0.113.241";
+    const lines: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      lines.push(`${ip} - - [10/Oct/2023:15:00:00 +0000] "GET /shop HTTP/1.1" 200 100 "-" "Mozilla/5.0"`);
+    }
+    writeFileSync(file, lines.join("\n") + "\n");
+
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    expect(findings.some((f) => f.sink?.kind === KIND_REQUEST_BURST)).toBe(false);
+  });
+});
+
+describe("analyzeLogs — behavioral aggregation: scanning behavior + recon→hit", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "ultrasec-logs-recon-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("fires 'scanning behavior' at >=15 404/403s, then 'recon followed by hit' on a later 2xx probe-path hit", async () => {
+    const file = join(dir, "recon.log");
+    const ip = "203.0.113.250";
+    const lines: string[] = [];
+    for (let i = 0; i < 15; i++) {
+      const ss = String(i).padStart(2, "0");
+      lines.push(`${ip} - - [10/Oct/2023:16:00:${ss} +0000] "GET /admin${i} HTTP/1.1" 404 100 "-" "Mozilla/5.0"`);
+    }
+    lines.push(`${ip} - - [10/Oct/2023:16:00:16 +0000] "GET /actuator/env HTTP/1.1" 200 3000 "-" "Mozilla/5.0"`);
+    writeFileSync(file, lines.join("\n") + "\n");
+
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    const scan = findings.find((f) => f.sink?.kind === KIND_SCAN_BEHAVIOR);
+    expect(scan).toBeDefined();
+    expect(scan!.severity).toBe("low");
+
+    const reconHit = findings.find((f) => f.sink?.kind === KIND_RECON_HIT);
+    expect(reconHit).toBeDefined();
+    expect(reconHit!.severity).toBe("medium");
+    expect(reconHit!.sink!.line).toBe(16); // the 2xx line itself
+  });
+
+  it("does not fire recon→hit when the scan threshold was never reached", async () => {
+    const file = join(dir, "no-recon.log");
+    const ip = "203.0.113.251";
+    const lines: string[] = [
+      `${ip} - - [10/Oct/2023:16:00:00 +0000] "GET /missing HTTP/1.1" 404 100 "-" "Mozilla/5.0"`,
+      `${ip} - - [10/Oct/2023:16:00:01 +0000] "GET /actuator/env HTTP/1.1" 200 3000 "-" "Mozilla/5.0"`,
+    ];
+    writeFileSync(file, lines.join("\n") + "\n");
+
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    expect(findings.some((f) => f.sink?.kind === KIND_RECON_HIT)).toBe(false);
+  });
+});
+
+describe("analyzeLogs — behavioral aggregation: bounded per-IP state", () => {
+  // MAX_TRACKED_IPS (100k) is a hardcoded module constant (same precedent as
+  // MAX_DISTINCT for topIps/topPaths) — exercised at real scale here would cost
+  // a 100k-line synthetic file per test run for no additional coverage over
+  // the class's own logic (see BoundedIpStates.get() — an exact structural
+  // mirror of BoundedCounter.add()'s already-proven cap check). This asserts
+  // the plumbing (stats fields + no false-positive overflow note) on a normal
+  // run instead.
+  it("distinctIpsSeen/distinctIpsOverflowed reflect a normal (well under cap) run, with no overflow noted", async () => {
+    const { stats, truncation } = await analyzeLogs([AUTH], { budget: "standard", redact: true, base: FIXTURES });
+    expect(stats.distinctIpsSeen).toBeGreaterThan(0);
+    expect(stats.distinctIpsSeen).toBeLessThanOrEqual(100_000);
+    expect(stats.distinctIpsOverflowed).toBe(false);
+    expect(truncation.some((t) => t.includes("distinct-IP cap"))).toBe(false);
+  });
+});
+
+describe("analyzeLogs — secret/PII leak findings", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), "ultrasec-logs-secrets-"));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("fires a high-severity, CWE-532 finding for a leaked AWS key, redacted by default", async () => {
+    const file = join(dir, "leak.log");
+    const ip = "203.0.113.10";
+    writeFileSync(file, `${ip} - - [10/Oct/2023:17:00:00 +0000] "GET /debug?key=AKIAABCDEFGHIJKLMNOP HTTP/1.1" 200 10 "-" "Mozilla/5.0"\n`);
+
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    const hit = findings.find((f) => f.sink?.kind === "log-secret-aws-access-key");
+    expect(hit).toBeDefined();
+    expect(hit!.severity).toBe("high");
+    expect(hit!.cwe).toBe("CWE-532");
+    expect(hit!.confidence).toBe("low");
+    expect(hit!.message).not.toContain("AKIAABCDEFGHIJKLMNOP");
+    expect(hit!.message).toContain("REDACTED");
+  });
+
+  it("--no-redact reveals the raw secret in the finding message", async () => {
+    const file = join(dir, "leak.log");
+    const ip = "203.0.113.11";
+    writeFileSync(file, `${ip} - - [10/Oct/2023:17:00:00 +0000] "GET /debug?key=AKIAABCDEFGHIJKLMNOP HTTP/1.1" 200 10 "-" "Mozilla/5.0"\n`);
+
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: false, base: dir });
+    const hit = findings.find((f) => f.sink?.kind === "log-secret-aws-access-key");
+    expect(hit!.message).toContain("AKIAABCDEFGHIJKLMNOP");
+  });
+
+  it("email bulk heuristic: 4 distinct emails in a file produce no email-leak finding", async () => {
+    const file = join(dir, "emails4.log");
+    const ip = "203.0.113.12";
+    const emails = ["a1@example.com", "b2@example.com", "c3@example.com", "d4@example.com"];
+    const lines = emails.map(
+      (e, i) => `${ip} - - [10/Oct/2023:17:00:${String(i).padStart(2, "0")} +0000] "GET /contact?email=${e} HTTP/1.1" 200 10 "-" "Mozilla/5.0"`,
+    );
+    writeFileSync(file, lines.join("\n") + "\n");
+
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    expect(findings.some((f) => f.sink?.kind === "log-secret-email")).toBe(false);
+  });
+
+  it("email bulk heuristic: 6 distinct emails in a file produce at least one email-leak finding", async () => {
+    const file = join(dir, "emails6.log");
+    const ip = "203.0.113.13";
+    const emails = ["a1@example.com", "b2@example.com", "c3@example.com", "d4@example.com", "e5@example.com", "f6@example.com"];
+    const lines = emails.map(
+      (e, i) => `${ip} - - [10/Oct/2023:17:00:${String(i).padStart(2, "0")} +0000] "GET /contact?email=${e} HTTP/1.1" 200 10 "-" "Mozilla/5.0"`,
+    );
+    writeFileSync(file, lines.join("\n") + "\n");
+
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    const emailLeaks = findings.filter((f) => f.sink?.kind === "log-secret-email");
+    expect(emailLeaks.length).toBeGreaterThanOrEqual(1);
+    expect(emailLeaks.every((f) => f.severity === "medium")).toBe(true);
+  });
+
+  it("caps secret/PII leak findings at 25 per file and reports the overflow", async () => {
+    const file = join(dir, "secret-flood.log");
+    const ip = "203.0.113.14";
+    const lines: string[] = [];
+    for (let i = 0; i < 30; i++) {
+      const ss = String(i % 60).padStart(2, "0");
+      lines.push(`${ip} - - [10/Oct/2023:18:00:${ss} +0000] "GET /leak?password=hunter2value${i} HTTP/1.1" 200 10 "-" "Mozilla/5.0"`);
+    }
+    writeFileSync(file, lines.join("\n") + "\n");
+
+    const { findings, truncation } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    const leaks = findings.filter((f) => f.sink?.file === "secret-flood.log" && f.sink.kind === "log-secret-query-secret");
+    expect(leaks).toHaveLength(25);
+    expect(truncation.some((t) => t.includes("secret") && t.includes("5"))).toBe(true);
   });
 });
