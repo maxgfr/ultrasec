@@ -1,20 +1,28 @@
 # ultrasec toolbox — a self-contained image with the engine + the external
-# scanners it orchestrates, so `ultrasec scan` finds them all on PATH. Pinned
-# versions (never :latest) for reproducibility + supply-chain safety. Arch is
-# detected from the base image so it builds on amd64 and arm64.
+# scanners it orchestrates, so `ultrasec scan` finds them all on PATH. Every
+# scanner installs its LATEST release by default (accepting the reproducibility
+# trade-off for always-current CVE/rule coverage) — image freshness is therefore
+# the freshness of the last `docker compose build`; run
+# `docker compose build --no-cache` to pick up new releases (a cached layer
+# otherwise keeps whatever was latest at the last build). Each ARG below is an
+# optional override: pass `--build-arg TRIVY_VERSION=0.71.1` (etc.) to pin a
+# specific tool to a specific release when reproducibility matters more than
+# freshness. Arch is detected from the base image so it builds on amd64 and
+# arm64.
 FROM node:22-bookworm-slim
 
-ARG TRIVY_VERSION=0.71.1
-ARG GITLEAKS_VERSION=8.30.1
-ARG OSV_VERSION=2.3.8
-ARG SEMGREP_VERSION=1.166.0
-ARG GOSEC_VERSION=2.21.4
-ARG HADOLINT_VERSION=2.12.0
-ARG BANDIT_VERSION=1.8.6
-ARG CHECKOV_VERSION=3.2.0
-ARG GRYPE_VERSION=0.116.0
-ARG SYFT_VERSION=1.49.0
-ARG PIP_AUDIT_VERSION=2.10.1
+# Empty (default) ⇒ install each tool's latest release. Set a version to pin.
+ARG TRIVY_VERSION=
+ARG GITLEAKS_VERSION=
+ARG OSV_VERSION=
+ARG SEMGREP_VERSION=
+ARG GOSEC_VERSION=
+ARG HADOLINT_VERSION=
+ARG BANDIT_VERSION=
+ARG CHECKOV_VERSION=
+ARG GRYPE_VERSION=
+ARG SYFT_VERSION=
+ARG PIP_AUDIT_VERSION=
 
 # python3 (for semgrep/bandit/checkov/pip-audit) + git (gitleaks/scanners) +
 # curl/ca-certs + gawk (package-checker needs awk; bookworm-slim ships mawk by
@@ -31,29 +39,42 @@ RUN set -eux; \
     arm64) GL=arm64; OSV=arm64; GSA=arm64; HAD=arm64 ;; \
     *) echo "unsupported arch: $arch" >&2; exit 1 ;; \
   esac; \
-  # Trivy (official installer, pinned)
-  curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh | sh -s -- -b /usr/local/bin "v${TRIVY_VERSION}"; \
-  # grype (official Anchore installer, pinned — same pattern as trivy)
-  curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin "v${GRYPE_VERSION}"; \
-  # syft (official Anchore installer, pinned — SBOM generator, pairs with grype)
-  curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin "v${SYFT_VERSION}"; \
-  # gitleaks (release tarball)
+  # Trivy (official installer): the installer resolves the latest release
+  # itself when no tag is given, so an empty ARG needs no extra API call.
+  curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+    | sh -s -- -b /usr/local/bin ${TRIVY_VERSION:+v$TRIVY_VERSION}; \
+  # grype (official Anchore installer — same "no tag = latest" convention)
+  curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+    | sh -s -- -b /usr/local/bin ${GRYPE_VERSION:+v$GRYPE_VERSION}; \
+  # syft (official Anchore installer — SBOM generator, pairs with grype)
+  curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+    | sh -s -- -b /usr/local/bin ${SYFT_VERSION:+v$SYFT_VERSION}; \
+  # gitleaks (release tarball — asset name embeds the version, so an empty ARG
+  # resolves the real tag from the GitHub API first, then downloads by tag).
+  GITLEAKS_VERSION="${GITLEAKS_VERSION:-$(curl -fsSL https://api.github.com/repos/gitleaks/gitleaks/releases/latest | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')}"; \
   curl -sSfL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GL}.tar.gz" \
     | tar -xz -C /usr/local/bin gitleaks; \
-  # osv-scanner (release binary — asset name carries no version)
-  curl -sSfL -o /usr/local/bin/osv-scanner \
-    "https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_${OSV}"; \
+  # osv-scanner (release binary — asset name carries no version, so GitHub's
+  # own `/latest/download/<asset>` alias resolves it without an API call).
+  if [ -n "${OSV_VERSION}" ]; then OSV_URL="https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}/osv-scanner_linux_${OSV}"; \
+  else OSV_URL="https://github.com/google/osv-scanner/releases/latest/download/osv-scanner_linux_${OSV}"; fi; \
+  curl -sSfL -o /usr/local/bin/osv-scanner "$OSV_URL"; \
   chmod +x /usr/local/bin/osv-scanner; \
-  # gosec (release tarball)
+  # gosec (release tarball — asset name embeds the version, same as gitleaks).
+  GOSEC_VERSION="${GOSEC_VERSION:-$(curl -fsSL https://api.github.com/repos/securego/gosec/releases/latest | grep -m1 '"tag_name"' | sed -E 's/.*"v?([^"]+)".*/\1/')}"; \
   curl -sSfL "https://github.com/securego/gosec/releases/download/v${GOSEC_VERSION}/gosec_${GOSEC_VERSION}_linux_${GSA}.tar.gz" \
     | tar -xz -C /usr/local/bin gosec; \
-  # hadolint (single release binary)
-  curl -sSfL -o /usr/local/bin/hadolint \
-    "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-Linux-${HAD}"; \
+  # hadolint (single release binary — asset name is also version-less, same
+  # `/latest/download/` trick as osv-scanner).
+  if [ -n "${HADOLINT_VERSION}" ]; then HAD_URL="https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-Linux-${HAD}"; \
+  else HAD_URL="https://github.com/hadolint/hadolint/releases/latest/download/hadolint-linux-${HAD}"; fi; \
+  curl -sSfL -o /usr/local/bin/hadolint "$HAD_URL"; \
   chmod +x /usr/local/bin/hadolint; \
-  # Semgrep + bandit + checkov + pip-audit (pip)
+  # Semgrep + bandit + checkov + pip-audit (pip): an empty ARG drops the
+  # `==version` pin entirely, so pip resolves each package's latest release.
   pip3 install --no-cache-dir --break-system-packages \
-    "semgrep==${SEMGREP_VERSION}" "bandit==${BANDIT_VERSION}" "checkov==${CHECKOV_VERSION}" "pip-audit==${PIP_AUDIT_VERSION}"; \
+    "semgrep${SEMGREP_VERSION:+==$SEMGREP_VERSION}" "bandit${BANDIT_VERSION:+==$BANDIT_VERSION}" \
+    "checkov${CHECKOV_VERSION:+==$CHECKOV_VERSION}" "pip-audit${PIP_AUDIT_VERSION:+==$PIP_AUDIT_VERSION}"; \
   trivy --version; gitleaks version; osv-scanner --version; semgrep --version; gosec --version; hadolint --version; bandit --version; checkov --version; \
   grype version; syft version; pip-audit --version
 
