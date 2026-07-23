@@ -14771,7 +14771,7 @@ function npmV6AdvisoryFinding(tool, id, a, lockfile) {
   const pkg = a?.module_name;
   const version = (a?.findings ?? [])[0]?.version;
   const ghsa = (a?.github_advisory_id ? String(a.github_advisory_id).toUpperCase() : void 0) || ghsaFromUrl(a?.url);
-  const cves = [...a?.cves ?? [], ...cvesIn(a?.title, a?.url)];
+  const cves = [...Array.isArray(a?.cves) ? a.cves : [], ...cvesIn(a?.title, a?.url)];
   const aliases = [ghsa, ...cves].filter(Boolean);
   const ident = ghsa || cves[0] || String(a?.id ?? id);
   return makeToolFinding({
@@ -14807,7 +14807,7 @@ function parseNpmV7(data, lockfile) {
   for (const name2 of Object.keys(vulns)) {
     const v = vulns[name2];
     if (!v) continue;
-    for (const via of v.via ?? []) {
+    for (const via of Array.isArray(v.via) ? v.via : []) {
       if (!via || typeof via !== "object") continue;
       const pkg = via.name || name2;
       const ghsa = ghsaFromUrl(via.url);

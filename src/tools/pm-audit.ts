@@ -40,7 +40,7 @@ function npmV6AdvisoryFinding(tool: string, id: string, a: any, lockfile: string
   const pkg = a?.module_name;
   const version = (a?.findings ?? [])[0]?.version;
   const ghsa = (a?.github_advisory_id ? String(a.github_advisory_id).toUpperCase() : undefined) || ghsaFromUrl(a?.url);
-  const cves = [...(a?.cves ?? []), ...cvesIn(a?.title, a?.url)];
+  const cves = [...(Array.isArray(a?.cves) ? a.cves : []), ...cvesIn(a?.title, a?.url)];
   const aliases = [ghsa, ...cves].filter(Boolean) as string[];
   // Prefer a cross-referenceable id (GHSA/CVE) as the `ident` — npm's own
   // internal numeric advisory id (module-private, no other tool ever reports
@@ -92,7 +92,7 @@ export function parseNpmV7(data: any, lockfile: string): Finding[] {
   for (const name of Object.keys(vulns)) {
     const v = vulns[name];
     if (!v) continue;
-    for (const via of v.via ?? []) {
+    for (const via of Array.isArray(v.via) ? v.via : []) {
       // String entries are transitive pointers, not advisory objects — skip.
       if (!via || typeof via !== "object") continue;
       const pkg = via.name || name;

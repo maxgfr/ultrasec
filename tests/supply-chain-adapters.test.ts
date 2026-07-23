@@ -120,9 +120,9 @@ describe("npm-audit adapter", () => {
 
   it("dispatches the npm-7 shape (auditReportVersion: 2) to the v7 parser, skipping string via pointers", () => {
     const f = npmAudit.parse(fix("npm-audit-v7.json"), "/repo");
-    // 2, not 3: "meow"'s via is a pure string pointer ("trim-newlines") and must
+    // 3, not 4: "meow"'s via is a pure string pointer ("trim-newlines") and must
     // NOT produce its own finding (anti-double-count).
-    expect(f).toHaveLength(2);
+    expect(f).toHaveLength(3);
     expect(f.some((x) => x.pkg === "meow")).toBe(false);
 
     const trimNewlines = f.find((x) => x.pkg === "trim-newlines")!;
@@ -134,6 +134,15 @@ describe("npm-audit adapter", () => {
     const scoped = f.find((x) => x.pkg === "@scope/vuln-pkg")!;
     expect(scoped.severity).toBe("high");
     expect(scoped.aliases).toEqual(expect.arrayContaining(["GHSA-ABCD-EFGH-IJKL"]));
+  });
+
+  it("npm-7 parser: via entry without severity falls back to parent vulnerability severity", () => {
+    const f = npmAudit.parse(fix("npm-audit-v7.json"), "/repo");
+    const missingSeverity = f.find((x) => x.pkg === "missing-severity-pkg")!;
+    expect(missingSeverity).toBeDefined();
+    // via.severity is absent, should inherit parent vulnerabilities[name].severity
+    expect(missingSeverity.severity).toBe("low");
+    expect(missingSeverity.aliases).toEqual(expect.arrayContaining(["GHSA-XXXX-YYYY-ZZZZ"]));
   });
 
   it("tolerates empty / malformed / unrecognized input", () => {
@@ -325,11 +334,102 @@ describe("pm-audit shared parsers — direct unit coverage", () => {
     expect(parseNpmV6Advisories({ advisories: { x: null } }, "pnpm-lock.yaml", "pnpm-audit")).toEqual([]);
   });
 
+  it("parseNpmV6Advisories: wrong-typed cves field (not an array) never throws, still creates finding", () => {
+    const resultWithObject = parseNpmV6Advisories(
+      {
+        advisories: {
+          x: {
+            id: 1,
+            module_name: "pkg",
+            title: "Vuln",
+            cves: {} // wrong type: object instead of array
+          }
+        }
+      },
+      "package-lock.json",
+      "npm-audit"
+    );
+    expect(resultWithObject).toHaveLength(1);
+    expect(resultWithObject[0]!.pkg).toBe("pkg");
+    expect(resultWithObject[0]!.title).toBe("Vuln");
+    // The finding is created, just without the CVE (cves was malformed)
+    expect(resultWithObject[0]!.aliases).toEqual(["1"]); // only the advisory id, no CVE
+
+    const resultWithBoolean = parseNpmV6Advisories(
+      {
+        advisories: {
+          x: {
+            id: 2,
+            module_name: "pkg2",
+            title: "Vuln2",
+            cves: true // wrong type: boolean instead of array
+          }
+        }
+      },
+      "package-lock.json",
+      "npm-audit"
+    );
+    expect(resultWithBoolean).toHaveLength(1);
+    expect(resultWithBoolean[0]!.pkg).toBe("pkg2");
+  });
+
+  it("pnpmAudit: wrong-typed cves field never throws (regression for parse contract)", () => {
+    const result = pnpmAudit.parse(
+      JSON.stringify({
+        advisories: {
+          x: {
+            id: 1,
+            module_name: "pkg",
+            title: "Vuln",
+            cves: {}
+          }
+        }
+      }),
+      "/repo"
+    );
+    expect(result).toHaveLength(1);
+    expect(result[0]!.pkg).toBe("pkg");
+    // The key point: parsing never throws, it still produces a finding
+  });
+
   it("parseNpmV7: unknown/empty/malformed shapes yield []", () => {
     expect(parseNpmV7({}, "package-lock.json")).toEqual([]);
     expect(parseNpmV7({ vulnerabilities: null }, "package-lock.json")).toEqual([]);
     expect(parseNpmV7({ vulnerabilities: { x: null } }, "package-lock.json")).toEqual([]);
     expect(parseNpmV7({ vulnerabilities: { x: { via: null } } }, "package-lock.json")).toEqual([]);
+  });
+
+  it("parseNpmV7: wrong-typed via field (not an array) never throws", () => {
+    // When via is not an array, the guard treats it as empty array, so no findings
+    // from this vulnerability. This is the correct defensive behavior.
+    const result = parseNpmV7(
+      {
+        vulnerabilities: {
+          x: {
+            via: {} // wrong type: object instead of array
+          }
+        }
+      },
+      "package-lock.json"
+    );
+    // Parsing succeeds without throwing; no findings because via is not iterable
+    expect(result).toEqual([]);
+  });
+
+  it("npmAudit: wrong-typed via field never throws (regression for parse contract)", () => {
+    const result = npmAudit.parse(
+      JSON.stringify({
+        auditReportVersion: 2,
+        vulnerabilities: {
+          x: {
+            via: {}
+          }
+        }
+      }),
+      "/repo"
+    );
+    // The key point: parsing never throws when via is wrong-typed
+    expect(result).toEqual([]);
   });
 });
 

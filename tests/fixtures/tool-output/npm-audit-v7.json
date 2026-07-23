@@ -52,10 +52,30 @@
       "range": "<2.0.0",
       "nodes": ["node_modules/@scope/vuln-pkg"],
       "fixAvailable": { "name": "@scope/vuln-pkg", "version": "2.0.1", "isSemVerMajor": false }
+    },
+    "missing-severity-pkg": {
+      "name": "missing-severity-pkg",
+      "severity": "low",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1101,
+          "name": "missing-severity-pkg",
+          "dependency": "missing-severity-pkg",
+          "title": "Test advisory without via severity",
+          "url": "https://github.com/advisories/GHSA-xxxx-yyyy-zzzz",
+          "cwe": ["CWE-200"],
+          "range": "<=1.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<=1.0.0",
+      "nodes": ["node_modules/missing-severity-pkg"],
+      "fixAvailable": false
     }
   },
   "metadata": {
-    "vulnerabilities": { "info": 0, "low": 0, "moderate": 1, "high": 1, "critical": 0, "total": 2 },
+    "vulnerabilities": { "info": 0, "low": 1, "moderate": 1, "high": 1, "critical": 0, "total": 3 },
     "dependencies": { "prod": 10, "dev": 5, "optional": 0, "peer": 0, "peerOptional": 0, "total": 15 }
   }
 }
