@@ -126,8 +126,11 @@ Two ways to get the scanners without installing them on the host:
 - **Toolbox image** (`docker/Dockerfile` + `docker-compose.yml`) bakes the engine +
   the scanners into one image (`docker compose build`), so the whole audit runs
   in-container with everything on PATH. Baked in: trivy, gitleaks, osv-scanner,
-  semgrep, gosec, hadolint, bandit, checkov. Versions are pinned build-args; arch
-  (amd64/arm64) is auto-detected.
+  semgrep, gosec, hadolint, bandit, checkov, grype, syft, pip-audit. Versions are
+  pinned build-args; arch (amd64/arm64) is auto-detected. The grype vulnerability
+  DB and package-checker's feeds are deliberately NOT baked in (per-run,
+  network-fetched state) — see the comment in `docker/Dockerfile` for the
+  air-gapped warm-up commands.
 
 Adapters with an official image for on-demand `--docker`: trivy, gitleaks,
 osv-scanner, semgrep, bandit (`ghcr.io/pycqa/bandit`), gosec
@@ -136,14 +139,26 @@ osv-scanner, semgrep, bandit (`ghcr.io/pycqa/bandit`), gosec
 
 ## Recommended additions (researched, not yet adapters)
 
-Net-new coverage worth adding next (none overlap trivy): **GuardDog**
-(`ghcr.io/datadog/guarddog`) — malicious-package / typosquat detection, a class
-no CVE scanner sees (opt-in network); **TruffleHog** — *live* secret verification
-(verified/unverified) to feed the `verified` field; **cppcheck** — C/C++
-memory-safety via SARIF (needs stderr capture). Brakeman and CodeQL were screened
-out (non-commercial / private-repo licence); **osv-scalibr** was screened out too
-— it's an inventory extractor already embedded in osv-scanner v2, not a
-standalone advisory source. Add one by following "Adding an adapter" below.
+Net-new coverage worth adding next (none overlap trivy), phase-2 candidates:
+
+- **GuardDog** (`ghcr.io/datadog/guarddog`) — malicious-package / typosquat
+  detection, a class no CVE scanner sees (opt-in network). Adapter sketch:
+  `category: "dep"`, `argv` runs `guarddog npm|pypi verify <lockfile> --output-format json`
+  per detected ecosystem (mirrors the pm-audit multi-ecosystem gate), `parse`
+  maps each flagged package into a Finding the same way package-checker does.
+- **TruffleHog** — *live* secret verification (verified/unverified) to feed the
+  `verified` field on secret-category findings; `category: "secret"`.
+- **cppcheck** — C/C++ memory-safety via SARIF (needs stderr capture).
+
+Brakeman and CodeQL were screened out (non-commercial / private-repo licence);
+**osv-scalibr** was screened out too — it's an inventory extractor already
+embedded in osv-scanner v2, not a standalone advisory source. Also screened out,
+one-liners: **lockfile-lint** — checks lockfile *integrity* (registry pinning,
+no injected entries), a niche supply-chain-tampering concern distinct from the
+per-dependency advisories every adapter here reports; **OSSF Scorecard** — scores
+a repo's overall security *posture* (branch protection, CI hygiene, …), not
+per-dependency vulnerabilities, so it doesn't fit the Finding model. Add one by
+following "Adding an adapter" below.
 
 ## Triaging tool findings
 
@@ -159,6 +174,22 @@ Implement `ToolAdapter` (`{ name, category, argv(repo), parse(raw) }`) in
 `src/tools/<tool>.ts`, register it in `src/tools/index.ts`, add it to the registry
 in `src/tools/registry.ts`, and add a parse test against a frozen sample of the
 tool's real JSON under `tests/fixtures/tool-output/`.
+
+Three optional hooks (`src/tools/run.ts`) cover the rest of what a real-world
+adapter needs beyond `argv`/`parse`:
+- **`command()`** — override the executable (argv0 prefix), e.g. `["bash", scriptPath()]`
+  or `["yarn", "npm"]`; return `null` for a graceful "not installed" skip. Replaces
+  the default PATH probe of `name` (see `package-checker.ts`, `pm-audit.ts`).
+- **`applicable(repo)`** — a repo-content gate: `null` runs the tool, a string is a
+  skip note (e.g. `"no requirements.txt"`); unlike `enumerate`, the result is
+  **not** appended to argv (see `pip-audit.ts`).
+- **`network`** — `true`, or a function answering per-run, when the tool hits the
+  network on every invocation (registry/feed queries); skipped under `--offline`.
+
+**Tool takes no positional file args (it scans by flag/config, not a path list)?
+Use `applicable`, not `enumerate`** — `enumerate` is only for tools that scan
+explicit *files* (its return value is appended to argv); a tool with nothing to
+point at a directory needs a content gate instead.
 
 Notes:
 - **SARIF output?** Skip a bespoke parser — delegate to
