@@ -105,6 +105,44 @@ describe("runLogs — end to end", () => {
     restore();
     expect(code).toBe(2);
   });
+
+  it("errors on an unknown --format value, listing valid values, instead of silently degrading to raw parsing", async () => {
+    let printed = "";
+    const o = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const e = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => {
+      printed += String(c);
+      return true;
+    });
+    const code = await runLogs(parseArgs(["logs", FIXTURES_DIR, "--out", join(dir, "run"), "--format", "bogus"]));
+    o.mockRestore();
+    e.mockRestore();
+    expect(code).toBe(2);
+    expect(printed).toContain("bogus");
+    // The error must list the valid values (mirrors import.ts's --format validation).
+    expect(printed).toContain("nginx-combined");
+    expect(printed).toContain("auto");
+    expect(existsSync(join(dir, "run", "manifest.json"))).toBe(false);
+  });
+
+  it("--format auto behaves like omitting --format (per-file auto-detection)", async () => {
+    const out = join(dir, "run");
+    const restore = silence();
+    const code = await runLogs(parseArgs(["logs", FIXTURES_DIR, "--out", out, "--format", "auto"]));
+    restore();
+    expect(code).toBe(0);
+    const dossier = loadDossier(out);
+    expect(dossier.findings.length).toBeGreaterThan(0);
+  });
+
+  it("accepts every real LogFormat value for --format", async () => {
+    for (const fmt of ["nginx-combined", "common", "json-lines", "generic", "raw"]) {
+      const out = join(dir, `run-${fmt}`);
+      const restore = silence();
+      const code = await runLogs(parseArgs(["logs", FIXTURES_DIR, "--out", out, "--format", fmt]));
+      restore();
+      expect(code, `--format ${fmt} should exit 0`).toBe(0);
+    }
+  });
 });
 
 describe("expandInputs", () => {

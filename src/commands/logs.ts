@@ -2,7 +2,7 @@ import { resolve, join, dirname, extname, sep } from "node:path";
 import { existsSync, statSync, readdirSync, mkdirSync, writeFileSync, openSync, readSync, closeSync } from "node:fs";
 import { flagStr, flagBool, numFlag, println, eprintln, byStr, type ParsedArgs } from "../util.js";
 import { analyzeLogs, type AnalyzeOptions } from "../logs/analyze.js";
-import type { LogFormat } from "../logs/detect.js";
+import { LOG_FORMATS, type LogFormat } from "../logs/detect.js";
 import { buildGraph } from "../graph.js";
 import { writeDossier, countBySeverity } from "../store.js";
 import { VERSION, SCHEMA_VERSION, type Manifest } from "../types.js";
@@ -53,7 +53,19 @@ export async function runLogs(args: ParsedArgs): Promise<number> {
     eprintln(`ultrasec logs: unknown --budget '${budget}' (expected quick|standard|thorough).`);
     return 2;
   }
-  const format = flagStr(args, "format") as LogFormat | undefined;
+  // Mirrors import.ts's --format validation: an unrecognized value must error
+  // out, never silently degrade every event to {message,raw} (no UA detection,
+  // empty LOGSTATS) while still exiting 0. "auto" (or omitting the flag) keeps
+  // per-file format auto-detection.
+  const formatFlag = flagStr(args, "format");
+  let format: LogFormat | undefined;
+  if (formatFlag !== undefined && formatFlag !== "auto") {
+    if (!(LOG_FORMATS as readonly string[]).includes(formatFlag)) {
+      eprintln(`ultrasec logs: unknown --format '${formatFlag}' (expected one of ${LOG_FORMATS.join("|")}, or auto).`);
+      return 2;
+    }
+    format = formatFlag as LogFormat;
+  }
   const maxLines = numFlag(args, "max-lines");
   const redactOn = !flagBool(args, "no-redact");
 

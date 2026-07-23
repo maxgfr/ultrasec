@@ -3,7 +3,8 @@
 // text into structured events. Kept extensible: syslog lands in a follow-up task
 // by adding a union member + a vote/parse branch, nothing here restructures.
 
-export type LogFormat = "nginx-combined" | "common" | "json-lines" | "generic" | "raw";
+export const LOG_FORMATS = ["nginx-combined", "common", "json-lines", "generic", "raw"] as const;
+export type LogFormat = (typeof LOG_FORMATS)[number];
 
 /** One parsed log line. Everything but `message`/`raw` is best-effort — a line
  *  that doesn't match its format's shape degrades to `{message: line, raw: line}`. */

@@ -15688,6 +15688,7 @@ import { createInterface as createInterface2 } from "readline";
 import { relative as relative3, sep as sep3 } from "path";
 
 // src/logs/detect.ts
+var LOG_FORMATS = ["nginx-combined", "common", "json-lines", "generic", "raw"];
 var ACCESS_RE = /^(\S+) \S+ (\S+) \[([^\]]+)\] "(\S+) ([^" ]+)[^"]*" (\d{3}) (\d+|-)(?: "([^"]*)" "([^"]*)")?/;
 var ISO_TS_RE = /^\d{4}-\d{2}-\d{2}[T ]/;
 var BRACKET_TS_RE = /^\[\d{4}-\d{2}-\d{2}/;
@@ -16225,7 +16226,15 @@ async function runLogs(args2) {
     eprintln(`ultrasec logs: unknown --budget '${budget}' (expected quick|standard|thorough).`);
     return 2;
   }
-  const format = flagStr(args2, "format");
+  const formatFlag = flagStr(args2, "format");
+  let format;
+  if (formatFlag !== void 0 && formatFlag !== "auto") {
+    if (!LOG_FORMATS.includes(formatFlag)) {
+      eprintln(`ultrasec logs: unknown --format '${formatFlag}' (expected one of ${LOG_FORMATS.join("|")}, or auto).`);
+      return 2;
+    }
+    format = formatFlag;
+  }
   const maxLines = numFlag(args2, "max-lines");
   const redactOn = !flagBool(args2, "no-redact");
   const { findings, stats, truncation } = await analyzeLogs(files, { budget, format, maxLines, redact: redactOn, base });
