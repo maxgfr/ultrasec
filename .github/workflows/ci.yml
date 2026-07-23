@@ -41,7 +41,7 @@ jobs:
         run: pnpm test
 
       - name: Smoke-run the committed bundle (offline, fixture repo)
-        run: pnpm run demo
+        run: pnpm run demo:offline
 
       - name: Assert the audit dossier was produced
         run: test -f /tmp/ultrasec-demo/findings.json && test -f /tmp/ultrasec-demo/DOSSIER.md
