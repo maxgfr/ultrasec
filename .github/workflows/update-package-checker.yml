@@ -9,9 +9,38 @@ name: Update package-checker
 # offline/failure path, not the only path, but it still needs to stay
 # reasonably fresh. This workflow checks daily for a newer upstream release
 # and opens a PR re-pinning it (regenerated bundles included, gated by the
-# same typecheck/test the CI workflow runs) — it never pushes to main
-# directly, and is idempotent: re-running it while a PR for the same tag is
-# already open is a no-op.
+# full repo gate below) — it never pushes to main directly, and is
+# idempotent: re-running it while a PR for the same tag is already open is a
+# no-op.
+#
+# GITHUB_TOKEN and ci.yml — read this before assuming the opened PR is fully
+# checked: GitHub's anti-recursion rule means a push/PR authenticated by the
+# default `GITHUB_TOKEN` never triggers OTHER `on: pull_request`/`on: push`
+# workflows (here, that's .github/workflows/ci.yml). Left uncompensated, the
+# PR this job opens would either sit unmergeable behind ci.yml's required
+# checks forever, or auto-merge would go through having only run this job's
+# own gate. Two things compensate:
+#   1. The "Full repo gate" step below runs the SAME commands ci.yml/
+#      check:build run — typecheck, test, lint, check:build — against the
+#      bumped (staged) state before the PR is opened, so the change is fully
+#      vetted regardless of which mode below applies.
+#   2. checkout and gh both authenticate with `secrets.PACKAGE_CHECKER_BUMP_TOKEN`
+#      when that secret is set, falling back to the default `github.token`
+#      otherwise (missing secrets evaluate to `''` in Actions expressions, so
+#      `secrets.X || github.token` is a safe, documented fallback — not an
+#      error — when the secret is unset). Add a PAT (repo-scoped, from a
+#      bot/machine account with write access) under the secret name
+#      `PACKAGE_CHECKER_BUMP_TOKEN` to restore normal CI-triggering with zero
+#      further workflow edits:
+#        - WITH the PAT: the push/PR is authenticated as that account, so
+#          ci.yml runs on the PR like any other, and `gh pr merge --auto`
+#          waits for it (and any other required checks) before merging.
+#        - WITHOUT the PAT (default GITHUB_TOKEN, the out-of-the-box state):
+#          ci.yml does NOT run on the PR; the full gate in this job is the
+#          only verification the change gets. `gh pr merge --auto` still
+#          completes immediately if the branch has no required checks
+#          configured — otherwise the PR needs a manual merge (or someone
+#          manually re-running the blocked checks).
 on:
   schedule:
     - cron: "17 5 * * *"
@@ -22,13 +51,20 @@ permissions:
   pull-requests: write
 
 env:
-  GH_TOKEN: ${{ github.token }}
+  # See the GITHUB_TOKEN note above: falls back to the default token when
+  # PACKAGE_CHECKER_BUMP_TOKEN isn't configured.
+  GH_TOKEN: ${{ secrets.PACKAGE_CHECKER_BUMP_TOKEN || github.token }}
 
 jobs:
   update-package-checker:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # See the GITHUB_TOKEN note above: this is what actually
+          # authenticates the later `git push`, so it's what determines
+          # whether the anti-recursion rule applies to the opened PR.
+          token: ${{ secrets.PACKAGE_CHECKER_BUMP_TOKEN || github.token }}
 
       - name: Decide whether a re-pin is needed (and not already in flight)
         id: decide
@@ -77,20 +113,12 @@ jobs:
         if: steps.decide.outputs.proceed == 'true'
         run: pnpm run build
 
-      - name: Sanity gate
-        if: steps.decide.outputs.proceed == 'true'
-        run: pnpm run typecheck && pnpm test
-
-      - name: Open the PR
+      - name: Stage the bumped state for commit
         if: steps.decide.outputs.proceed == 'true'
         env:
-          LATEST: ${{ steps.decide.outputs.latest }}
           BRANCH: ${{ steps.decide.outputs.branch }}
         run: |
           set -euo pipefail
-          SHA_SH="$(jq -r '.sha256["package-checker.sh"]' src/vendor/package-checker.meta.json)"
-          SHA_TS="$(jq -r '.sha256["package-checker-script.ts"]' src/vendor/package-checker.meta.json)"
-
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           # Belt-and-suspenders idempotency: the "already open" check above covers
@@ -100,8 +128,28 @@ jobs:
           # chore/package-checker-* branches, so deleting-then-recreating is safe.
           git push origin --delete "$BRANCH" 2>/dev/null || true
           git checkout -b "$BRANCH"
+          # Staged BEFORE the full gate below runs, so check:build's own
+          # `git diff --exit-code` over the two bundle paths compares its fresh
+          # rebuild against this staged (bumped) content rather than against
+          # stale pre-bump HEAD — i.e. it verifies byte-identity of the bumped
+          # state, not "does the bump match what was here before the bump".
           git add src/vendor/package-checker.sh src/vendor/package-checker-script.ts src/vendor/package-checker.meta.json \
             scripts/ultrasec.mjs skills/ultrasec/scripts/ultrasec.mjs
+
+      - name: Full repo gate (mirrors ci.yml — ci.yml itself won't run on this PR without a PAT; see header)
+        if: steps.decide.outputs.proceed == 'true'
+        run: pnpm typecheck && pnpm test && pnpm run lint && pnpm run check:build
+
+      - name: Commit and open the PR
+        if: steps.decide.outputs.proceed == 'true'
+        env:
+          LATEST: ${{ steps.decide.outputs.latest }}
+          BRANCH: ${{ steps.decide.outputs.branch }}
+        run: |
+          set -euo pipefail
+          SHA_SH="$(jq -r '.sha256["package-checker.sh"]' src/vendor/package-checker.meta.json)"
+          SHA_TS="$(jq -r '.sha256["package-checker-script.ts"]' src/vendor/package-checker.meta.json)"
+
           git commit -m "feat(deps): re-pin package-checker at ${LATEST}"
           git push -u origin "$BRANCH"
 
@@ -114,7 +162,7 @@ jobs:
           - package-checker.sh sha256: \`${SHA_SH}\`
           - package-checker-script.ts sha256: \`${SHA_TS}\`
 
-          Both bundles (\`scripts/ultrasec.mjs\`, \`skills/ultrasec/scripts/ultrasec.mjs\`) were regenerated so \`check:build\`'s byte-identity gate stays green. Opened automatically by \`.github/workflows/update-package-checker.yml\`.
+          Both bundles (\`scripts/ultrasec.mjs\`, \`skills/ultrasec/scripts/ultrasec.mjs\`) were regenerated so \`check:build\`'s byte-identity gate stays green. The full repo gate (typecheck, test, lint, check:build) already ran in-job before this PR was opened — see the workflow's header comment for why (GITHUB_TOKEN does not trigger ci.yml on this PR unless \`PACKAGE_CHECKER_BUMP_TOKEN\` is configured). Opened automatically by \`.github/workflows/update-package-checker.yml\`.
           EOF
           )"
 
