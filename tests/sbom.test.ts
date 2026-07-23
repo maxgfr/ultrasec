@@ -101,23 +101,19 @@ describe("scan --json output — includes SBOM field", () => {
     return { out, restore: () => spy.mockRestore() };
   }
 
-  it(
-    "includes sbom field in scan --json output (mirrors manifest.sbom)",
-    async () => {
-      const out = mkdtempSync(join(tmpdir(), "ultrasec-scan-json-sbom-"));
-      const code = await runScan(parseArgs(["scan", "--repo", FIXTURE, "--out", out, "--no-enrich", "--json"]));
-      expect(code).toBe(0);
+  it("includes sbom field in scan --json output (mirrors manifest.sbom)", async () => {
+    const out = mkdtempSync(join(tmpdir(), "ultrasec-scan-json-sbom-"));
+    const code = await runScan(parseArgs(["scan", "--repo", FIXTURE, "--out", out, "--no-enrich", "--json"]));
+    expect(code).toBe(0);
 
-      const result = JSON.parse(cap.out.join(""));
-      // The fix adds sbom to the --json output object, following the same pattern as
-      // optional manifest fields like scopes and toolStatus. If syft is available,
-      // result.sbom will be "sbom.cdx.json"; if not, the property won't appear
-      // (JSON omits undefined values). Either way, the structure now properly mirrors
-      // the manifest's optional sbom field, allowing --json-only consumers to see it.
-      if (result.sbom !== undefined) {
-        expect(result.sbom).toBe("sbom.cdx.json");
-      }
-    },
-    15000,
-  );
+    const result = JSON.parse(cap.out.join(""));
+    // The fix adds sbom to the --json output object, following the same pattern as
+    // optional manifest fields like scopes and toolStatus. If syft is available,
+    // result.sbom will be "sbom.cdx.json"; if not, the property won't appear
+    // (JSON omits undefined values). Either way, the structure now properly mirrors
+    // the manifest's optional sbom field, allowing --json-only consumers to see it.
+    if (result.sbom !== undefined) {
+      expect(result.sbom).toBe("sbom.cdx.json");
+    }
+  }, 15000);
 });
