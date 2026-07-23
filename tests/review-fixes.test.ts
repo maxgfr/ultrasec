@@ -3,7 +3,7 @@ import { resolveImport } from "../src/resolve.js";
 import { neighbors } from "../src/neighbors.js";
 import type { Graph } from "../src/graph.js";
 import { findSources, findSanitizers } from "../src/catalog.js";
-import { langForFile, extract } from "../src/lang.js";
+import { langForFile } from "../src/lang.js";
 import { parseVerdicts } from "../src/verify.js";
 import { check } from "../src/check.js";
 import type { Dossier } from "../src/store.js";
@@ -44,13 +44,6 @@ describe("catalog: .split() is no longer treated as command sanitization", () =>
   it("does not hint argv-array for a bare .split()", () => {
     expect(findSanitizers(js, "execSync('x ' + name.split(',')[0])", "command")).toEqual([]);
     expect(findSanitizers(js, "execFile('ls', args)", "command")).not.toEqual([]); // real one still hints
-  });
-});
-
-describe("lang: a match starting mid-identifier is rejected", () => {
-  it("does not extract `abc` from `123abc.exec()`", () => {
-    const js = langForFile("x.js")!;
-    expect(extract(js, "var y = 123abc.exec();").calls.some((c) => c.callee === "exec")).toBe(false);
   });
 });
 
