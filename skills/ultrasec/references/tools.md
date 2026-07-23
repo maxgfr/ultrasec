@@ -88,6 +88,17 @@ bash <vendored script.sh> --fetch-all <dir>
 bash <vendored script.sh> <repo> --source <dir>/*.purl --export-json <file>
 ```
 
+**Feed-poisoning guard**: precisely because `./data/` resolves against the
+*scanned repo's own cwd* and is preferred over Homebrew/`/app/data`/the real
+upstream feed, a repo that commits its own `data/ghsa.purl` (or `data/osv.purl`,
+or a per-ecosystem `data/{ghsa,osv}-<eco>.purl`) makes `find_default_source()`
+silently substitute it for the real advisory feed — suppressing real findings
+or injecting fake ones. `package-checker.ts`'s `applicable(repo)` detects any
+`<repo>/data/*.purl` file (the exact shape probed) and SKIPS the adapter with
+an explicit note rather than trusting a feed the scanned repo controls; use
+trivy or osv-scanner (their own local vuln DBs, not repo-writable) to still get
+coverage on such a repo.
+
 ## Correlation, risk scoring & SARIF
 
 Three deterministic layers turn raw scanner output into a ranked, de-duplicated

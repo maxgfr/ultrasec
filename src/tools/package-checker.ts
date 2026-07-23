@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding } from "../types.js";
 import type { ToolAdapter } from "./run.js";
@@ -28,6 +28,31 @@ import { PACKAGE_CHECKER_SH, PACKAGE_CHECKER_SHA256, PACKAGE_CHECKER_TAG } from 
 // upstream feeds once and point the script at them explicitly:
 //   bash <script> --fetch-all <dir>
 //   bash <script> <target> --source <dir>/*.purl --export-json <exportPath>
+//
+// Feed-poisoning guard: precisely BECAUSE ./data/ is resolved against the
+// scanned repo's own cwd (above) and find_default_source() prefers it over
+// every other source, a hostile repo can commit its own `data/ghsa.purl` (or
+// `data/osv.purl`, or a per-ecosystem `data/{ghsa,osv}-<eco>.purl`) and the
+// script will silently treat it as the real advisory feed, suppressing real
+// findings or injecting fake ones the AI would then adjudicate as trustworthy.
+// `applicable()` below detects any `<repo>/data/*.purl` file — the exact
+// shape find_default_source() probes — and skips the adapter with an
+// explicit note instead of running against a feed that repo controls.
+
+/** True when `<repo>/data/` contains at least one `*.purl` file — every shape
+ *  `find_default_source()` (package-checker.sh) checks under `./data/`
+ *  before falling back to Homebrew share / `/app/data` / the real upstream
+ *  GitHub feed (`ghsa.purl`, `osv.purl` for npm; `ghsa-<eco>.purl` /
+ *  `osv-<eco>.purl` for every other ecosystem). */
+function hasRepoLocalPurlFeed(repo: string): boolean {
+  let entries: string[];
+  try {
+    entries = readdirSync(join(repo, "data"));
+  } catch {
+    return false; // no data/ dir at all — the common, safe case
+  }
+  return entries.some((e) => e.toLowerCase().endsWith(".purl"));
+}
 
 /** Where the vendored script is materialized on disk (content-hash named, so a
  *  version bump writes a fresh file instead of silently reusing a stale one). */
@@ -102,6 +127,10 @@ export const packageChecker: ToolAdapter = {
   name: "package-checker",
   category: "dep",
   network: true,
+  applicable: (repo) =>
+    hasRepoLocalPurlFeed(repo)
+      ? "repo-local data/*.purl would shadow the advisory feeds (feed-poisoning risk) — remove them or scan with trivy/osv-scanner"
+      : null,
   command(): string[] | null {
     if (!detect("bash").installed || !detect("awk").installed || !detect("curl").installed) return null;
     // Guard script materialization: cache dir failures (EACCES, ENOSPC, etc.) must

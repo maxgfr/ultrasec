@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { readFileSync, mkdtempSync, writeFileSync } from "node:fs";
+import { readFileSync, mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -506,6 +506,46 @@ describe("package-checker adapter — mapExport (the export-JSON -> Finding[] ma
 
     const withSbom = packageChecker.argv("/repo", { sbom: "/abs/run/sbom.json" });
     expect(withSbom.slice(-2)).toEqual(["--source", "/abs/run/sbom.json"]);
+  });
+
+  // IMPORTANT 2: the vendored script's find_default_source() prefers
+  // <repo>/data/{ghsa,osv}[-<eco>].purl over every other feed source, and the
+  // runner executes the script with cwd = the SCANNED repo — so a hostile
+  // repo committing one of these files silently substitutes its own advisory
+  // feed. `applicable()` must skip the adapter (never run it) whenever such a
+  // file is present, and run normally otherwise. Command-level assertions
+  // only (no live script invocation, no network).
+  describe("applicable(): repo-local data/*.purl feed-poisoning guard", () => {
+    it("skips with an explicit note when <repo>/data/ghsa.purl is planted", () => {
+      const repo = mkdtempSync(join(tmpdir(), "ultrasec-package-checker-poison-"));
+      mkdirSync(join(repo, "data"));
+      writeFileSync(join(repo, "data", "ghsa.purl"), "pkg:npm/left-pad@1.0.0\n");
+      const note = packageChecker.applicable!(repo);
+      expect(note).toBeTruthy();
+      expect(note).toContain("data/*.purl");
+      expect(note).toContain("feed-poisoning");
+    });
+
+    it("skips with the same note for a per-ecosystem osv-cargo.purl, not just the legacy npm names", () => {
+      const repo = mkdtempSync(join(tmpdir(), "ultrasec-package-checker-poison-eco-"));
+      mkdirSync(join(repo, "data"));
+      writeFileSync(join(repo, "data", "osv-cargo.purl"), "pkg:cargo/time@0.1.0\n");
+      const note = packageChecker.applicable!(repo);
+      expect(note).toBeTruthy();
+      expect(note).toContain("feed-poisoning");
+    });
+
+    it("runs normally (applicable() === null) when data/ exists but has no .purl file", () => {
+      const repo = mkdtempSync(join(tmpdir(), "ultrasec-package-checker-clean-data-"));
+      mkdirSync(join(repo, "data"));
+      writeFileSync(join(repo, "data", "readme.txt"), "not a feed\n");
+      expect(packageChecker.applicable!(repo)).toBeNull();
+    });
+
+    it("runs normally (applicable() === null) when there's no data/ directory at all", () => {
+      const repo = mkdtempSync(join(tmpdir(), "ultrasec-package-checker-no-data-"));
+      expect(packageChecker.applicable!(repo)).toBeNull();
+    });
   });
 
   it("command(): invokes the materialized script via bash when bash/awk/curl are all present, else null", () => {
