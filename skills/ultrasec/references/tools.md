@@ -20,7 +20,7 @@ always-on core. `node scripts/ultrasec.mjs tools` shows status + install hints.
 | npm-audit | dep | registry audit of the detected lockfile; needs network (skipped under `--offline`) | ships with Node |
 | pnpm-audit | dep | registry audit of the detected lockfile; needs network (skipped under `--offline`) | `corepack enable pnpm` |
 | yarn-audit | dep | registry audit of the detected lockfile, classic or berry; needs network (skipped under `--offline`) | `corepack enable yarn` |
-| **package-checker** | dep | vendored 12-ecosystem GHSA/OSV lockfile scanner; needs network to fetch feeds (skipped under `--offline`) unless pre-warmed | nothing to install (vendored + pinned) |
+| **package-checker** | dep | 12-ecosystem GHSA/OSV lockfile scanner; runs upstream's latest release by default, vendored sha256-pinned copy as offline/failure fallback; needs network to fetch feeds (skipped under `--offline`) unless pre-warmed | nothing to install (bash+awk+curl) |
 | **bandit** | sast | Python idioms a taint engine can't see (shell=True, eval, weak crypto, pickle) | `pipx install bandit` |
 | **gosec** | sast | Go stdlib-aware (math/rand, InsecureSkipVerify, exec w/ tainted args) | `brew install gosec` |
 | **checkov** | config | IaC misconfig with a cross-resource graph (deeper than per-block) | `pipx install checkov` |
@@ -58,16 +58,26 @@ don't ship `syft` — so a scan without it just falls back to each adapter
 scanning the repo directory directly; nothing is fatal either way.
 
 package-checker ([maxgfr/package-checker.sh](https://github.com/maxgfr/package-checker.sh),
-same author as ultrasec) is vendored and pinned exactly like the codeindex
-engine — `src/vendor/package-checker.sh` + `src/vendor/package-checker.meta.json`,
-synced by `scripts/sync-package-checker.mjs` and sha256 drift-gated
-(`pnpm run check:package-checker`, folded into `check:build`). It ships
+same author as ultrasec) runs **upstream's latest release by default** —
+executing it at scan time is first-party trust, not a third-party
+supply-chain hole. `command()` (`src/tools/package-checker.ts`) resolves the
+latest tag + downloads `script.sh` via a short-timeout `curl` (the
+`ToolAdapter.command()` contract is synchronous, so this can't use `fetch`),
+caches it content-addressed under `<cache dir>/package-checker/script-<tag>-<hash12>.sh`,
+and runs that. Any failure in that chain — offline, DNS, rate-limited, a
+malformed API response, a full disk — falls straight back to the vendored,
+sha256-pinned copy (`src/vendor/package-checker.sh` +
+`src/vendor/package-checker.meta.json`, synced by
+`scripts/sync-package-checker.mjs`, drift-gated by
+`pnpm run check:package-checker` folded into `check:build`, and kept fresh by
+the scheduled `.github/workflows/update-package-checker.yml` auto-bump PR).
+Set `ULTRASEC_PACKAGE_CHECKER_PINNED=1` to force the vendored copy
+unconditionally (hardened/air-gapped hosts) — this is also what the test
+suite sets by default so it never hits the network. The vendored copy ships
 embedded as a generated TS string constant in the bundle
 (`src/vendor/package-checker-script.ts`) so it survives any packaging path
-that only copies `scripts/ultrasec.mjs`, and is materialized to
-`<cache dir>/package-checker/script-<hash12>.sh` at first use (content-hash
-named, idempotent, upgrade-safe). It needs `bash`, `awk` and `curl` — nothing
-to `npm install`.
+that only copies `scripts/ultrasec.mjs`. Either way it needs `bash`, `awk`
+and `curl` — nothing to `npm install`.
 
 Coverage — 12 ecosystems, one script, detect-then-load: npm, yarn, pnpm, bun,
 deno, PyPI, Go, Cargo, RubyGems, Composer, Maven/Gradle, NuGet, Pub, Hex,
@@ -127,26 +137,30 @@ worklist (all keyless, no LLM calls):
 
 Two ways to get the scanners without installing them on the host:
 
-- **`scan --docker`** runs each scanner from its official, version-pinned image on
-  demand (repo bind-mounted at `/work`, paths rewritten back to repo-relative).
-  Only Docker is needed. Adapters with images: trivy, gitleaks, osv-scanner,
-  semgrep. Pinned: `ghcr.io/aquasecurity/trivy:0.71.1`,
-  `ghcr.io/gitleaks/gitleaks:v8.30.1`, `ghcr.io/google/osv-scanner:v2.3.8`,
-  `semgrep/semgrep:1.166.0` (its entrypoint isn't the tool, so the runner prepends
-  `semgrep`). OpenGrep has no official image yet → native-only.
+- **`scan --docker`** runs each scanner from its official image's rolling
+  `latest` tag on demand (repo bind-mounted at `/work`, paths rewritten back to
+  repo-relative). `docker run` always carries `--pull always` (`src/tools/run.ts`
+  `runDocker`) so a stale cached `latest` is never silently reused — trading
+  reproducibility for always-current CVE/rule coverage. Only Docker is needed.
+  Adapters with an official image: trivy (`ghcr.io/aquasecurity/trivy`),
+  gitleaks (`ghcr.io/gitleaks/gitleaks`), osv-scanner
+  (`ghcr.io/google/osv-scanner`), semgrep (`semgrep/semgrep`, entrypoint isn't
+  the tool so the runner prepends `semgrep`), bandit
+  (`ghcr.io/pycqa/bandit/bandit`), gosec (`ghcr.io/securego/gosec`), checkov
+  (`bridgecrew/checkov`), hadolint (`hadolint/hadolint`) — all track `:latest`.
+  opengrep, kingfisher → native-only for now.
 - **Toolbox image** (`docker/Dockerfile` + `docker-compose.yml`) bakes the engine +
   the scanners into one image (`docker compose build`), so the whole audit runs
   in-container with everything on PATH. Baked in: trivy, gitleaks, osv-scanner,
-  semgrep, gosec, hadolint, bandit, checkov, grype, syft, pip-audit. Versions are
-  pinned build-args; arch (amd64/arm64) is auto-detected. The grype vulnerability
-  DB and package-checker's feeds are deliberately NOT baked in (per-run,
+  semgrep, gosec, hadolint, bandit, checkov, grype, syft, pip-audit. Every tool
+  installs its **latest release by default**; each has an optional
+  `--build-arg <TOOL>_VERSION=x.y.z` to pin it instead (see `docker/Dockerfile`).
+  Image freshness is therefore the freshness of the last build —
+  `docker compose build --no-cache` re-resolves every tool's latest release;
+  arch (amd64/arm64) is auto-detected. The grype vulnerability DB and
+  package-checker's feeds are deliberately NOT baked in (per-run,
   network-fetched state) — see the comment in `docker/Dockerfile` for the
   air-gapped warm-up commands.
-
-Adapters with an official image for on-demand `--docker`: trivy, gitleaks,
-osv-scanner, semgrep, bandit (`ghcr.io/pycqa/bandit`), gosec
-(`ghcr.io/securego/gosec`), checkov (`bridgecrew/checkov`), hadolint
-(`hadolint/hadolint`). opengrep, kingfisher → native-only for now.
 
 ## Recommended additions (researched, not yet adapters)
 

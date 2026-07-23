@@ -168,7 +168,7 @@ the live status of each.
 
 | Tool | Covers | Needs |
 |---|---|---|
-| `package-checker` | dependencies — 12 ecosystems (npm/yarn/pnpm/bun/deno, PyPI, Go, Cargo, RubyGems, Composer, Maven/Gradle, NuGet, Pub, Hex, Swift, GitHub Actions) against GHSA/OSV feeds | **nothing — vendored** (pinned [v1.11.4](https://github.com/maxgfr/package-checker.sh), sha256 drift-gated; just bash+awk+curl) |
+| `package-checker` | dependencies — 12 ecosystems (npm/yarn/pnpm/bun/deno, PyPI, Go, Cargo, RubyGems, Composer, Maven/Gradle, NuGet, Pub, Hex, Swift, GitHub Actions) against GHSA/OSV feeds | **nothing** — fetches upstream's latest [release](https://github.com/maxgfr/package-checker.sh) at scan time (sha-cached); falls back to a vendored, sha256-pinned copy offline/on any resolution failure, auto-bumped by a scheduled PR (`ULTRASEC_PACKAGE_CHECKER_PINNED=1` forces the pinned copy); just bash+awk+curl |
 | `trivy` | dependencies/CVE + secrets + misconfig | install or `--docker` |
 | `osv-scanner` | dependencies (Google OSV, lockfile-driven) | install or `--docker` |
 | `grype` | dependencies (Anchore; consumes the Syft SBOM when present) | install |
@@ -187,8 +187,10 @@ the live status of each.
 ultrasec orchestrates best-in-class OSS scanners and normalizes their output into
 one finding model. You don't have to install any of them — two Docker paths:
 
-**1. `--docker` (zero install).** ultrasec runs each scanner from its official,
-version-pinned image on demand, with your repo bind-mounted at `/work`:
+**1. `--docker` (zero install).** ultrasec runs each scanner from its official
+image's rolling `latest` tag on demand (`--pull always`, so a stale cached
+`latest` is never silently reused — this trades reproducibility for always-current
+CVE/rule coverage), with your repo bind-mounted at `/work`:
 
 ```bash
 node scripts/ultrasec.mjs scan --repo . --out .ultrasec --docker
@@ -198,18 +200,21 @@ node scripts/ultrasec.mjs scan --repo . --docker --tools trivy,gitleaks   # pick
 ```
 
 Only Docker is required. Reported paths are rewritten from `/work` back to
-repo-relative automatically. Pinned images: `ghcr.io/aquasecurity/trivy:0.71.1`,
-`ghcr.io/gitleaks/gitleaks:v8.30.1`, `ghcr.io/google/osv-scanner:v2.3.8`,
-`semgrep/semgrep:1.166.0`, `ghcr.io/pycqa/bandit:1.8.6`,
-`ghcr.io/securego/gosec:v2.21.4`, `bridgecrew/checkov:3.2.0`,
-`hadolint/hadolint:v2.12.0`.
+repo-relative automatically. Images (all track `:latest`):
+`ghcr.io/aquasecurity/trivy`, `ghcr.io/gitleaks/gitleaks`,
+`ghcr.io/google/osv-scanner`, `semgrep/semgrep`, `ghcr.io/pycqa/bandit/bandit`,
+`ghcr.io/securego/gosec`, `bridgecrew/checkov`, `hadolint/hadolint`.
 
 **2. Toolbox image (everything baked in).** Build one image with the engine + the
 bundled scanners and run the whole audit inside it — trivy, gitleaks, osv-scanner,
-semgrep, gosec, hadolint, bandit, checkov, **grype, syft, pip-audit**:
+semgrep, gosec, hadolint, bandit, checkov, **grype, syft, pip-audit**. Every tool
+installs its latest release by default (each has an optional `--build-arg
+<TOOL>_VERSION=x.y.z` to pin it instead — see `docker/Dockerfile`); image
+freshness is therefore the freshness of the last build:
 
 ```bash
 docker compose build
+docker compose build --no-cache   # refresh: re-resolve every tool's latest release
 TARGET=/path/to/repo docker compose run --rm ultrasec scan --repo /work --out /work/.ultrasec
 TARGET=/path/to/repo docker compose run --rm ultrasec tools     # the baked-in tools show ✓ installed
 ```
@@ -230,7 +235,7 @@ node scripts/ultrasec.mjs clean --docker --dry-run         # preview what would 
 ```
 
 `clean --docker` removes only the artifacts ultrasec is responsible for (the
-pinned scanner images, `ultrasec-toolbox`, and the `*trivy-cache*` volume) — your
+scanner images, `ultrasec-toolbox`, and the `*trivy-cache*` volume) — your
 other Docker images are untouched. The compose stack tears down the same way with
 `docker compose down -v`.
 
