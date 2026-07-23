@@ -1,0 +1,85 @@
+{
+  "matches": [
+    {
+      "vulnerability": {
+        "id": "GHSA-jf85-cpcp-j695",
+        "dataSource": "https://github.com/advisories/GHSA-jf85-cpcp-j695",
+        "namespace": "github:language:javascript",
+        "severity": "High",
+        "urls": ["https://github.com/advisories/GHSA-jf85-cpcp-j695"],
+        "description": "Prototype Pollution in lodash",
+        "cvss": [],
+        "fix": { "versions": ["4.17.21"], "state": "fixed" }
+      },
+      "relatedVulnerabilities": [
+        {
+          "id": "CVE-2020-8203",
+          "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2020-8203",
+          "namespace": "nvd:cpe",
+          "severity": "High",
+          "urls": ["https://nvd.nist.gov/vuln/detail/CVE-2020-8203"]
+        }
+      ],
+      "matchDetails": [
+        {
+          "type": "exact-indirect-match",
+          "matcher": "javascript-matcher",
+          "searchedBy": { "language": "javascript", "namespace": "github:language:javascript" }
+        }
+      ],
+      "artifact": {
+        "id": "9f2c1a1e6e7b3a4c",
+        "name": "lodash",
+        "version": "4.17.15",
+        "type": "npm",
+        "locations": [{ "path": "package-lock.json", "layerID": "" }],
+        "language": "javascript",
+        "licenses": ["MIT"],
+        "cpes": ["cpe:2.3:a:lodash:lodash:4.17.15:*:*:*:*:*:*:*"],
+        "purl": "pkg:npm/lodash@4.17.15"
+      }
+    },
+    {
+      "vulnerability": {
+        "id": "CVE-2023-43804",
+        "dataSource": "https://nvd.nist.gov/vuln/detail/CVE-2023-43804",
+        "namespace": "nvd:cpe",
+        "severity": "Unknown",
+        "urls": ["https://nvd.nist.gov/vuln/detail/CVE-2023-43804"],
+        "description": "urllib3 Cookie header not stripped during cross-origin redirects",
+        "cvss": [
+          {
+            "source": "nvd@nist.gov",
+            "type": "Primary",
+            "version": "3.1",
+            "vector": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N",
+            "metrics": { "baseScore": 7.5, "exploitabilityScore": 3.9, "impactScore": 3.6 },
+            "vendorMetadata": {}
+          }
+        ]
+      },
+      "relatedVulnerabilities": [],
+      "matchDetails": [
+        {
+          "type": "exact-indirect-match",
+          "matcher": "python-matcher",
+          "searchedBy": { "language": "python", "namespace": "nvd:cpe" }
+        }
+      ],
+      "artifact": {
+        "id": "3d8e2b7c1f4a9d6e",
+        "name": "urllib3",
+        "version": "1.26.5",
+        "type": "python",
+        "locations": [{ "path": "requirements.txt", "layerID": "" }],
+        "language": "python",
+        "licenses": ["MIT"],
+        "cpes": ["cpe:2.3:a:urllib3:urllib3:1.26.5:*:*:*:*:*:*:*"],
+        "purl": "pkg:pypi/urllib3@1.26.5"
+      }
+    }
+  ],
+  "source": { "type": "directory", "target": "." },
+  "distro": {},
+  "descriptor": { "name": "grype", "version": "0.79.0" }
+}

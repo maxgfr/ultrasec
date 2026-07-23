@@ -119,14 +119,6 @@ export const TOOLS: ToolSpec[] = [
     runHint: "pip-audit -f json",
   },
   {
-    name: "osv-scalibr",
-    category: "dep",
-    description: "Library scanner / SBOM extractor backing osv-scanner v2.",
-    languages: ["*"],
-    install: { url: "https://github.com/google/osv-scalibr" },
-    runHint: "scalibr --result=json <repo>",
-  },
-  {
     name: "checkov",
     category: "config",
     description: "IaC/misconfig with a cross-resource graph (Terraform, k8s, Dockerfile, CloudFormation…) — deeper than per-block scanning.",

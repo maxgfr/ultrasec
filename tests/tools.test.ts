@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { TOOLS, detect, toolStatuses, type ToolSpec } from "../src/tools/registry.js";
+import { ADAPTERS } from "../src/tools/index.js";
 import { CATEGORIES } from "../src/types.js";
+
+// Deliberate exceptions to "every TOOLS entry has a runnable adapter" — a TOOLS
+// row that documents a scanner ultrasec knows about but doesn't (yet) drive.
+// Empty today: this is where a future one gets recorded, not a place to quietly
+// grow drift back in.
+const TOOLS_WITHOUT_ADAPTER: string[] = [];
 
 describe("tool registry", () => {
   it("every tool has a valid category and at least one install hint", () => {
@@ -21,6 +28,24 @@ describe("tool registry", () => {
   it("has at least one primary SAST and one primary SCA tool", () => {
     expect(TOOLS.some((t) => t.primary && t.category === "sast")).toBe(true);
     expect(TOOLS.some((t) => t.primary && t.category === "dep")).toBe(true);
+  });
+
+  // Regression guard for the drift this task fixed: TOOLS advertised grype,
+  // pip-audit and osv-scalibr while ADAPTERS ran none of them — `tools` showed
+  // them installed, nothing ever executed them. Every adapter must be a real,
+  // advertised tool, and every advertised tool must be a real, runnable adapter
+  // unless explicitly allowlisted above.
+  it("every adapter has a matching TOOLS entry", () => {
+    const toolNames = new Set(TOOLS.map((t) => t.name));
+    for (const a of ADAPTERS) expect(toolNames, `ADAPTERS entry "${a.name}" has no TOOLS spec`).toContain(a.name);
+  });
+
+  it("every TOOLS entry has an adapter, unless explicitly allowlisted in TOOLS_WITHOUT_ADAPTER", () => {
+    const adapterNames = new Set(ADAPTERS.map((a) => a.name));
+    for (const t of TOOLS) {
+      if (TOOLS_WITHOUT_ADAPTER.includes(t.name)) continue;
+      expect(adapterNames, `TOOLS entry "${t.name}" has no adapter (add one or list it in TOOLS_WITHOUT_ADAPTER)`).toContain(t.name);
+    }
   });
 });
 
