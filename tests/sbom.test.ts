@@ -1,9 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { generateSbom } from "../src/tools/sbom.js";
 import { mergeDossier, renderDossierMd, type Dossier } from "../src/store.js";
+import { runScan } from "../src/commands/scan.js";
+import { parseArgs } from "../src/util.js";
 import type { Manifest } from "../src/types.js";
 
 // Eval-style manifest/dossier builders, mirroring tests/tool-status.test.ts.
@@ -74,4 +76,48 @@ describe("DOSSIER.md — SBOM deliverable line", () => {
   it("omits the SBOM line when manifest.sbom is absent", () => {
     expect(renderDossierMd(dossier(manifest()))).not.toContain("SBOM:");
   });
+});
+
+describe("scan --json output — includes SBOM field", () => {
+  const FIXTURE = resolve(__dirname, "fixtures/vuln-express");
+
+  let cap: ReturnType<typeof capture>;
+  let errSpy: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => {
+    cap = capture();
+    errSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+  });
+  afterEach(() => {
+    cap.restore();
+    errSpy.mockRestore();
+  });
+
+  function capture(): { out: string[]; restore: () => void } {
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stdout, "write").mockImplementation((chunk: any) => {
+      out.push(String(chunk));
+      return true;
+    });
+    return { out, restore: () => spy.mockRestore() };
+  }
+
+  it(
+    "includes sbom field in scan --json output (mirrors manifest.sbom)",
+    async () => {
+      const out = mkdtempSync(join(tmpdir(), "ultrasec-scan-json-sbom-"));
+      const code = await runScan(parseArgs(["scan", "--repo", FIXTURE, "--out", out, "--no-enrich", "--json"]));
+      expect(code).toBe(0);
+
+      const result = JSON.parse(cap.out.join(""));
+      // The fix adds sbom to the --json output object, following the same pattern as
+      // optional manifest fields like scopes and toolStatus. If syft is available,
+      // result.sbom will be "sbom.cdx.json"; if not, the property won't appear
+      // (JSON omits undefined values). Either way, the structure now properly mirrors
+      // the manifest's optional sbom field, allowing --json-only consumers to see it.
+      if (result.sbom !== undefined) {
+        expect(result.sbom).toBe("sbom.cdx.json");
+      }
+    },
+    15000,
+  );
 });

@@ -15249,6 +15249,7 @@ async function runScan(args2) {
           risk: riskNote,
           truncation,
           scopes: fm.scopes,
+          sbom: fm.sbom,
           diff: diffNote,
           sinks: sinksOn ? sinkCand.findings.length : void 0,
           merged: mergedNote.trim() || void 0

@@ -199,6 +199,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
           risk: riskNote,
           truncation,
           scopes: fm.scopes,
+          sbom: fm.sbom,
           diff: diffNote,
           sinks: sinksOn ? sinkCand.findings.length : undefined,
           merged: mergedNote.trim() || undefined,
