@@ -112,4 +112,8 @@ describe("normalizeSeverity (deepsec non-security tiers)", () => {
     expect(normalizeSeverity("HIGH_BUG")).toBe("high");
     expect(normalizeSeverity("BUG")).toBe("low");
   });
+
+  it("aliases grype's Negligible tier to low", () => {
+    expect(normalizeSeverity("Negligible")).toBe("low");
+  });
 });

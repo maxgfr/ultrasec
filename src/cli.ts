@@ -8,6 +8,7 @@ import { runMap } from "./commands/map.js";
 import { runScan } from "./commands/scan.js";
 import { runContext } from "./commands/context.js";
 import { runImport } from "./commands/import.js";
+import { runLogs } from "./commands/logs.js";
 import { runDossier } from "./commands/dossier.js";
 import { runTriage } from "./commands/triage.js";
 import { runInvestigate } from "./commands/investigate.js";
@@ -44,7 +45,8 @@ COMMANDS
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
              Flags: --tools auto|none|a,b · --docker · --no-enrich/--offline ·
-             --sinks (orphan-sink recall) · --blame (git-blame/CODEOWNERS provenance) ·
+             --sinks (orphan-sink recall) · --log-hygiene (opt-in CWE-117/CWE-532
+             logging-hygiene checks) · --blame (git-blame/CODEOWNERS provenance) ·
              --scope/--include/--exclude/--max-files/--gitignore (focus) ·
              --budget quick|standard|thorough · --max-candidates · --max-depth ·
              --diff <ref>/--since <commit> · --merge · --resume (incremental).
@@ -52,6 +54,16 @@ COMMANDS
              dossier: map → correlate → risk-rank → fold in (preserving verdicts).
              ultrasec never runs it — data ingest only. Flags: --run · --format
              deepsec-json · --no-enrich/--offline · --blame.
+  logs       Blue-team log forensics: ingest existing log files (nginx/access,
+             JSON-lines, syslog/auth.log, generic-timestamped, raw) and run
+             deterministic attack-signature detection (SQLi/XSS/traversal/
+             cmdinj/probe-path + known scanner user-agents), per-IP behavioral
+             aggregation (brute-force/credential-compromise, request bursts,
+             scan/recon→hit), and secret/PII-leak detection into its OWN
+             dossier, findings citing [logfile:line]. Evidence is redacted by
+             default (secrets/PII never land in a finding message). Flags:
+             --out · --format · --budget quick|standard|thorough ·
+             --max-lines · --window <sec> · --no-redact · --json.
   tools      List known external scanners, which are installed, and how to get them.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source→sink chains.
@@ -121,6 +133,7 @@ export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   scan: runScan,
   context: runContext,
   import: runImport,
+  logs: runLogs,
   dossier: runDossier,
   triage: runTriage,
   paths: runPaths,

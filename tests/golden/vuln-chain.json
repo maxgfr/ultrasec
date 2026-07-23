@@ -170,26 +170,6 @@
       "risk": 48
     },
     {
-      "id": "71729017b48f",
-      "category": "sast",
-      "cwe": "CWE-918",
-      "title": "Server-side request forgery (SSRF): get() sink (no source path found)",
-      "severity": "high",
-      "confidence": "low",
-      "sink": {
-        "file": "src/fetcher.js",
-        "line": 4,
-        "kind": "ssrf"
-      },
-      "message": "Dangerous ssrf sink get() at src/fetcher.js:4 that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). Tainted data used as a request URL/host via an HTTP-client method. Verify the destination is allow-listed (no internal/metadata endpoints). Receiver is generic (an HTTP client vs. a cache/map getter) — confirm it is a network call. Confirm whether attacker-controlled data can reach it before trusting it.",
-      "tool": "ultrasec",
-      "references": [
-        "https://cwe.mitre.org/data/definitions/918.html"
-      ],
-      "status": "open",
-      "risk": 48
-    },
-    {
       "id": "7e51071c4783",
       "category": "taint",
       "cwe": "CWE-89",
@@ -373,7 +353,7 @@
         "from": "src/routes.js",
         "to": "src/fetcher.js",
         "kind": "call",
-        "weight": 5,
+        "weight": 4,
         "toSymbol": "get"
       },
       {
@@ -463,24 +443,6 @@
           "line": 2
         }
       ],
-      "VULN": [
-        {
-          "file": "src/routes.js",
-          "line": 9
-        },
-        {
-          "file": "src/routes.js",
-          "line": 17
-        },
-        {
-          "file": "src/routes.js",
-          "line": 23
-        },
-        {
-          "file": "src/routes.js",
-          "line": 29
-        }
-      ],
       "async": [
         {
           "file": "src/routes.js",
@@ -527,14 +489,6 @@
       "get": [
         {
           "file": "src/fetcher.js",
-          "line": 4
-        },
-        {
-          "file": "src/fetcher.js",
-          "line": 5
-        },
-        {
-          "file": "src/fetcher.js",
           "line": 8,
           "symbol": "fetchUrl"
         },
@@ -554,10 +508,6 @@
         {
           "file": "src/routes.js",
           "line": 24
-        },
-        {
-          "file": "src/routes.js",
-          "line": 30
         },
         {
           "file": "src/routes.js",
@@ -644,12 +594,6 @@
           "line": 1
         }
       ],
-      "rule": [
-        {
-          "file": "src/fetcher.js",
-          "line": 5
-        }
-      ],
       "runQuery": [
         {
           "file": "src/service.js",
@@ -669,12 +613,6 @@
         {
           "file": "src/routes.js",
           "line": 33
-        }
-      ],
-      "sink": [
-        {
-          "file": "src/routes.js",
-          "line": 30
         }
       ],
       "toString": [

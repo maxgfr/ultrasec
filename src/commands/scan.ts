@@ -5,12 +5,14 @@ import { scanRepo, scanRepoCached } from "../scan.js";
 import { buildGraph, reverseDependents } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
 import { enumerateSinkCandidates } from "../sinks.js";
+import { enumerateSensitiveLogCandidates } from "../logs/hygiene.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
 import { loadScanCache, saveScanCache } from "../cache.js";
 import { orchestrate, toolStatus } from "../tools/run.js";
 import { correlate } from "../tools/correlate.js";
 import { enrichFindings } from "../tools/scoring.js";
+import { generateSbom } from "../tools/sbom.js";
 import { ADAPTERS } from "../tools/index.js";
 import { writeDossier, loadDossier, mergeDossier, countBySeverity, type Dossier } from "../store.js";
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest } from "../types.js";
@@ -46,7 +48,8 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const budgetName = flagStr(args, "budget");
   const preset = own(BUDGETS, budgetName ?? "standard") ?? BUDGETS.standard!;
   const maxDepth = numFlag(args, "max-depth") ?? preset.maxDepth;
-  const maxCandidates = numFlag(args, "max-candidates") ?? preset.maxCandidates;
+  const explicitMaxCandidates = numFlag(args, "max-candidates");
+  const maxCandidates = explicitMaxCandidates ?? preset.maxCandidates;
 
   // Incremental: --diff/--since <ref> scans only files changed since the ref plus
   // their reverse-dependents (the call sites that reach them), folding into --merge.
@@ -92,7 +95,11 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const cache = resume ? loadScanCache(out) : undefined;
   const scan = cache ? scanRepoCached(repo, scanOpts, cache) : scanRepo(repo, scanOpts);
   const graph = buildGraph(scan);
-  const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates });
+  // Logging hygiene (opt-in `--log-hygiene`, CWE-117 + CWE-532): unions LOG_SINKS
+  // into the taint sink catalog for this run only — default false keeps the
+  // sink-matching step (and therefore every golden/snapshot) byte-identical.
+  const logHygieneOn = flagBool(args, "log-hygiene");
+  const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn });
   const taintFindings = taint.findings;
 
   // Orphan-sink recall (opt-in `--sinks`): dangerous sinks the source-gated taint
@@ -100,6 +107,17 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // `sast` candidates, de-duped against the taint findings, capped + reported.
   const sinksOn = flagBool(args, "sinks");
   const sinkCand = sinksOn ? enumerateSinkCandidates(scan, taintFindings, { maxCandidates }) : { findings: [] as Finding[], truncated: 0, total: 0 };
+
+  // Sensitive-logging line-content pass (opt-in `--log-hygiene`, CWE-532): every
+  // LOG_SINKS call site whose line names a sensitive identifier or contains a
+  // literal secret. Capped independently (logging noise floods fast) + reported.
+  // Mirrors the EXPLICIT --max-candidates flag (same value taint/--sinks receive)
+  // so "Raise --max-candidates" is true here too; absent that flag it keeps its own
+  // tighter default (40, see src/logs/hygiene.ts) rather than inheriting the
+  // budget-preset value (200/1000/5000), which would silently change today's cap.
+  const hygieneCand = logHygieneOn
+    ? enumerateSensitiveLogCandidates(scan, { maxCandidates: explicitMaxCandidates })
+    : { findings: [] as Finding[], truncated: 0, total: 0 };
 
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
@@ -110,18 +128,27 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const skipTools = flagBool(args, "no-tools") || toolsFlag === "none" || toolsAutoSkipped;
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : undefined;
   const useDocker = flagBool(args, "docker");
-  const tool = skipTools ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker });
+  const offline = flagBool(args, "offline");
+  // Produce the CycloneDX SBOM (when `syft` is installed) before running the
+  // adapters that can consume it faster than re-walking the tree themselves
+  // (grype's `sbom:` mode, package-checker's `--source`) — skipped right along
+  // with the adapters when tools aren't going to run this pass.
+  const sbomResult = skipTools ? undefined : generateSbom(repo, out);
+  const tool = skipTools
+    ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] }
+    : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path });
 
-  // Merge taint candidates, orphan-sink candidates, and tool findings (ids are
-  // disjoint by construction), then correlate the WHOLE set: orchestrate only
-  // correlates tool findings among themselves, so without this second (idempotent)
-  // pass a scanner finding sitting exactly on a taint/orphan-sink node would ship
-  // as a duplicate instead of corroborating the candidate.
-  const merged = correlate([...taintFindings, ...sinkCand.findings, ...tool.findings]);
+  // Merge taint candidates, orphan-sink candidates, logging-hygiene candidates,
+  // and tool findings (ids are disjoint by construction), then correlate the
+  // WHOLE set: orchestrate only correlates tool findings among themselves, so
+  // without this second (idempotent) pass a scanner finding sitting exactly on a
+  // taint/orphan-sink/hygiene node would ship as a duplicate instead of
+  // corroborating the candidate.
+  const merged = correlate([...taintFindings, ...sinkCand.findings, ...hygieneCand.findings, ...tool.findings]);
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
-  const enrich = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
+  const enrich = !(flagBool(args, "no-enrich") || offline);
   const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
 
   // Provenance (opt-in `--blame`/`--provenance`): deterministic git-blame author/
@@ -132,9 +159,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
 
   const languages = [...new Set(scan.files.map((f) => f.lang))].sort();
   // Never hide a capped run as a full one: record candidate + file-walk truncation.
-  // Candidate truncation folds the taint and orphan-sink caps together.
-  const truncatedCount = taint.truncated + sinkCand.truncated;
-  const totalCandidates = taint.total + sinkCand.total;
+  // Candidate truncation folds the taint, orphan-sink, and logging-hygiene caps together.
+  const truncatedCount = taint.truncated + sinkCand.truncated + hygieneCand.truncated;
+  const totalCandidates = taint.total + sinkCand.total + hygieneCand.total;
   const truncation =
     truncatedCount > 0 || scan.truncated
       ? { candidates: truncatedCount, total: totalCandidates, ...(scan.truncated ? { files: true as const } : {}) }
@@ -152,6 +179,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
+    ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),
   };
 
   const nextDossier: Dossier = { manifest, findings, graph };
@@ -189,8 +217,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
           risk: riskNote,
           truncation,
           scopes: fm.scopes,
+          sbom: fm.sbom,
           diff: diffNote,
           sinks: sinksOn ? sinkCand.findings.length : undefined,
+          logHygiene: logHygieneOn ? hygieneCand.findings.length : undefined,
           merged: mergedNote.trim() || undefined,
         },
         null,
@@ -208,8 +238,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   } else if (!skipTools) {
     println(`  external tools run: ${tool.toolsRun.join(", ") || "none"}  (\`ultrasec tools\` to see/install more)`);
   }
+  if (sbomResult) println(`  sbom: ${sbomResult.note}`);
   println(
-    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""} + ${tool.findings.length} tool this pass`,
+    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""}${logHygieneOn ? ` + ${hygieneCand.findings.length} log-hygiene` : ""} + ${tool.findings.length} tool this pass`,
   );
   println(`  ${riskNote}`);
   if (truncation?.candidates) {

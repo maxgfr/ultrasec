@@ -1,7 +1,20 @@
-import { walkWithMeta, readText } from "./walk.js";
-import { langForFile, extract, type Sym, type Imp, type Call } from "./lang.js";
-import { byStr, shortHash } from "./util.js";
+import { resolve, join } from "node:path";
+import { langForFile, type Sym, type Imp, type Call } from "./lang.js";
+import { byStr } from "./util.js";
 import type { CacheEntry } from "./cache.js";
+import {
+  scanRepo as engineScanRepo,
+  type FileRecord,
+  type RepoScan as EngineRepoScan,
+  type ScanOptions as EngineScanOptions,
+} from "./vendor/codeindex-engine.mjs";
+
+/** ultrasec's dossier output dir name — mirrors the `--out`/`--run` default used
+ *  across every src/commands/*.ts (e.g. `ultrasec scan --out .ultrasec`). The old
+ *  src/walk.ts hardcoded this literal into its DEFAULT_IGNORE_DIRS (unconditionally,
+ *  by name — not by whatever `--out` a caller actually passed); the adapter mirrors
+ *  that same unconditional exclusion below via the engine's `out` self-index guard. */
+const DOSSIER_DIRNAME = ".ultrasec";
 
 export interface FileScan {
   rel: string;
@@ -18,6 +31,9 @@ export interface RepoScan {
   truncated?: boolean;
   /** Number of files the walk enumerated (pre language-filter). */
   walkedFiles?: number;
+  /** The raw engine scan (richer symbols/refs/calls + doc text). NOT serialized —
+   *  a downstream input (e.g. the raw caller-index); never persisted to the dossier. */
+  engine?: EngineRepoScan;
 }
 
 export interface ScanOptions {
@@ -30,60 +46,127 @@ export interface ScanOptions {
   gitignore?: boolean;
 }
 
-/** Walk the repo and extract symbols/imports/calls from every recognized file. */
-export function scanRepo(repo: string, opts: ScanOptions = {}): RepoScan {
-  const { files: walked, truncated } = walkWithMeta(repo, {
-    maxBytes: opts.maxBytes,
-    scope: opts.scope,
-    include: opts.include,
-    exclude: opts.exclude,
-    maxFiles: opts.maxFiles,
-    gitignore: opts.gitignore,
+/** Map ultrasec's scan options onto the engine's. Several mappings are load-bearing:
+ *  - `scope: string[]` → engine `include` globs. Each entry must match BOTH the exact
+ *    path (a lone file — the `--diff` `src/db.js` case) AND everything beneath it (a
+ *    directory), mirroring ultrasec's former `rel === s || rel.startsWith(s + "/")`.
+ *    The engine's own single-string `scope` sugar only covers the directory case.
+ *  - `gitignore` is coerced to a strict boolean: ultrasec's gitignore is opt-in
+ *    (default OFF), but the engine treats `!== false` as ON — passing `undefined`
+ *    through would silently start honouring .gitignore.
+ *  - `maxBytes` defaults to ultrasec's pre-adoption cap, not the engine's own. The old
+ *    src/walk.ts fell back to MAX_FILE_BYTES = 1_500_000 when the caller passed none;
+ *    the engine's bare default is 1_048_576 (1MB). Passing `opts.maxBytes` through
+ *    unmodified would silently shrink the scanned file-set on any real repo carrying
+ *    a 1-1.5MB source file (invisible on the golden corpus, which has none) — recall
+ *    doctrine: never let an adoption swap narrow what used to be scanned.
+ *  - `out` is always the repo's own dossier dir (self-index guard), mirroring the old
+ *    walk's unconditional `.ultrasec` entry in DEFAULT_IGNORE_DIRS — see DOSSIER_DIRNAME.
+ *
+ *  Ignore-dir divergence (accepted, not worked around): the engine's own IGNORE_DIRS
+ *  (hardcoded engine-side, not configurable through ScanOptions) additionally skips
+ *  .pnpm, bower_components, .svelte-kit, .turbo, .tox, .mypy_cache, .pytest_cache,
+ *  .cache, tmp, Pods, DerivedData, .terraform, elm-stuff, .dart_tool — 14 dirs the old
+ *  walk didn't know about. Adjudicated class A5: every one is a dependency/build/cache
+ *  directory by convention, the same category as ultrasec's own pre-existing exclusions
+ *  (node_modules, vendor, dist, build) — never a directory a security audit reasons
+ *  about. Accepted as-is; not worth fighting the engine's pruning for. An upstream
+ *  engine issue will propose an ignore-override for recall-sensitive consumers like
+ *  this one. See the fix commit body for the full adjudication. */
+function toEngineOptions(repo: string, opts: ScanOptions): EngineScanOptions {
+  const scopeGlobs = (opts.scope ?? []).flatMap((s) => {
+    const t = s.replace(/\/+$/, "");
+    return [t, `${t}/**`];
   });
+  const include = [...(opts.include ?? []), ...scopeGlobs];
+  return {
+    include: include.length ? include : undefined,
+    exclude: opts.exclude,
+    maxBytes: opts.maxBytes ?? 1_500_000,
+    maxFiles: opts.maxFiles,
+    gitignore: opts.gitignore === true,
+    out: join(resolve(repo), DOSSIER_DIRNAME),
+  };
+}
+
+/** Symbol kinds the engine treats as references (not definitions) when attributing
+ *  a line to its enclosing symbol — mirrors the engine's `REFERENCE_KINDS` in
+ *  src/callers.ts. Kept in sync so ultrasec's seed attribution below stays
+ *  byte-identical to what `buildRawCallerIndex` records for the same site. */
+const REFERENCE_KINDS: ReadonlySet<string> = new Set(["reexport", "reexport-all", "default"]);
+
+/**
+ * The symbol enclosing `line` — the definition ultrasec attributes a call site or
+ * a sink/source seed to. IDENTICAL to the engine's `enclosingAmong` (src/callers.ts,
+ * the primitive behind `buildRawCallerIndex`): the innermost symbol whose extent
+ * covers the line (bounded by `endLine` when the extractor knows it), falling back
+ * to the nearest preceding definition when no extent is known; reference-kind
+ * symbols (re-exports, default markers) are skipped. Sharing ONE helper across the
+ * graph's caller index (engine-computed hops) and the taint/sink seeds keeps the
+ * BFS visited key `${file}#${symbol ?? line}` in a single attribution namespace —
+ * otherwise seeds attributed nearest-preceding and hops attributed endLine-aware
+ * would collide/diverge on the same line.
+ */
+export function enclosingSymbolName(symbols: Sym[], line: number): string | undefined {
+  let best: Sym | undefined;
+  for (const s of symbols) {
+    if (REFERENCE_KINDS.has(s.kind)) continue;
+    if (s.line > line) continue;
+    if (s.endLine !== undefined && line > s.endLine) continue;
+    // Innermost wins: a later-opening symbol, or on a same-line tie the one with
+    // the tighter extent (smaller/equal endLine).
+    if (!best || s.line > best.line || (s.line === best.line && (s.endLine ?? Infinity) <= (best.endLine ?? Infinity))) {
+      best = s;
+    }
+  }
+  return best?.name;
+}
+
+/** Adapt one engine `FileRecord` to ultrasec's `FileScan`, or drop it when its
+ *  extension isn't one ultrasec reasons about. `lang` is the ultrasec id (the
+ *  catalogs gate on it), NOT the engine's `lang`. */
+export function recordToFileScan(f: FileRecord): FileScan | undefined {
+  const spec = langForFile(f.rel);
+  if (!spec) return undefined;
+  return {
+    rel: f.rel,
+    lang: spec.id,
+    symbols: f.symbols.map((s) => ({ name: s.name, kind: s.kind, line: s.line, endLine: s.endLine, exported: s.exported })),
+    imports: f.refs.filter((r) => r.kind === "import").map((r) => ({ spec: r.spec })),
+    calls: (f.calls ?? []).map((c) => ({ callee: c.name, receiver: c.receiver, line: c.line })),
+  };
+}
+
+function adapt(repo: string, engine: EngineRepoScan): RepoScan {
   const files: FileScan[] = [];
-  for (const wf of walked) {
-    const spec = langForFile(wf.rel);
-    if (!spec) continue;
-    const { symbols, imports, calls } = extract(spec, readText(wf.abs));
-    files.push({ rel: wf.rel, lang: spec.id, symbols, imports, calls });
+  for (const f of engine.files) {
+    const fs = recordToFileScan(f);
+    if (fs) files.push(fs);
   }
   files.sort((a, b) => byStr(a.rel, b.rel));
-  return { repo, files, truncated, walkedFiles: walked.length };
+  // NOTE semantic shift vs. pre-adoption: this used to be ultrasec's own walk.ts's
+  // enumerated-file count (its own ignore-dirs, its own byte cap). It's now the
+  // engine's own walked-file count (pre ultrasec's language filter, like before) —
+  // same intent, but produced by a different walk with its own filter surface (see
+  // the ignore-dir/byte-cap notes on toEngineOptions above). No reader exists today;
+  // flagged so a future one doesn't assume byte-identical semantics with pre-adoption.
+  return { repo, files, truncated: engine.capped, walkedFiles: engine.files.length, engine };
+}
+
+/** Walk the repo and extract symbols/imports/calls from every recognized file. */
+export function scanRepo(repo: string, opts: ScanOptions = {}): RepoScan {
+  return adapt(repo, engineScanRepo(repo, toEngineOptions(repo, opts)));
 }
 
 /**
- * Like `scanRepo`, but reuses `cache` for files whose content is unchanged (only
- * re-extracts what moved) and upserts the cache in place. Deterministic: a cache
- * hit yields the identical `FileScan` extraction would produce. Never prunes
- * entries — so it composes with `--scope`/`--diff` (a scoped pass touches a subset
- * but must not evict other scopes' cached work).
+ * Like `scanRepo`, but reuses `cache` for files whose content is unchanged (the
+ * engine skips re-extracting them) and upserts the cache in place. Deterministic:
+ * a cache hit yields the identical `FileScan` a fresh scan would produce. Never
+ * prunes entries — so it composes with `--scope`/`--diff` (a scoped pass touches a
+ * subset but must not evict other scopes' cached work).
  */
 export function scanRepoCached(repo: string, opts: ScanOptions, cache: Map<string, CacheEntry>): RepoScan {
-  const { files: walked, truncated } = walkWithMeta(repo, {
-    maxBytes: opts.maxBytes,
-    scope: opts.scope,
-    include: opts.include,
-    exclude: opts.exclude,
-    maxFiles: opts.maxFiles,
-    gitignore: opts.gitignore,
-  });
-  const files: FileScan[] = [];
-  for (const wf of walked) {
-    const spec = langForFile(wf.rel);
-    if (!spec) continue;
-    const content = readText(wf.abs);
-    const hash = shortHash(content);
-    const cached = cache.get(wf.rel);
-    let fileScan: FileScan;
-    if (cached && cached.hash === hash) {
-      fileScan = cached.fileScan; // unchanged — skip the expensive extract()
-    } else {
-      const { symbols, imports, calls } = extract(spec, content);
-      fileScan = { rel: wf.rel, lang: spec.id, symbols, imports, calls };
-    }
-    files.push(fileScan);
-    cache.set(wf.rel, { hash, fileScan });
-  }
-  files.sort((a, b) => byStr(a.rel, b.rel));
-  return { repo, files, truncated, walkedFiles: walked.length };
+  const engine = engineScanRepo(repo, { ...toEngineOptions(repo, opts), cache });
+  for (const f of engine.files) cache.set(f.rel, { hash: f.hash, record: f });
+  return adapt(repo, engine);
 }

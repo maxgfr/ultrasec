@@ -1,6 +1,8 @@
 node_modules/
 coverage/
 *.log
+# Intentional fixtures for `ultrasec logs` (log-forensics command) tests.
+!/tests/fixtures/logs/*.log
 .DS_Store
 .idea/
 .vscode/
@@ -10,3 +12,4 @@ coverage/
 **/.ultrasec/
 .ult/
 **/.ult/
+.superpowers/

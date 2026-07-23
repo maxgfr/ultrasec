@@ -12,7 +12,8 @@ export const VERSION = "1.11.0";
 // 5: dep findings gained optional `locations` (per-version/per-lockfile instances
 // of a cross-version-merged advisory); manifest gained optional `toolStatus`
 // (per-tool ran/empty/skipped/failed). Additive + optional (back-compat).
-export const SCHEMA_VERSION = 5;
+// 6: manifest gained optional `sbom` (CycloneDX deliverable); additive, back-compat.
+export const SCHEMA_VERSION = 6;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -25,7 +26,7 @@ export type Confidence = (typeof CONFIDENCES)[number];
 // How a finding was surfaced. `taint` = a cross-file source→sink data-flow the
 // engine enumerated for the AI to adjudicate; the rest map to external tools or
 // non-taint reasoning the AI performs (authz/business-logic, weak crypto, …).
-export const CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "other"] as const;
+export const CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "other"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 // Lifecycle of a finding through the conservative verify gate. A candidate is
@@ -222,7 +223,19 @@ export interface Manifest {
     total: number;
     /** True when the file walk hit `--max-files` (some files were not scanned). */
     files?: boolean;
+    /** Command-specific replacement for the default "Coverage capped" advice
+     *  sentence (which names scan-only flags: `--max-candidates`/`--scope`).
+     *  Set by commands — e.g. `logs`, whose family caps aren't reachable via
+     *  those flags — whose remediation differs from a taint-candidate cap.
+     *  Absent ⇒ `store.ts` renders the default scan advice, byte-identical to
+     *  before this field existed. */
+    hint?: string;
   };
   /** Every scope/diff that has contributed to this (possibly merged) run. */
   scopes?: string[];
+  /** Basename of the CycloneDX SBOM generated this run (`src/tools/sbom.ts`), a
+   *  dossier deliverable in its own right and the input grype/package-checker
+   *  prefer over re-walking the tree. Additive/optional; older dossiers and
+   *  hosts without `syft` omit it. */
+  sbom?: string;
 }

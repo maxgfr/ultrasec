@@ -1,9 +1,10 @@
 import { join } from "node:path";
 import { readText } from "./walk.js";
-import type { RepoScan, FileScan } from "./scan.js";
+import type { RepoScan } from "./scan.js";
+import { enclosingSymbolName } from "./scan.js";
 import type { Graph } from "./graph.js";
 import { langForFile } from "./lang.js";
-import { findSinks, findSources, findSanitizers, cweUrl, type SinkHit, type SourceHit } from "./catalog.js";
+import { findSinks, findSources, findSanitizers, cweUrl, LOG_SINKS, type SinkHit, type SourceHit } from "./catalog.js";
 import { shortHash, byStr } from "./util.js";
 import { SEVERITIES, type Finding, type PathStep, type Severity } from "./types.js";
 
@@ -15,6 +16,10 @@ export interface TaintOptions {
   maxDepth?: number;
   /** Keep at most this many ranked candidates (default 1000). Excess is reported, not dropped silently. */
   maxCandidates?: number;
+  /** Union `LOG_SINKS` into the sink catalog for this run (opt-in `scan
+   *  --log-hygiene`, CWE-117 log injection). Default false ⇒ the sink-matching
+   *  step is byte-identical to before this option existed. */
+  includeLogSinks?: boolean;
 }
 
 export interface TaintResult {
@@ -27,15 +32,6 @@ export interface TaintResult {
 
 function severityRank(s: Severity): number {
   return SEVERITIES.indexOf(s); // 0 = critical … 4 = info
-}
-
-/** Nearest preceding symbol definition — attributes a line to its function. */
-function enclosingSymbol(file: FileScan, line: number): string | undefined {
-  let best: { name: string; line: number } | undefined;
-  for (const s of file.symbols) {
-    if (s.line <= line && (!best || s.line > best.line)) best = s;
-  }
-  return best?.name;
 }
 
 function truncate(s: string, n = 60): string {
@@ -52,6 +48,7 @@ function truncate(s: string, n = 60): string {
 export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions = {}): TaintResult {
   const MAX_DEPTH = opts.maxDepth ?? DEFAULT_MAX_DEPTH;
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
+  const extraSinks = opts.includeLogSinks ? LOG_SINKS : undefined;
   const byRel = new Map(scan.files.map((f) => [f.rel, f]));
   const contentCache = new Map<string, string>();
   const sourceCache = new Map<string, SourceHit[]>();
@@ -88,7 +85,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     const srcStep: PathStep = {
       file: srcFile,
       line: srcHit.line,
-      symbol: enclosingSymbol(byRel.get(srcFile)!, srcHit.line),
+      symbol: enclosingSymbolName(byRel.get(srcFile)!.symbols, srcHit.line),
       why: `untrusted input (${srcHit.kind}): ${truncate(srcHit.match)}`,
     };
     const path = [srcStep, ...hops];
@@ -125,8 +122,8 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     const lang = langForFile(file.rel);
     if (!lang) continue;
 
-    for (const sink of findSinks(lang, file.calls)) {
-      const sinkSym = enclosingSymbol(file, sink.line);
+    for (const sink of findSinks(lang, file.calls, extraSinks)) {
+      const sinkSym = enclosingSymbolName(file.symbols, sink.line);
       const sinkStep: PathStep = {
         file: file.rel,
         line: sink.line,

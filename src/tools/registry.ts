@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import type { Category } from "../types.js";
 import { byStr } from "../util.js";
+import { PACKAGE_CHECKER_TAG } from "../vendor/package-checker-script.js";
 
 // The catalog of external OSS scanners ultrasec can orchestrate. ultrasec never
 // *requires* any of them — the link-graph + AI taint reasoning is the always-on
@@ -15,6 +16,9 @@ export interface InstallHints {
   go?: string;
   cargo?: string;
   docker?: string;
+  /** Node's built-in package-manager shim (pnpm/yarn ship via Corepack, not a
+   *  separate install). */
+  corepack?: string;
   url?: string;
 }
 
@@ -33,6 +37,9 @@ export interface ToolSpec {
   runHint: string;
   /** Whether ultrasec considers this a primary tool for its category. */
   primary?: boolean;
+  /** Display-only presence override for the tool-status listing (e.g. a vendored
+   *  script that isn't a PATH binary). Falls back to the PATH probe when absent. */
+  detect?: () => { installed: boolean; version?: string };
 }
 
 export const TOOLS: ToolSpec[] = [
@@ -64,6 +71,14 @@ export const TOOLS: ToolSpec[] = [
     languages: ["*"],
     install: { brew: "brew install grype", url: "https://github.com/anchore/grype" },
     runHint: "grype dir:<repo> -o json",
+  },
+  {
+    name: "syft",
+    category: "dep",
+    description: "CycloneDX SBOM generator — dossier deliverable + grype/package-checker input",
+    languages: ["*"],
+    install: { brew: "brew install syft", url: "https://github.com/anchore/syft" },
+    runHint: "syft <repo> -o cyclonedx-json -q",
   },
   {
     name: "opengrep",
@@ -113,15 +128,49 @@ export const TOOLS: ToolSpec[] = [
     description: "PyPI advisory scanner for Python requirements/lockfiles.",
     languages: ["python"],
     install: { pip: "pipx install pip-audit", url: "https://pypi.org/project/pip-audit/" },
-    runHint: "pip-audit -f json",
+    runHint: "pip-audit -r requirements.txt -f json",
   },
   {
-    name: "osv-scalibr",
+    name: "npm-audit",
     category: "dep",
-    description: "Library scanner / SBOM extractor backing osv-scanner v2.",
+    description: "npm's own registry audit of the detected lockfile; needs network (skipped under --offline).",
+    languages: ["javascript", "typescript"],
+    install: { url: "https://docs.npmjs.com/cli/v10/commands/npm-audit" }, // ships with Node — nothing to install
+    runHint: "npm audit --json",
+    detect: () => detect("npm"),
+  },
+  {
+    name: "pnpm-audit",
+    category: "dep",
+    description: "pnpm's own registry audit of the detected lockfile; needs network (skipped under --offline).",
+    languages: ["javascript", "typescript"],
+    install: { corepack: "corepack enable pnpm", url: "https://pnpm.io/cli/audit" },
+    runHint: "pnpm audit --json",
+    detect: () => detect("pnpm"),
+  },
+  {
+    name: "yarn-audit",
+    category: "dep",
+    description: "yarn's own registry audit of the detected lockfile (classic or berry); needs network (skipped under --offline).",
+    languages: ["javascript", "typescript"],
+    install: { corepack: "corepack enable yarn", url: "https://yarnpkg.com/cli/npm/audit" },
+    runHint: "yarn audit --json (classic) / yarn npm audit --json --recursive (berry)",
+    detect: () => detect("yarn"),
+  },
+  {
+    name: "package-checker",
+    category: "dep",
+    description: "vendored multi-ecosystem GHSA/OSV lockfile scanner (nothing to install)",
     languages: ["*"],
-    install: { url: "https://github.com/google/osv-scalibr" },
-    runHint: "scalibr --result=json <repo>",
+    install: { url: "https://github.com/maxgfr/package-checker.sh" }, // vendored + pinned — ships with ultrasec
+    runHint: "bash <vendored package-checker.sh> <repo> --default-source-ghsa-osv --export-json <file>",
+    // Not a PATH binary — it's vendored bash, materialized to the cache dir at
+    // runtime (src/tools/package-checker.ts). "Installed" means the interpreter
+    // trio it needs (bash/awk/curl) is present, not the script itself.
+    detect: () => {
+      const ok = detect("bash").installed && detect("awk").installed && detect("curl").installed;
+      return { installed: ok, version: ok ? PACKAGE_CHECKER_TAG : undefined };
+    },
   },
   {
     name: "checkov",
@@ -205,5 +254,5 @@ export function detect(name: string): { installed: boolean; version?: string } {
 
 /** The full registry with live presence/version filled in, name-sorted. */
 export function toolStatuses(): ToolStatus[] {
-  return TOOLS.map((t) => ({ ...t, ...detect(t.name) })).sort((a, b) => byStr(a.name, b.name));
+  return TOOLS.map((t) => ({ ...t, ...(t.detect?.() ?? detect(t.name)) })).sort((a, b) => byStr(a.name, b.name));
 }

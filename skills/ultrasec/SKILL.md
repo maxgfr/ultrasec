@@ -62,8 +62,9 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   installed external scanners → **correlate** their findings across tools (one
   issue, not three; `sources[]` records every producer) → **risk-rank** every
   finding by EPSS · CISA KEV · CVSS → write the **audit dossier** (`findings.json`,
-  `graph.json`, `manifest.json`, `DOSSIER.md`, ordered by risk). `--tools`
-  defaults to **auto** (every installed scanner); `none` for graph+taint only.
+  `graph.json`, `manifest.json`, `DOSSIER.md`, ordered by risk; plus a CycloneDX
+  **SBOM** `sbom.cdx.json` when `syft` is installed, fed to grype/package-checker).
+  `--tools` defaults to **auto** (every installed scanner); `none` for graph+taint only.
   `--no-enrich`/`--offline` skips the EPSS/KEV network fetch (ranks by severity).
   - **Focus (large repos):** `--scope <subdir|glob>` (prune the walk),
     `--include`/`--exclude <glob>`, `--max-files <n>`, `--gitignore`.
@@ -78,6 +79,13 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
     dangerous sink the source-gated taint BFS can't connect to a source (single-file
     script, framework dispatch, config-fed sink) is emitted as a low-confidence
     `sast` candidate to adjudicate (capped + truncation-reported like taint).
+    `--log-hygiene` adds two static **logging-hygiene** checks on the code being
+    audited (CWE-117 log injection via the taint BFS + CWE-532 sensitive data on a
+    log-call line, `category: "logs"`) — low/medium severity, redacted messages,
+    capped at 40/run by default (logging noise floods fast) — raise it with
+    `--max-candidates`, same as taint/`--sinks`, and any cap is truncation-reported,
+    never silent (see
+    [references/severity-and-discipline.md](references/severity-and-discipline.md)).
     `--blame` attaches deterministic **provenance** (git-blame author/commit/author-date
     + CODEOWNERS owner) to each finding — a triage signal, **never** a suppression rule.
 - `import <findings.json> --run <dir> [--format deepsec-json] [--no-enrich|--offline] [--blame]`
@@ -87,6 +95,23 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   **risk-rank**, and fold in **preserving prior verdicts**. ultrasec never runs deepsec
   (no keys, no Vercel) — pure data ingest; each imported finding lands `open` and is
   yours to adjudicate, gated by the same `[file:line]` grounding `check` as everything else.
+- `logs <path…> [--out .ultrasec-logs] [--format F] [--budget quick|standard|thorough]
+  [--max-lines N] [--window SECONDS] [--no-redact] [--json]` — **blue-team log
+  forensics** (defensive, read-only): ingest existing log files (nginx/access,
+  JSON-lines, syslog/auth.log, generic-timestamped, raw) and run TWO detector
+  layers into its **own** dossier — never the code-scan pipeline — with findings
+  citing `[logfile:line]`, so `check`/`verify`/`render` work unchanged: (1)
+  per-line attack-signature detection (SQLi/XSS/traversal/cmdinj/probe-path +
+  known scanner user-agents, e.g. sqlmap/nikto/nuclei) and secret/PII-leak
+  findings (CWE-532: AWS/JWT/Slack/Google keys, private keys, query-string
+  secrets, emails, Luhn-valid card numbers); (2) per-IP behavioral aggregation
+  over a sliding window (`--window`, default 60s) — brute-force auth attempts →
+  possible credential compromise, request bursts, and scan/recon→hit (a probe
+  run followed by a 2xx on a sensitive path). Also writes `LOGSTATS.json` (top
+  IPs/paths, status distribution). Evidence — including `LOGSTATS.json`'s top
+  paths — is **redacted by default** (secrets/PII never land in a finding
+  message or the stats). Use for "analyze my access/auth logs", "forensique de
+  logs" — see [references/log-forensics-playbook.md](references/log-forensics-playbook.md).
 - `tools [--json]` — the external-scanner catalog: which are installed, what they
   cover, how to install the rest. ultrasec runs what's present; none are required.
 - `graph <file|symbol> [--depth n]` — the cross-file links into/out of a node.
@@ -191,6 +216,10 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
    [references/revalidate-playbook.md](references/revalidate-playbook.md) (git-history
    FP cut) and [references/investigate-playbook.md](references/investigate-playbook.md)
    (agentic discovery of authz/business-logic bugs).
+6. **Blue-team: analyze existing logs, not source code** — "analyze my access/auth
+   logs", "forensique de logs", "did anyone attack us" — `logs <path…>` (its own
+   dossier, defensive/read-only, redacted evidence by default):
+   [references/log-forensics-playbook.md](references/log-forensics-playbook.md).
 
 ## Orchestration — route by harness
 

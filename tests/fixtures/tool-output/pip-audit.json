@@ -1,0 +1,26 @@
+{
+  "dependencies": [
+    {
+      "name": "django",
+      "version": "3.0.2",
+      "vulns": [
+        {
+          "id": "PYSEC-2021-9",
+          "aliases": ["CVE-2021-3281"],
+          "description": "Django before 2.2.18, 3.0.x before 3.0.12, and 3.1.x before 3.1.6 allows directory traversal via uploaded files with suitably crafted file names."
+        }
+      ]
+    },
+    {
+      "name": "requests",
+      "version": "2.25.0",
+      "vulns": [
+        {
+          "id": "GHSA-x84v-xcm2-53pg",
+          "fix_versions": ["2.31.0"],
+          "description": "Requests leaks Proxy-Authorization header on cross-origin redirects."
+        }
+      ]
+    }
+  ]
+}

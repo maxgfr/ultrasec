@@ -125,26 +125,6 @@
       ],
       "status": "open",
       "risk": 48
-    },
-    {
-      "id": "eee16b7815c3",
-      "category": "sast",
-      "cwe": "CWE-89",
-      "title": "SQL injection: query() sink (no source path found)",
-      "severity": "high",
-      "confidence": "low",
-      "sink": {
-        "file": "src/app.js",
-        "line": 4,
-        "kind": "sql"
-      },
-      "message": "Dangerous sql sink query() at src/app.js:4 that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Confirm whether attacker-controlled data can reach it before trusting it.",
-      "tool": "ultrasec",
-      "references": [
-        "https://cwe.mitre.org/data/definitions/89.html"
-      ],
-      "status": "open",
-      "risk": 48
     }
   ],
   "graph": {
@@ -204,19 +184,6 @@
           "file": "src/app.js",
           "line": 13,
           "symbol": "update"
-        }
-      ],
-      "object": [
-        {
-          "file": "src/app.js",
-          "line": 10,
-          "symbol": "search"
-        }
-      ],
-      "query": [
-        {
-          "file": "src/app.js",
-          "line": 4
         }
       ],
       "require": [

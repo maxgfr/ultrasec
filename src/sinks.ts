@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { readText } from "./walk.js";
-import type { RepoScan, FileScan } from "./scan.js";
+import type { RepoScan } from "./scan.js";
+import { enclosingSymbolName } from "./scan.js";
 import { langForFile } from "./lang.js";
 import { findSinks, findSanitizers, cweUrl } from "./catalog.js";
 import { shortHash, byStr } from "./util.js";
@@ -23,13 +24,6 @@ export interface SinkCandidateResult {
 
 function severityRank(s: Severity): number {
   return SEVERITIES.indexOf(s); // 0 = critical … 4 = info
-}
-
-/** Nearest preceding symbol definition — attributes a line to its function. */
-function enclosingSymbol(file: FileScan, line: number): string | undefined {
-  let best: { name: string; line: number } | undefined;
-  for (const s of file.symbols) if (s.line <= line && (!best || s.line > best.line)) best = s;
-  return best?.name;
 }
 
 /**
@@ -86,7 +80,7 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
         title: `${sink.title}: ${sink.callee}() sink (no source path found)`,
         severity: sink.severity,
         confidence: "low",
-        sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbol(file, sink.line) },
+        sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbolName(file.symbols, sink.line) },
         message:
           `Dangerous ${sink.kind} sink ${sink.callee}() at ${file.rel}:${sink.line} that the cross-file taint pass ` +
           `could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a ` +

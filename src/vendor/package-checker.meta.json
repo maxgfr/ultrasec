@@ -1,0 +1,9 @@
+{
+  "tag": "v1.11.4",
+  "scriptVersion": "1.11.4",
+  "sha256": {
+    "package-checker.sh": "932e57b2da2e8e15977d6d0de6a3911423085a336005e23be5c924e95258425b",
+    "package-checker-script.ts": "05a747add0b7f46df6cddd0b046f6771c2ae19af665693e13d06ca049b38d9f7"
+  },
+  "syncedAt": "2026-07-23T13:20:22.742Z"
+}

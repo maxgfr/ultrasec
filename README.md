@@ -83,11 +83,14 @@ node scripts/ultrasec.mjs run --repo . --powered --agent claude --cross-check co
 
 Nothing external is required — the link-graph and taint reasoning are the
 always-on core. Installed scanners (Trivy, OpenGrep/Semgrep, gitleaks,
-osv-scanner, cargo-audit, govulncheck, **bandit, gosec, checkov, hadolint,
-kingfisher**, …) are an automatic bonus, normalized into one finding model,
-**de-duplicated across tools**, and **risk-ranked** (EPSS exploit-probability +
-CISA KEV + CVSS). Risk scoring uses cached, offline-friendly feeds — add
-`--no-enrich`/`--offline` to skip the network and rank by severity alone.
+osv-scanner, cargo-audit, govulncheck, **grype, pip-audit, npm/pnpm/yarn audit,
+package-checker, bandit, gosec, checkov, hadolint, kingfisher**, …) are an
+automatic bonus, normalized into one finding model, **de-duplicated across
+tools**, and **risk-ranked** (EPSS exploit-probability + CISA KEV + CVSS). Risk
+scoring uses cached, offline-friendly feeds — add `--no-enrich`/`--offline` to
+skip the network and rank by severity alone. When `syft` is installed, `scan`
+also emits a CycloneDX SBOM (`sbom.cdx.json`) as a dossier deliverable, fed
+straight into grype (`sbom:` mode) and package-checker (`--source`).
 
 See [`assets/example-audit/`](assets/example-audit/) for a complete run, and
 [`SKILL.md`](skills/ultrasec/SKILL.md) + [`references/`](skills/ultrasec/references/) for the agent workflow
@@ -142,6 +145,19 @@ node scripts/ultrasec.mjs import findings.json --run .ultrasec    # ingest a dee
   signal** (shown in the dossier + verify worklist, but it never changes a status — your
   verify gate does).
 
+## Log forensics (blue team)
+
+`logs <path…>` is a separate, read-only pipeline over *existing* log files
+(nginx/access, JSON-lines, syslog/auth, raw) — deterministic attack-signature
+and behavioral detection (SQLi/XSS/traversal/brute-force/request-burst/scan
+behavior…) plus redacted secret/PII leak findings, into its own dossier:
+
+```bash
+node scripts/ultrasec.mjs logs ./var/log --out .ultrasec-logs
+```
+
+See [references/log-forensics-playbook.md](skills/ultrasec/references/log-forensics-playbook.md).
+
 ## Analysis tools via Docker
 
 ultrasec orchestrates best-in-class OSS scanners and normalizes their output into
@@ -164,13 +180,14 @@ repo-relative automatically. Pinned images: `ghcr.io/aquasecurity/trivy:0.71.1`,
 `ghcr.io/securego/gosec:v2.21.4`, `bridgecrew/checkov:3.2.0`,
 `hadolint/hadolint:v2.12.0`.
 
-**2. Toolbox image (everything baked in).** Build one image with the engine + all
-bundled scanners and run the whole audit inside it:
+**2. Toolbox image (everything baked in).** Build one image with the engine + the
+bundled scanners and run the whole audit inside it — trivy, gitleaks, osv-scanner,
+semgrep, gosec, hadolint, bandit, checkov, **grype, syft, pip-audit**:
 
 ```bash
 docker compose build
 TARGET=/path/to/repo docker compose run --rm ultrasec scan --repo /work --out /work/.ultrasec
-TARGET=/path/to/repo docker compose run --rm ultrasec tools     # all show ✓ installed
+TARGET=/path/to/repo docker compose run --rm ultrasec tools     # the baked-in tools show ✓ installed
 ```
 
 See [`references/tools.md`](skills/ultrasec/references/tools.md) for the full scanner matrix,

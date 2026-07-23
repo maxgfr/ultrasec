@@ -88,6 +88,11 @@ export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
   for (const s of next.manifest.toolStatus ?? []) statusByName.set(s.name, s);
   const toolStatus = [...statusByName.values()];
 
+  // A scoped/diff pass that skipped tools (and so never regenerated the SBOM)
+  // must not lose the prior run's deliverable — carry it forward; a fresh SBOM
+  // (next) wins on conflict, same precedence as toolStatus above.
+  const sbom = next.manifest.sbom ?? prev.manifest.sbom;
+
   const manifest: Manifest = {
     ...next.manifest,
     languages: [...new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
@@ -96,6 +101,7 @@ export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     ...(truncation ? { truncation } : { truncation: undefined }),
     ...(scopes.length ? { scopes } : {}),
+    ...(sbom ? { sbom } : {}),
   };
 
   return { manifest, findings, graph };
@@ -148,6 +154,7 @@ export function renderDossierMd(d: Dossier): string {
   L.push(`- languages: ${m.languages.join(", ") || "—"}`);
   L.push(`- external tools run: ${m.toolsRun.join(", ") || "none (graph + taint only)"}`);
   if (m.toolStatus?.length) for (const line of toolStatusLines(m.toolStatus)) L.push(`  - ${line}`);
+  if (m.sbom) L.push(`- SBOM: \`${m.sbom}\` (CycloneDX)`);
   L.push(`- findings: **${m.counts.findings}** — ${SEVERITIES.map((s) => `${severityBadge(s)} ${c[s]}`).join("  ")}`);
   L.push("");
   L.push(`> Candidates are deterministic and **recall-oriented** — every one needs`);
@@ -160,9 +167,12 @@ export function renderDossierMd(d: Dossier): string {
   if (m.truncation?.candidates) {
     // Report the OMITTED count (accurate to what the cap dropped) rather than a
     // "shown = total − candidates" that can drift from the merged finding set.
-    L.push(
-      `> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`,
-    );
+    // The remediation sentence is command-specific: scan's default names
+    // --max-candidates/--budget/--scope (all real scan flags); a command whose
+    // cap isn't reachable through those flags (e.g. `logs`'s fixed per-family
+    // cap) supplies its own `truncation.hint` instead — never both.
+    const advice = m.truncation.hint ?? "Raise `--max-candidates` (or `--budget thorough`) or narrow `--scope` to see the rest.";
+    L.push(`> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. ${advice}`);
     L.push("");
   }
   if (m.truncation?.files) {

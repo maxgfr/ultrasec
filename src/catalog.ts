@@ -247,6 +247,83 @@ export const SINKS: SinkRule[] = [
   },
 ];
 
+// Logging-hygiene sinks (CWE-117 — log injection): calls that write to a log.
+// Deliberately kept OUT of `SINKS` — logging-hygiene findings are strictly
+// opt-in (`scan --log-hygiene`), so the default sink-matching enumeration is
+// untouched unless a caller explicitly unions this in (`findSinks`'s optional
+// `extraSinks` param). Every rule is receiver-gated HARD (`requireReceiver:
+// true`) so a bare `log(x)`/`info(x)` — no known logger receiver — never
+// matches, EXCEPT the PHP bare `error_log`: PHP has no receiver for it at all,
+// so gating on one would make the rule unreachable.
+export const LOG_SINKS: SinkRule[] = [
+  {
+    kind: "log",
+    cwe: "CWE-117",
+    severity: "low",
+    languages: ["javascript"],
+    requireReceiver: true,
+    receivers: ["console", "logger", "log", "winston", "pino", "bunyan"],
+    callees: ["log", "info", "warn", "error", "debug", "trace"],
+    title: "Log injection (unsanitized log write)",
+    note: "Untrusted data written to a log without newline/CRLF stripping — verify neutralization; typically low severity.",
+  },
+  {
+    kind: "log",
+    cwe: "CWE-117",
+    severity: "low",
+    languages: ["python"],
+    requireReceiver: true,
+    receivers: ["logging", "logger", "log"],
+    callees: ["info", "warning", "error", "debug", "exception", "critical"],
+    title: "Log injection (unsanitized log write)",
+    note: "Untrusted data written to a log without newline/CRLF stripping — verify neutralization; typically low severity.",
+  },
+  {
+    kind: "log",
+    cwe: "CWE-117",
+    severity: "low",
+    languages: ["go"],
+    requireReceiver: true,
+    receivers: ["log", "logger", "zap", "sugar"],
+    callees: ["Print", "Printf", "Println", "Info", "Infof", "Error", "Errorf", "Warn", "Warnf"],
+    title: "Log injection (unsanitized log write)",
+    note: "Untrusted data written to a log without newline/CRLF stripping — verify neutralization; typically low severity.",
+  },
+  {
+    kind: "log",
+    cwe: "CWE-117",
+    severity: "low",
+    languages: ["ruby"],
+    requireReceiver: true,
+    receivers: ["logger"],
+    callees: ["info", "warn", "error", "debug"],
+    title: "Log injection (unsanitized log write)",
+    note: "Untrusted data written to a log without newline/CRLF stripping — verify neutralization; typically low severity.",
+  },
+  {
+    // PHP has no receiver for error_log — an allowed bare-callee exception, since
+    // gating it on a receiver would make the rule unreachable.
+    kind: "log",
+    cwe: "CWE-117",
+    severity: "low",
+    languages: ["php"],
+    callees: ["error_log"],
+    title: "Log injection (unsanitized log write)",
+    note: "Untrusted data written to a log without newline/CRLF stripping — verify neutralization; typically low severity.",
+  },
+  {
+    kind: "log",
+    cwe: "CWE-117",
+    severity: "low",
+    languages: ["php"],
+    requireReceiver: true,
+    receivers: ["logger", "monolog"],
+    callees: ["info", "warning", "error", "debug"],
+    title: "Log injection (unsanitized log write)",
+    note: "Untrusted data written to a log without newline/CRLF stripping — verify neutralization; typically low severity.",
+  },
+];
+
 export interface SinkHit {
   line: number;
   callee: string;
@@ -258,10 +335,16 @@ export interface SinkHit {
   note: string;
 }
 
-export function findSinks(lang: LangSpec, calls: Call[]): SinkHit[] {
+/**
+ * @param extraSinks Additional rules unioned in for this call ONLY (e.g.
+ * `LOG_SINKS` under `scan --log-hygiene`). Omitted/empty ⇒ matches exactly
+ * `SINKS`, byte-identical to before this param existed.
+ */
+export function findSinks(lang: LangSpec, calls: Call[], extraSinks?: SinkRule[]): SinkHit[] {
+  const rules = extraSinks && extraSinks.length ? [...SINKS, ...extraSinks] : SINKS;
   const out: SinkHit[] = [];
   for (const c of calls) {
-    for (const rule of SINKS) {
+    for (const rule of rules) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (!rule.callees.includes(c.callee)) continue;
       // Verb-shaped callees (get/post/…) are only a sink as a MEMBER call

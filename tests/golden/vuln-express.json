@@ -211,16 +211,6 @@
       ]
     },
     "callersBySymbol": {
-      "VULN": [
-        {
-          "file": "src/server.js",
-          "line": 7
-        },
-        {
-          "file": "src/server.js",
-          "line": 15
-        }
-      ],
       "execSync": [
         {
           "file": "src/report.js",
@@ -306,12 +296,6 @@
         {
           "file": "src/server.js",
           "line": 20
-        }
-      ],
-      "sink": [
-        {
-          "file": "src/report.js",
-          "line": 3
         }
       ],
       "toString": [

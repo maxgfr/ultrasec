@@ -9,11 +9,19 @@ import { correlate } from "./correlate.js";
 // found". With `useDocker`, a scanner that publishes an official image is run via
 // `docker run` instead — zero local install — with the repo bind-mounted at /work.
 
+/** Per-run knobs threaded from `orchestrate` down into adapter hooks. */
+export interface RunContext {
+  /** True under `scan --offline` — adapters with `network` are skipped. */
+  offline?: boolean;
+  /** Absolute path of a CycloneDX SBOM generated this run, if any. */
+  sbom?: string;
+}
+
 export interface ToolAdapter {
   name: string;
   category: Category;
   /** Args after the binary; `target` is the repo path (native) or /work (docker). */
-  argv(target: string): string[];
+  argv(target: string, ctx?: RunContext): string[];
   /** Normalize raw stdout (JSON) into findings. Must not throw on empty input. */
   parse(raw: string, repo: string): Finding[];
   /**
@@ -29,6 +37,16 @@ export interface ToolAdapter {
   dockerImage?: string;
   /** False when the image's ENTRYPOINT is NOT the tool (e.g. semgrep). Default true. */
   dockerEntrypointIsTool?: boolean;
+  /** Override the executable (argv0 prefix): e.g. ["bash", "/abs/script.sh"],
+   *  ["yarn", "npm"]. Return null when the host can't run it → graceful
+   *  "not installed" skip. When present this REPLACES the PATH probe of `name`. */
+  command?(): string[] | null;
+  /** Repo-content gate: null = run; a string = skip note (e.g. "no package-lock.json").
+   *  Unlike `enumerate`, the result is NOT appended to argv. */
+  applicable?(repo: string): string | null;
+  /** Needs the network on every run (registry-query audits) → skipped under
+   *  --offline. A function answers per-run ("only if feeds not cached"). */
+  network?: boolean | (() => boolean);
 }
 
 export interface ToolRunResult {
@@ -58,8 +76,10 @@ export function toolStatus(results: ToolRunResult[]): ToolStatus[] {
   });
 }
 
-const TIMEOUT_MS = 300_000;
-const MAX_BUFFER = 64 * 1024 * 1024;
+// Exported for reuse by other execFileSync callers outside the adapter runner
+// (e.g. src/tools/sbom.ts's syft invocation) that want the same bounds.
+export const TIMEOUT_MS = 300_000;
+export const MAX_BUFFER = 64 * 1024 * 1024;
 const MOUNT = "/work";
 
 function exec(name: string, args: string[], cwd: string): { stdout: string; failed: boolean; err?: string } {
@@ -109,29 +129,52 @@ export function relativizeFindings(findings: Finding[], base: string): Finding[]
  * adapter scans explicit files. Returns null when enumeration yields nothing
  * (the runner then records a graceful "no target files" skip).
  */
-function buildArgv(adapter: ToolAdapter, repo: string, target: string): string[] | null {
-  const base = adapter.argv(target);
+function buildArgv(adapter: ToolAdapter, repo: string, target: string, ctx: RunContext): string[] | null {
+  const base = adapter.argv(target, ctx);
   if (!adapter.enumerate) return base;
   const files = adapter.enumerate(repo);
   if (!files.length) return null;
   return [...base, ...files];
 }
 
-/** Run one adapter natively if its binary is present. Never throws. */
-function runNative(adapter: ToolAdapter, repo: string): ToolRunResult {
-  if (!detect(adapter.name).installed) {
-    return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
+/** True when `ctx.offline` and the adapter declares it needs the network this run. */
+function blockedOffline(adapter: ToolAdapter, ctx: RunContext): boolean {
+  if (!ctx.offline) return false;
+  return typeof adapter.network === "function" ? adapter.network() : adapter.network === true;
+}
+
+/** Run one adapter natively if its binary (or `command` override) is present. Never throws. */
+function runNative(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRunResult {
+  if (blockedOffline(adapter, ctx)) {
+    return { name: adapter.name, ran: false, ok: false, findings: [], note: "offline (network required)" };
   }
-  const argv = buildArgv(adapter, repo, repo);
+  let cmd: string[] | null;
+  if (adapter.command) {
+    cmd = adapter.command();
+    if (!cmd) return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
+  } else {
+    if (!detect(adapter.name).installed) {
+      return { name: adapter.name, ran: false, ok: false, findings: [], note: "not installed" };
+    }
+    cmd = [adapter.name];
+  }
+  const applicableNote = adapter.applicable?.(repo);
+  if (applicableNote) return { name: adapter.name, ran: false, ok: false, findings: [], note: applicableNote };
+  const argv = buildArgv(adapter, repo, repo, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
-  const { stdout, failed, err } = exec(adapter.name, argv, repo);
+  const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], repo);
   return finish(adapter, repo, stdout, failed, err, false);
 }
 
 /** Run one adapter via its official Docker image. Never throws. */
-function runDocker(adapter: ToolAdapter, repo: string): ToolRunResult {
+function runDocker(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRunResult {
+  if (blockedOffline(adapter, ctx)) {
+    return { name: adapter.name, ran: false, ok: false, findings: [], note: "offline (network required)" };
+  }
   if (!adapter.dockerImage) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no docker image" };
-  const argv = buildArgv(adapter, repo, MOUNT);
+  const applicableNote = adapter.applicable?.(repo);
+  if (applicableNote) return { name: adapter.name, ran: false, ok: false, findings: [], note: applicableNote };
+  const argv = buildArgv(adapter, repo, MOUNT, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
   const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
   const args = ["run", "--rm", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
@@ -151,8 +194,8 @@ function finish(adapter: ToolAdapter, repo: string, stdout: string, failed: bool
   }
 }
 
-export function runAdapter(adapter: ToolAdapter, repo: string, useDocker = false): ToolRunResult {
-  return useDocker ? runDocker(adapter, repo) : runNative(adapter, repo);
+export function runAdapter(adapter: ToolAdapter, repo: string, useDocker = false, ctx: RunContext = {}): ToolRunResult {
+  return useDocker ? runDocker(adapter, repo, ctx) : runNative(adapter, repo, ctx);
 }
 
 export interface OrchestrateResult {
@@ -164,6 +207,10 @@ export interface OrchestrateResult {
 export interface OrchestrateOptions {
   which?: string[];
   useDocker?: boolean;
+  /** True under `scan --offline` — forwarded into the per-run RunContext. */
+  offline?: boolean;
+  /** Absolute path of a CycloneDX SBOM generated this run, if any. */
+  sbom?: string;
 }
 
 /**
@@ -177,10 +224,11 @@ export function orchestrate(adapters: ToolAdapter[], repo: string, opts: Orchest
   let selected = opts.which && opts.which.length ? adapters.filter((a) => opts.which!.includes(a.name)) : adapters;
   if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
 
+  const ctx: RunContext = { offline: opts.offline, sbom: opts.sbom };
   const results: ToolRunResult[] = [];
   const all: Finding[] = [];
   for (const a of selected) {
-    const r = runAdapter(a, repo, opts.useDocker);
+    const r = runAdapter(a, repo, opts.useDocker, ctx);
     results.push(r);
     all.push(...r.findings);
   }
