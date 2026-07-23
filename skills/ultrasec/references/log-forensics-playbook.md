@@ -100,8 +100,8 @@ other candidate):
   shape. It counts EVERY line carrying an IP, including syslog/auth lines — so
   a `brute-force` run on the same IP can also trip it; corroborate the two
   against each other instead of treating them as two separate incidents.
-- **`scan-behavior`** — ≥15 404/403 responses from one IP inside the window
-  (directory/endpoint enumeration).
+- **`scan-behavior`** — ≥15 401/403/404 responses from one IP inside the window
+  (directory/endpoint enumeration, or credential/authorization probing).
 - **`recon-hit`** — the SAME IP, after qualifying as `scan-behavior`, later
   gets a 2xx on a sensitive path (the same probe-path signature family as
   §3's `probe-path`). This is the strongest of the behavioral findings —

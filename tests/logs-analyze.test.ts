@@ -129,10 +129,41 @@ describe("analyzeLogs — redaction guarantee", () => {
     expect(blob).toContain("REDACTED");
   });
 
+  // Whole-result guarantee (CRITICAL 1 regression test): `stats` — not just
+  // `findings` — is republished verbatim in LOGSTATS.json and `--json`
+  // stdout, so it must clear the same bar. `nginx-combined.log` plants the
+  // same secret-bearing `.aws/credentials?password=...&key=...` path TWICE
+  // (see fixture) specifically so it lands inside `stats.topPaths`'s top-10 —
+  // a single occurrence used to fall below the cut and escape this check.
+  it("no finding OR stats value anywhere contains a planted secret, including stats.topPaths (redact: true, default)", async () => {
+    const { findings, stats } = await analyzeLogs([NGINX, JSONL], { budget: "standard", redact: true, base: FIXTURES });
+    const blob = JSON.stringify({ findings, stats });
+    for (const secret of PLANTED_SECRETS) expect(blob).not.toContain(secret);
+    expect(blob).toContain("REDACTED");
+  });
+
+  it("the secret-bearing path that lands in stats.topPaths's top-10 is redacted there too, not just dropped", async () => {
+    const { stats } = await analyzeLogs([NGINX], { budget: "standard", redact: true, base: FIXTURES });
+    const entry = stats.topPaths.find((p) => p.path.includes("REDACTED"));
+    expect(entry).toBeDefined();
+    // Both plants of the secret-bearing path (see fixture) count toward one
+    // bucket keyed on the REDACTED form — the documented redact-at-add-time
+    // choice (see analyze.ts processEvent).
+    expect(entry!.count).toBeGreaterThanOrEqual(2);
+    const blob = JSON.stringify(stats.topPaths);
+    for (const secret of PLANTED_SECRETS) expect(blob).not.toContain(secret);
+  });
+
   it("--no-redact (redact: false) keeps raw evidence, including the planted secrets", async () => {
     const { findings } = await analyzeLogs([NGINX, JSONL], { budget: "standard", redact: false, base: FIXTURES });
     const blob = JSON.stringify(findings);
     // At least one of the planted secrets must show up in the clear once redaction is off.
+    expect(PLANTED_SECRETS.some((s) => blob.includes(s))).toBe(true);
+  });
+
+  it("--no-redact (redact: false) also keeps the raw secret-bearing path in stats.topPaths", async () => {
+    const { stats } = await analyzeLogs([NGINX], { budget: "standard", redact: false, base: FIXTURES });
+    const blob = JSON.stringify(stats.topPaths);
     expect(PLANTED_SECRETS.some((s) => blob.includes(s))).toBe(true);
   });
 
@@ -175,7 +206,7 @@ describe("analyzeLogs — per-family cap + truncation", () => {
 describe("analyzeLogs — stats", () => {
   it("reports files/format/lines and top ips/paths/status counts", async () => {
     const { stats } = await analyzeLogs([NGINX], { budget: "standard", redact: true, base: FIXTURES });
-    expect(stats.totalLines).toBe(63);
+    expect(stats.totalLines).toBe(64);
     expect(stats.files).toHaveLength(1);
     expect(stats.files[0]!.format).toBe("nginx-combined");
     expect(stats.topIps.length).toBeGreaterThan(0);
@@ -343,6 +374,24 @@ describe("analyzeLogs — behavioral aggregation: scanning behavior + recon→hi
     expect(reconHit).toBeDefined();
     expect(reconHit!.severity).toBe("medium");
     expect(reconHit!.sink!.line).toBe(16); // the 2xx line itself
+  });
+
+  it("counts 401s toward the scanning-behavior spike, not just 403/404", async () => {
+    const file = join(dir, "recon-401.log");
+    const ip = "203.0.113.252";
+    const lines: string[] = [];
+    for (let i = 0; i < 15; i++) {
+      const ss = String(i).padStart(2, "0");
+      // Mix of 401/403/404 — all three must count toward the same spike.
+      const status = i % 3 === 0 ? 401 : i % 3 === 1 ? 403 : 404;
+      lines.push(`${ip} - - [10/Oct/2023:16:00:${ss} +0000] "GET /admin${i} HTTP/1.1" ${status} 100 "-" "Mozilla/5.0"`);
+    }
+    writeFileSync(file, lines.join("\n") + "\n");
+
+    const { findings } = await analyzeLogs([file], { budget: "standard", redact: true, base: dir });
+    const scan = findings.find((f) => f.sink?.kind === KIND_SCAN_BEHAVIOR);
+    expect(scan).toBeDefined();
+    expect(scan!.message).toContain("401/403/404");
   });
 
   it("does not fire recon→hit when the scan threshold was never reached", async () => {

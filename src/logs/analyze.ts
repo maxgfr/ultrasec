@@ -6,7 +6,7 @@ import { shortHash } from "../util.js";
 import type { Finding, Severity } from "../types.js";
 import { detectFormat, parseLine, type LogFormat, type ParsedEvent } from "./detect.js";
 import { ATTACK_SIGNATURES, ESCALATION_FAMILIES, FAMILY_CWE, PROBE_PATH_RE, SCANNER_UAS, classifyAuthEvent, type AttackSignature } from "./patterns.js";
-import { PII_PATTERNS, SECRET_PATTERNS, redact } from "./secrets.js";
+import { PII_PATTERNS, SECRET_PATTERNS, redact, truncateEvidence } from "./secrets.js";
 
 // The streaming engine behind `ultrasec logs`. Reads each file with
 // createReadStream + readline (bounded memory — never reads a whole log into
@@ -73,7 +73,6 @@ const BUDGETS: Record<AnalyzeOptions["budget"], number> = {
 const MAX_LINE_LEN = 8_192; // per-line length cap, applied before matching
 const FAMILY_CAP = 50; // kept findings per attack-signature family, per RUN
 const MAX_DISTINCT = 100_000; // distinct IPs/paths tracked before "(other)"
-const EVIDENCE_MAX = 200; // evidence text cap in a finding's message
 const TOP_N = 10;
 
 // ── Behavioral aggregation (per-IP state, second detector layer) ────────────
@@ -108,10 +107,11 @@ const LINE_PROXY_WINDOW = 500;
 // scripted sweep before it finishes the window.
 const REQUEST_BURST_THRESHOLD = 300;
 
-// >=15 4xx (404/403) responses from one IP inside the window: enough distinct
-// failed probes to read as directory/endpoint enumeration, not a couple of
-// natural not-founds.
+// >=15 4xx (401/403/404) responses from one IP inside the window: enough
+// distinct failed probes to read as directory/endpoint enumeration or
+// credential/authorization probing, not a couple of natural not-founds.
 const ERROR_SPIKE_THRESHOLD = 15;
+const ERROR_SPIKE_STATUSES = new Set([401, 403, 404]);
 
 // ── Secret/PII leak findings ─────────────────────────────────────────────────
 
@@ -148,10 +148,6 @@ function escalateOnce(sev: Severity): Severity {
   if (sev === "low") return "medium";
   if (sev === "medium") return "high";
   return sev;
-}
-
-function truncateEvidence(s: string): string {
-  return s.length > EVIDENCE_MAX ? s.slice(0, EVIDENCE_MAX) : s;
 }
 
 /** First-seen-bounded counter: tracks at most `cap` distinct keys; anything
@@ -612,8 +608,8 @@ function processBehavior(state: RunState, relPath: string, lineNo: number, ev: P
     }
   }
 
-  // Error spike (404/403 scanning) — feeds recon→hit below via hadQualifyingErrorRun.
-  if (ipState && !ipState.spikeFired && typeof ev.status === "number" && (ev.status === 404 || ev.status === 403)) {
+  // Error spike (401/403/404 scanning) — feeds recon→hit below via hadQualifyingErrorRun.
+  if (ipState && !ipState.spikeFired && typeof ev.status === "number" && ERROR_SPIKE_STATUSES.has(ev.status)) {
     const { count, oldest, usedLineProxy } = ipState.error4xx.add(mark);
     if (count >= ERROR_SPIKE_THRESHOLD) {
       ipState.spikeFired = true;
@@ -623,7 +619,7 @@ function processBehavior(state: RunState, relPath: string, lineNo: number, ev: P
         kind: KIND_SCAN_BEHAVIOR,
         title: "Scanning behavior",
         severity: "low",
-        message: `Scanning behavior: ${count} 404/403 responses from ${ev.ip} within ${windowDescription(usedLineProxy, windowSeconds)} (starting at ${oldest.relPath}:${oldest.lineNo}).`,
+        message: `Scanning behavior: ${count} 401/403/404 responses from ${ev.ip} within ${windowDescription(usedLineProxy, windowSeconds)} (starting at ${oldest.relPath}:${oldest.lineNo}).`,
         relPath: oldest.relPath,
         lineNo: oldest.lineNo,
         ip: ev.ip,
@@ -696,7 +692,15 @@ function processEvent(state: RunState, relPath: string, lineNo: number, ev: Pars
     state.lastTs = ev.ts;
   }
   if (ev.ip) state.ipCounter.add(ev.ip);
-  if (ev.path) state.pathCounter.add(ev.path);
+  // topPaths lands verbatim in LOGSTATS.json and --json stdout, so a raw
+  // query-string secret counted here would republish exactly what the
+  // secret/PII detector redacts everywhere else (CWE-532). When redaction is
+  // on, count the REDACTED form of the path — a deliberate choice: two
+  // distinct secrets on an otherwise-identical path template collapse into
+  // one counted key, but that's strictly better than leaking either one, and
+  // it keeps "same path, same bucket" for the common case (no secret on the
+  // path at all, where redact() is a no-op).
+  if (ev.path) state.pathCounter.add(opts.redact ? redact(ev.path).redacted : ev.path);
   if (typeof ev.status === "number") {
     const k = String(ev.status);
     state.statusCounts[k] = (state.statusCounts[k] ?? 0) + 1;
