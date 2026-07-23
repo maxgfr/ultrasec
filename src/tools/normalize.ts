@@ -18,6 +18,8 @@ const SEVERITY_ALIASES: Record<string, Severity> = Object.assign(Object.create(n
   low: "low",
   minor: "low",
   note: "low",
+  negligible: "low", // grype's lowest severity label
+
   // deepsec's non-security bug tiers — alias explicitly so they don't silently
   // collapse to the fallback (HIGH_BUG = a high-priority bug; BUG = an ordinary one).
   high_bug: "high",

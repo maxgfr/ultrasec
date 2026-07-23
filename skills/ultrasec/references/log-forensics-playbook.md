@@ -97,7 +97,9 @@ other candidate):
 - **`request-burst`** — >300 requests from one IP inside the window. A
   recon/DoS indicator, not an attack confirmation — a legitimate but
   misbehaving client (a retry storm, a broken integration) produces the same
-  shape.
+  shape. It counts EVERY line carrying an IP, including syslog/auth lines — so
+  a `brute-force` run on the same IP can also trip it; corroborate the two
+  against each other instead of treating them as two separate incidents.
 - **`scan-behavior`** — ≥15 404/403 responses from one IP inside the window
   (directory/endpoint enumeration).
 - **`recon-hit`** — the SAME IP, after qualifying as `scan-behavior`, later

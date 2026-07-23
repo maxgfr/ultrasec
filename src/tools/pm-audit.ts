@@ -172,7 +172,7 @@ let yarnMajorCache: number | null | undefined; // undefined = not probed yet thi
 /** `yarn --version` → major version, or null when yarn is absent / the probe
  *  fails / the output doesn't parse. Never throws. Memoized: probed once per
  *  process so command()/argv() (both called per run) always agree. */
-export function yarnMajor(): number | null {
+function yarnMajor(): number | null {
   if (yarnMajorCache !== undefined) return yarnMajorCache;
   try {
     const out = execFileSync("yarn", ["--version"], { stdio: ["ignore", "pipe", "ignore"], timeout: 5000 })

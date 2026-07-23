@@ -212,7 +212,7 @@ var TOOLS = [
     description: "PyPI advisory scanner for Python requirements/lockfiles.",
     languages: ["python"],
     install: { pip: "pipx install pip-audit", url: "https://pypi.org/project/pip-audit/" },
-    runHint: "pip-audit -f json"
+    runHint: "pip-audit -r requirements.txt -f json"
   },
   {
     name: "npm-audit",
@@ -13684,6 +13684,8 @@ var SEVERITY_ALIASES = Object.assign(/* @__PURE__ */ Object.create(null), {
   low: "low",
   minor: "low",
   note: "low",
+  negligible: "low",
+  // grype's lowest severity label
   // deepsec's non-security bug tiers — alias explicitly so they don't silently
   // collapse to the fallback (HIGH_BUG = a high-priority bug; BUG = an ordinary one).
   high_bug: "high",
@@ -14205,7 +14207,7 @@ function generateSbom(repo, outDir) {
     const count = componentCount(stdout);
     return { path: resolve5(path), note: `sbom.cdx.json${count !== void 0 ? ` (${count} components)` : ""}` };
   } catch (e) {
-    return { note: `syft failed: ${e.message}` };
+    return { note: `syft failed: ${String(e instanceof Error ? e.message : e)}` };
   }
 }
 

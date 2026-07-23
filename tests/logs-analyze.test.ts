@@ -302,11 +302,11 @@ describe("analyzeLogs — behavioral aggregation: request burst", () => {
     expect(hit!.message).toContain("301");
   });
 
-  it("does not fire below the 300-request threshold", async () => {
+  it("does not fire at exactly the 300-request threshold (strict >)", async () => {
     const file = join(dir, "no-burst.log");
     const ip = "203.0.113.241";
     const lines: string[] = [];
-    for (let i = 0; i < 50; i++) {
+    for (let i = 0; i < 300; i++) {
       lines.push(`${ip} - - [10/Oct/2023:15:00:00 +0000] "GET /shop HTTP/1.1" 200 100 "-" "Mozilla/5.0"`);
     }
     writeFileSync(file, lines.join("\n") + "\n");

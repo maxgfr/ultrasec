@@ -128,7 +128,7 @@ export const TOOLS: ToolSpec[] = [
     description: "PyPI advisory scanner for Python requirements/lockfiles.",
     languages: ["python"],
     install: { pip: "pipx install pip-audit", url: "https://pypi.org/project/pip-audit/" },
-    runHint: "pip-audit -f json",
+    runHint: "pip-audit -r requirements.txt -f json",
   },
   {
     name: "npm-audit",

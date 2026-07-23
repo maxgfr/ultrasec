@@ -54,6 +54,6 @@ export function generateSbom(repo: string, outDir: string): SbomResult {
     const count = componentCount(stdout);
     return { path: resolve(path), note: `sbom.cdx.json${count !== undefined ? ` (${count} components)` : ""}` };
   } catch (e) {
-    return { note: `syft failed: ${(e as Error).message}` };
+    return { note: `syft failed: ${String(e instanceof Error ? e.message : e)}` };
   }
 }
