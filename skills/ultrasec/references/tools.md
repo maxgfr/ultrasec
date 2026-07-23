@@ -133,6 +133,61 @@ worklist (all keyless, no LLM calls):
   `security-severity` or `level`, CWE from rule tags, location from the first
   result region. Used by the kingfisher adapter and ready for the next ones.
 
+## Keeping native tools fresh: `tools --upgrade`
+
+ultrasec is latest-first everywhere — docker mode tracks `:latest` with
+`--pull always`, `package-checker` resolves upstream's latest release at scan
+time — and `tools --upgrade` completes that story for NATIVE binaries: for
+every INSTALLED tool it infers which package manager put it there and drives
+that manager's own "upgrade to latest" command. `--dry-run` prints the exact
+commands without running any of them.
+
+```bash
+node scripts/ultrasec.mjs tools --upgrade --dry-run   # preview
+node scripts/ultrasec.mjs tools --upgrade              # actually upgrade
+```
+
+**Origin inference** (`inferOrigin`, `src/tools/origin.ts`) reasons purely from
+the installed binary's resolved, symlink-followed absolute path (`resolveBinaryPath`
+in `src/tools/registry.ts`), checked in this order:
+
+| # | Signal | Manager | Upgrade command |
+|---|---|---|---|
+| 1 | tool name is `npm` | `npm` | `npm install -g npm@latest` — npm has no separate Homebrew formula, so self-upgrade is the only universally correct move regardless of how Node was installed |
+| 1 | tool name is `pnpm`/`yarn`, or the path contains `/corepack/` | `corepack` | `corepack up` — pnpm/yarn "ship via Corepack, not a separate install" (this registry's own stance); deliberately overrides even a `brew install pnpm` formula |
+| 2 | `/opt/homebrew/` or `/usr/local/Cellar/` in the path | `brew` | `brew upgrade <formula>` — both dirs are Homebrew-exclusive, unambiguous on their own |
+| 2 | `/usr/local/bin/` in the path **and** a `brew` binary sits alongside it | `brew` | `brew upgrade <formula>` — bare `/usr/local/bin` is also the generic Linux/FHS "manually installed" dir, so it only counts as brew when a sibling `brew` confirms it (no PATH search, no subprocess) |
+| 3 | `.local/pipx` or `pipx/venvs` in the path | `pipx` | `pipx upgrade <package>` |
+| 4 | under `$GOPATH/bin`, or `~/go/bin` when GOPATH is unset | `go` | `go install <module-path>@latest` |
+| 5 | under `~/.cargo/bin` | `cargo` | `cargo install <crate> --force` (`--force` because `cargo install` no-ops a same-version reinstall) |
+| 6 | Linux only: `/usr/bin/*` and `dpkg -S` claims it | `apt` | **print-only** — `sudo apt install --only-upgrade <pkg>`; ultrasec never runs `sudo` |
+| — | nothing matched | `unknown` | **print-only** — falls back to the tool's registry install hint |
+
+The package/module/crate identifier defaults to the tool's own name and is
+overridden per manager via `ToolSpec.packageIds` (`src/tools/registry.ts`) only
+where it genuinely differs — today that's exclusively the three Go-installed
+tools, whose import path has nothing in common with the binary it builds:
+`govulncheck` → `golang.org/x/vuln/cmd/govulncheck@latest`, `gosec` →
+`github.com/securego/gosec/v2/cmd/gosec@latest`, `osv-scanner` →
+`github.com/google/osv-scanner/cmd/osv-scanner@latest`. Every brew/pipx/cargo
+entry today has a formula/package/crate name identical to the binary, so none
+needed an override.
+
+`npm-audit`/`pnpm-audit`/`yarn-audit` probe and upgrade their REAL binary
+(`ToolSpec.binaryName`: `npm`/`pnpm`/`yarn`) rather than their display name.
+`package-checker` is skipped entirely — it isn't a single PATH binary (its
+presence check is bash+awk+curl) and already self-updates at scan time; the
+summary notes this instead of attempting a command. Docker-mode scans get a
+one-line reminder that they already refresh via `--pull always`.
+
+Per-tool outcomes (`upgraded`/`already-latest`/`failed`/`skipped-unknown-origin`)
+are independent and never fatal — one tool's upgrade failing (wrong exit code,
+timeout, missing manager) is recorded and the run continues; `tools --upgrade`
+itself never throws and never exits non-zero for a per-tool failure. Versions
+are compared before/after via the same `detect()` probe the default listing
+uses, so an actual version change prints `old → new`; an unchanged version
+(or one that isn't cheaply parseable) prints `already-latest`.
+
 ## Via Docker (no native install)
 
 Two ways to get the scanners without installing them on the host:

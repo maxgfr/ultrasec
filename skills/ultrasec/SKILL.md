@@ -267,6 +267,12 @@ a worklist → you **fill** it → `--apply` folds it back in under a conservati
 
 2. **Scan.** `scan --repo <dir> --out <run>`. Check `tools` first if you want to
    install scanners for richer coverage (Trivy for deps/secrets/IaC is highest-leverage).
+   **Keep the toolchain fresh.** At audit start (or whenever the user asks for the
+   latest), run `tools` — then, with the user's consent or a standing preference,
+   `tools --upgrade` to bring every installed native tool to latest via its own
+   package manager (`--dry-run` to preview the exact commands first). Docker runs
+   (`--pull always`) and `package-checker` already self-refresh every run — nothing
+   to do there.
 
 3. **Read the dossier.** Open `<run>/DOSSIER.md` — the candidate list with each
    cross-file path. Don't bulk-load `graph.json`.

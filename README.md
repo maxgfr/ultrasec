@@ -182,6 +182,18 @@ the live status of each.
 | `gitleaks` / `kingfisher` | secrets | install (gitleaks also `--docker`) |
 | `checkov` / `hadolint` | IaC / Dockerfile misconfig | install or `--docker` |
 
+**Latest-first, everywhere.** ultrasec never asks you to manually chase a scanner
+version: `--docker` runs always pull each image's rolling `latest` tag
+(`--pull always`, so a stale cache is never silently reused), `package-checker`
+resolves upstream's latest release at every scan (vendored, sha256-pinned
+fallback), and `node scripts/ultrasec.mjs tools --upgrade [--dry-run]` completes
+the story for natively-installed binaries — it infers which package manager
+(brew/pipx/go/cargo/corepack/npm) put each installed tool there from its own
+binary path and drives that manager's real upgrade command (apt-owned or
+unrecognized origins print a hint instead; ultrasec never runs `sudo`). See
+[`references/tools.md`](skills/ultrasec/references/tools.md#keeping-native-tools-fresh-tools---upgrade)
+for the full origin-inference table.
+
 ## Analysis tools via Docker
 
 ultrasec orchestrates best-in-class OSS scanners and normalizes their output into
