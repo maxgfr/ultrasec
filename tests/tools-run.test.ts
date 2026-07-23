@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { orchestrate, runAdapter, relativizeFindings, toolStatus, type ToolAdapter, type ToolRunResult, type RunContext } from "../src/tools/run.js";
 import type { Finding } from "../src/types.js";
 
@@ -146,6 +146,48 @@ describe("docker mode + command-override adapters", () => {
     const r = orchestrate([nodeEcho], "/tmp", { useDocker: true });
     expect(r.results).toHaveLength(0);
     expect(r.findings).toEqual([]);
+  });
+});
+
+describe("docker mode → always pulls the rolling `latest` tag fresh", () => {
+  it("runDocker's argv forces `--pull always` so a stale cached `latest` is never silently reused", async () => {
+    vi.resetModules();
+    let seenCommand: string | undefined;
+    let seenArgs: string[] | undefined;
+    vi.doMock("node:child_process", async (importOriginal) => {
+      const original = await importOriginal<typeof import("node:child_process")>();
+      return {
+        ...original,
+        execFileSync: (command: string, args: string[]) => {
+          seenCommand = command;
+          seenArgs = args;
+          return "[]";
+        },
+      };
+    });
+    try {
+      const fresh = await import("../src/tools/run.js");
+      const dockerAdapter: import("../src/tools/run.js").ToolAdapter = {
+        name: "fake-docker-tool",
+        category: "sast",
+        dockerImage: "example.org/fake-tool:latest",
+        argv: () => ["--json"],
+        parse: () => [],
+      };
+      const r = fresh.runAdapter(dockerAdapter, "/repo", true);
+      expect(r.ran).toBe(true);
+      expect(seenCommand).toBe("docker");
+      expect(seenArgs).toBeDefined();
+      // `--pull always` must be present so a cached `latest` never wins silently.
+      const pullIdx = seenArgs!.indexOf("--pull");
+      expect(pullIdx).toBeGreaterThan(-1);
+      expect(seenArgs![pullIdx + 1]).toBe("always");
+      // And the run actually targets the adapter's rolling-tag image.
+      expect(seenArgs).toContain("example.org/fake-tool:latest");
+    } finally {
+      vi.doUnmock("node:child_process");
+      vi.resetModules();
+    }
   });
 });
 

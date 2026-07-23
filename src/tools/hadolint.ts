@@ -19,7 +19,7 @@ function isDockerfile(rel: string): boolean {
 export const hadolint: ToolAdapter = {
   name: "hadolint",
   category: "config",
-  dockerImage: "hadolint/hadolint:v2.12.0",
+  dockerImage: "hadolint/hadolint:latest",
   argv: () => ["--format", "json", "--no-fail"],
   enumerate: (repo) =>
     walk(repo)

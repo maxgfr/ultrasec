@@ -16,7 +16,7 @@ import { makeToolFinding } from "./normalize.js";
 export const gitleaks: ToolAdapter = {
   name: "gitleaks",
   category: "secret",
-  dockerImage: "ghcr.io/gitleaks/gitleaks:v8.30.1",
+  dockerImage: "ghcr.io/gitleaks/gitleaks:latest",
   // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);
   // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
   argv: (target) => {

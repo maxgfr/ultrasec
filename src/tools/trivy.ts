@@ -8,7 +8,7 @@ import { makeToolFinding, normalizeSeverity, firstCwe, cvesIn } from "./normaliz
 export const trivy: ToolAdapter = {
   name: "trivy",
   category: "dep",
-  dockerImage: "ghcr.io/aquasecurity/trivy:0.71.1",
+  dockerImage: "ghcr.io/aquasecurity/trivy:latest",
   argv: (target) => ["fs", "--scanners", "vuln,secret,misconfig", "--format", "json", "--quiet", target],
   parse(raw): Finding[] {
     const data = JSON.parse(raw || "{}") as any;

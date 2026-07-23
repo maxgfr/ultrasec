@@ -8,6 +8,10 @@ import { correlate } from "./correlate.js";
 // ones, and tolerates the non-zero exit codes scanners use to signal "findings
 // found". With `useDocker`, a scanner that publishes an official image is run via
 // `docker run` instead — zero local install — with the repo bind-mounted at /work.
+// Images track each tool's rolling `latest` tag (see each adapter's `dockerImage`)
+// rather than a pinned version, so `--pull always` is forced on every docker run —
+// without it a previously cached `latest` would silently keep being reused and the
+// "latest" tag would become cosmetic.
 
 /** Per-run knobs threaded from `orchestrate` down into adapter hooks. */
 export interface RunContext {
@@ -33,7 +37,7 @@ export interface ToolAdapter {
   enumerate?(repo: string): string[];
   /** Some tools (govulncheck) stream NDJSON; default reads one JSON blob. */
   streaming?: boolean;
-  /** Pinned official image enabling `--docker` mode (omitted ⇒ native-only). */
+  /** Official image (rolling `latest` tag) enabling `--docker` mode (omitted ⇒ native-only). */
   dockerImage?: string;
   /** False when the image's ENTRYPOINT is NOT the tool (e.g. semgrep). Default true. */
   dockerEntrypointIsTool?: boolean;
@@ -177,7 +181,7 @@ function runDocker(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
   const argv = buildArgv(adapter, repo, MOUNT, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
   const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
-  const args = ["run", "--rm", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
+  const args = ["run", "--rm", "--pull", "always", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
   const { stdout, failed, err } = exec("docker", args, repo);
   return finish(adapter, repo, stdout, failed, err, true);
 }
@@ -221,7 +225,7 @@ export interface OrchestrateOptions {
  * Missing tools are skipped gracefully (recorded, not fatal).
  */
 export function orchestrate(adapters: ToolAdapter[], repo: string, opts: OrchestrateOptions = {}): OrchestrateResult {
-  let selected = opts.which && opts.which.length ? adapters.filter((a) => opts.which!.includes(a.name)) : adapters;
+  let selected = opts.which?.length ? adapters.filter((a) => opts.which!.includes(a.name)) : adapters;
   if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
 
   const ctx: RunContext = { offline: opts.offline, sbom: opts.sbom };

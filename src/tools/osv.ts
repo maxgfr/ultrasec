@@ -9,7 +9,7 @@ import { deriveSeverity } from "./cvss.js";
 export const osvScanner: ToolAdapter = {
   name: "osv-scanner",
   category: "dep",
-  dockerImage: "ghcr.io/google/osv-scanner:v2.3.8",
+  dockerImage: "ghcr.io/google/osv-scanner:latest",
   // v2 CLI: `scan source` walks a directory for lockfiles/manifests. JSON → stdout.
   argv: (target) => ["scan", "source", "--recursive", "--format", "json", target],
   parse(raw): Finding[] {

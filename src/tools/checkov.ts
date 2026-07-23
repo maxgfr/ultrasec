@@ -11,7 +11,7 @@ import { makeToolFinding, normalizeSeverity } from "./normalize.js";
 export const checkov: ToolAdapter = {
   name: "checkov",
   category: "config",
-  dockerImage: "bridgecrew/checkov:3.2.0",
+  dockerImage: "bridgecrew/checkov:latest",
   argv: (target) => ["-d", target, "-o", "json", "--compact", "--quiet", "--soft-fail"],
   parse(raw): Finding[] {
     const data = JSON.parse(raw || "{}") as any;

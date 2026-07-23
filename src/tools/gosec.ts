@@ -11,7 +11,7 @@ import { makeToolFinding, normalizeSeverity } from "./normalize.js";
 export const gosec: ToolAdapter = {
   name: "gosec",
   category: "sast",
-  dockerImage: "ghcr.io/securego/gosec:v2.21.4",
+  dockerImage: "ghcr.io/securego/gosec:latest",
   argv: () => ["-fmt", "json", "-quiet", "-no-fail", "./..."],
   parse(raw): Finding[] {
     const data = JSON.parse(raw || "{}") as any;

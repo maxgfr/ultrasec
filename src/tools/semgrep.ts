@@ -43,7 +43,7 @@ export const semgrep: ToolAdapter = {
   name: "semgrep",
   category: "sast",
   // The semgrep/semgrep image entrypoint is NOT `semgrep`, so the runner prepends it.
-  dockerImage: "semgrep/semgrep:1.166.0",
+  dockerImage: "semgrep/semgrep:latest",
   dockerEntrypointIsTool: false,
   argv: (target) => ["scan", "--json", "--quiet", "--config", "auto", target],
   parse: (raw) => parseSemgrep("semgrep", raw),

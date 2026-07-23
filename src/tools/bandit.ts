@@ -10,7 +10,11 @@ import { makeToolFinding, normalizeSeverity } from "./normalize.js";
 export const bandit: ToolAdapter = {
   name: "bandit",
   category: "sast",
-  dockerImage: "ghcr.io/pycqa/bandit:1.8.6",
+  // NB the image lives at pycqa/bandit/bandit (the publish workflow appends the
+  // repo name again under the org path) — a plain ghcr.io/pycqa/bandit:* tag 404s.
+  // Upstream also only ever pushes `latest` (no versioned tags), so that's the
+  // sole usable tag here regardless of the latest-by-default policy.
+  dockerImage: "ghcr.io/pycqa/bandit/bandit:latest",
   argv: (target) => ["-r", target, "-f", "json", "-ll", "-ii", "-q"],
   parse(raw): Finding[] {
     const data = JSON.parse(raw || "{}") as any;
