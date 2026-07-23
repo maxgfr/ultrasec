@@ -55,6 +55,14 @@ describe("analyzeLogs — signature true positives", () => {
     const hit = findings.find((f) => f.sink?.file === "nginx-combined.log" && f.sink.line === line && f.sink.kind === "probe-path");
     expect(hit).toBeDefined();
   });
+
+  it("finds /actuator/env as a probe-path hit, escalated (200)", async () => {
+    const { findings } = await analyzeLogs([NGINX], { budget: "standard", redact: true, base: FIXTURES });
+    const line = lineOf("/actuator/env");
+    const hit = findings.find((f) => f.sink?.file === "nginx-combined.log" && f.sink.line === line && f.sink.kind === "probe-path");
+    expect(hit).toBeDefined();
+    expect(hit!.message).toContain("succeeded — 2xx");
+  });
 });
 
 describe("analyzeLogs — false-positive resistance (benign twins)", () => {
@@ -68,6 +76,20 @@ describe("analyzeLogs — false-positive resistance (benign twins)", () => {
   it("does not flag /blog/wp-login-guide as a probe-path hit", async () => {
     const { findings } = await analyzeLogs([NGINX], { budget: "standard", redact: true, base: FIXTURES });
     const line = lineOf("wp-login-guide");
+    const hits = findings.filter((f) => f.sink?.file === "nginx-combined.log" && f.sink.line === line);
+    expect(hits).toHaveLength(0);
+  });
+
+  it("does not flag /blog/actuator-tips as a probe-path hit (no slash after 'actuator')", async () => {
+    const { findings } = await analyzeLogs([NGINX], { budget: "standard", redact: true, base: FIXTURES });
+    const line = lineOf("actuator-tips");
+    const hits = findings.filter((f) => f.sink?.file === "nginx-combined.log" && f.sink.line === line);
+    expect(hits).toHaveLength(0);
+  });
+
+  it("does not flag 'union membership selection committee' as sqli (harder adversarial input: contains 'union' and 'select' as a substring of 'selection', not the whole word)", async () => {
+    const { findings } = await analyzeLogs([NGINX], { budget: "standard", redact: true, base: FIXTURES });
+    const line = lineOf("union%20membership%20selection%20committee");
     const hits = findings.filter((f) => f.sink?.file === "nginx-combined.log" && f.sink.line === line);
     expect(hits).toHaveLength(0);
   });
@@ -134,7 +156,7 @@ describe("analyzeLogs — per-family cap + truncation", () => {
 describe("analyzeLogs — stats", () => {
   it("reports files/format/lines and top ips/paths/status counts", async () => {
     const { stats } = await analyzeLogs([NGINX], { budget: "standard", redact: true, base: FIXTURES });
-    expect(stats.totalLines).toBe(60);
+    expect(stats.totalLines).toBe(63);
     expect(stats.files).toHaveLength(1);
     expect(stats.files[0]!.format).toBe("nginx-combined");
     expect(stats.topIps.length).toBeGreaterThan(0);

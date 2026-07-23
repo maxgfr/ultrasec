@@ -95,7 +95,18 @@ export const ATTACK_SIGNATURES: AttackSignature[] = [
     id: "probe-sensitive-path",
     family: "probe-path",
     severity: "low",
-    re: /(^|\/)(\.env|\.git\/config|wp-login\.php|xmlrpc\.php|phpmyadmin|\.aws\/credentials|actuator\/|server-status|\.ssh\/|vendor\/phpunit|id_rsa)([/?"]|$)/i,
+    // `actuator\/[\w-]*` (not bare `actuator\/`): a Spring Boot actuator probe
+    // always names an endpoint segment (`/actuator/env`, `/actuator/health`,
+    // `/actuator/heapdump`, `/actuator/beans`, …) — a bare `actuator\/` alt only
+    // matched `/actuator/` itself, missing every real recon hit. `[\w-]*` (zero
+    // or more, so the bare `/actuator/` case still matches too) consumes the
+    // endpoint name; the trailing `([/?"]|$)` boundary then only has to clear
+    // the char AFTER the endpoint (a further `/` for a nested path like
+    // `/actuator/health/liveness`, `?`, `"`, or end-of-string) — same boundary
+    // discipline as the rest of this alternation. It still requires a literal
+    // `/` right after "actuator", so `/blog/actuator-tips` (hyphen, no slash)
+    // does not match — see the benign-twin fixture line + test.
+    re: /(^|\/)(\.env|\.git\/config|wp-login\.php|xmlrpc\.php|phpmyadmin|\.aws\/credentials|actuator\/[\w-]*|server-status|\.ssh\/|vendor\/phpunit|id_rsa)([/?"]|$)/i,
     title: "Sensitive-path probe",
     note: "A request for a well-known sensitive/config path (.env, .git/config, wp-login.php, cloud credentials, actuator…).",
   },

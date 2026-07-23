@@ -58,3 +58,6 @@
 203.0.113.99 - - [10/Oct/2023:14:03:00 +0000] "GET /.aws/credentials?password=hunter2secret&key=AKIAIOSFODNN7EXAMPLE HTTP/1.1" 403 96 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 10.0.0.30 - - [10/Oct/2023:13:55:55 +0000] "GET /shop HTTP/1.1" 200 4521 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 10.0.0.30 - - [10/Oct/2023:13:55:56 +0000] "GET /shop/item-7 HTTP/1.1" 200 3321 "http://example.com/shop" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+203.0.113.101 - - [10/Oct/2023:14:05:00 +0000] "GET /actuator/env HTTP/1.1" 200 3011 "-" "Mozilla/5.0 (compatible)"
+10.0.0.31 - - [10/Oct/2023:13:55:57 +0000] "GET /blog/actuator-tips HTTP/1.1" 200 4102 "http://example.com/blog" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+192.0.2.17 - - [10/Oct/2023:14:04:10 +0000] "GET /search?q=union%20membership%20selection%20committee HTTP/1.1" 200 1610 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
