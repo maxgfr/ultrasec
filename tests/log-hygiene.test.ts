@@ -163,17 +163,56 @@ describe("enumerateSensitiveLogCandidates — CWE-532 sensitive data on a log-ca
 
 // ── Default cap of 40 actually engages on a large corpus ───────────────────────
 describe("enumerateSensitiveLogCandidates — default cap (40) engages under real load", () => {
-  it("synthesizes 45 sensitive-log hits and confirms the default cap keeps exactly 40, reporting the rest as truncated", () => {
+  const N = 45;
+  function synthesizeCorpus(): string {
     const dir = mkdtempSync(join(tmpdir(), "ultrasec-log-hygiene-cap-"));
-    const N = 45;
     for (let i = 0; i < N; i++) {
       writeFileSync(join(dir, `f${i}.js`), `function f${i}() {\n  const token = "t${i}";\n  logger.info("token=" + token);\n}\nmodule.exports = { f${i} };\n`);
     }
-    const scan = scanRepo(dir);
+    return dir;
+  }
+
+  it("synthesizes 45 sensitive-log hits and confirms the default cap keeps exactly 40, reporting the rest as truncated", () => {
+    const scan = scanRepo(synthesizeCorpus());
     const { findings, truncated, total } = enumerateSensitiveLogCandidates(scan);
     expect(total).toBe(N);
     expect(findings).toHaveLength(40);
     expect(truncated).toBe(N - 40);
+  });
+
+  it("a raised `maxCandidates` option lets all 45 through with zero truncation", () => {
+    const scan = scanRepo(synthesizeCorpus());
+    const { findings, truncated, total } = enumerateSensitiveLogCandidates(scan, { maxCandidates: 5000 });
+    expect(total).toBe(N);
+    expect(findings).toHaveLength(N);
+    expect(truncated).toBe(0);
+  });
+
+  // ── CLI wiring regression: `scan --log-hygiene` must forward `--max-candidates`
+  // to the hygiene pass exactly as it does for taint/--sinks, so the truncation
+  // advisory ("Raise --max-candidates") is genuinely actionable for this pass too.
+  it("`scan --log-hygiene --max-candidates 5000` raises the hygiene cap end-to-end (all 45, truncated: 0)", async () => {
+    const dir = synthesizeCorpus();
+    const out = mkdtempSync(join(tmpdir(), "ultrasec-log-hygiene-cap-cli-high-"));
+    const code = await runScan(parseArgs(["scan", "--repo", dir, "--out", out, "--no-enrich", "--no-tools", "--log-hygiene", "--max-candidates", "5000"]));
+    expect(code).toBe(0);
+    const findings = JSON.parse(readFileSync(join(out, "findings.json"), "utf8")) as Finding[];
+    const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"));
+    const cwe532 = findings.filter((f) => f.cwe === "CWE-532");
+    expect(cwe532).toHaveLength(N);
+    expect(manifest.truncation).toBeUndefined();
+  });
+
+  it("`scan --log-hygiene` without --max-candidates keeps today's behavior unchanged (40 kept, 5 truncated)", async () => {
+    const dir = synthesizeCorpus();
+    const out = mkdtempSync(join(tmpdir(), "ultrasec-log-hygiene-cap-cli-default-"));
+    const code = await runScan(parseArgs(["scan", "--repo", dir, "--out", out, "--no-enrich", "--no-tools", "--log-hygiene"]));
+    expect(code).toBe(0);
+    const findings = JSON.parse(readFileSync(join(out, "findings.json"), "utf8")) as Finding[];
+    const manifest = JSON.parse(readFileSync(join(out, "manifest.json"), "utf8"));
+    const cwe532 = findings.filter((f) => f.cwe === "CWE-532");
+    expect(cwe532).toHaveLength(40);
+    expect(manifest.truncation?.candidates).toBe(N - 40);
   });
 });
 

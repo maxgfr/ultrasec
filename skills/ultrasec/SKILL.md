@@ -82,7 +82,9 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
     `--log-hygiene` adds two static **logging-hygiene** checks on the code being
     audited (CWE-117 log injection via the taint BFS + CWE-532 sensitive data on a
     log-call line, `category: "logs"`) — low/medium severity, redacted messages,
-    capped at 40/run (see
+    capped at 40/run by default (logging noise floods fast) — raise it with
+    `--max-candidates`, same as taint/`--sinks`, and any cap is truncation-reported,
+    never silent (see
     [references/severity-and-discipline.md](references/severity-and-discipline.md)).
     `--blame` attaches deterministic **provenance** (git-blame author/commit/author-date
     + CODEOWNERS owner) to each finding — a triage signal, **never** a suppression rule.

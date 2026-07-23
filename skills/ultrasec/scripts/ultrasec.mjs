@@ -15329,7 +15329,8 @@ async function runScan(args2) {
   const budgetName = flagStr(args2, "budget");
   const preset = own(BUDGETS, budgetName ?? "standard") ?? BUDGETS.standard;
   const maxDepth = numFlag(args2, "max-depth") ?? preset.maxDepth;
-  const maxCandidates = numFlag(args2, "max-candidates") ?? preset.maxCandidates;
+  const explicitMaxCandidates = numFlag(args2, "max-candidates");
+  const maxCandidates = explicitMaxCandidates ?? preset.maxCandidates;
   const diffRef = flagStr(args2, "diff") ?? flagStr(args2, "since");
   let effectiveScope = scope;
   let diffNote;
@@ -15368,7 +15369,7 @@ async function runScan(args2) {
   const taintFindings = taint.findings;
   const sinksOn = flagBool(args2, "sinks");
   const sinkCand = sinksOn ? enumerateSinkCandidates(scan2, taintFindings, { maxCandidates }) : { findings: [], truncated: 0, total: 0 };
-  const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan2) : { findings: [], truncated: 0, total: 0 };
+  const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan2, { maxCandidates: explicitMaxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const scopedScan = !!(effectiveScope && effectiveScope.length || include?.length || exclude?.length || diffRef);
   const toolsFlag = flagStr(args2, "tools");
   const toolsAutoSkipped = scopedScan && toolsFlag === void 0 && !flagBool(args2, "no-tools");

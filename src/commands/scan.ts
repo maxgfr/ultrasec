@@ -48,7 +48,8 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const budgetName = flagStr(args, "budget");
   const preset = own(BUDGETS, budgetName ?? "standard") ?? BUDGETS.standard!;
   const maxDepth = numFlag(args, "max-depth") ?? preset.maxDepth;
-  const maxCandidates = numFlag(args, "max-candidates") ?? preset.maxCandidates;
+  const explicitMaxCandidates = numFlag(args, "max-candidates");
+  const maxCandidates = explicitMaxCandidates ?? preset.maxCandidates;
 
   // Incremental: --diff/--since <ref> scans only files changed since the ref plus
   // their reverse-dependents (the call sites that reach them), folding into --merge.
@@ -110,7 +111,13 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // Sensitive-logging line-content pass (opt-in `--log-hygiene`, CWE-532): every
   // LOG_SINKS call site whose line names a sensitive identifier or contains a
   // literal secret. Capped independently (logging noise floods fast) + reported.
-  const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan) : { findings: [] as Finding[], truncated: 0, total: 0 };
+  // Mirrors the EXPLICIT --max-candidates flag (same value taint/--sinks receive)
+  // so "Raise --max-candidates" is true here too; absent that flag it keeps its own
+  // tighter default (40, see src/logs/hygiene.ts) rather than inheriting the
+  // budget-preset value (200/1000/5000), which would silently change today's cap.
+  const hygieneCand = logHygieneOn
+    ? enumerateSensitiveLogCandidates(scan, { maxCandidates: explicitMaxCandidates })
+    : { findings: [] as Finding[], truncated: 0, total: 0 };
 
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
