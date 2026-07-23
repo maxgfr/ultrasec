@@ -45,7 +45,8 @@ COMMANDS
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
              Flags: --tools auto|none|a,b · --docker · --no-enrich/--offline ·
-             --sinks (orphan-sink recall) · --blame (git-blame/CODEOWNERS provenance) ·
+             --sinks (orphan-sink recall) · --log-hygiene (opt-in CWE-117/CWE-532
+             logging-hygiene checks) · --blame (git-blame/CODEOWNERS provenance) ·
              --scope/--include/--exclude/--max-files/--gitignore (focus) ·
              --budget quick|standard|thorough · --max-candidates · --max-depth ·
              --diff <ref>/--since <commit> · --merge · --resume (incremental).

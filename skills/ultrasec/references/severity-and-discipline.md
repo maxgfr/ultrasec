@@ -75,6 +75,21 @@ radius = MEDIUM.
 > gate. An uncertain high/critical finding stays **needs-human** — `verify`/`revalidate`
 > never auto-dismiss it. Use the rubric to *rank and describe*, not to silently drop.
 
+## Logging hygiene (opt-in `scan --log-hygiene`)
+
+CWE-117 (log injection — untrusted data reaches a log call) and CWE-532 (sensitive
+data written to a log) are **low/medium** severity by default: a forged log line or
+a leaked credential in a log is real, but rarely the whole attack — rate it against
+what actually reads that log (a SIEM parsing raw text vs. a structured logger) and
+what the "sensitive" value turns out to be (a real secret vs. a variable *named*
+`token` that never holds one). If a CRLF-stripping logger, a structured/JSON log
+sink, or a redaction middleware already sits between the call and storage, treat the
+absence of a *second* guard as a **hardening note**, not a finding. These checks are
+**opt-in** (not part of the default `scan`) precisely because logging call sites are
+numerous and easy to flood a report with — turn it on when logging hygiene is
+actually in scope for the audit, and keep the same discipline as everywhere else:
+report what you can show reaches an untrusted value, not every log statement.
+
 ## Anti-patterns (what makes an audit useless)
 
 1. **Listing every OWASP deviation as a finding.** OWASP is a checklist, not a bug list.

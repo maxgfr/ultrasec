@@ -35,6 +35,7 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "blame",
   "provenance",
   "sinks",
+  "log-hygiene",
   "merge",
   "resume",
   "powered",

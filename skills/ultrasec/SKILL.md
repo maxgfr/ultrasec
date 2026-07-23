@@ -79,6 +79,11 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
     dangerous sink the source-gated taint BFS can't connect to a source (single-file
     script, framework dispatch, config-fed sink) is emitted as a low-confidence
     `sast` candidate to adjudicate (capped + truncation-reported like taint).
+    `--log-hygiene` adds two static **logging-hygiene** checks on the code being
+    audited (CWE-117 log injection via the taint BFS + CWE-532 sensitive data on a
+    log-call line, `category: "logs"`) — low/medium severity, redacted messages,
+    capped at 40/run (see
+    [references/severity-and-discipline.md](references/severity-and-discipline.md)).
     `--blame` attaches deterministic **provenance** (git-blame author/commit/author-date
     + CODEOWNERS owner) to each finding — a triage signal, **never** a suppression rule.
 - `import <findings.json> --run <dir> [--format deepsec-json] [--no-enrich|--offline] [--blame]`

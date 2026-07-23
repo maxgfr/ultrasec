@@ -5,6 +5,7 @@ import { scanRepo, scanRepoCached } from "../scan.js";
 import { buildGraph, reverseDependents } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
 import { enumerateSinkCandidates } from "../sinks.js";
+import { enumerateSensitiveLogCandidates } from "../logs/hygiene.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
 import { loadScanCache, saveScanCache } from "../cache.js";
@@ -93,7 +94,11 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const cache = resume ? loadScanCache(out) : undefined;
   const scan = cache ? scanRepoCached(repo, scanOpts, cache) : scanRepo(repo, scanOpts);
   const graph = buildGraph(scan);
-  const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates });
+  // Logging hygiene (opt-in `--log-hygiene`, CWE-117 + CWE-532): unions LOG_SINKS
+  // into the taint sink catalog for this run only — default false keeps the
+  // sink-matching step (and therefore every golden/snapshot) byte-identical.
+  const logHygieneOn = flagBool(args, "log-hygiene");
+  const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn });
   const taintFindings = taint.findings;
 
   // Orphan-sink recall (opt-in `--sinks`): dangerous sinks the source-gated taint
@@ -101,6 +106,11 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // `sast` candidates, de-duped against the taint findings, capped + reported.
   const sinksOn = flagBool(args, "sinks");
   const sinkCand = sinksOn ? enumerateSinkCandidates(scan, taintFindings, { maxCandidates }) : { findings: [] as Finding[], truncated: 0, total: 0 };
+
+  // Sensitive-logging line-content pass (opt-in `--log-hygiene`, CWE-532): every
+  // LOG_SINKS call site whose line names a sensitive identifier or contains a
+  // literal secret. Capped independently (logging noise floods fast) + reported.
+  const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan) : { findings: [] as Finding[], truncated: 0, total: 0 };
 
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
@@ -121,12 +131,13 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] }
     : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path });
 
-  // Merge taint candidates, orphan-sink candidates, and tool findings (ids are
-  // disjoint by construction), then correlate the WHOLE set: orchestrate only
-  // correlates tool findings among themselves, so without this second (idempotent)
-  // pass a scanner finding sitting exactly on a taint/orphan-sink node would ship
-  // as a duplicate instead of corroborating the candidate.
-  const merged = correlate([...taintFindings, ...sinkCand.findings, ...tool.findings]);
+  // Merge taint candidates, orphan-sink candidates, logging-hygiene candidates,
+  // and tool findings (ids are disjoint by construction), then correlate the
+  // WHOLE set: orchestrate only correlates tool findings among themselves, so
+  // without this second (idempotent) pass a scanner finding sitting exactly on a
+  // taint/orphan-sink/hygiene node would ship as a duplicate instead of
+  // corroborating the candidate.
+  const merged = correlate([...taintFindings, ...sinkCand.findings, ...hygieneCand.findings, ...tool.findings]);
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
@@ -141,9 +152,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
 
   const languages = [...new Set(scan.files.map((f) => f.lang))].sort();
   // Never hide a capped run as a full one: record candidate + file-walk truncation.
-  // Candidate truncation folds the taint and orphan-sink caps together.
-  const truncatedCount = taint.truncated + sinkCand.truncated;
-  const totalCandidates = taint.total + sinkCand.total;
+  // Candidate truncation folds the taint, orphan-sink, and logging-hygiene caps together.
+  const truncatedCount = taint.truncated + sinkCand.truncated + hygieneCand.truncated;
+  const totalCandidates = taint.total + sinkCand.total + hygieneCand.total;
   const truncation =
     truncatedCount > 0 || scan.truncated
       ? { candidates: truncatedCount, total: totalCandidates, ...(scan.truncated ? { files: true as const } : {}) }
@@ -202,6 +213,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
           sbom: fm.sbom,
           diff: diffNote,
           sinks: sinksOn ? sinkCand.findings.length : undefined,
+          logHygiene: logHygieneOn ? hygieneCand.findings.length : undefined,
           merged: mergedNote.trim() || undefined,
         },
         null,
@@ -221,7 +233,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   }
   if (sbomResult) println(`  sbom: ${sbomResult.note}`);
   println(
-    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""} + ${tool.findings.length} tool this pass`,
+    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""}${logHygieneOn ? ` + ${hygieneCand.findings.length} log-hygiene` : ""} + ${tool.findings.length} tool this pass`,
   );
   println(`  ${riskNote}`);
   if (truncation?.candidates) {
