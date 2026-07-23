@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.13.0](https://github.com/maxgfr/ultrasec/compare/v1.12.0...v1.13.0) (2026-07-23)
+
+
+### Bug Fixes
+
+* **ci:** fully vet auto-bump PRs since the default token can't trigger ci.yml ([0a0f5c2](https://github.com/maxgfr/ultrasec/commit/0a0f5c276999ca0257eaee1b2ac13cd6ed9741db))
+* **docker:** resolve hadolint's post-2.13 asset rename for pinned versions ([8b05576](https://github.com/maxgfr/ultrasec/commit/8b0557639719239990c6603a540658c6ce788192))
+
+
+### Features
+
+* **docker:** install toolbox scanners at latest by default ([92f2c2e](https://github.com/maxgfr/ultrasec/commit/92f2c2e974dbb24c403ecabf0a9ef9579151a2b5))
+* **docker:** track latest tags for docker-mode scanner images ([42ad220](https://github.com/maxgfr/ultrasec/commit/42ad220a0548077d85680a55dc0debf67657ea43))
+* **package-checker:** resolve upstream latest with vendored fallback ([11061e1](https://github.com/maxgfr/ultrasec/commit/11061e11717c4c9d5b0e6b1bb0ec2413f865c2bc))
+* **tools:** infer native-tool origin and drive `tools --upgrade` ([86baab9](https://github.com/maxgfr/ultrasec/commit/86baab9b4a165ed7da10d4597b9d281119df0f35))
+
 # [1.12.0](https://github.com/maxgfr/ultrasec/compare/v1.11.0...v1.12.0) (2026-07-23)
 
 
