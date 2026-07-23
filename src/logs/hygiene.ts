@@ -14,7 +14,7 @@ import { langForFile } from "../lang.js";
 import { findSinks, LOG_SINKS, cweUrl } from "../catalog.js";
 import { shortHash, byStr } from "../util.js";
 import { SEVERITIES, type Finding, type Severity } from "../types.js";
-import { redact } from "./secrets.js";
+import { redact, truncateEvidence } from "./secrets.js";
 
 // Logging hygiene floods easily (every log line is a candidate line), so the
 // cap is far tighter than the taint/orphan-sink passes' (default 1000).
@@ -92,7 +92,7 @@ export function enumerateSensitiveLogCandidates(scan: RepoScan, opts: SensitiveL
         confidence: "low",
         sink: { file: file.rel, line: sink.line, kind: "log", symbol: enclosingSymbol(file, sink.line) },
         message:
-          `Possible sensitive-data log write at ${file.rel}:${sink.line} (${reasons.join("; ")}): \`${redacted.trim()}\`. ` +
+          `Possible sensitive-data log write at ${file.rel}:${sink.line} (${reasons.join("; ")}): \`${truncateEvidence(redacted.trim())}\`. ` +
           `Verify this isn't a live credential/PII before it ships to a log sink — redact or drop the field. ` +
           `A CRLF-stripping logger or redaction middleware already in place downgrades this to a hardening note.`,
         tool: "ultrasec",

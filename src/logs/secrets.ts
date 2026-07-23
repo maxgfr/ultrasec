@@ -52,6 +52,19 @@ export interface RedactResult {
   hits: { kind: string }[];
 }
 
+// Cap on embedded raw/redacted evidence text kept in a finding's message —
+// shared between the log analyzer (`analyze.ts`) and the static
+// logging-hygiene pass (`hygiene.ts`) so a single line's evidence text has
+// one truncation policy across the whole logs/ subsystem, not two that can
+// drift apart.
+export const EVIDENCE_MAX = 200;
+
+/** Truncate `s` to `EVIDENCE_MAX` characters for embedding in a finding's
+ *  message — never returns a longer string, no-ops on shorter ones. */
+export function truncateEvidence(s: string): string {
+  return s.length > EVIDENCE_MAX ? s.slice(0, EVIDENCE_MAX) : s;
+}
+
 /**
  * Replace every secret/PII match with `‹REDACTED:<kind>›`. Idempotent (running
  * it again on its own output finds nothing new — the placeholder text matches

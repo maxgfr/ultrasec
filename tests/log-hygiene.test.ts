@@ -148,6 +148,25 @@ describe("enumerateSensitiveLogCandidates — CWE-532 sensitive data on a log-ca
     expect(blob).toContain("REDACTED");
   });
 
+  it("caps the embedded redacted line in the message at 200 chars (EVIDENCE_MAX, shared with analyze.ts)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "ultrasec-log-hygiene-long-line-"));
+    const longValue = "x".repeat(400);
+    writeFileSync(
+      join(dir, "long.js"),
+      `function logLongPassword() {\n  logger.info("password=" + "${longValue}");\n}\nmodule.exports = { logLongPassword };\n`,
+    );
+    const scan = scanRepo(dir);
+    const { findings: longFindings } = enumerateSensitiveLogCandidates(scan);
+    const hit = longFindings.find((f) => f.sink?.symbol === "logLongPassword");
+    expect(hit, "expected a CWE-532 finding on the long password line").toBeTruthy();
+    // The embedded backtick-quoted evidence segment must never exceed 200 chars.
+    const evidence = hit!.message.match(/: `(.*)`\. /)?.[1];
+    expect(evidence, "expected a backtick-quoted evidence segment in the message").toBeTruthy();
+    expect(evidence!.length).toBeLessThanOrEqual(200);
+    // Sanity: the untruncated line would have been well over 200 chars.
+    expect(longValue.length).toBeGreaterThan(200);
+  });
+
   it("rank-then-caps and reports truncation (never silent)", () => {
     const capped = enumerateSensitiveLogCandidates(scan, { maxCandidates: 1 });
     expect(capped.findings).toHaveLength(1);
