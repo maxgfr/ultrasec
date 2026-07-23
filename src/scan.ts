@@ -89,6 +89,39 @@ function toEngineOptions(repo: string, opts: ScanOptions): EngineScanOptions {
   };
 }
 
+/** Symbol kinds the engine treats as references (not definitions) when attributing
+ *  a line to its enclosing symbol — mirrors the engine's `REFERENCE_KINDS` in
+ *  src/callers.ts. Kept in sync so ultrasec's seed attribution below stays
+ *  byte-identical to what `buildRawCallerIndex` records for the same site. */
+const REFERENCE_KINDS: ReadonlySet<string> = new Set(["reexport", "reexport-all", "default"]);
+
+/**
+ * The symbol enclosing `line` — the definition ultrasec attributes a call site or
+ * a sink/source seed to. IDENTICAL to the engine's `enclosingAmong` (src/callers.ts,
+ * the primitive behind `buildRawCallerIndex`): the innermost symbol whose extent
+ * covers the line (bounded by `endLine` when the extractor knows it), falling back
+ * to the nearest preceding definition when no extent is known; reference-kind
+ * symbols (re-exports, default markers) are skipped. Sharing ONE helper across the
+ * graph's caller index (engine-computed hops) and the taint/sink seeds keeps the
+ * BFS visited key `${file}#${symbol ?? line}` in a single attribution namespace —
+ * otherwise seeds attributed nearest-preceding and hops attributed endLine-aware
+ * would collide/diverge on the same line.
+ */
+export function enclosingSymbolName(symbols: Sym[], line: number): string | undefined {
+  let best: Sym | undefined;
+  for (const s of symbols) {
+    if (REFERENCE_KINDS.has(s.kind)) continue;
+    if (s.line > line) continue;
+    if (s.endLine !== undefined && line > s.endLine) continue;
+    // Innermost wins: a later-opening symbol, or on a same-line tie the one with
+    // the tighter extent (smaller/equal endLine).
+    if (!best || s.line > best.line || (s.line === best.line && (s.endLine ?? Infinity) <= (best.endLine ?? Infinity))) {
+      best = s;
+    }
+  }
+  return best?.name;
+}
+
 /** Adapt one engine `FileRecord` to ultrasec's `FileScan`, or drop it when its
  *  extension isn't one ultrasec reasons about. `lang` is the ultrasec id (the
  *  catalogs gate on it), NOT the engine's `lang`. */

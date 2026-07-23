@@ -1,5 +1,7 @@
 import type { RepoScan } from "./scan.js";
+import { enclosingSymbolName } from "./scan.js";
 import { buildFileResolver } from "./resolve.js";
+import { buildRawCallerIndex } from "./vendor/codeindex-engine.mjs";
 import { byStr } from "./util.js";
 
 export type EdgeKind = "import" | "call";
@@ -46,16 +48,6 @@ function add(map: Map<string, Edge>, e: Edge): void {
   else map.set(k, { ...e });
 }
 
-// Which line/symbol encloses a given line — used to attribute a call to its
-// caller function. Returns the nearest preceding symbol definition.
-function enclosingSymbol(symbols: { name: string; line: number }[], line: number): string | undefined {
-  let best: { name: string; line: number } | undefined;
-  for (const s of symbols) {
-    if (s.line <= line && (!best || s.line > best.line)) best = s;
-  }
-  return best?.name;
-}
-
 /** Build the cross-file link-graph (import + resolved call edges). Deterministic. */
 export function buildGraph(scan: RepoScan): Graph {
   const fileSet = new Set(scan.files.map((f) => f.rel));
@@ -74,7 +66,6 @@ export function buildGraph(scan: RepoScan): Graph {
   for (const [name, files] of defs) symbolDefs[name] = [...files].sort(byStr);
 
   const edgeMap = new Map<string, Edge>();
-  const callers = new Map<string, CallerRef[]>();
   const resolve = buildFileResolver(scan);
 
   for (const f of scan.files) {
@@ -84,15 +75,15 @@ export function buildGraph(scan: RepoScan): Graph {
       if (to && to !== f.rel) add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
     }
     for (const c of f.calls) {
-      const callerSym = enclosingSymbol(f.symbols, c.line);
-      // Reverse call-index: record EVERY call site keyed by callee name (this is
-      // what the taint walk steps through, so it must mirror the old per-file scan).
-      (callers.get(c.callee) ?? callers.set(c.callee, []).get(c.callee)!).push({ file: f.rel, line: c.line, symbol: callerSym });
       // Call edges: a call to a uniquely-defined exported symbol in another file.
       const targets = defs.get(c.callee);
       if (!targets || targets.size !== 1) continue; // ambiguous or undefined -> skip
       const to = [...targets][0]!;
       if (to === f.rel) continue; // intra-file call, not a cross-file edge
+      // The caller attribution uses the SAME endLine-aware enclosing helper the raw
+      // caller index uses for its hops (enclosingSymbolName), so a call edge's
+      // fromSymbol matches the caller-index site for that same {file, line}.
+      const callerSym = enclosingSymbolName(f.symbols, c.line);
       add(edgeMap, { from: f.rel, to, kind: "call", weight: 1, fromSymbol: callerSym, toSymbol: c.callee });
     }
   }
@@ -101,11 +92,31 @@ export function buildGraph(scan: RepoScan): Graph {
     (a, b) => byStr(a.from, b.from) || byStr(a.to, b.to) || byStr(a.kind, b.kind) || byStr(a.toSymbol ?? "", b.toSymbol ?? ""),
   );
 
-  // Sort each caller list by (file, line) so the taint BFS visits callers in the
-  // same order the old `scan.files × calls` double loop did — keeps output identical.
+  // Reverse call-index straight from the engine's raw caller index (callee name ->
+  // every call site, zero gate). Replaces ultrasec's former per-FileScan loop; its
+  // enclosing-symbol attribution is endLine-aware and shared with the taint/sink
+  // seeds (via enclosingSymbolName), so the BFS steps through one attribution
+  // namespace. `symbol` may be undefined when a site is outside every extent.
   const callersBySymbol: Record<string, CallerRef[]> = {};
-  for (const [name, refs] of [...callers.entries()].sort((a, b) => byStr(a[0], b[0]))) {
-    callersBySymbol[name] = refs.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+  if (scan.engine) {
+    const raw = buildRawCallerIndex(scan.engine);
+    for (const name of [...raw.keys()].sort(byStr)) {
+      // Scan-perimeter filter (NOT a resolution gate): buildRawCallerIndex sees every
+      // engine-scanned file, including files ultrasec's langForFile gate drops from the
+      // RepoScan (a language ultrasec doesn't reason about). Keep only sites in files
+      // ultrasec actually scanned, so the caller index's file-set matches the
+      // pre-adoption per-FileScan loop's perimeter. Recall is unaffected: a dropped
+      // file carries no ultrasec sink/source, so no taint path can traverse it — this
+      // narrows the walk surface, it never gates which symbols resolve.
+      const refs = raw
+        .get(name)!
+        .filter((s) => fileSet.has(s.file))
+        .map((s): CallerRef => ({ file: s.file, line: s.line, symbol: s.enclosingSymbol?.name }));
+      // Keep sorted by (file, line) so the taint BFS visits callers in the same
+      // deterministic order the old double loop did (the raw index already sorts;
+      // re-sort explicitly after the perimeter filter).
+      if (refs.length) callersBySymbol[name] = refs.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+    }
   }
 
   return { files: [...fileSet].sort(byStr), edges, symbolDefs, callersBySymbol };

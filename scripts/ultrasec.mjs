@@ -11985,6 +11985,19 @@ function toEngineOptions(repo, opts) {
     out: join13(resolve2(repo), DOSSIER_DIRNAME)
   };
 }
+var REFERENCE_KINDS7 = /* @__PURE__ */ new Set(["reexport", "reexport-all", "default"]);
+function enclosingSymbolName(symbols, line) {
+  let best;
+  for (const s of symbols) {
+    if (REFERENCE_KINDS7.has(s.kind)) continue;
+    if (s.line > line) continue;
+    if (s.endLine !== void 0 && line > s.endLine) continue;
+    if (!best || s.line > best.line || s.line === best.line && (s.endLine ?? Infinity) <= (best.endLine ?? Infinity)) {
+      best = s;
+    }
+  }
+  return best?.name;
+}
 function recordToFileScan(f) {
   const spec = langForFile(f.rel);
   if (!spec) return void 0;
@@ -12272,13 +12285,6 @@ function add(map, e) {
   if (prev) prev.weight += e.weight;
   else map.set(k, { ...e });
 }
-function enclosingSymbol2(symbols, line) {
-  let best;
-  for (const s of symbols) {
-    if (s.line <= line && (!best || s.line > best.line)) best = s;
-  }
-  return best?.name;
-}
 function buildGraph2(scan2) {
   const fileSet = new Set(scan2.files.map((f) => f.rel));
   const defs = /* @__PURE__ */ new Map();
@@ -12293,7 +12299,6 @@ function buildGraph2(scan2) {
   const symbolDefs = {};
   for (const [name2, files] of defs) symbolDefs[name2] = [...files].sort(byStr);
   const edgeMap = /* @__PURE__ */ new Map();
-  const callers = /* @__PURE__ */ new Map();
   const resolve26 = buildFileResolver(scan2);
   for (const f of scan2.files) {
     for (const imp of f.imports) {
@@ -12301,12 +12306,11 @@ function buildGraph2(scan2) {
       if (to && to !== f.rel) add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
     }
     for (const c2 of f.calls) {
-      const callerSym = enclosingSymbol2(f.symbols, c2.line);
-      (callers.get(c2.callee) ?? callers.set(c2.callee, []).get(c2.callee)).push({ file: f.rel, line: c2.line, symbol: callerSym });
       const targets = defs.get(c2.callee);
       if (!targets || targets.size !== 1) continue;
       const to = [...targets][0];
       if (to === f.rel) continue;
+      const callerSym = enclosingSymbolName(f.symbols, c2.line);
       add(edgeMap, { from: f.rel, to, kind: "call", weight: 1, fromSymbol: callerSym, toSymbol: c2.callee });
     }
   }
@@ -12314,8 +12318,12 @@ function buildGraph2(scan2) {
     (a, b) => byStr(a.from, b.from) || byStr(a.to, b.to) || byStr(a.kind, b.kind) || byStr(a.toSymbol ?? "", b.toSymbol ?? "")
   );
   const callersBySymbol = {};
-  for (const [name2, refs] of [...callers.entries()].sort((a, b) => byStr(a[0], b[0]))) {
-    callersBySymbol[name2] = refs.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+  if (scan2.engine) {
+    const raw = buildRawCallerIndex(scan2.engine);
+    for (const name2 of [...raw.keys()].sort(byStr)) {
+      const refs = raw.get(name2).filter((s) => fileSet.has(s.file)).map((s) => ({ file: s.file, line: s.line, symbol: s.enclosingSymbol?.name }));
+      if (refs.length) callersBySymbol[name2] = refs.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+    }
   }
   return { files: [...fileSet].sort(byStr), edges, symbolDefs, callersBySymbol };
 }
@@ -13184,13 +13192,6 @@ var DEFAULT_MAX_CANDIDATES = 1e3;
 function severityRank(s) {
   return SEVERITIES.indexOf(s);
 }
-function enclosingSymbol3(file, line) {
-  let best;
-  for (const s of file.symbols) {
-    if (s.line <= line && (!best || s.line > best.line)) best = s;
-  }
-  return best?.name;
-}
 function truncate(s, n = 60) {
   return s.length > n ? s.slice(0, n - 1) + "\u2026" : s;
 }
@@ -13230,7 +13231,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
     const srcStep = {
       file: srcFile,
       line: srcHit.line,
-      symbol: enclosingSymbol3(byRel.get(srcFile), srcHit.line),
+      symbol: enclosingSymbolName(byRel.get(srcFile).symbols, srcHit.line),
       why: `untrusted input (${srcHit.kind}): ${truncate(srcHit.match)}`
     };
     const path = [srcStep, ...hops];
@@ -13260,7 +13261,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
     for (const sink of findSinks(lang, file.calls, extraSinks)) {
-      const sinkSym = enclosingSymbol3(file, sink.line);
+      const sinkSym = enclosingSymbolName(file.symbols, sink.line);
       const sinkStep = {
         file: file.rel,
         line: sink.line,
@@ -13308,11 +13309,6 @@ var DEFAULT_MAX_CANDIDATES2 = 1e3;
 function severityRank2(s) {
   return SEVERITIES.indexOf(s);
 }
-function enclosingSymbol4(file, line) {
-  let best;
-  for (const s of file.symbols) if (s.line <= line && (!best || s.line > best.line)) best = s;
-  return best?.name;
-}
 function enumerateSinkCandidates(scan2, covered, opts = {}) {
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES2;
   const taken = /* @__PURE__ */ new Set();
@@ -13341,7 +13337,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
         title: `${sink.title}: ${sink.callee}() sink (no source path found)`,
         severity: sink.severity,
         confidence: "low",
-        sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbol4(file, sink.line) },
+        sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbolName(file.symbols, sink.line) },
         message: `Dangerous ${sink.kind} sink ${sink.callee}() at ${file.rel}:${sink.line} that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look \u2014 the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). ${sink.note}${note} Confirm whether attacker-controlled data can reach it before trusting it.`,
         tool: "ultrasec",
         references: [cweUrl(sink.cwe)],
@@ -13426,7 +13422,7 @@ var SENSITIVE_NAME_RE = /\b(pass(word|wd)?|secret|token|api[_-]?key|authorizatio
 function severityRank3(s) {
   return SEVERITIES.indexOf(s);
 }
-function enclosingSymbol5(file, line) {
+function enclosingSymbol2(file, line) {
   let best;
   for (const s of file.symbols) if (s.line <= line && (!best || s.line > best.line)) best = s;
   return best?.name;
@@ -13459,7 +13455,7 @@ function enumerateSensitiveLogCandidates(scan2, opts = {}) {
         title: `Sensitive data logged via ${sink.callee}()`,
         severity: "medium",
         confidence: "low",
-        sink: { file: file.rel, line: sink.line, kind: "log", symbol: enclosingSymbol5(file, sink.line) },
+        sink: { file: file.rel, line: sink.line, kind: "log", symbol: enclosingSymbol2(file, sink.line) },
         message: `Possible sensitive-data log write at ${file.rel}:${sink.line} (${reasons.join("; ")}): \`${truncateEvidence(redacted.trim())}\`. Verify this isn't a live credential/PII before it ships to a log sink \u2014 redact or drop the field. A CRLF-stripping logger or redaction middleware already in place downgrades this to a hardening note.`,
         tool: "ultrasec",
         references: [cweUrl("CWE-532")],

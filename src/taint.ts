@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { readText } from "./walk.js";
-import type { RepoScan, FileScan } from "./scan.js";
+import type { RepoScan } from "./scan.js";
+import { enclosingSymbolName } from "./scan.js";
 import type { Graph } from "./graph.js";
 import { langForFile } from "./lang.js";
 import { findSinks, findSources, findSanitizers, cweUrl, LOG_SINKS, type SinkHit, type SourceHit } from "./catalog.js";
@@ -31,15 +32,6 @@ export interface TaintResult {
 
 function severityRank(s: Severity): number {
   return SEVERITIES.indexOf(s); // 0 = critical … 4 = info
-}
-
-/** Nearest preceding symbol definition — attributes a line to its function. */
-function enclosingSymbol(file: FileScan, line: number): string | undefined {
-  let best: { name: string; line: number } | undefined;
-  for (const s of file.symbols) {
-    if (s.line <= line && (!best || s.line > best.line)) best = s;
-  }
-  return best?.name;
 }
 
 function truncate(s: string, n = 60): string {
@@ -93,7 +85,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     const srcStep: PathStep = {
       file: srcFile,
       line: srcHit.line,
-      symbol: enclosingSymbol(byRel.get(srcFile)!, srcHit.line),
+      symbol: enclosingSymbolName(byRel.get(srcFile)!.symbols, srcHit.line),
       why: `untrusted input (${srcHit.kind}): ${truncate(srcHit.match)}`,
     };
     const path = [srcStep, ...hops];
@@ -131,7 +123,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     if (!lang) continue;
 
     for (const sink of findSinks(lang, file.calls, extraSinks)) {
-      const sinkSym = enclosingSymbol(file, sink.line);
+      const sinkSym = enclosingSymbolName(file.symbols, sink.line);
       const sinkStep: PathStep = {
         file: file.rel,
         line: sink.line,
