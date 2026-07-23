@@ -160,13 +160,16 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "package-checker",
     category: "dep",
-    description: "vendored multi-ecosystem GHSA/OSV lockfile scanner (nothing to install)",
+    description:
+      "multi-ecosystem GHSA/OSV lockfile scanner — runs upstream's latest release, vendored sha256-pinned copy as offline/failure fallback (nothing to install)",
     languages: ["*"],
-    install: { url: "https://github.com/maxgfr/package-checker.sh" }, // vendored + pinned — ships with ultrasec
-    runHint: "bash <vendored package-checker.sh> <repo> --default-source-ghsa-osv --export-json <file>",
-    // Not a PATH binary — it's vendored bash, materialized to the cache dir at
-    // runtime (src/tools/package-checker.ts). "Installed" means the interpreter
-    // trio it needs (bash/awk/curl) is present, not the script itself.
+    install: { url: "https://github.com/maxgfr/package-checker.sh" }, // latest by default, vendored + pinned fallback — ships with ultrasec
+    runHint: "bash <resolved package-checker.sh> <repo> --default-source-ghsa-osv --export-json <file>",
+    // Not a PATH binary — it's resolved (latest, or the vendored fallback) and
+    // materialized to the cache dir at runtime (src/tools/package-checker.ts,
+    // resolveScriptSource()). "Installed" means the interpreter trio it needs
+    // (bash/awk/curl) is present, not any specific script version — the
+    // version actually run is decided per-run, not at registry-display time.
     detect: () => {
       const ok = detect("bash").installed && detect("awk").installed && detect("curl").installed;
       return { installed: ok, version: ok ? PACKAGE_CHECKER_TAG : undefined };

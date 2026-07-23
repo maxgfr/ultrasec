@@ -1,3 +1,5 @@
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Finding } from "../types.js";
@@ -64,6 +66,122 @@ export function scriptPath(): string {
     writeFileSync(path, PACKAGE_CHECKER_SH);
   }
   return path;
+}
+
+// ── Runtime latest-with-fallback resolution ─────────────────────────────────
+//
+// By default this adapter tries to run the UPSTREAM latest release of
+// package-checker.sh (maxgfr/package-checker.sh — same author as ultrasec, so
+// executing its latest release at scan time is first-party trust, not the
+// third-party supply-chain hole running arbitrary remote bash would otherwise
+// be). The vendored, sha256-pinned copy (src/vendor/package-checker.sh,
+// drift-gated by `pnpm run check:build`) stays as the OFFLINE / FAILURE
+// fallback: any step below that can fail — DNS, TLS, rate limiting, malformed
+// JSON, a full disk — falls straight back to it. `resolveScriptSource` itself
+// never throws for a NETWORK reason; it can only propagate if the last-resort
+// vendored materialization (`scriptPath()`) itself fails to write to disk —
+// `command()` below still wraps it, so that degrades to a graceful skip
+// rather than a crash, exactly like the pre-existing vendored-only behavior.
+//
+//   ULTRASEC_PACKAGE_CHECKER_PINNED=1   force the vendored copy unconditionally,
+//                                       skipping network resolution entirely.
+//                                       For hardened/offline/air-gapped hosts.
+//   ULTRASEC_PACKAGE_CHECKER_API        test-only: override the GitHub API base
+//                                       (default https://api.github.com).
+//   ULTRASEC_PACKAGE_CHECKER_RAW        test-only: override the raw-content base
+//                                       (default https://raw.githubusercontent.com).
+//   ULTRASEC_PACKAGE_CHECKER_DEBUG=1    print which script actually ran (tag +
+//                                       source) to stderr. `run.ts`'s `finish()`
+//                                       builds the per-tool report note generically
+//                                       from findings count for every adapter, so
+//                                       this is the surface for that detail without
+//                                       a runner-contract change for one adapter.
+//
+// `ToolAdapter.command()` must stay synchronous, so resolution shells out to
+// `curl` (already a precondition for this adapter — see the PATH probe below)
+// with a short `--max-time` rather than Node's fetch (async-only).
+const RESOLVE_CURL_TIMEOUT_S = 4; // curl's own --max-time
+const RESOLVE_TIMEOUT_MS = 6_000; // execFileSync hard stop, a beat above curl's
+const UPSTREAM_REPO = "maxgfr/package-checker.sh";
+/** Conservative allowlist for a resolved tag before it touches a filename or
+ *  URL path — closes off a hostile/corrupted API response without needing to
+ *  reason about escaping. */
+const SAFE_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+
+function truthyEnv(v: string | undefined): boolean {
+  return v !== undefined && v !== "" && v !== "0" && v.toLowerCase() !== "false";
+}
+
+const apiBase = (): string => process.env.ULTRASEC_PACKAGE_CHECKER_API || "https://api.github.com";
+const rawBase = (): string => process.env.ULTRASEC_PACKAGE_CHECKER_RAW || "https://raw.githubusercontent.com";
+
+/** `curl` a URL to a Buffer, short-timeout, never throws (null on any failure:
+ *  DNS, TLS, non-2xx via `-f`, timeout, curl missing). */
+function curlFetch(url: string): Buffer | null {
+  try {
+    return execFileSync("curl", ["-fsSL", "--max-time", String(RESOLVE_CURL_TIMEOUT_S), url], {
+      timeout: RESOLVE_TIMEOUT_MS,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** GET `{apiBase}/repos/{UPSTREAM_REPO}/releases/latest` -> tag_name, validated
+ *  against SAFE_TAG. null on any failure (network, JSON, missing/unsafe field). */
+function fetchLatestTag(): string | null {
+  const buf = curlFetch(`${apiBase()}/repos/${UPSTREAM_REPO}/releases/latest`);
+  if (!buf) return null;
+  try {
+    const tag = (JSON.parse(buf.toString("utf8")) as { tag_name?: unknown }).tag_name;
+    return typeof tag === "string" && SAFE_TAG.test(tag) ? tag : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Download `{rawBase}/{UPSTREAM_REPO}/{tag}/script.sh`, cache it content-
+ *  addressed under the same cache dir as the vendored script (so a later run
+ *  targeting the same tag skips the download), and return its path. null on
+ *  any failure (network, empty body, cache-dir write). */
+function fetchAndCacheScript(tag: string): string | null {
+  const buf = curlFetch(`${rawBase()}/${UPSTREAM_REPO}/${tag}/script.sh`);
+  if (!buf?.length) return null;
+  const sha12 = createHash("sha256").update(buf).digest("hex").slice(0, 12);
+  const dir = join(cacheDir(), "package-checker");
+  const path = join(dir, `script-${tag}-${sha12}.sh`);
+  try {
+    if (!existsSync(path)) {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(path, buf);
+    }
+    return path;
+  } catch {
+    return null;
+  }
+}
+
+export interface ScriptSource {
+  /** `command()`-shaped executable override: `["bash", <path>]`. */
+  cmd: string[];
+  /** Human-readable outcome, e.g. "v1.12.0 (latest)" / "v1.11.4 (vendored fallback — <why>)". */
+  note: string;
+}
+
+/** Decide which package-checker.sh actually runs this scan: upstream latest
+ *  (downloaded once per tag, then cached), or the vendored sha256-pinned copy.
+ *  Exported for direct unit coverage of the branching. */
+export function resolveScriptSource(): ScriptSource {
+  if (truthyEnv(process.env.ULTRASEC_PACKAGE_CHECKER_PINNED)) {
+    return { cmd: ["bash", scriptPath()], note: `${PACKAGE_CHECKER_TAG} (vendored, pinned)` };
+  }
+  const tag = fetchLatestTag();
+  if (!tag) return { cmd: ["bash", scriptPath()], note: `${PACKAGE_CHECKER_TAG} (vendored fallback — latest-tag lookup failed)` };
+  if (tag === PACKAGE_CHECKER_TAG) return { cmd: ["bash", scriptPath()], note: `${PACKAGE_CHECKER_TAG} (vendored, already latest)` };
+  const path = fetchAndCacheScript(tag);
+  if (!path) return { cmd: ["bash", scriptPath()], note: `${PACKAGE_CHECKER_TAG} (vendored fallback — download of ${tag} failed)` };
+  return { cmd: ["bash", path], note: `${tag} (latest)` };
 }
 
 // One export file per process (not per run) to avoid two concurrent scans on
@@ -133,10 +251,14 @@ export const packageChecker: ToolAdapter = {
       : null,
   command(): string[] | null {
     if (!detect("bash").installed || !detect("awk").installed || !detect("curl").installed) return null;
-    // Guard script materialization: cache dir failures (EACCES, ENOSPC, etc.) must
-    // not crash the scan. If the script cannot be written, skip gracefully.
+    // Guard script resolution/materialization end to end: cache dir failures
+    // (EACCES, ENOSPC, etc.) must not crash the scan. If nothing can be
+    // written, skip gracefully — resolveScriptSource() itself already falls
+    // back through every network failure to the vendored copy.
     try {
-      return ["bash", scriptPath()];
+      const { cmd, note } = resolveScriptSource();
+      if (truthyEnv(process.env.ULTRASEC_PACKAGE_CHECKER_DEBUG)) process.stderr.write(`package-checker: ${note}\n`);
+      return cmd;
     } catch {
       return null;
     }
