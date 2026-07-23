@@ -125,7 +125,7 @@ describe("scan --json output — includes SBOM field", () => {
 
   it("includes sbom field in scan --json output (mirrors manifest.sbom)", async () => {
     const out = mkdtempSync(join(tmpdir(), "ultrasec-scan-json-sbom-"));
-    const code = await runScan(parseArgs(["scan", "--repo", FIXTURE, "--out", out, "--no-enrich", "--json"]));
+    const code = await runScan(parseArgs(["scan", "--repo", FIXTURE, "--out", out, "--no-enrich", "--offline", "--json"]));
     expect(code).toBe(0);
 
     const result = JSON.parse(cap.out.join(""));
