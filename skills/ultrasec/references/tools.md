@@ -16,6 +16,9 @@ always-on core. `node scripts/ultrasec.mjs tools` shows status + install hints.
 | cargo-audit | dep | RustSec advisories (Cargo.lock) | `cargo install cargo-audit` |
 | govulncheck | dep | reachability-aware Go vulns | `go install golang.org/x/vuln/cmd/govulncheck@latest` |
 | pip-audit | dep | PyPI/OSV advisories for `requirements.txt` (network on every run) | `pipx install pip-audit` |
+| npm-audit | dep | registry audit of the detected lockfile; needs network (skipped under `--offline`) | ships with Node |
+| pnpm-audit | dep | registry audit of the detected lockfile; needs network (skipped under `--offline`) | `corepack enable pnpm` |
+| yarn-audit | dep | registry audit of the detected lockfile, classic or berry; needs network (skipped under `--offline`) | `corepack enable yarn` |
 | **bandit** | sast | Python idioms a taint engine can't see (shell=True, eval, weak crypto, pickle) | `pipx install bandit` |
 | **gosec** | sast | Go stdlib-aware (math/rand, InsecureSkipVerify, exec w/ tainted args) | `brew install gosec` |
 | **checkov** | config | IaC misconfig with a cross-resource graph (deeper than per-block) | `pipx install checkov` |
@@ -33,6 +36,13 @@ tool is skipped gracefully and recorded, never fatal.
 Severity is normalized to critical/high/medium/low/info: label vocabularies are
 aliased; tools that emit only a CVSS vector or score (cargo-audit, osv-scanner)
 are bucketed via the CVSS v3 base-score calculator in `src/tools/cvss.ts`.
+
+npm-audit/pnpm-audit/yarn-audit each gate on their own root lockfile
+(`package-lock.json`/`npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`) and
+audit it via the package manager's real registry query — no local vuln DB, so
+they're `network: true` and skipped under `--offline`. **v1 limitation**: only
+the root lockfile is audited, not per-workspace sub-lockfiles in a monorepo;
+trivy/osv-scanner already walk the tree recursively and cover that gap.
 
 ## Correlation, risk scoring & SARIF
 

@@ -1,0 +1,40 @@
+{
+  "advisories": {
+    "1523": {
+      "id": 1523,
+      "module_name": "lodash",
+      "severity": "high",
+      "title": "Command Injection in lodash",
+      "url": "https://github.com/advisories/GHSA-35jh-r3h4-6jhm",
+      "github_advisory_id": "GHSA-35jh-r3h4-6jhm",
+      "cves": ["CVE-2021-23337"],
+      "cwe": "CWE-78",
+      "findings": [{ "version": "4.17.20", "paths": ["lodash"] }]
+    },
+    "1600": {
+      "id": 1600,
+      "module_name": "@babel/traverse",
+      "severity": "moderate",
+      "title": "Arbitrary Code Execution in @babel/traverse",
+      "url": "https://github.com/advisories/GHSA-67hx-6x53-jw92",
+      "github_advisory_id": "GHSA-67hx-6x53-jw92",
+      "cves": ["CVE-2023-45133"],
+      "cwe": ["CWE-1321"],
+      "findings": [{ "version": "7.20.0", "paths": ["@babel/traverse"] }]
+    },
+    "1042": {
+      "id": 1042,
+      "module_name": "minimist",
+      "severity": "critical",
+      "title": "Prototype Pollution in minimist",
+      "url": "https://github.com/advisories/GHSA-vh95-rmgr-6w4m",
+      "github_advisory_id": "GHSA-vh95-rmgr-6w4m",
+      "cves": ["CVE-2020-7598"],
+      "cwe": "CWE-1321",
+      "findings": [{ "version": "1.2.0", "paths": ["minimist"] }]
+    }
+  },
+  "metadata": {
+    "vulnerabilities": { "info": 0, "low": 0, "moderate": 1, "high": 1, "critical": 1, "total": 3 }
+  }
+}

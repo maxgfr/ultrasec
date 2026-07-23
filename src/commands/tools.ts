@@ -7,7 +7,7 @@ import { toolStatuses, type ToolStatus } from "../tools/registry.js";
 
 function bestInstallHint(t: ToolStatus): string {
   const i = t.install;
-  return i.brew ?? i.pip ?? i.go ?? i.cargo ?? i.npx ?? i.docker ?? i.url ?? "";
+  return i.brew ?? i.pip ?? i.go ?? i.cargo ?? i.npx ?? i.corepack ?? i.docker ?? i.url ?? "";
 }
 
 export function runTools(args: ParsedArgs): number {

@@ -1,0 +1,61 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "trim-newlines": {
+      "name": "trim-newlines",
+      "severity": "moderate",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1071,
+          "name": "trim-newlines",
+          "dependency": "trim-newlines",
+          "title": "Regular Expression Denial of Service in trim-newlines",
+          "url": "https://github.com/advisories/GHSA-7p7h-4mm5-852v",
+          "severity": "moderate",
+          "cwe": ["CWE-1333"],
+          "range": "<3.0.1"
+        }
+      ],
+      "effects": ["meow"],
+      "range": "<3.0.1",
+      "nodes": ["node_modules/trim-newlines"],
+      "fixAvailable": true
+    },
+    "meow": {
+      "name": "meow",
+      "severity": "moderate",
+      "isDirect": true,
+      "via": ["trim-newlines"],
+      "effects": [],
+      "range": ">=4.0.0",
+      "nodes": ["node_modules/meow"],
+      "fixAvailable": true
+    },
+    "@scope/vuln-pkg": {
+      "name": "@scope/vuln-pkg",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        {
+          "source": 1099,
+          "name": "@scope/vuln-pkg",
+          "dependency": "@scope/vuln-pkg",
+          "title": "Prototype Pollution in @scope/vuln-pkg",
+          "url": "https://github.com/advisories/GHSA-abcd-efgh-ijkl",
+          "severity": "high",
+          "cwe": ["CWE-1321"],
+          "range": "<2.0.0"
+        }
+      ],
+      "effects": [],
+      "range": "<2.0.0",
+      "nodes": ["node_modules/@scope/vuln-pkg"],
+      "fixAvailable": { "name": "@scope/vuln-pkg", "version": "2.0.1", "isSemVerMajor": false }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": { "info": 0, "low": 0, "moderate": 1, "high": 1, "critical": 0, "total": 2 },
+    "dependencies": { "prod": 10, "dev": 5, "optional": 0, "peer": 0, "peerOptional": 0, "total": 15 }
+  }
+}

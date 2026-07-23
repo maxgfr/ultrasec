@@ -15,6 +15,9 @@ export interface InstallHints {
   go?: string;
   cargo?: string;
   docker?: string;
+  /** Node's built-in package-manager shim (pnpm/yarn ship via Corepack, not a
+   *  separate install). */
+  corepack?: string;
   url?: string;
 }
 
@@ -117,6 +120,33 @@ export const TOOLS: ToolSpec[] = [
     languages: ["python"],
     install: { pip: "pipx install pip-audit", url: "https://pypi.org/project/pip-audit/" },
     runHint: "pip-audit -f json",
+  },
+  {
+    name: "npm-audit",
+    category: "dep",
+    description: "npm's own registry audit of the detected lockfile; needs network (skipped under --offline).",
+    languages: ["javascript", "typescript"],
+    install: { url: "https://docs.npmjs.com/cli/v10/commands/npm-audit" }, // ships with Node — nothing to install
+    runHint: "npm audit --json",
+    detect: () => detect("npm"),
+  },
+  {
+    name: "pnpm-audit",
+    category: "dep",
+    description: "pnpm's own registry audit of the detected lockfile; needs network (skipped under --offline).",
+    languages: ["javascript", "typescript"],
+    install: { corepack: "corepack enable pnpm", url: "https://pnpm.io/cli/audit" },
+    runHint: "pnpm audit --json",
+    detect: () => detect("pnpm"),
+  },
+  {
+    name: "yarn-audit",
+    category: "dep",
+    description: "yarn's own registry audit of the detected lockfile (classic or berry); needs network (skipped under --offline).",
+    languages: ["javascript", "typescript"],
+    install: { corepack: "corepack enable yarn", url: "https://yarnpkg.com/cli/npm/audit" },
+    runHint: "yarn audit --json (classic) / yarn npm audit --json --recursive (berry)",
+    detect: () => detect("yarn"),
   },
   {
     name: "checkov",

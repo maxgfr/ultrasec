@@ -1,0 +1,38 @@
+{
+  "advisories": {
+    "1092": {
+      "id": 1092,
+      "module_name": "ansi-regex",
+      "severity": "moderate",
+      "title": "Inefficient Regular Expression Complexity in ansi-regex",
+      "url": "https://github.com/advisories/GHSA-93q8-gq69-wqmw",
+      "github_advisory_id": "GHSA-93q8-gq69-wqmw",
+      "cves": ["CVE-2021-3807"],
+      "cwe": "CWE-1333",
+      "findings": [{ "version": "5.0.0", "paths": ["ansi-regex"] }]
+    },
+    "1099": {
+      "id": 1099,
+      "module_name": "@scope/pnpm-vuln",
+      "severity": "high",
+      "title": "Command Injection in @scope/pnpm-vuln",
+      "url": "https://github.com/advisories/GHSA-mmmm-nnnn-oooo",
+      "github_advisory_id": "GHSA-mmmm-nnnn-oooo",
+      "cves": ["CVE-2022-9999"],
+      "cwe": ["CWE-78"],
+      "findings": [{ "version": "3.1.0", "paths": ["@scope/pnpm-vuln"] }]
+    },
+    "1100": {
+      "id": 1100,
+      "module_name": "minimatch",
+      "severity": "critical",
+      "title": "ReDoS in minimatch",
+      "url": "https://github.com/advisories/GHSA-f8q6-p94x-37v3",
+      "cves": ["CVE-2022-3517"],
+      "findings": [{ "version": "3.0.4", "paths": ["minimatch"] }]
+    }
+  },
+  "metadata": {
+    "vulnerabilities": { "info": 0, "low": 0, "moderate": 1, "high": 1, "critical": 1, "total": 3 }
+  }
+}

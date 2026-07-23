@@ -12,6 +12,7 @@ import { hadolint } from "./hadolint.js";
 import { kingfisher } from "./kingfisher.js";
 import { grype } from "./grype.js";
 import { pipAudit } from "./pip-audit.js";
+import { npmAudit, pnpmAudit, yarnAudit } from "./pm-audit.js";
 
 // Every adapter ultrasec knows how to drive. The runner detects which binaries
 // are installed and runs only those; the rest are skipped gracefully.
@@ -25,6 +26,9 @@ export const ADAPTERS: ToolAdapter[] = [
   cargoAudit,
   govulncheck,
   pipAudit,
+  npmAudit,
+  pnpmAudit,
+  yarnAudit,
   bandit,
   gosec,
   checkov,
@@ -34,5 +38,23 @@ export const ADAPTERS: ToolAdapter[] = [
 
 export const adapterByName = (name: string): ToolAdapter | undefined => ADAPTERS.find((a) => a.name === name);
 
-export { trivy, gitleaks, osvScanner, grype, semgrep, opengrep, cargoAudit, govulncheck, pipAudit, bandit, gosec, checkov, hadolint, kingfisher };
+export {
+  trivy,
+  gitleaks,
+  osvScanner,
+  grype,
+  semgrep,
+  opengrep,
+  cargoAudit,
+  govulncheck,
+  pipAudit,
+  npmAudit,
+  pnpmAudit,
+  yarnAudit,
+  bandit,
+  gosec,
+  checkov,
+  hadolint,
+  kingfisher,
+};
 export { orchestrate, runAdapter, type ToolAdapter, type ToolRunResult, type OrchestrateResult } from "./run.js";
