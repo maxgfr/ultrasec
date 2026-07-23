@@ -342,12 +342,12 @@ describe("pm-audit shared parsers — direct unit coverage", () => {
             id: 1,
             module_name: "pkg",
             title: "Vuln",
-            cves: {} // wrong type: object instead of array
-          }
-        }
+            cves: {}, // wrong type: object instead of array
+          },
+        },
       },
       "package-lock.json",
-      "npm-audit"
+      "npm-audit",
     );
     expect(resultWithObject).toHaveLength(1);
     expect(resultWithObject[0]!.pkg).toBe("pkg");
@@ -362,12 +362,12 @@ describe("pm-audit shared parsers — direct unit coverage", () => {
             id: 2,
             module_name: "pkg2",
             title: "Vuln2",
-            cves: true // wrong type: boolean instead of array
-          }
-        }
+            cves: true, // wrong type: boolean instead of array
+          },
+        },
       },
       "package-lock.json",
-      "npm-audit"
+      "npm-audit",
     );
     expect(resultWithBoolean).toHaveLength(1);
     expect(resultWithBoolean[0]!.pkg).toBe("pkg2");
@@ -381,11 +381,11 @@ describe("pm-audit shared parsers — direct unit coverage", () => {
             id: 1,
             module_name: "pkg",
             title: "Vuln",
-            cves: {}
-          }
-        }
+            cves: {},
+          },
+        },
       }),
-      "/repo"
+      "/repo",
     );
     expect(result).toHaveLength(1);
     expect(result[0]!.pkg).toBe("pkg");
@@ -406,11 +406,11 @@ describe("pm-audit shared parsers — direct unit coverage", () => {
       {
         vulnerabilities: {
           x: {
-            via: {} // wrong type: object instead of array
-          }
-        }
+            via: {}, // wrong type: object instead of array
+          },
+        },
       },
-      "package-lock.json"
+      "package-lock.json",
     );
     // Parsing succeeds without throwing; no findings because via is not iterable
     expect(result).toEqual([]);
@@ -422,11 +422,11 @@ describe("pm-audit shared parsers — direct unit coverage", () => {
         auditReportVersion: 2,
         vulnerabilities: {
           x: {
-            via: {}
-          }
-        }
+            via: {},
+          },
+        },
       }),
-      "/repo"
+      "/repo",
     );
     // The key point: parsing never throws when via is wrong-typed
     expect(result).toEqual([]);
