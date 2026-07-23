@@ -15032,7 +15032,11 @@ var packageChecker = {
   network: true,
   command() {
     if (!detect("bash").installed || !detect("awk").installed || !detect("curl").installed) return null;
-    return ["bash", scriptPath()];
+    try {
+      return ["bash", scriptPath()];
+    } catch {
+      return null;
+    }
   },
   argv(target, ctx) {
     const args2 = [target, "--default-source-ghsa-osv", "--export-json", exportPath()];

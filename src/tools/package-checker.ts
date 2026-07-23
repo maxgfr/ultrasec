@@ -104,7 +104,13 @@ export const packageChecker: ToolAdapter = {
   network: true,
   command(): string[] | null {
     if (!detect("bash").installed || !detect("awk").installed || !detect("curl").installed) return null;
-    return ["bash", scriptPath()];
+    // Guard script materialization: cache dir failures (EACCES, ENOSPC, etc.) must
+    // not crash the scan. If the script cannot be written, skip gracefully.
+    try {
+      return ["bash", scriptPath()];
+    } catch {
+      return null;
+    }
   },
   argv(target, ctx): string[] {
     const args = [target, "--default-source-ghsa-osv", "--export-json", exportPath()];

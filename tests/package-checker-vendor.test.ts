@@ -174,6 +174,20 @@ describe("package-checker adapter — materialization and export-file lifecycle"
     expect(packageChecker.parse("", "/repo")).toEqual([]);
     expect(existsSync(path)).toBe(false);
   });
+
+  it("command(): returns null (graceful skip) on cache dir write failure, never throws", async () => {
+    // Point ULTRASEC_CACHE_DIR to a path under an existing file: mkdir will fail on all platforms.
+    const tmpFile = join(dir, "not-a-directory");
+    writeFileSync(tmpFile, "");
+    const unwritablePath = join(tmpFile, "sub");
+    process.env.ULTRASEC_CACHE_DIR = unwritablePath;
+
+    const { packageChecker } = await freshModule();
+    // command() should return null (skip) on materialization failure, not throw.
+    expect(packageChecker.command).toBeDefined();
+    const result = packageChecker.command!();
+    expect(result).toBeNull();
+  });
 });
 
 /** Import package-checker.ts fresh so its module-state export path (memoized
