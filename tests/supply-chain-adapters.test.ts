@@ -9,6 +9,7 @@ import { trivy } from "../src/tools/trivy.js";
 import { correlate } from "../src/tools/correlate.js";
 import { detect } from "../src/tools/registry.js";
 import { npmAudit, pnpmAudit, yarnAudit, parseNpmV6Advisories, parseNpmV7 } from "../src/tools/pm-audit.js";
+import { packageChecker, mapExport, scriptPath } from "../src/tools/package-checker.js";
 
 const fix = (name: string) => readFileSync(join(import.meta.dirname, "fixtures", "tool-output", name), "utf8");
 
@@ -447,6 +448,102 @@ describe("npm-audit correlates with trivy on a shared GHSA/CVE (cross-tool dedup
     expect(lodash.aliases).toEqual(expect.arrayContaining(["GHSA-35JH-R3H4-6JHM", "CVE-2021-23337"]));
 
     // trivy: 1 dep (lodash) + 1 secret + 1 config = 3; npm-audit: 3 dep advisories.
+    // lodash merges 1:1 -> 6 raw findings collapse to 5.
+    expect(merged).toHaveLength(5);
+    expect(merged.filter((f) => f.category === "dep")).toHaveLength(3);
+  });
+});
+
+describe("package-checker adapter — mapExport (the export-JSON -> Finding[] mapping, unit-tested independent of disk I/O)", () => {
+  const f = mapExport(JSON.parse(fix("package-checker.json")));
+
+  it("maps 3 vulnerabilities across two ecosystems (npm, golang), all credited to package-checker", () => {
+    expect(f).toHaveLength(3);
+    for (const x of f) expect(x.tool).toBe("package-checker");
+  });
+
+  it("scoped npm package + ghsa-only entry: pkg/version split on the LAST '@', no cve", () => {
+    const scoped = f.find((x) => x.pkg === "@acme/widget-core")!;
+    expect(scoped.version).toBe("2.3.1");
+    expect(scoped.severity).toBe("medium");
+    expect(scoped.aliases).toEqual(["GHSA-8x2m-9f3p-7q4r"]);
+    expect(scoped.cve).toBeUndefined();
+    expect(scoped.references).toEqual(["https://github.com/advisories/GHSA-8x2m-9f3p-7q4r"]);
+  });
+
+  it("cve-only entry (golang ecosystem): aliases/cve/reference derive from cve, file untouched (no leading './')", () => {
+    const net = f.find((x) => x.pkg === "golang.org/x/net")!;
+    expect(net.version).toBe("0.7.0");
+    expect(net.severity).toBe("high");
+    expect(net.aliases).toEqual(["CVE-2023-39325"]);
+    expect(net.cve).toBe("CVE-2023-39325");
+    expect(net.references).toEqual(["https://nvd.nist.gov/vuln/detail/CVE-2023-39325"]);
+    expect(net.sink).toEqual({ file: "go.sum", line: 1 });
+    expect(net.message).toContain("golang.org/x/net@0.7.0");
+    expect(net.message).toContain("via osv");
+  });
+
+  it("lodash entry: ghsa+cve aliases both present, leading './' stripped from file", () => {
+    const lodash = f.find((x) => x.pkg === "lodash")!;
+    expect(lodash.version).toBe("4.17.20");
+    expect(lodash.severity).toBe("high");
+    expect(lodash.aliases).toEqual(expect.arrayContaining(["GHSA-35jh-r3h4-6jhm", "CVE-2021-23337"]));
+    expect(lodash.cve).toBe("CVE-2021-23337");
+    expect(lodash.sink).toEqual({ file: "package-lock.json", line: 1 });
+  });
+
+  it("tolerates empty / malformed input", () => {
+    expect(mapExport(null)).toEqual([]);
+    expect(mapExport({})).toEqual([]);
+    expect(mapExport({ vulnerabilities: "not an array" })).toEqual([]);
+    expect(mapExport({ vulnerabilities: [null, undefined, {}, { package: "" }] })).toEqual([]);
+  });
+
+  it("argv(): scans target with the default GHSA+OSV source and the process export path; appends --source for an SBOM ctx", () => {
+    const base = packageChecker.argv("/repo");
+    expect(base.slice(0, 3)).toEqual(["/repo", "--default-source-ghsa-osv", "--export-json"]);
+    expect(base).toHaveLength(4); // + the export path itself
+
+    const withSbom = packageChecker.argv("/repo", { sbom: "/abs/run/sbom.json" });
+    expect(withSbom.slice(-2)).toEqual(["--source", "/abs/run/sbom.json"]);
+  });
+
+  it("command(): invokes the materialized script via bash when bash/awk/curl are all present, else null", () => {
+    // scriptPath() is not memoized (unlike exportPath()) — it re-reads cacheDir()
+    // on every call — so a temp ULTRASEC_CACHE_DIR here keeps the materialized
+    // script out of the real ~/.cache/ultrasec, without needing a module reset.
+    const dir = mkdtempSync(join(tmpdir(), "ultrasec-package-checker-cmd-"));
+    const prev = process.env.ULTRASEC_CACHE_DIR;
+    process.env.ULTRASEC_CACHE_DIR = dir;
+    try {
+      const haveAll = detect("bash").installed && detect("awk").installed && detect("curl").installed;
+      const cmd = packageChecker.command!();
+      if (haveAll) {
+        expect(cmd).toEqual(["bash", scriptPath()]);
+      } else {
+        expect(cmd).toBeNull();
+      }
+    } finally {
+      if (prev === undefined) delete process.env.ULTRASEC_CACHE_DIR;
+      else process.env.ULTRASEC_CACHE_DIR = prev;
+    }
+  });
+});
+
+describe("package-checker correlates with trivy on a shared CVE (cross-tool dedup)", () => {
+  it("merges the shared lodash advisory into one finding with both tool sources, keeps the rest distinct", () => {
+    const trivyFindings = trivy.parse(fix("trivy.json"), "/repo");
+    const pcFindings = mapExport(JSON.parse(fix("package-checker.json")));
+    const merged = correlate([...trivyFindings, ...pcFindings]);
+
+    const lodash = merged.find((f) => f.pkg === "lodash")!;
+    expect(lodash).toBeDefined();
+    expect(lodash.sources).toEqual(["package-checker", "trivy"]);
+    expect(lodash.confidence).toBe("high"); // corroborated by 2 tools
+    expect(lodash.severity).toBe("high");
+    expect(lodash.aliases).toEqual(expect.arrayContaining(["GHSA-35JH-R3H4-6JHM", "CVE-2021-23337"]));
+
+    // trivy: 1 dep (lodash) + 1 secret + 1 config = 3; package-checker: 3 dep entries.
     // lodash merges 1:1 -> 6 raw findings collapse to 5.
     expect(merged).toHaveLength(5);
     expect(merged.filter((f) => f.category === "dep")).toHaveLength(3);

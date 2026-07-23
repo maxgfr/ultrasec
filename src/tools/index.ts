@@ -13,6 +13,7 @@ import { kingfisher } from "./kingfisher.js";
 import { grype } from "./grype.js";
 import { pipAudit } from "./pip-audit.js";
 import { npmAudit, pnpmAudit, yarnAudit } from "./pm-audit.js";
+import { packageChecker } from "./package-checker.js";
 
 // Every adapter ultrasec knows how to drive. The runner detects which binaries
 // are installed and runs only those; the rest are skipped gracefully.
@@ -29,6 +30,7 @@ export const ADAPTERS: ToolAdapter[] = [
   npmAudit,
   pnpmAudit,
   yarnAudit,
+  packageChecker,
   bandit,
   gosec,
   checkov,
@@ -51,6 +53,7 @@ export {
   npmAudit,
   pnpmAudit,
   yarnAudit,
+  packageChecker,
   bandit,
   gosec,
   checkov,

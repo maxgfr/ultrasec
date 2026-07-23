@@ -19,6 +19,7 @@ always-on core. `node scripts/ultrasec.mjs tools` shows status + install hints.
 | npm-audit | dep | registry audit of the detected lockfile; needs network (skipped under `--offline`) | ships with Node |
 | pnpm-audit | dep | registry audit of the detected lockfile; needs network (skipped under `--offline`) | `corepack enable pnpm` |
 | yarn-audit | dep | registry audit of the detected lockfile, classic or berry; needs network (skipped under `--offline`) | `corepack enable yarn` |
+| **package-checker** | dep | vendored 12-ecosystem GHSA/OSV lockfile scanner; needs network to fetch feeds (skipped under `--offline`) unless pre-warmed | nothing to install (vendored + pinned) |
 | **bandit** | sast | Python idioms a taint engine can't see (shell=True, eval, weak crypto, pickle) | `pipx install bandit` |
 | **gosec** | sast | Go stdlib-aware (math/rand, InsecureSkipVerify, exec w/ tainted args) | `brew install gosec` |
 | **checkov** | config | IaC misconfig with a cross-resource graph (deeper than per-block) | `pipx install checkov` |
@@ -43,6 +44,39 @@ audit it via the package manager's real registry query — no local vuln DB, so
 they're `network: true` and skipped under `--offline`. **v1 limitation**: only
 the root lockfile is audited, not per-workspace sub-lockfiles in a monorepo;
 trivy/osv-scanner already walk the tree recursively and cover that gap.
+
+## Supply-chain audit: package-checker
+
+package-checker ([maxgfr/package-checker.sh](https://github.com/maxgfr/package-checker.sh),
+same author as ultrasec) is vendored and pinned exactly like the codeindex
+engine — `src/vendor/package-checker.sh` + `src/vendor/package-checker.meta.json`,
+synced by `scripts/sync-package-checker.mjs` and sha256 drift-gated
+(`pnpm run check:package-checker`, folded into `check:build`). It ships
+embedded as a generated TS string constant in the bundle
+(`src/vendor/package-checker-script.ts`) so it survives any packaging path
+that only copies `scripts/ultrasec.mjs`, and is materialized to
+`<cache dir>/package-checker/script-<hash12>.sh` at first use (content-hash
+named, idempotent, upgrade-safe). It needs `bash`, `awk` and `curl` — nothing
+to `npm install`.
+
+Coverage — 12 ecosystems, one script, detect-then-load: npm, yarn, pnpm, bun,
+deno, PyPI, Go, Cargo, RubyGems, Composer, Maven/Gradle, NuGet, Pub, Hex,
+Swift, and GitHub Actions workflow files, matched against GHSA + OSV advisory
+feeds.
+
+**Network stance**: the script resolves its default feeds via
+`find_default_source()` (Homebrew share → `./data/` → `/app/data/` → a remote
+GitHub raw URL) with no env var or flag to redirect that search to an
+arbitrary directory, and `./data/` resolves against the scanned repo's cwd,
+not ultrasec's cache dir — so this adapter cannot be made offline-safe by
+pointing it at a cache dir. It is `network: true` and skipped under
+`--offline`. For air-gapped use, warm the feeds once and point the script at
+them explicitly:
+
+```sh
+bash <vendored script.sh> --fetch-all <dir>
+bash <vendored script.sh> <repo> --source <dir>/*.purl --export-json <file>
+```
 
 ## Correlation, risk scoring & SARIF
 

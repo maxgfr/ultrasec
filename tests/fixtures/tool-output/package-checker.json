@@ -1,0 +1,33 @@
+{
+  "vulnerabilities": [
+    {
+      "package": "lodash@4.17.20",
+      "file": "./package-lock.json",
+      "ecosystem": "npm",
+      "severity": "high",
+      "ghsa": "GHSA-35jh-r3h4-6jhm",
+      "cve": "CVE-2021-23337",
+      "source": "ghsa"
+    },
+    {
+      "package": "@acme/widget-core@2.3.1",
+      "file": "./package-lock.json",
+      "ecosystem": "npm",
+      "severity": "medium",
+      "ghsa": "GHSA-8x2m-9f3p-7q4r",
+      "source": "ghsa"
+    },
+    {
+      "package": "golang.org/x/net@0.7.0",
+      "file": "go.sum",
+      "ecosystem": "golang",
+      "severity": "high",
+      "cve": "CVE-2023-39325",
+      "source": "osv"
+    }
+  ],
+  "summary": {
+    "total_unique_vulnerabilities": 3,
+    "total_occurrences": 3
+  }
+}

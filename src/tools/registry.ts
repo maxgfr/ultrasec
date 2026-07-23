@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import type { Category } from "../types.js";
 import { byStr } from "../util.js";
+import { PACKAGE_CHECKER_TAG } from "../vendor/package-checker-script.js";
 
 // The catalog of external OSS scanners ultrasec can orchestrate. ultrasec never
 // *requires* any of them — the link-graph + AI taint reasoning is the always-on
@@ -147,6 +148,21 @@ export const TOOLS: ToolSpec[] = [
     install: { corepack: "corepack enable yarn", url: "https://yarnpkg.com/cli/npm/audit" },
     runHint: "yarn audit --json (classic) / yarn npm audit --json --recursive (berry)",
     detect: () => detect("yarn"),
+  },
+  {
+    name: "package-checker",
+    category: "dep",
+    description: "vendored multi-ecosystem GHSA/OSV lockfile scanner (nothing to install)",
+    languages: ["*"],
+    install: { url: "https://github.com/maxgfr/package-checker.sh" }, // vendored + pinned — ships with ultrasec
+    runHint: "bash <vendored package-checker.sh> <repo> --default-source-ghsa-osv --export-json <file>",
+    // Not a PATH binary — it's vendored bash, materialized to the cache dir at
+    // runtime (src/tools/package-checker.ts). "Installed" means the interpreter
+    // trio it needs (bash/awk/curl) is present, not the script itself.
+    detect: () => {
+      const ok = detect("bash").installed && detect("awk").installed && detect("curl").installed;
+      return { installed: ok, version: ok ? PACKAGE_CHECKER_TAG : undefined };
+    },
   },
   {
     name: "checkov",
