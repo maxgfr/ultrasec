@@ -96,15 +96,22 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   (no keys, no Vercel) — pure data ingest; each imported finding lands `open` and is
   yours to adjudicate, gated by the same `[file:line]` grounding `check` as everything else.
 - `logs <path…> [--out .ultrasec-logs] [--format F] [--budget quick|standard|thorough]
-  [--max-lines N] [--no-redact] [--json]` — **blue-team log forensics** (defensive,
-  read-only): ingest existing log files (nginx/access, JSON-lines, generic-timestamped,
-  raw) and run deterministic attack-signature detection (SQLi/XSS/traversal/cmdinj/
-  probe-path + known scanner user-agents, e.g. sqlmap/nikto/nuclei) into its **own**
-  dossier — never the code-scan pipeline — with findings citing `[logfile:line]`, so
-  `check`/`verify`/`render` work unchanged. Also writes `LOGSTATS.json` (top IPs/paths,
-  status distribution). Evidence is **redacted by default** (secrets/PII never land in
-  a finding message). Use for "analyze my access/auth logs", "forensique de logs" —
-  see [references/log-forensics-playbook.md](references/log-forensics-playbook.md).
+  [--max-lines N] [--window SECONDS] [--no-redact] [--json]` — **blue-team log
+  forensics** (defensive, read-only): ingest existing log files (nginx/access,
+  JSON-lines, syslog/auth.log, generic-timestamped, raw) and run TWO detector
+  layers into its **own** dossier — never the code-scan pipeline — with findings
+  citing `[logfile:line]`, so `check`/`verify`/`render` work unchanged: (1)
+  per-line attack-signature detection (SQLi/XSS/traversal/cmdinj/probe-path +
+  known scanner user-agents, e.g. sqlmap/nikto/nuclei) and secret/PII-leak
+  findings (CWE-532: AWS/JWT/Slack/Google keys, private keys, query-string
+  secrets, emails, Luhn-valid card numbers); (2) per-IP behavioral aggregation
+  over a sliding window (`--window`, default 60s) — brute-force auth attempts →
+  possible credential compromise, request bursts, and scan/recon→hit (a probe
+  run followed by a 2xx on a sensitive path). Also writes `LOGSTATS.json` (top
+  IPs/paths, status distribution). Evidence — including `LOGSTATS.json`'s top
+  paths — is **redacted by default** (secrets/PII never land in a finding
+  message or the stats). Use for "analyze my access/auth logs", "forensique de
+  logs" — see [references/log-forensics-playbook.md](references/log-forensics-playbook.md).
 - `tools [--json]` — the external-scanner catalog: which are installed, what they
   cover, how to install the rest. ultrasec runs what's present; none are required.
 - `graph <file|symbol> [--depth n]` — the cross-file links into/out of a node.
