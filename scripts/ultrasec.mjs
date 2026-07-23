@@ -245,14 +245,16 @@ var TOOLS = [
   {
     name: "package-checker",
     category: "dep",
-    description: "vendored multi-ecosystem GHSA/OSV lockfile scanner (nothing to install)",
+    description: "multi-ecosystem GHSA/OSV lockfile scanner \u2014 runs upstream's latest release, vendored sha256-pinned copy as offline/failure fallback (nothing to install)",
     languages: ["*"],
     install: { url: "https://github.com/maxgfr/package-checker.sh" },
-    // vendored + pinned — ships with ultrasec
-    runHint: "bash <vendored package-checker.sh> <repo> --default-source-ghsa-osv --export-json <file>",
-    // Not a PATH binary — it's vendored bash, materialized to the cache dir at
-    // runtime (src/tools/package-checker.ts). "Installed" means the interpreter
-    // trio it needs (bash/awk/curl) is present, not the script itself.
+    // latest by default, vendored + pinned fallback — ships with ultrasec
+    runHint: "bash <resolved package-checker.sh> <repo> --default-source-ghsa-osv --export-json <file>",
+    // Not a PATH binary — it's resolved (latest, or the vendored fallback) and
+    // materialized to the cache dir at runtime (src/tools/package-checker.ts,
+    // resolveScriptSource()). "Installed" means the interpreter trio it needs
+    // (bash/awk/curl) is present, not any specific script version — the
+    // version actually run is decided per-run, not at registry-display time.
     detect: () => {
       const ok = detect("bash").installed && detect("awk").installed && detect("curl").installed;
       return { installed: ok, version: ok ? PACKAGE_CHECKER_TAG : void 0 };
@@ -14019,7 +14021,7 @@ function runDocker(adapter, repo, ctx) {
   const argv = buildArgv(adapter, repo, MOUNT, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
   const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
-  const args2 = ["run", "--rm", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
+  const args2 = ["run", "--rm", "--pull", "always", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
   const { stdout, failed: failed2, err: err2 } = exec("docker", args2, repo);
   return finish(adapter, repo, stdout, failed2, err2, true);
 }
@@ -14037,7 +14039,7 @@ function runAdapter(adapter, repo, useDocker = false, ctx = {}) {
   return useDocker ? runDocker(adapter, repo, ctx) : runNative(adapter, repo, ctx);
 }
 function orchestrate(adapters, repo, opts = {}) {
-  let selected = opts.which && opts.which.length ? adapters.filter((a) => opts.which.includes(a.name)) : adapters;
+  let selected = opts.which?.length ? adapters.filter((a) => opts.which.includes(a.name)) : adapters;
   if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
   const ctx = { offline: opts.offline, sbom: opts.sbom };
   const results = [];
@@ -14225,7 +14227,7 @@ function generateSbom(repo, outDir) {
 var trivy = {
   name: "trivy",
   category: "dep",
-  dockerImage: "ghcr.io/aquasecurity/trivy:0.71.1",
+  dockerImage: "ghcr.io/aquasecurity/trivy:latest",
   argv: (target) => ["fs", "--scanners", "vuln,secret,misconfig", "--format", "json", "--quiet", target],
   parse(raw) {
     const data = JSON.parse(raw || "{}");
@@ -14294,7 +14296,7 @@ import { join as join25 } from "path";
 var gitleaks = {
   name: "gitleaks",
   category: "secret",
-  dockerImage: "ghcr.io/gitleaks/gitleaks:v8.30.1",
+  dockerImage: "ghcr.io/gitleaks/gitleaks:latest",
   // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);
   // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
   argv: (target) => {
@@ -14377,7 +14379,7 @@ function deriveSeverity(input, fallback = "medium") {
 var osvScanner = {
   name: "osv-scanner",
   category: "dep",
-  dockerImage: "ghcr.io/google/osv-scanner:v2.3.8",
+  dockerImage: "ghcr.io/google/osv-scanner:latest",
   // v2 CLI: `scan source` walks a directory for lockfiles/manifests. JSON → stdout.
   argv: (target) => ["scan", "source", "--recursive", "--format", "json", target],
   parse(raw) {
@@ -14456,7 +14458,7 @@ var semgrep = {
   name: "semgrep",
   category: "sast",
   // The semgrep/semgrep image entrypoint is NOT `semgrep`, so the runner prepends it.
-  dockerImage: "semgrep/semgrep:1.166.0",
+  dockerImage: "semgrep/semgrep:latest",
   dockerEntrypointIsTool: false,
   argv: (target) => ["scan", "--json", "--quiet", "--config", "auto", target],
   parse: (raw) => parseSemgrep("semgrep", raw)
@@ -14577,7 +14579,11 @@ var govulncheck = {
 var bandit = {
   name: "bandit",
   category: "sast",
-  dockerImage: "ghcr.io/pycqa/bandit:1.8.6",
+  // NB the image lives at pycqa/bandit/bandit (the publish workflow appends the
+  // repo name again under the org path) — a plain ghcr.io/pycqa/bandit:* tag 404s.
+  // Upstream also only ever pushes `latest` (no versioned tags), so that's the
+  // sole usable tag here regardless of the latest-by-default policy.
+  dockerImage: "ghcr.io/pycqa/bandit/bandit:latest",
   argv: (target) => ["-r", target, "-f", "json", "-ll", "-ii", "-q"],
   parse(raw) {
     const data = JSON.parse(raw || "{}");
@@ -14609,7 +14615,7 @@ var bandit = {
 var gosec = {
   name: "gosec",
   category: "sast",
-  dockerImage: "ghcr.io/securego/gosec:v2.21.4",
+  dockerImage: "ghcr.io/securego/gosec:latest",
   argv: () => ["-fmt", "json", "-quiet", "-no-fail", "./..."],
   parse(raw) {
     const data = JSON.parse(raw || "{}");
@@ -14641,7 +14647,7 @@ var gosec = {
 var checkov = {
   name: "checkov",
   category: "config",
-  dockerImage: "bridgecrew/checkov:3.2.0",
+  dockerImage: "bridgecrew/checkov:latest",
   argv: (target) => ["-d", target, "-o", "json", "--compact", "--quiet", "--soft-fail"],
   parse(raw) {
     const data = JSON.parse(raw || "{}");
@@ -14680,7 +14686,7 @@ function isDockerfile(rel) {
 var hadolint = {
   name: "hadolint",
   category: "config",
-  dockerImage: "hadolint/hadolint:v2.12.0",
+  dockerImage: "hadolint/hadolint:latest",
   argv: () => ["--format", "json", "--no-fail"],
   enumerate: (repo) => walk2(repo).map((f) => f.rel).filter(isDockerfile),
   parse(raw) {
@@ -15057,6 +15063,8 @@ var yarnAudit = {
 };
 
 // src/tools/package-checker.ts
+import { execFileSync as execFileSync6 } from "child_process";
+import { createHash as createHash3 } from "crypto";
 import { existsSync as existsSync13, mkdirSync as mkdirSync8, readFileSync as readFileSync13, readdirSync as readdirSync5, rmSync as rmSync2, writeFileSync as writeFileSync9 } from "fs";
 import { join as join29 } from "path";
 function hasRepoLocalPurlFeed(repo) {
@@ -15076,6 +15084,62 @@ function scriptPath() {
     writeFileSync9(path, PACKAGE_CHECKER_SH);
   }
   return path;
+}
+var RESOLVE_CURL_TIMEOUT_S = 4;
+var RESOLVE_TIMEOUT_MS = 6e3;
+var UPSTREAM_REPO = "maxgfr/package-checker.sh";
+var SAFE_TAG = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+function truthyEnv(v) {
+  return v !== void 0 && v !== "" && v !== "0" && v.toLowerCase() !== "false";
+}
+var apiBase = () => process.env.ULTRASEC_PACKAGE_CHECKER_API || "https://api.github.com";
+var rawBase = () => process.env.ULTRASEC_PACKAGE_CHECKER_RAW || "https://raw.githubusercontent.com";
+function curlFetch(url) {
+  try {
+    return execFileSync6("curl", ["-fsSL", "--max-time", String(RESOLVE_CURL_TIMEOUT_S), url], {
+      timeout: RESOLVE_TIMEOUT_MS,
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+  } catch {
+    return null;
+  }
+}
+function fetchLatestTag() {
+  const buf = curlFetch(`${apiBase()}/repos/${UPSTREAM_REPO}/releases/latest`);
+  if (!buf) return null;
+  try {
+    const tag = JSON.parse(buf.toString("utf8")).tag_name;
+    return typeof tag === "string" && SAFE_TAG.test(tag) ? tag : null;
+  } catch {
+    return null;
+  }
+}
+function fetchAndCacheScript(tag) {
+  const buf = curlFetch(`${rawBase()}/${UPSTREAM_REPO}/${tag}/script.sh`);
+  if (!buf?.length) return null;
+  const sha12 = createHash3("sha256").update(buf).digest("hex").slice(0, 12);
+  const dir = join29(cacheDir(), "package-checker");
+  const path = join29(dir, `script-${tag}-${sha12}.sh`);
+  try {
+    if (!existsSync13(path)) {
+      mkdirSync8(dir, { recursive: true });
+      writeFileSync9(path, buf);
+    }
+    return path;
+  } catch {
+    return null;
+  }
+}
+function resolveScriptSource() {
+  if (truthyEnv(process.env.ULTRASEC_PACKAGE_CHECKER_PINNED)) {
+    return { cmd: ["bash", scriptPath()], note: `${PACKAGE_CHECKER_TAG} (vendored, pinned)` };
+  }
+  const tag = fetchLatestTag();
+  if (!tag) return { cmd: ["bash", scriptPath()], note: `${PACKAGE_CHECKER_TAG} (vendored fallback \u2014 latest-tag lookup failed)` };
+  if (tag === PACKAGE_CHECKER_TAG) return { cmd: ["bash", scriptPath()], note: `${PACKAGE_CHECKER_TAG} (vendored, already latest)` };
+  const path = fetchAndCacheScript(tag);
+  if (!path) return { cmd: ["bash", scriptPath()], note: `${PACKAGE_CHECKER_TAG} (vendored fallback \u2014 download of ${tag} failed)` };
+  return { cmd: ["bash", path], note: `${tag} (latest)` };
 }
 var cachedExportPath;
 function exportPath() {
@@ -15131,7 +15195,10 @@ var packageChecker = {
   command() {
     if (!detect("bash").installed || !detect("awk").installed || !detect("curl").installed) return null;
     try {
-      return ["bash", scriptPath()];
+      const { cmd, note } = resolveScriptSource();
+      if (truthyEnv(process.env.ULTRASEC_PACKAGE_CHECKER_DEBUG)) process.stderr.write(`package-checker: ${note}
+`);
+      return cmd;
     } catch {
       return null;
     }
@@ -18580,7 +18647,7 @@ function runRender(args2) {
 }
 
 // src/commands/clean.ts
-import { execFileSync as execFileSync6 } from "child_process";
+import { execFileSync as execFileSync7 } from "child_process";
 import { existsSync as existsSync20, rmSync as rmSync3, readdirSync as readdirSync8 } from "fs";
 import { join as join41, resolve as resolve23 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
@@ -18591,7 +18658,7 @@ function dockerImages() {
 }
 function dockerAvailable() {
   try {
-    execFileSync6("docker", ["--version"], { stdio: "ignore", timeout: 5e3 });
+    execFileSync7("docker", ["--version"], { stdio: "ignore", timeout: 5e3 });
     return true;
   } catch {
     return false;
@@ -18599,7 +18666,7 @@ function dockerAvailable() {
 }
 function docker(args2) {
   try {
-    const out2 = execFileSync6("docker", args2, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 });
+    const out2 = execFileSync7("docker", args2, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 });
     return { ok: true, out: out2 };
   } catch {
     return { ok: false, out: "" };
