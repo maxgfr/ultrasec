@@ -158,6 +158,30 @@ node scripts/ultrasec.mjs logs ./var/log --out .ultrasec-logs
 
 See [references/log-forensics-playbook.md](skills/ultrasec/references/log-forensics-playbook.md).
 
+## The tool belt
+
+Every scanner ultrasec knows how to drive, normalized into one finding model and
+correlated (the same advisory seen by three tools becomes one multi-source
+finding). Everything degrades gracefully: not installed ⇒ skipped with a note,
+`scan --offline` skips the network-dependent audits, and `ultrasec tools` shows
+the live status of each.
+
+| Tool | Covers | Needs |
+|---|---|---|
+| `package-checker` | dependencies — 12 ecosystems (npm/yarn/pnpm/bun/deno, PyPI, Go, Cargo, RubyGems, Composer, Maven/Gradle, NuGet, Pub, Hex, Swift, GitHub Actions) against GHSA/OSV feeds | **nothing — vendored** (pinned [v1.11.4](https://github.com/maxgfr/package-checker.sh), sha256 drift-gated; just bash+awk+curl) |
+| `trivy` | dependencies/CVE + secrets + misconfig | install or `--docker` |
+| `osv-scanner` | dependencies (Google OSV, lockfile-driven) | install or `--docker` |
+| `grype` | dependencies (Anchore; consumes the Syft SBOM when present) | install |
+| `npm-audit` / `pnpm-audit` / `yarn-audit` | dependencies — the package manager's own registry audit of the detected lockfile | npm/pnpm/yarn on PATH; network (skipped `--offline`) |
+| `pip-audit` | Python dependencies (`requirements.txt`) | install; network |
+| `cargo-audit` | Rust dependencies (`Cargo.lock`, RustSec) | install |
+| `govulncheck` | Go dependencies, reachability-aware | install |
+| `syft` | SBOM generator — CycloneDX deliverable (`sbom.cdx.json`), cross-fed to grype and package-checker | install |
+| `semgrep` / `opengrep` | SAST rules | install (semgrep also `--docker`) |
+| `bandit` / `gosec` | SAST (Python / Go) | install or `--docker` |
+| `gitleaks` / `kingfisher` | secrets | install (gitleaks also `--docker`) |
+| `checkov` / `hadolint` | IaC / Dockerfile misconfig | install or `--docker` |
+
 ## Analysis tools via Docker
 
 ultrasec orchestrates best-in-class OSS scanners and normalizes their output into
