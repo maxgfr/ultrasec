@@ -8,6 +8,7 @@ import { runMap } from "./commands/map.js";
 import { runScan } from "./commands/scan.js";
 import { runContext } from "./commands/context.js";
 import { runImport } from "./commands/import.js";
+import { runLogs } from "./commands/logs.js";
 import { runDossier } from "./commands/dossier.js";
 import { runTriage } from "./commands/triage.js";
 import { runInvestigate } from "./commands/investigate.js";
@@ -52,6 +53,13 @@ COMMANDS
              dossier: map → correlate → risk-rank → fold in (preserving verdicts).
              ultrasec never runs it — data ingest only. Flags: --run · --format
              deepsec-json · --no-enrich/--offline · --blame.
+  logs       Blue-team log forensics: ingest existing log files (nginx/access,
+             JSON-lines, generic-timestamped, raw) and run deterministic attack-
+             signature detection (SQLi/XSS/traversal/cmdinj/probe-path + known
+             scanner user-agents) into its OWN dossier, findings citing
+             [logfile:line]. Evidence is redacted by default (secrets/PII never
+             land in a finding message). Flags: --out · --format · --budget
+             quick|standard|thorough · --max-lines · --no-redact · --json.
   tools      List known external scanners, which are installed, and how to get them.
   graph      Show the links into/out of a file or symbol.
   paths      List candidate cross-file source→sink chains.
@@ -121,6 +129,7 @@ export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   scan: runScan,
   context: runContext,
   import: runImport,
+  logs: runLogs,
   dossier: runDossier,
   triage: runTriage,
   paths: runPaths,

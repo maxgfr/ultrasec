@@ -88,6 +88,16 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
   **risk-rank**, and fold in **preserving prior verdicts**. ultrasec never runs deepsec
   (no keys, no Vercel) — pure data ingest; each imported finding lands `open` and is
   yours to adjudicate, gated by the same `[file:line]` grounding `check` as everything else.
+- `logs <path…> [--out .ultrasec-logs] [--format F] [--budget quick|standard|thorough]
+  [--max-lines N] [--no-redact] [--json]` — **blue-team log forensics** (defensive,
+  read-only): ingest existing log files (nginx/access, JSON-lines, generic-timestamped,
+  raw) and run deterministic attack-signature detection (SQLi/XSS/traversal/cmdinj/
+  probe-path + known scanner user-agents, e.g. sqlmap/nikto/nuclei) into its **own**
+  dossier — never the code-scan pipeline — with findings citing `[logfile:line]`, so
+  `check`/`verify`/`render` work unchanged. Also writes `LOGSTATS.json` (top IPs/paths,
+  status distribution). Evidence is **redacted by default** (secrets/PII never land in
+  a finding message). Use for "analyze my access/auth logs", "forensique de logs" —
+  see [references/log-forensics-playbook.md](references/log-forensics-playbook.md).
 - `tools [--json]` — the external-scanner catalog: which are installed, what they
   cover, how to install the rest. ultrasec runs what's present; none are required.
 - `graph <file|symbol> [--depth n]` — the cross-file links into/out of a node.
@@ -192,6 +202,10 @@ One committed, dependency-free bundle: `node scripts/ultrasec.mjs <command>`.
    [references/revalidate-playbook.md](references/revalidate-playbook.md) (git-history
    FP cut) and [references/investigate-playbook.md](references/investigate-playbook.md)
    (agentic discovery of authz/business-logic bugs).
+6. **Blue-team: analyze existing logs, not source code** — "analyze my access/auth
+   logs", "forensique de logs", "did anyone attack us" — `logs <path…>` (its own
+   dossier, defensive/read-only, redacted evidence by default):
+   [references/log-forensics-playbook.md](references/log-forensics-playbook.md).
 
 ## Orchestration — route by harness
 
