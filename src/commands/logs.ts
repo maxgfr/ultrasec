@@ -78,6 +78,10 @@ export async function runLogs(args: ParsedArgs): Promise<number> {
   // `scan`'s taint-candidate cap (real candidates dropped by a hard limit), so
   // it's surfaced through the SAME manifest.truncation field/shape scan uses —
   // one coverage-capped banner in DOSSIER.md, not a bespoke logs-only field.
+  // Its remediation differs from scan's, though: FAMILY_CAP is a hardcoded
+  // constant (no flag raises it) and `--scope` doesn't exist here — so `hint`
+  // overrides the shared banner's default (scan-only) advice sentence with
+  // logs-appropriate wording. See store.ts's renderDossierMd.
   // A budget stop (fewer LINES read than exist) is a different kind of
   // truncation — reported via `truncation[]`/stdout/exit code instead, since
   // the shared DOSSIER.md copy for `truncation.files` names scan-only flags
@@ -97,7 +101,15 @@ export async function runLogs(args: ParsedArgs): Promise<number> {
     languages: [],
     toolsRun: [],
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
-    ...(familyOverflow > 0 ? { truncation: { candidates: familyOverflow, total: familyOverflow + signatureFindings } } : {}),
+    ...(familyOverflow > 0
+      ? {
+          truncation: {
+            candidates: familyOverflow,
+            total: familyOverflow + signatureFindings,
+            hint: "Per-family caps are fixed (not configurable); re-run with `--max-lines` or `--budget thorough` for a larger line budget — see `truncation[]` (stdout/--json) and `LOGSTATS.json` for the full counts.",
+          },
+        }
+      : {}),
   };
 
   writeDossier(out, { manifest, findings, graph });

@@ -143,6 +143,34 @@ describe("runLogs — end to end", () => {
       expect(code, `--format ${fmt} should exit 0`).toBe(0);
     }
   });
+
+  it("logs dossier truncation banner uses logs-appropriate wording, not scan-only flags", async () => {
+    const floodDir = mkdtempSync(join(tmpdir(), "ultrasec-logs-trunc-"));
+    try {
+      const file = join(floodDir, "flood.log");
+      const lines: string[] = [];
+      for (let i = 0; i < 80; i++) {
+        lines.push(
+          `203.0.113.${(i % 200) + 1} - - [10/Oct/2023:15:00:${String(i % 60).padStart(2, "0")} +0000] "GET /search?q=1' OR '${i}'='${i} HTTP/1.1" 200 100 "-" "Mozilla/5.0"`,
+        );
+      }
+      writeFileSync(file, lines.join("\n") + "\n");
+
+      const out = join(floodDir, "run");
+      const restore = silence();
+      const code = await runLogs(parseArgs(["logs", file, "--out", out]));
+      restore();
+      expect(code).toBe(0);
+
+      const md = readFileSync(join(out, "DOSSIER.md"), "utf8");
+      expect(md).toContain("Coverage capped");
+      expect(md).toContain("--max-lines");
+      expect(md).not.toContain("--max-candidates");
+      expect(md).not.toContain("--scope");
+    } finally {
+      rmSync(floodDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("expandInputs", () => {

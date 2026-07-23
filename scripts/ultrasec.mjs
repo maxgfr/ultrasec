@@ -12635,9 +12635,8 @@ function renderDossierMd(d) {
   L.push(`> **needs-human** \u2014 never silently dropped.`);
   L.push("");
   if (m.truncation?.candidates) {
-    L.push(
-      `> \u26A0\uFE0F **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`
-    );
+    const advice = m.truncation.hint ?? "Raise `--max-candidates` (or `--budget thorough`) or narrow `--scope` to see the rest.";
+    L.push(`> \u26A0\uFE0F **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. ${advice}`);
     L.push("");
   }
   if (m.truncation?.files) {
@@ -16250,7 +16249,13 @@ async function runLogs(args2) {
     languages: [],
     toolsRun: [],
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
-    ...familyOverflow > 0 ? { truncation: { candidates: familyOverflow, total: familyOverflow + signatureFindings } } : {}
+    ...familyOverflow > 0 ? {
+      truncation: {
+        candidates: familyOverflow,
+        total: familyOverflow + signatureFindings,
+        hint: "Per-family caps are fixed (not configurable); re-run with `--max-lines` or `--budget thorough` for a larger line budget \u2014 see `truncation[]` (stdout/--json) and `LOGSTATS.json` for the full counts."
+      }
+    } : {}
   };
   writeDossier(out2, { manifest, findings, graph });
   mkdirSync10(out2, { recursive: true });

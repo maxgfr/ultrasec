@@ -167,9 +167,12 @@ export function renderDossierMd(d: Dossier): string {
   if (m.truncation?.candidates) {
     // Report the OMITTED count (accurate to what the cap dropped) rather than a
     // "shown = total − candidates" that can drift from the merged finding set.
-    L.push(
-      `> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. Raise \`--max-candidates\` (or \`--budget thorough\`) or narrow \`--scope\` to see the rest.`,
-    );
+    // The remediation sentence is command-specific: scan's default names
+    // --max-candidates/--budget/--scope (all real scan flags); a command whose
+    // cap isn't reachable through those flags (e.g. `logs`'s fixed per-family
+    // cap) supplies its own `truncation.hint` instead — never both.
+    const advice = m.truncation.hint ?? "Raise `--max-candidates` (or `--budget thorough`) or narrow `--scope` to see the rest.";
+    L.push(`> ⚠️ **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. ${advice}`);
     L.push("");
   }
   if (m.truncation?.files) {

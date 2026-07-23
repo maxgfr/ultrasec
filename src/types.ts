@@ -223,6 +223,13 @@ export interface Manifest {
     total: number;
     /** True when the file walk hit `--max-files` (some files were not scanned). */
     files?: boolean;
+    /** Command-specific replacement for the default "Coverage capped" advice
+     *  sentence (which names scan-only flags: `--max-candidates`/`--scope`).
+     *  Set by commands — e.g. `logs`, whose family caps aren't reachable via
+     *  those flags — whose remediation differs from a taint-candidate cap.
+     *  Absent ⇒ `store.ts` renders the default scan advice, byte-identical to
+     *  before this field existed. */
+    hint?: string;
   };
   /** Every scope/diff that has contributed to this (possibly merged) run. */
   scopes?: string[];
