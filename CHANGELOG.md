@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.16.1](https://github.com/maxgfr/ultrasec/compare/v1.16.0...v1.16.1) (2026-07-24)
+
+
+### Bug Fixes
+
+* **scan:** warm the tree-sitter grammars — the AST tier was never reachable ([9048ffe](https://github.com/maxgfr/ultrasec/commit/9048ffef7dff89b3d0013df015c871e0cb9e79b0))
+
 # [1.16.0](https://github.com/maxgfr/ultrasec/compare/v1.15.0...v1.16.0) (2026-07-24)
 
 
