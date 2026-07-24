@@ -4,9 +4,9 @@ name: Engine re-pin
 # If the pinned engine is stale, re-pins it, rebuilds the bundle, and runs the
 # same gates as ci.yml. All green -> pushed straight to main (a GITHUB_TOKEN
 # push triggers no workflows, so release.yml/ci.yml are kicked off explicitly
-# via workflow_dispatch). Any gate red -> the synced state (adjudication
-# material, not thrown away) goes to a repin/<tag> branch with a PR for a
-# human to classify golden diffs. Never auto-regenerates a golden/snapshot.
+# via workflow_dispatch). Any gate red -> nothing is pushed and no PR is
+# opened; the run just fails and the next daily cron retries. A red run is
+# the signal to investigate locally.
 on:
   schedule:
     - cron: "59 6 * * *"
@@ -15,7 +15,6 @@ on:
 permissions:
   contents: write
   actions: write
-  pull-requests: write
 
 concurrency: engine-repin
 
@@ -87,9 +86,8 @@ jobs:
 
       # check:build's own git-diff gate compares the rebuilt bundle against
       # HEAD, so the rebuilt bundle has to be committed first (this repo's
-      # local/CI flow: build, then commit, then check:build). This commit is
-      # also the adjudication material if a later gate goes red — it stays
-      # even on failure.
+      # local/CI flow: build, then commit, then check:build). On red gates
+      # nothing is pushed — this commit never leaves the runner.
       - name: Commit re-pinned engine + rebuilt bundle
         if: steps.detect.outputs.stale == 'true'
         env:
@@ -135,26 +133,3 @@ jobs:
       - name: Trigger CI workflow
         if: steps.detect.outputs.stale == 'true'
         run: gh workflow run ci.yml --ref main
-
-      - name: On failure — push adjudication branch and open PR
-        if: steps.detect.outputs.stale == 'true' && failure() && steps.push.outputs.pushed != 'true'
-        env:
-          LATEST: ${{ steps.detect.outputs.latest }}
-        run: |
-          git rebase --abort 2>/dev/null || true
-          BRANCH="repin/${LATEST}"
-          git add -A
-          git diff --cached --quiet || git commit -m "chore(engine): re-pin codeindex ${LATEST}" -m "Automated re-pin — gates failed, pushed for manual adjudication."
-          git push origin HEAD:refs/heads/"$BRANCH" --force
-          EXISTING=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number')
-          if [ -z "$EXISTING" ]; then
-            RUN_URL="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            BODY=$(printf 'Automated re-pin to codeindex %s failed one or more gates.\n\nRun: %s\n\nDoctrine: classify every golden diff (accept/reject, with reasoning) before ever regenerating a snapshot — a golden diff is a test failure, not something to wave through here. If the engine is genuinely producing wrong output, file an issue on maxgfr/codeindex instead of silently accepting the diff.\n' "$LATEST" "$RUN_URL")
-            gh pr create \
-              --title "engine re-pin ${LATEST}: gates failed — manual adjudication needed" \
-              --head "$BRANCH" \
-              --base main \
-              --body "$BODY"
-          else
-            echo "PR #$EXISTING already open for $BRANCH, not duplicating."
-          fi
