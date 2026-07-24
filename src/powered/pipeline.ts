@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadDossier, writeDossier, countBySeverity, type Dossier } from "../store.js";
 import { emitWorklist, persistFindings, stageFiles } from "../stage.js";
-import { scanRepo, type ScanOptions } from "../scan.js";
+import { scanRepo, extractionTier, type ScanOptions } from "../scan.js";
 import { buildGraph } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
 import { buildAttackSurface } from "../map.js";
@@ -183,6 +183,7 @@ function scanCore(repo: string, run: string, scanOpts: ScanOptions): void {
     languages: [...new Set(scan.files.map((f) => f.lang))].sort(),
     toolsRun: [],
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
+    extraction: extractionTier(),
   };
   writeDossier(run, { manifest, findings, graph });
 }

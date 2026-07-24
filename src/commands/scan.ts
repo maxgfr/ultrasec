@@ -1,7 +1,7 @@
 import { resolve, join, relative } from "node:path";
 import { existsSync } from "node:fs";
 import { flagStr, flagBool, listFlag, numFlag, own, println, eprintln, byStr, type ParsedArgs } from "../util.js";
-import { scanRepo, scanRepoCached } from "../scan.js";
+import { scanRepo, scanRepoCached, extractionTier } from "../scan.js";
 import { buildGraph, reverseDependents } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
 import { enumerateSinkCandidates } from "../sinks.js";
@@ -177,6 +177,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     toolsRun: tool.toolsRun,
     ...(perToolStatus ? { toolStatus: perToolStatus } : {}),
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
+    extraction: extractionTier(),
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
     ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),

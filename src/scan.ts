@@ -4,6 +4,9 @@ import { byStr } from "./util.js";
 import type { CacheEntry } from "./cache.js";
 import {
   scanRepo as engineScanRepo,
+  allGrammarKeys,
+  grammarReady,
+  resolveGrammarsTier,
   type FileRecord,
   type RepoScan as EngineRepoScan,
   type ScanOptions as EngineScanOptions,
@@ -169,4 +172,13 @@ export function scanRepoCached(repo: string, opts: ScanOptions, cache: Map<strin
   const engine = engineScanRepo(repo, { ...toEngineOptions(repo, opts), cache });
   for (const f of engine.files) cache.set(f.rel, { hash: f.hash, record: f });
   return adapt(repo, engine);
+}
+
+/** Which extraction tier this process will actually use, for the manifest.
+ *  `ast: false` is the regex fallback — a materially thinner scan (fewer symbols,
+ *  regex-guessed call sites), so it goes in the dossier rather than staying an
+ *  invisible property of the machine that happened to run it. Read AFTER the
+ *  CLI's `warmGrammars`, since `grammarReady` only flips once a grammar loads. */
+export function extractionTier(): { tier: "adjacent" | "env" | "cache" | "none"; ast: boolean } {
+  return { tier: resolveGrammarsTier().tier, ast: allGrammarKeys().some((k) => grammarReady(k)) };
 }

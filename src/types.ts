@@ -233,6 +233,14 @@ export interface Manifest {
   };
   /** Every scope/diff that has contributed to this (possibly merged) run. */
   scopes?: string[];
+  /** Which extraction tier produced this run's symbols and call sites. Same
+   *  contract as `truncation` above: a degraded run must never pass for a full
+   *  one. `ast: false` means tree-sitter was unavailable and the regex
+   *  extractors ran instead — measured on a 69-file TypeScript repo, that is 27
+   *  taint candidates instead of 66, with every cross-file command-injection
+   *  candidate missing. Additive/optional; dossiers written before this field
+   *  existed omit it. */
+  extraction?: { tier: "adjacent" | "env" | "cache" | "none"; ast: boolean };
   /** Basename of the CycloneDX SBOM generated this run (`src/tools/sbom.ts`), a
    *  dossier deliverable in its own right and the input grype/package-checker
    *  prefer over re-walking the tree. Additive/optional; older dossiers and

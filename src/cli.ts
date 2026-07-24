@@ -1,5 +1,6 @@
 import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
+import { warmGrammars } from "./vendor/codeindex-engine.mjs";
 import { VERSION } from "./types.js";
 import { parseArgs, flagBool, println, eprintln, type ParsedArgs } from "./util.js";
 import { runTools } from "./commands/tools.js";
@@ -172,6 +173,11 @@ export async function dispatch(cmd: string | undefined, args: ParsedArgs): Promi
   return handler(args);
 }
 
+// Commands that walk the repo and extract symbols. Only these pay for the
+// grammar warm-up: `check`/`render`/`triage`/… re-read an existing dossier and
+// must never trigger a 22 MB download to do it.
+const SCANNING_COMMANDS = new Set(["scan", "run", "graph", "map", "context", "investigate", "logs"]);
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const args = parseArgs(argv);
@@ -184,6 +190,15 @@ async function main(): Promise<void> {
     println(VERSION);
     process.exit(0);
   }
+
+  // Load the tree-sitter grammars ONCE, up front — the only async step; the scan
+  // pipeline stays synchronous and parses against the warmed grammars. Without
+  // this, `extractAst` never fires and every run silently uses the regex
+  // extractors: on a 69-file TypeScript repo that is 27 taint candidates instead
+  // of 66, and zero of the 9 critical cross-file command-injection candidates.
+  // First use on a fresh machine pulls the wasm into the shared cache; offline ⇒
+  // regex fallback, and warmGrammars says so rather than degrading in silence.
+  if (SCANNING_COMMANDS.has(args._[0] ?? "")) await warmGrammars({ label: "ultrasec" });
 
   const code = await dispatch(args._[0], args);
   process.exit(code);
