@@ -5,7 +5,7 @@ import { realpathSync as realpathSync5 } from "fs";
 import { pathToFileURL } from "url";
 
 // src/types.ts
-var VERSION = "1.13.0";
+var VERSION = "1.14.0";
 var SCHEMA_VERSION = 6;
 var SEVERITIES = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
