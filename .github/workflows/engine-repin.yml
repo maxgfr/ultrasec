@@ -141,6 +141,7 @@ jobs:
         env:
           LATEST: ${{ steps.detect.outputs.latest }}
         run: |
+          git rebase --abort 2>/dev/null || true
           BRANCH="repin/${LATEST}"
           git add -A
           git diff --cached --quiet || git commit -m "chore(engine): re-pin codeindex ${LATEST}" -m "Automated re-pin — gates failed, pushed for manual adjudication."
