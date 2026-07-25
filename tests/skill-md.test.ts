@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { COMMAND_HANDLERS, HELP } from "../src/cli.js";
+import { ALL_STAGES } from "../src/powered/pipeline.js";
 import { VERSION } from "../src/types.js";
 
 // Guards that the published SKILL.md stays installable via `npx skills add`.
@@ -73,5 +75,121 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
     const pkg = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")) as { version: string };
     expect(metaVersion).toBe(pkg.version);
     expect(VERSION).toBe(pkg.version);
+  });
+
+  // SKILL.md is loaded on EVERY invocation of the skill; references/ are loaded on
+  // demand. Words that live here are paid for whether or not the run needs them, so
+  // the body carries routing + the irreducible rules and the method goes to a
+  // reference. Raising this cap is a real cost — log the reason when you do.
+  //
+  //   3183 -> 2400: `## The script` (148 lines duplicating `--help`) became a cheat
+  //                 sheet + references/commands.md; six new references absorbed the
+  //                 depth. Room was made for the run-health check, the symptom table,
+  //                 Common mistakes / Do not, and the References index.
+  it("keeps the SKILL.md body within its word budget", () => {
+    const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2400);
+  });
+
+  // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits
+  // away from the user's project, so a cwd-relative invocation resolves to nothing —
+  // and `orchestrate` fans work out to subagents that don't share our cwd at all.
+  it("teaches the absolute-path convention and never models a relative one", () => {
+    expect(raw, "SKILL.md must explain <skill-dir> resolution").toContain("<skill-dir>/scripts/ultrasec.mjs");
+    expect(raw.includes("node scripts/ultrasec.mjs"), "SKILL.md models a cwd-relative engine path that fails for an installed skill").toBe(false);
+  });
+
+  // One canonical statement of what `run` sequences. It had drifted into three
+  // mutually contradictory orderings (two in SKILL.md, one in powered-mode.md that
+  // dropped `implement` entirely while the same file called it "the final stage").
+  // Rule: the places that DO state it must state it identically, and nowhere may
+  // state a different one.
+  it("states the run stage list identically everywhere", () => {
+    const canonical = ALL_STAGES.join(" → ");
+    const powered = readFileSync(join(SKILL_DIR, "references", "powered-mode.md"), "utf8");
+    const authorities = [
+      ["references/powered-mode.md", powered],
+      ["src/cli.ts HELP", HELP],
+    ] as const;
+    for (const [name, text] of authorities) {
+      expect(text.replace(/\s+/g, " ").includes(canonical), `${name} must carry the canonical stage list "${canonical}"`).toBe(true);
+    }
+    // Any arrow-joined run of >=3 stage names anywhere in the docs must be the canonical one.
+    const stageArrows = new RegExp(`(?:${ALL_STAGES.join("|")})(?: → (?:${ALL_STAGES.join("|")})){2,}`, "g");
+    for (const f of readdirSync(join(SKILL_DIR, "references")).filter((n) => n.endsWith(".md"))) {
+      const text = readFileSync(join(SKILL_DIR, "references", f), "utf8").replace(/\s+/g, " ");
+      for (const m of text.matchAll(stageArrows)) {
+        expect(m[0], `references/${f} states a stage ordering that isn't canonical`).toBe(canonical);
+      }
+    }
+  });
+});
+
+// Docs that name a command or a flag the engine doesn't have are worse than no docs:
+// the agent runs them and gets exit 2. `--help` is the authority, and these keep the
+// prose pinned to it.
+describe("SKILL.md and references stay in sync with the CLI", () => {
+  const docs = [
+    ["SKILL.md", raw],
+    ...readdirSync(join(SKILL_DIR, "references"))
+      .filter((f) => f.endsWith(".md"))
+      .map((f) => [`references/${f}`, readFileSync(join(SKILL_DIR, "references", f), "utf8")] as const),
+  ] as const;
+
+  // Every flag any command actually reads, harvested from the real arg readers.
+  const realFlags = (): Set<string> => {
+    const found = new Set(["help", "version"]); // handled in main(), not via a flag reader
+    const walk = (dir: string): void => {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        const p = join(dir, e.name);
+        if (e.isDirectory()) {
+          if (e.name !== "vendor") walk(p);
+        } else if (p.endsWith(".ts") && !p.endsWith(".d.ts")) {
+          for (const m of readFileSync(p, "utf8").matchAll(/\b(?:flagStr|flagBool|listFlag|numFlag)\(\s*\w+\s*,\s*["']([^"']+)["']/g)) {
+            found.add(m[1] ?? "");
+          }
+        }
+      }
+    };
+    walk(join(ROOT, "src"));
+    return found;
+  };
+
+  // Only actual invocations count — a line inside a fenced block whose first token is
+  // `ultrasec`. Prose that happens to say "ultrasec does X", and other tools' flags
+  // quoted as examples (git's `--upload-pack`, docker's `--pull`), are not claims
+  // about this CLI and must not be linted as if they were.
+  const invocations = (text: string): string[] =>
+    [...text.matchAll(/```[a-z]*\n([\s\S]*?)```/g)]
+      .flatMap((b) => (b[1] ?? "").split("\n"))
+      .map((l) => l.trim())
+      .filter((l) => l.startsWith("ultrasec "));
+
+  it("documents only commands the CLI dispatches", () => {
+    const wired = new Set(Object.keys(COMMAND_HANDLERS));
+    let checked = 0;
+    for (const [name, text] of docs) {
+      for (const line of invocations(text)) {
+        const cmd = line.split(/\s+/)[1] ?? "";
+        checked++;
+        expect(wired.has(cmd), `${name} shows \`ultrasec ${cmd}\`, which no handler implements`).toBe(true);
+      }
+    }
+    expect(checked, "found no ultrasec invocations to check — the extractor is broken").toBeGreaterThan(20);
+  });
+
+  it("documents only flags the engine reads", () => {
+    const flags = realFlags();
+    for (const [name, text] of docs) {
+      for (const raw of invocations(text)) {
+        // A quoted argument is opaque: `--agent "mytool exec {prompt} --cwd {run}"`
+        // carries the OTHER CLI's flags, which ultrasec never parses.
+        const line = raw.replace(/"[^"]*"|'[^']*'/g, '""');
+        for (const m of line.matchAll(/--([a-z][a-z0-9-]+)/g)) {
+          const flag = m[1] ?? "";
+          expect(flags.has(flag), `${name} shows \`--${flag}\` on an ultrasec command line, but no command reads it`).toBe(true);
+        }
+      }
+    }
   });
 });
