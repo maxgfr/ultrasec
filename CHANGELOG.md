@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.18.0](https://github.com/maxgfr/ultrasec/compare/v1.17.0...v1.18.0) (2026-07-25)
+
+
+### Bug Fixes
+
+* **cli:** fail closed everywhere a run used to degrade in silence ([19a9d6a](https://github.com/maxgfr/ultrasec/commit/19a9d6a2af8c36ff672b6dcc5c5202d299338ea6))
+
+
+### Features
+
+* **skill:** rewrite ultrasec as a security reference, not a CLI manual ([85b11d0](https://github.com/maxgfr/ultrasec/commit/85b11d0b5c00c66d7abd409a09259f30b72377c9))
+
 # [1.17.0](https://github.com/maxgfr/ultrasec/compare/v1.16.1...v1.17.0) (2026-07-25)
 
 
