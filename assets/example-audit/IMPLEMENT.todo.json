@@ -9,7 +9,8 @@
       "at": "src/server.js:18 → src/server.js:19 → src/report.js:5",
       "status": "confirmed",
       "kind": "fix",
-      "fix": "Use execFile with an argv array; never build a shell string from input.",
+      "fix": "Replace execSync with execFile and an argv array: execFile(\"generate-report\", [\"--for\", name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can't be read as an option.",
+      "patch": "- return execSync(\"generate-report --for \" + name).toString();\n+ return execFileSync(\"generate-report\", [\"--for\", \"--\", name]).toString();",
       "owner": "@backend"
     },
     {
@@ -21,33 +22,21 @@
       "at": "src/server.js:10 → src/server.js:11 → src/db.js:6",
       "status": "confirmed",
       "kind": "fix",
-      "fix": "Use a parameterized query (placeholders), never string concatenation.",
-      "owner": "@backend"
-    },
-    {
-      "id": "9b0bcc91ea6a",
-      "title": "Cross-site scripting (reflected): untrusted input reaches send()",
-      "severity": "medium",
-      "category": "taint",
-      "cwe": "CWE-79",
-      "at": "src/server.js:18 → src/server.js:20",
-      "status": "confirmed",
-      "kind": "fix",
-      "fix": "Use execFile with an argv array; never build a shell string from input.",
+      "fix": "Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query(\"SELECT * FROM users WHERE id = ?\", [id]).",
+      "patch": "- const sql = \"SELECT * FROM users WHERE id = \" + id;\n- return sqlite.query(sql);\n+ return sqlite.query(\"SELECT * FROM users WHERE id = ?\", [id]);",
       "owner": "@backend"
     }
   ],
   "investigations": [],
   "rootCauses": [
     {
-      "cause": "Untrusted request input concatenated into interpreters",
+      "cause": "Request values handed to a helper that builds an interpreter string",
       "findingIds": [
         "3ffa0917b004",
-        "54b733703450",
-        "9b0bcc91ea6a"
+        "54b733703450"
       ],
-      "note": "Centralize input handling: parameterized queries + argv-array exec, plus an input-validation layer."
+      "note": "Both handlers read req.query.* and pass it, unvalidated, to a helper that concatenates it into SQL or a shell command. The fix is structural, not per-site: bind parameters at the data layer and use argv arrays for process execution, then add validation at the route boundary so a future helper inherits neither habit."
     }
   ],
-  "dismissed": 0
+  "dismissed": 1
 }

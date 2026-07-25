@@ -39,7 +39,8 @@
   <h1>Security audit</h1>
   <div class="sub">repo <code>examples/vuln-express</code> · ultrasec 0.0.0-development · tools: none</div>
   <div><span class="badge" style="background:#b91c1c">critical 1</span> <span class="badge" style="background:#c2410c">high 1</span> <span class="badge" style="background:#b45309">medium 1</span> <span class="badge" style="background:#15803d">low 0</span> <span class="badge" style="background:#64748b">info 0</span></div>
-  <section class="ai-narrative"><h2>Executive summary <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p>Two confirmed injection vulnerabilities in a public Express API: untrusted req.query values reach a raw SQL query and a shell command across files, with no validation. Both are directly exploitable by any client.</p></section>
+  <section class="ai-narrative"><h2>Executive summary <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p>Two confirmed injection flaws in a public Express API. Untrusted req.query values cross file boundaries into a raw SQL statement and a shell command, with no validation on any hop and no authentication on either route, so both are exploitable by any unauthenticated client — command injection first, which yields code execution as the app user. Both come from the same habit: request values handed straight to a helper that builds an interpreter string.</p></section>
+  <section class="ai-narrative"><h2>What the codebase does well <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p>The data layer already knows how to do this correctly — db.getUserSafe (src/db.js:11) uses a `?` placeholder with a parameter array, so the parameterized path exists and is the one to standardize on. The two findings below are deviations from it, not a missing capability.</p></section>
   
   <section class="finding" id="3ffa0917b004">
     <h3><span class="badge" style="background:#b91c1c">CRITICAL</span> OS command injection: untrusted input reaches execSync()</h3>
@@ -55,9 +56,12 @@
     <div class="flow"><div class="node source"><div class="loc">src/server.js:18</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node hop"><div class="loc">src/server.js:19</div><div class="why">calls runReport()</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/report.js:5</div><div class="sym">runReport()</div><div class="why">command sink: execSync()</div></div></div>
     <p class="msg">Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
-Revalidation (still-valid): still present at HEAD</p>
-    <p class="exploit"><strong>Exploit path:</strong> GET /report?name=$(id)</p>
-    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Use execFile with an argv array; never build a shell string from input. · owner @backend</div>
+Verdict (supported): req.query.name is concatenated into a shell string at report.js:5 and executed with execSync; no validation on any hop, and the route has no auth.
+
+Revalidation (still-valid): report.js:5 is unchanged at HEAD — still execSync on a concatenated string.</p>
+    <p class="exploit"><strong>Exploit path:</strong> GET /report?name=x;sleep%205 · unauthenticated → the response takes 5s (baseline ~40ms), proving shell execution as the app user</p>
+    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Replace execSync with execFile and an argv array: execFile(&quot;generate-report&quot;, [&quot;--for&quot;, name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can't be read as an option. · owner @backend<pre class="ai-patch">- return execSync(&quot;generate-report --for &quot; + name).toString();
++ return execFileSync(&quot;generate-report&quot;, [&quot;--for&quot;, &quot;--&quot;, name]).toString();</pre></div>
     <p class="refs"><a href="https://cwe.mitre.org/data/definitions/78.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/78.html</a></p>
   </section>
 
@@ -75,32 +79,35 @@ Revalidation (still-valid): still present at HEAD</p>
     <div class="flow"><div class="node source"><div class="loc">src/server.js:10</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node hop"><div class="loc">src/server.js:11</div><div class="why">calls getUser()</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/db.js:6</div><div class="sym">getUser()</div><div class="why">sql sink: query()</div></div></div>
     <p class="msg">Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
-Revalidation (still-valid): still present at HEAD</p>
-    <p class="exploit"><strong>Exploit path:</strong> GET /user?id=1 OR 1=1</p>
-    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Use a parameterized query (placeholders), never string concatenation. · owner @backend</div>
+Verdict (supported): req.query.id is concatenated into SQL at db.js:5 and reaches sqlite.query() with no parameter array. The parameterized sibling getUserSafe (db.js:11) is NOT on this path.
+
+Revalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation it consumes is still at db.js:5.</p>
+    <p class="exploit"><strong>Exploit path:</strong> GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`, proving the value is parsed as SQL, not data</p>
+    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query(&quot;SELECT * FROM users WHERE id = ?&quot;, [id]). · owner @backend<pre class="ai-patch">- const sql = &quot;SELECT * FROM users WHERE id = &quot; + id;
+- return sqlite.query(sql);
++ return sqlite.query(&quot;SELECT * FROM users WHERE id = ?&quot;, [id]);</pre></div>
     <p class="refs"><a href="https://cwe.mitre.org/data/definitions/89.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/89.html</a></p>
   </section>
-
+  <details><summary>1 dismissed candidate(s)</summary>
   <section class="finding" id="9b0bcc91ea6a">
     <h3><span class="badge" style="background:#b45309">MEDIUM</span> Cross-site scripting (reflected): untrusted input reaches send()</h3>
     <div class="meta">
       <code>9b0bcc91ea6a</code>
       · CWE-79 · taint
-      · status <span class="badge" style="background:#b91c1c">confirmed</span>
-      · confidence high
-      · verdict supported
+      · status <span class="badge" style="background:#64748b">dismissed</span>
+      · confidence low
+      · verdict unsupported
       
     </div>
     <div class="risk"><span class="badge" style="background:#475569">risk 30</span></div>
     <div class="flow"><div class="node source"><div class="loc">src/server.js:18</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/server.js:20</div><div class="why">xss sink: send()</div></div></div>
     <p class="msg">Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
-Revalidation (still-valid): still present at HEAD</p>
-    <p class="exploit"><strong>Exploit path:</strong> GET /report?name=$(id)</p>
-    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Use execFile with an argv array; never build a shell string from input. · owner @backend</div>
+Verdict (unsupported): The argument to res.send() at server.js:20 is `out` — the return value of runReport() — not req.query.name, so the query parameter is never reflected. The attacker does control that output, but only by way of the command injection at report.js:5, whose impact (RCE) subsumes it; reporting a separate MEDIUM XSS would double-count one bug. Tracked by 3ffa0917b004.</p>
+    
     <p class="refs"><a href="https://cwe.mitre.org/data/definitions/79.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/79.html</a></p>
-  </section>
-  
-  <section class="ai-narrative"><h2>Attack chains <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="ai-block"><h3>Unauthenticated SQL injection via /user</h3><div class="meta"><code>54b733703450</code></div><p>GET /user?id=... flows req.query.id across server.js into a string-concatenated SQL query in db.getUser.</p></div></section>
-  <section class="ai-narrative"><h2>Root-cause groups <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="ai-block"><h3>Untrusted request input concatenated into interpreters</h3><div class="meta"><code>3ffa0917b004</code>, <code>54b733703450</code>, <code>9b0bcc91ea6a</code></div><p>Centralize input handling: parameterized queries + argv-array exec, plus an input-validation layer.</p></div></section>
+  </section></details>
+  <section class="ai-narrative"><h2>Attack chains <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="ai-block"><h3>Unauthenticated code execution, then data access</h3><div class="meta"><code>3ffa0917b004</code> → <code>54b733703450</code></div><p>Neither route requires authentication. GET /report gives shell execution as the app user (report.js:5), which already reaches the database file directly; GET /user independently returns arbitrary rows (db.js:6). Fixing only the SQL injection leaves the stronger path intact.</p></div></section>
+  <section class="ai-narrative"><h2>Root-cause groups <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="ai-block"><h3>Request values handed to a helper that builds an interpreter string</h3><div class="meta"><code>3ffa0917b004</code>, <code>54b733703450</code></div><p>Both handlers read req.query.* and pass it, unvalidated, to a helper that concatenates it into SQL or a shell command. The fix is structural, not per-site: bind parameters at the data layer and use argv arrays for process execution, then add validation at the route boundary so a future helper inherits neither habit.</p></div></section>
+  <section class="ai-narrative"><h2>Hardening notes <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p class="ai-note">Defense-in-depth suggestions — not findings; excluded from the severity counts.</p><ul><li>Neither route validates the shape of its input before use (an integer id, a report name from a known set). Type/shape validation at the boundary is defense in depth once the two fixes above land — it is not what makes them exploitable today.</li><li>res.send() at server.js:20 returns command output with the default text/html content type. Once the command injection is fixed the attacker no longer controls that body, but setting an explicit content type (or res.json) removes the reflected-content question entirely.</li></ul></section>
 </body></html>

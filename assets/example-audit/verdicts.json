@@ -2,16 +2,18 @@
   {
     "id": "3ffa0917b004",
     "verdict": "supported",
-    "exploitPath": "GET /report?name=$(id)"
+    "note": "req.query.name is concatenated into a shell string at report.js:5 and executed with execSync; no validation on any hop, and the route has no auth.",
+    "exploitPath": "GET /report?name=x;sleep%205 · unauthenticated → the response takes 5s (baseline ~40ms), proving shell execution as the app user"
   },
   {
     "id": "54b733703450",
     "verdict": "supported",
-    "exploitPath": "GET /user?id=1 OR 1=1"
+    "note": "req.query.id is concatenated into SQL at db.js:5 and reaches sqlite.query() with no parameter array. The parameterized sibling getUserSafe (db.js:11) is NOT on this path.",
+    "exploitPath": "GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`, proving the value is parsed as SQL, not data"
   },
   {
     "id": "9b0bcc91ea6a",
-    "verdict": "supported",
-    "exploitPath": "GET /report?name=$(id)"
+    "verdict": "unsupported",
+    "note": "The argument to res.send() at server.js:20 is `out` — the return value of runReport() — not req.query.name, so the query parameter is never reflected. The attacker does control that output, but only by way of the command injection at report.js:5, whose impact (RCE) subsumes it; reporting a separate MEDIUM XSS would double-count one bug. Tracked by 3ffa0917b004."
   }
 ]

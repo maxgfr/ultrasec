@@ -1,40 +1,36 @@
 {
-  "executiveSummary": "Two confirmed injection vulnerabilities in a public Express API: untrusted req.query values reach a raw SQL query and a shell command across files, with no validation. Both are directly exploitable by any client.",
+  "executiveSummary": "Two confirmed injection flaws in a public Express API. Untrusted req.query values cross file boundaries into a raw SQL statement and a shell command, with no validation on any hop and no authentication on either route, so both are exploitable by any unauthenticated client — command injection first, which yields code execution as the app user. Both come from the same habit: request values handed straight to a helper that builds an interpreter string.",
+  "positivePatterns": "The data layer already knows how to do this correctly — db.getUserSafe (src/db.js:11) uses a `?` placeholder with a parameter array, so the parameterized path exists and is the one to standardize on. The two findings below are deviations from it, not a missing capability.",
   "remediations": [
     {
       "id": "3ffa0917b004",
-      "fix": "Use execFile with an argv array; never build a shell string from input.",
+      "fix": "Replace execSync with execFile and an argv array: execFile(\"generate-report\", [\"--for\", name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can't be read as an option.",
+      "patch": "- return execSync(\"generate-report --for \" + name).toString();\n+ return execFileSync(\"generate-report\", [\"--for\", \"--\", name]).toString();",
       "owner": "@backend"
     },
     {
       "id": "54b733703450",
-      "fix": "Use a parameterized query (placeholders), never string concatenation.",
-      "owner": "@backend"
-    },
-    {
-      "id": "9b0bcc91ea6a",
-      "fix": "Use execFile with an argv array; never build a shell string from input.",
+      "fix": "Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query(\"SELECT * FROM users WHERE id = ?\", [id]).",
+      "patch": "- const sql = \"SELECT * FROM users WHERE id = \" + id;\n- return sqlite.query(sql);\n+ return sqlite.query(\"SELECT * FROM users WHERE id = ?\", [id]);",
       "owner": "@backend"
     }
   ],
   "attackChains": [
     {
-      "title": "Unauthenticated SQL injection via /user",
-      "findingIds": [
-        "54b733703450"
-      ],
-      "narrative": "GET /user?id=... flows req.query.id across server.js into a string-concatenated SQL query in db.getUser."
+      "title": "Unauthenticated code execution, then data access",
+      "findingIds": ["3ffa0917b004", "54b733703450"],
+      "narrative": "Neither route requires authentication. GET /report gives shell execution as the app user (report.js:5), which already reaches the database file directly; GET /user independently returns arbitrary rows (db.js:6). Fixing only the SQL injection leaves the stronger path intact."
     }
   ],
   "rootCauses": [
     {
-      "cause": "Untrusted request input concatenated into interpreters",
-      "findingIds": [
-        "3ffa0917b004",
-        "54b733703450",
-        "9b0bcc91ea6a"
-      ],
-      "note": "Centralize input handling: parameterized queries + argv-array exec, plus an input-validation layer."
+      "cause": "Request values handed to a helper that builds an interpreter string",
+      "findingIds": ["3ffa0917b004", "54b733703450"],
+      "note": "Both handlers read req.query.* and pass it, unvalidated, to a helper that concatenates it into SQL or a shell command. The fix is structural, not per-site: bind parameters at the data layer and use argv arrays for process execution, then add validation at the route boundary so a future helper inherits neither habit."
     }
+  ],
+  "hardeningNotes": [
+    "Neither route validates the shape of its input before use (an integer id, a report name from a known set). Type/shape validation at the boundary is defense in depth once the two fixes above land — it is not what makes them exploitable today.",
+    "res.send() at server.js:20 returns command output with the default text/html content type. Once the command injection is fixed the attacker no longer controls that body, but setting an explicit content type (or res.json) removes the reflected-content question entirely."
   ]
 }

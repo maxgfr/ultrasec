@@ -1,5 +1,5 @@
 <!-- ultrasec IMPLEMENT draft — feed this file to the `to-prd` skill to author the remediation PRD, or hand it to an implementer/AI. Every item is grounded in a confirmed [file:line]. -->
-# Remediation PRD draft — 3 fixes, 0 to investigate
+# Remediation PRD draft — 2 fixes, 0 to investigate
 _AI-authored — verify against the cited findings before acting._
 
 > Deterministic draft from the ultrasec dossier. Feed it to the **`to-prd`** skill to
@@ -27,34 +27,40 @@ NOT exploitable — do not flag it.
 
 ## Problem statement
 
-The audit confirmed **3** exploitable finding(s) (1 critical, 1 high, 1 medium) that must be remediated.
+The audit confirmed **2** exploitable finding(s) (1 critical, 1 high) that must be remediated.
 
 ## Solution
 
 Fix at the root cause where possible:
 
-### Root cause: Untrusted request input concatenated into interpreters
-- findings: `3ffa0917b004`, `54b733703450`, `9b0bcc91ea6a`
-- Centralize input handling: parameterized queries + argv-array exec, plus an input-validation layer.
+### Root cause: Request values handed to a helper that builds an interpreter string
+- findings: `3ffa0917b004`, `54b733703450`
+- Both handlers read req.query.* and pass it, unvalidated, to a helper that concatenates it into SQL or a shell command. The fix is structural, not per-site: bind parameters at the data layer and use argv arrays for process execution, then add validation at the route boundary so a future helper inherits neither habit.
 
 ## User stories / work items
 
 1. **Fix `OS command injection: untrusted input reaches execSync()`** at `src/server.js:18 → src/server.js:19 → src/report.js:5` so it is no longer exploitable. _([critical] CWE-78 · `3ffa0917b004` · owner @backend)_
-   - Suggested fix (AI): Use execFile with an argv array; never build a shell string from input.
+   - Suggested fix (AI): Replace execSync with execFile and an argv array: execFile("generate-report", ["--for", name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can't be read as an option.
+   - Suggested patch:
+     ```diff
+     - return execSync("generate-report --for " + name).toString();
+     + return execFileSync("generate-report", ["--for", "--", name]).toString();
+     ```
    - Acceptance criteria:
      - [ ] The cited line `src/server.js:18 → src/server.js:19 → src/report.js:5` is no longer exploitable for this finding.
      - [ ] A regression test reproduces the issue before the fix and passes after it.
 2. **Fix `SQL injection: untrusted input reaches query()`** at `src/server.js:10 → src/server.js:11 → src/db.js:6` so it is no longer exploitable. _([high] CWE-89 · `54b733703450` · owner @backend)_
-   - Suggested fix (AI): Use a parameterized query (placeholders), never string concatenation.
+   - Suggested fix (AI): Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query("SELECT * FROM users WHERE id = ?", [id]).
+   - Suggested patch:
+     ```diff
+     - const sql = "SELECT * FROM users WHERE id = " + id;
+     - return sqlite.query(sql);
+     + return sqlite.query("SELECT * FROM users WHERE id = ?", [id]);
+     ```
    - Acceptance criteria:
      - [ ] The cited line `src/server.js:10 → src/server.js:11 → src/db.js:6` is no longer exploitable for this finding.
      - [ ] A regression test reproduces the issue before the fix and passes after it.
-3. **Fix `Cross-site scripting (reflected): untrusted input reaches send()`** at `src/server.js:18 → src/server.js:20` so it is no longer exploitable. _([medium] CWE-79 · `9b0bcc91ea6a` · owner @backend)_
-   - Suggested fix (AI): Use execFile with an argv array; never build a shell string from input.
-   - Acceptance criteria:
-     - [ ] The cited line `src/server.js:18 → src/server.js:20` is no longer exploitable for this finding.
-     - [ ] A regression test reproduces the issue before the fix and passes after it.
 
 ## Out of scope
-- Nothing dismissed.
+- 1 finding(s) were dismissed during the audit — not in scope for this work.
 

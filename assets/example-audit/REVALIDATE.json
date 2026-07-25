@@ -2,16 +2,11 @@
   {
     "id": "3ffa0917b004",
     "verdict": "still-valid",
-    "note": "still present at HEAD"
+    "note": "report.js:5 is unchanged at HEAD — still execSync on a concatenated string."
   },
   {
     "id": "54b733703450",
     "verdict": "still-valid",
-    "note": "still present at HEAD"
-  },
-  {
-    "id": "9b0bcc91ea6a",
-    "verdict": "still-valid",
-    "note": "still present at HEAD"
+    "note": "db.js:6 is unchanged at HEAD, and the concatenation it consumes is still at db.js:5."
   }
 ]

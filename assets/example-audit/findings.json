@@ -35,7 +35,7 @@
         "why": "command sink: execSync()"
       }
     ],
-    "message": "Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nRevalidation (still-valid): still present at HEAD",
+    "message": "Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nVerdict (supported): req.query.name is concatenated into a shell string at report.js:5 and executed with execSync; no validation on any hop, and the route has no auth.\n\nRevalidation (still-valid): report.js:5 is unchanged at HEAD — still execSync on a concatenated string.",
     "tool": "ultrasec",
     "references": [
       "https://cwe.mitre.org/data/definitions/78.html"
@@ -43,7 +43,7 @@
     "status": "confirmed",
     "risk": 60,
     "verdict": "supported",
-    "exploitPath": "GET /report?name=$(id)"
+    "exploitPath": "GET /report?name=x;sleep%205 · unauthenticated → the response takes 5s (baseline ~40ms), proving shell execution as the app user"
   },
   {
     "id": "54b733703450",
@@ -81,7 +81,7 @@
         "why": "sql sink: query()"
       }
     ],
-    "message": "Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nRevalidation (still-valid): still present at HEAD",
+    "message": "Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nVerdict (supported): req.query.id is concatenated into SQL at db.js:5 and reaches sqlite.query() with no parameter array. The parameterized sibling getUserSafe (db.js:11) is NOT on this path.\n\nRevalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation it consumes is still at db.js:5.",
     "tool": "ultrasec",
     "references": [
       "https://cwe.mitre.org/data/definitions/89.html"
@@ -89,7 +89,7 @@
     "status": "confirmed",
     "risk": 48,
     "verdict": "supported",
-    "exploitPath": "GET /user?id=1 OR 1=1"
+    "exploitPath": "GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`, proving the value is parsed as SQL, not data"
   },
   {
     "id": "9b0bcc91ea6a",
@@ -97,7 +97,7 @@
     "cwe": "CWE-79",
     "title": "Cross-site scripting (reflected): untrusted input reaches send()",
     "severity": "medium",
-    "confidence": "high",
+    "confidence": "low",
     "source": {
       "file": "src/server.js",
       "line": 18,
@@ -120,14 +120,13 @@
         "why": "xss sink: send()"
       }
     ],
-    "message": "Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nRevalidation (still-valid): still present at HEAD",
+    "message": "Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\n\nVerdict (unsupported): The argument to res.send() at server.js:20 is `out` — the return value of runReport() — not req.query.name, so the query parameter is never reflected. The attacker does control that output, but only by way of the command injection at report.js:5, whose impact (RCE) subsumes it; reporting a separate MEDIUM XSS would double-count one bug. Tracked by 3ffa0917b004.",
     "tool": "ultrasec",
     "references": [
       "https://cwe.mitre.org/data/definitions/79.html"
     ],
-    "status": "confirmed",
+    "status": "dismissed",
     "risk": 30,
-    "verdict": "supported",
-    "exploitPath": "GET /report?name=$(id)"
+    "verdict": "unsupported"
   }
 ]

@@ -8,10 +8,14 @@ _ranked by composite risk (severity ⊕ EPSS ⊕ KEV)_
 ## Executive summary (AI-authored)
 _AI-authored — verify against the cited findings before acting._
 
-Two confirmed injection vulnerabilities in a public Express API: untrusted req.query values reach a raw SQL query and a shell command across files, with no validation. Both are directly exploitable by any client.
+Two confirmed injection flaws in a public Express API. Untrusted req.query values cross file boundaries into a raw SQL statement and a shell command, with no validation on any hop and no authentication on either route, so both are exploitable by any unauthenticated client — command injection first, which yields code execution as the app user. Both come from the same habit: request values handed straight to a helper that builds an interpreter string.
 
-## Confirmed (3)
+## What the codebase does well (AI-authored)
+_AI-authored — verify against the cited findings before acting._
+
+The data layer already knows how to do this correctly — db.getUserSafe (src/db.js:11) uses a `?` placeholder with a parameter array, so the parameterized path exists and is the one to standardize on. The two findings below are deviations from it, not a missing capability.
+
+## Confirmed (2)
 - 🟥 CRITICAL **OS command injection: untrusted input reaches execSync()** — `src/server.js:18` → `src/server.js:19` → `src/report.js:5` (CWE-78) · risk 60
 - 🟧 HIGH **SQL injection: untrusted input reaches query()** — `src/server.js:10` → `src/server.js:11` → `src/db.js:6` (CWE-89) · risk 48
-- 🟨 MEDIUM **Cross-site scripting (reflected): untrusted input reaches send()** — `src/server.js:18` → `src/server.js:20` (CWE-79) · risk 30
 

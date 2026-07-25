@@ -62,16 +62,6 @@
     ]
   },
   "callersBySymbol": {
-    "VULN": [
-      {
-        "file": "src/server.js",
-        "line": 7
-      },
-      {
-        "file": "src/server.js",
-        "line": 15
-      }
-    ],
     "execSync": [
       {
         "file": "src/report.js",
@@ -82,7 +72,8 @@
     "express": [
       {
         "file": "src/server.js",
-        "line": 5
+        "line": 5,
+        "symbol": "app"
       }
     ],
     "get": [
@@ -128,23 +119,28 @@
     "require": [
       {
         "file": "src/db.js",
-        "line": 1
+        "line": 1,
+        "symbol": "sqlite"
       },
       {
         "file": "src/report.js",
-        "line": 1
+        "line": 1,
+        "symbol": "{ execSync }"
       },
       {
         "file": "src/server.js",
-        "line": 1
+        "line": 1,
+        "symbol": "express"
       },
       {
         "file": "src/server.js",
-        "line": 2
+        "line": 2,
+        "symbol": "{ getUser }"
       },
       {
         "file": "src/server.js",
-        "line": 3
+        "line": 3,
+        "symbol": "{ runReport }"
       }
     ],
     "runReport": [
@@ -157,12 +153,6 @@
       {
         "file": "src/server.js",
         "line": 20
-      }
-    ],
-    "sink": [
-      {
-        "file": "src/report.js",
-        "line": 3
       }
     ],
     "toString": [

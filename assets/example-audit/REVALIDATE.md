@@ -1,4 +1,4 @@
-# ultrasec revalidation worklist (3)
+# ultrasec revalidation worklist (2)
 
 Each finding below was already ranked **real** (confirmed / needs-human). Using the
 git facts, decide whether it is still a live issue and set a `verdict`:
@@ -32,15 +32,10 @@ NOT exploitable — do not flag it.
 ## 3ffa0917b004 — [critical] OS command injection: untrusted input reaches execSync()
 - at: `src/report.js:5` · file exists at HEAD: yes
 - current line: `return execSync("generate-report --for " + name).toString();`
-- line last changed: `5e902a3` (2026-01-15) by ultrasec example
+- line last changed: `4926462` (2026-01-15) by ultrasec example
 
 ## 54b733703450 — [high] SQL injection: untrusted input reaches query()
 - at: `src/db.js:6` · file exists at HEAD: yes
 - current line: `return sqlite.query(sql);`
-- line last changed: `5e902a3` (2026-01-15) by ultrasec example
-
-## 9b0bcc91ea6a — [medium] Cross-site scripting (reflected): untrusted input reaches send()
-- at: `src/server.js:20` · file exists at HEAD: yes
-- current line: `res.send(out);`
-- line last changed: `5e902a3` (2026-01-15) by ultrasec example
+- line last changed: `4926462` (2026-01-15) by ultrasec example
 

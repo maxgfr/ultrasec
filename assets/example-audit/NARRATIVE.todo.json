@@ -1,0 +1,39 @@
+{
+  "findings": [
+    {
+      "id": "3ffa0917b004",
+      "severity": "critical",
+      "title": "OS command injection: untrusted input reaches execSync()",
+      "category": "taint",
+      "cwe": "CWE-78",
+      "at": "src/server.js:18 → src/server.js:19 → src/report.js:5",
+      "status": "confirmed"
+    },
+    {
+      "id": "54b733703450",
+      "severity": "high",
+      "title": "SQL injection: untrusted input reaches query()",
+      "category": "taint",
+      "cwe": "CWE-89",
+      "at": "src/server.js:10 → src/server.js:11 → src/db.js:6",
+      "status": "confirmed"
+    }
+  ],
+  "scaffold": {
+    "executiveSummary": "",
+    "positivePatterns": "",
+    "remediations": [
+      {
+        "id": "3ffa0917b004",
+        "fix": ""
+      },
+      {
+        "id": "54b733703450",
+        "fix": ""
+      }
+    ],
+    "attackChains": [],
+    "rootCauses": [],
+    "hardeningNotes": []
+  }
+}

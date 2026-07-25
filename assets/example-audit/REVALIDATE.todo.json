@@ -8,7 +8,7 @@
     "currentLine": "  return execSync(\"generate-report --for \" + name).toString();",
     "commitsSinceFinding": null,
     "lineLastChanged": {
-      "commit": "5e902a3",
+      "commit": "4926462",
       "author": "ultrasec example",
       "date": "2026-01-15"
     },
@@ -25,24 +25,7 @@
     "currentLine": "  return sqlite.query(sql);",
     "commitsSinceFinding": null,
     "lineLastChanged": {
-      "commit": "5e902a3",
-      "author": "ultrasec example",
-      "date": "2026-01-15"
-    },
-    "renamedTo": null,
-    "verdict": null,
-    "note": ""
-  },
-  {
-    "id": "9b0bcc91ea6a",
-    "severity": "medium",
-    "title": "Cross-site scripting (reflected): untrusted input reaches send()",
-    "at": "src/server.js:20",
-    "fileExists": true,
-    "currentLine": "  res.send(out);",
-    "commitsSinceFinding": null,
-    "lineLastChanged": {
-      "commit": "5e902a3",
+      "commit": "4926462",
       "author": "ultrasec example",
       "date": "2026-01-15"
     },
