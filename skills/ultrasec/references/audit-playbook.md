@@ -1,110 +1,151 @@
 # Audit playbook (standard single pass)
 
-The everyday workflow: narrow the repo to a handful of evidence-backed
-candidates, adjudicate each from the real code, gate, and report.
+The everyday workflow: narrow the repo to a handful of evidence-backed candidates, adjudicate
+each from the real code, gate, and report. Commands are shown as `ultrasec …`; run the engine by
+its absolute path (see [SKILL.md](../SKILL.md)).
 
-> **Optional AI stages (all additive).** Before scanning, `context` lets you author
-> a `CONTEXT.md` (trust model + framework protections) that every later stage reasons
-> with. After scanning you can `triage` (cheap noise/keep fast-lane) and `investigate`
-> (hunt authz/business-logic bugs the engine can't enumerate). After verify, `revalidate`
-> cuts false positives against git history; `render --narrative` adds an AI-authored
-> executive summary + fixes. `run` sequences them all (and, opt-in, drives an agent CLI).
-> Playbooks: [revalidate](revalidate-playbook.md) · [investigate](investigate-playbook.md)
-> · [powered mode](powered-mode.md). A quick audit can skip all of these.
+> **Optional stages, all additive.** `context` (trust model), `triage` (cheap noise cut),
+> `investigate` (the classes the engine can't enumerate), `revalidate` (git-history FP cut),
+> `narrative` + `implement` (report and remediation plan). A quick audit can skip all of them;
+> `run` sequences them all. For a thorough one, escalate to
+> [deep-audit-playbook.md](deep-audit-playbook.md); for a repo too big to scan whole, start at
+> [scale-audit-playbook.md](scale-audit-playbook.md).
 
-## 1. (Optional) install scanners
-
-```
-node scripts/ultrasec.mjs tools
-```
-
-Install the highest-leverage ones for the stack — **Trivy** (deps + secrets +
-IaC across ecosystems) covers the most ground; add `gitleaks` for secrets,
-`osv-scanner` for lockfile CVEs, `opengrep`/`semgrep` for rule-based SAST, and the
-language-native ones (`cargo-audit`, `govulncheck`, `pip-audit`) as relevant.
-Everything works without them — they're an automatic bonus.
-
-## 2. Scan
+## 1. Prime the context (highest leverage)
 
 ```
-node scripts/ultrasec.mjs scan --repo . --out .ultrasec        # auto-runs installed tools
-node scripts/ultrasec.mjs scan --repo . --out .ultrasec --tools none   # graph + taint only
+ultrasec context --repo . --out .ultrasec     # → CONTEXT.scaffold.json + CONTEXT.todo.md
+# author .ultrasec/CONTEXT.md
 ```
 
-Writes the audit dossier. Scope with `--include`/`--exclude` globs on a big repo.
+Every later dossier and worklist is injected with it. The questions to answer are in
+[context-playbook.md](context-playbook.md). Skipping this means adjudicating each candidate
+without knowing what the app considers trusted.
 
-## 3. Read the dossier, then adjudicate each candidate
+## 2. (Optional) install scanners
 
 ```
-node scripts/ultrasec.mjs paths --run .ultrasec               # the candidate chains
-node scripts/ultrasec.mjs dossier <id> --run .ultrasec        # the grounding packet
+ultrasec tools
 ```
 
-For each candidate, the four questions (answer from the code in the packet):
+**Trivy** covers the most ground (deps + secrets + IaC); add `gitleaks`, `osv-scanner`,
+`opengrep`/`semgrep`, and the language-native ones as relevant. Everything works without them.
+See [tools.md](tools.md).
+
+## 3. Scan
+
+```
+ultrasec scan --repo . --out .ultrasec              # auto-runs installed tools
+ultrasec scan --repo . --out .ultrasec --tools none # graph + taint only
+```
+
+Then **read `manifest.json` before reading the findings** — `extraction.ast: false` means the
+scan ran on the regex tier and is materially thinner; `truncation` means a cap was hit;
+`toolStatus` shows which scanners were skipped. A degraded run must never be reported as a
+complete one. Scope a big repo with `--scope`/`--include`/`--exclude`.
+
+## 4. (Optional) triage the obvious noise
+
+```
+ultrasec triage --run .ultrasec                       # → TRIAGE.todo.json (no code excerpts)
+ultrasec triage --apply TRIAGE.json --run .ultrasec
+```
+
+A glance, not a read: mark `noise|keep` per candidate. `noise` clears only low/medium/info — on a
+high/critical it is **ignored by design** and the finding goes to full verify. Decision rules are
+in [adjudication.md](adjudication.md#triage-noise-vs-keep). If deciding needs the code, it isn't
+triage — leave it `keep`.
+
+## 5. Read the dossier, then adjudicate each candidate
+
+```
+ultrasec paths --run .ultrasec                 # the candidate chains
+ultrasec dossier <id> --run .ultrasec          # the grounding packet (id may be a prefix)
+```
+
+For each candidate, answer the four questions from the code in the packet:
 
 1. **Source** — is it genuinely attacker-controlled (request, CLI, env, file, queue)?
 2. **Propagation** — does the tainted value reach the sink through every hop, unchanged?
-3. **Sanitizer/guard** — is it parameterized / escaped / validated / authz-checked anywhere on the path?
+3. **Sanitizer/guard** — is it parameterized / escaped / validated / authz-checked on the path?
 4. **Sink** — is it exploitable with the value that arrives? Write the concrete trigger.
 
-Then look for what taint enumeration can't: **broken access control / IDOR,
-missing authorization, business-logic abuse, feature abuse, chained attacks, weak
-crypto, unsafe config** — hunt these with the attacker-mindset angles and the
-non-taint taxonomy in [hunting-heuristics.md](hunting-heuristics.md). Add them as
-findings with `[file:line]` citations (edit `findings.json`, or note them for the
-report). Calibrate severity and avoid false positives with
-[severity-and-discipline.md](severity-and-discipline.md) — only report what you can
-exploit; a gap another layer already prevents is a hardening note, not a finding.
+The false-positive taxonomy, the refutation bar, how to write an `exploitPath`, and three worked
+examples are in [adjudication.md](adjudication.md).
 
-## 3b. (Optional) revalidate against git history
+## 6. Hunt what taint enumeration can't reach
 
 ```
-node scripts/ultrasec.mjs revalidate --run .ultrasec        # git facts per confirmed/needs-human finding
-node scripts/ultrasec.mjs revalidate --apply REVALIDATE.json --run .ultrasec
+ultrasec investigate --run .ultrasec                          # → region worklist
+ultrasec investigate --apply INVESTIGATE.json --run .ultrasec  # citation-checked ingest
 ```
 
-Cuts false positives by re-checking each promoted finding against HEAD (does the
-cited line still exist? was it fixed?). `fixed`→dismissed (+ fixing commit); a
-high/critical `false-positive`→needs-human. See [revalidate-playbook.md](revalidate-playbook.md).
+Broken access control / IDOR, missing authorization, business logic, auth/session/JWT, crypto
+misuse, race conditions, feature abuse, chained attacks. Method per class:
+[attack-classes.md](attack-classes.md); where each hides in your stack:
+[frameworks.md](frameworks.md); the lenses to apply first:
+[hunting-heuristics.md](hunting-heuristics.md).
 
-## 4. Verify and gate
+**Ingest discoveries through `investigate --apply`, never by editing `findings.json`.** Hand
+editing bypasses the citation gate and breaks the content-derived `id` that makes re-scans and
+`--merge` idempotent. Citations are checked before ingest, so over-reporting costs nothing.
 
-```
-node scripts/ultrasec.mjs verify --run .ultrasec              # → VERIFY.todo.json + VERIFY.md
-# write verdicts.json: [{ "id": "...", "verdict": "supported", "note": "...", "exploitPath": "..." }, ...]
-node scripts/ultrasec.mjs verify --apply verdicts.json --run .ultrasec
-node scripts/ultrasec.mjs check --run .ultrasec --semantic    # exit 0 only when grounded + adjudicated
-```
-
-`supported`→confirmed, `refuted`→dismissed. `unsupported`/`partial` on a
-high/critical finding becomes **needs-human** — not dropped. Don't refute a
-high-severity finding you can't actually disprove.
-
-## 5. Render and present
+## 7. Verify and gate
 
 ```
-node scripts/ultrasec.mjs render --run .ultrasec              # SUMMARY/REPORT.md + index.html
+ultrasec verify --run .ultrasec                        # → VERIFY.todo.json + VERIFY.md
+# write verdicts.json — shape in references/schemas.md
+ultrasec verify --apply verdicts.json --run .ultrasec
 ```
 
-Present: the SUMMARY counts, each confirmed finding with its cross-file path and
-exploit path, the needs-human list, and the run folder. See
-[citation-format.md](citation-format.md) for how findings are cited. A
-`NARRATIVE.json` can also carry **`positivePatterns`** (what the codebase does well —
-calibrates trust) and **`hardeningNotes`** (defense-in-depth, *not* findings);
-`render --narrative` emits both as clearly-marked sections.
+`supported`→confirmed, `refuted`→dismissed. `partial` → **needs-human at every severity**;
+`unsupported` → needs-human on high/critical, dismissed below. Don't refute a high-severity
+finding you can't actually disprove — not proving it is not disproving it.
 
-> **Coverage improves with more runs.** One pass reads only the paths you dug into.
-> Re-run and fold passes into one dossier with `--merge` (verdicts preserved),
-> weighting a re-run toward the classes/regions the last pass under-covered. On a
-> first/only pass, say so and recommend another —
-> [severity-and-discipline.md](severity-and-discipline.md).
+## 8. Revalidate against git history
 
-## 6. Plan the fixes (optional)
+Run this **after** `verify --apply`: its scope is `status ∈ {confirmed, needs-human}`, so before
+promotion the worklist is empty.
 
-To turn the confirmed findings into an actionable remediation plan, run
-`implement --run .ultrasec` — it emits a remediation-PRD draft (fix stories grounded in
-their `[file:line]`, grouped by root cause) you can feed to the `to-prd` skill or an
-implementer. See [implement-playbook.md](implement-playbook.md).
+```
+ultrasec revalidate --run .ultrasec                          # git facts per promoted finding
+ultrasec revalidate --apply REVALIDATE.json --run .ultrasec
+```
 
-For a thorough/high-assurance audit, escalate to
-[deep-audit-playbook.md](deep-audit-playbook.md).
+`fixed`→dismissed (+ the fixing commit); a high/critical `false-positive`→needs-human, never
+auto-dismissed. See [revalidate-playbook.md](revalidate-playbook.md).
+
+## 9. Gate
+
+```
+ultrasec check --run .ultrasec --semantic   # exit 0 only when grounded + adjudicated
+```
+
+Read-only. A dangling `[file:line]` means a hallucinated or stale citation — reopen the dossier
+and fix it, or drop the finding.
+
+## 10. Narrate, render and present
+
+```
+ultrasec narrative --run .ultrasec                                # → author NARRATIVE.json
+ultrasec render --run .ultrasec --narrative NARRATIVE.json        # SUMMARY/REPORT.md + index.html
+```
+
+Present the SUMMARY counts, each confirmed finding with its cross-file and exploit path, the
+needs-human list, the coverage caveats from step 3, and the run folder. Writing guidance:
+[narrative-playbook.md](narrative-playbook.md); citation contract:
+[citation-format.md](citation-format.md).
+
+> **Coverage improves with more runs.** One pass reads only the paths you dug into. Re-run and
+> fold with `--merge` (verdicts preserved), weighting the next pass toward what this one
+> under-covered — see [severity-and-discipline.md](severity-and-discipline.md).
+
+## 11. Plan the fixes (optional)
+
+```
+ultrasec implement --run .ultrasec    # → IMPLEMENT.md + IMPLEMENT.todo.json
+```
+
+Confirmed findings become fix stories grounded in their `[file:line]`, grouped by root cause;
+feed `IMPLEMENT.md` to the `to-prd` skill or an implementer. Per-class fix patterns:
+[implement-playbook.md](implement-playbook.md).

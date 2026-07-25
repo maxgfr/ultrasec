@@ -34,7 +34,8 @@ decide.
 ## 2. Emit and read
 
 ```
-node scripts/ultrasec.mjs logs <path…> [--out .ultrasec-logs] [--budget quick|standard|thorough] [--window <sec>]
+ultrasec logs <path…> [--out .ultrasec-logs] [--format F] [--budget quick|standard|thorough]
+                      [--max-lines N] [--window <sec>] [--no-redact] [--json]
 ```
 
 - `<path…>` — one or more log files and/or directories (directories expand to
@@ -47,6 +48,11 @@ node scripts/ultrasec.mjs logs <path…> [--out .ultrasec-logs] [--budget quick|
   gated by any threshold), and `distinctIpsSeen`/`distinctIpsOverflowed` (the
   behavioral aggregator's bounded per-IP state — see §6) — read this for the
   traffic context a single finding can't show you.
+- `--format` — force a parser instead of auto-detecting. Accepted values are exactly
+  `nginx-combined`, `common`, `json-lines`, `syslog`, `generic`, `raw`, `auto` (default).
+- `--budget quick|standard|thorough` caps the total lines read across the **whole run**, not per
+  file: 200k / 2M / 10M. `--max-lines N` overrides the preset. Each detector family caps at 50
+  findings per run (25 per file for secrets/PII) — fixed, and truncation-reported.
 - `--window <sec>` (default 60) — the sliding-window size the behavioral
   detectors (§3) use. Widen it to catch a slower/low-and-slow attacker;
   narrow it to tighten what counts as "one burst."
@@ -188,12 +194,16 @@ refute.
 as everything else:
 
 ```
-node scripts/ultrasec.mjs verify --run .ultrasec-logs
-# … fill VERIFY.json …
-node scripts/ultrasec.mjs verify --apply VERIFY.json --run .ultrasec-logs
-node scripts/ultrasec.mjs check --run .ultrasec-logs --semantic
-node scripts/ultrasec.mjs render --run .ultrasec-logs
+ultrasec verify --run .ultrasec-logs
+# … fill verdicts.json (shape in references/schemas.md) …
+ultrasec verify --apply verdicts.json --run .ultrasec-logs
+ultrasec check  --run .ultrasec-logs --semantic
+ultrasec render --run .ultrasec-logs
 ```
+
+Name the file `verdicts.json`, not `VERIFY.json`: a single file path works either way, but a
+**directory** apply only picks up names matching `*verdict*.json`, so a differently-named
+fragment is silently skipped in any fan-out.
 
 `revalidate` doesn't apply here (there's no git history for a log file), but
 `triage`, `verify`, `check`, and `render` all work unmodified — see

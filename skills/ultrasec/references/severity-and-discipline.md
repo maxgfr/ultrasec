@@ -33,23 +33,14 @@ against it — don't dismiss findings, focus effort:
 Don't hard-code one comparable: a CMS is judged against other CMSes, an API gateway
 against other gateways. A genuinely novel app may have no meaningful comparable — say so.
 
-## Recon before you hunt (the `context` questions)
-
-`context` emits a deterministic scaffold; turn it into a `CONTEXT.md` that answers:
-
-1. **What is this & what's the baseline?** App type (web app, API, CLI, library, daemon),
-   who uses it and how, the stack, and the comparable mainstream app + the tradeoffs that
-   comparable accepts.
-2. **Trust boundaries & access control.** Where does untrusted input enter? How do callers
-   prove identity (sessions, tokens, API keys, mTLS)? How is authorization enforced
-   (middleware, decorators, capability checks)? Does it run as root / drop privileges /
-   sandbox? Any bypass modes (dev/test/setup/debug)?
-3. **Input-surface inventory.** Every network surface (routes, gRPC, WS, listeners), file
-   input (uploads, config, import/export), IPC/CLI/env, user-generated content stored then
-   rendered, and external integrations (OAuth, webhooks, plugins, dynamic code).
+## Recon before you hunt
 
 Understand the **trust model** first — if the design says admins are fully trusted, an
-admin doing admin things is not a finding.
+admin doing admin things is not a finding. The questions `CONTEXT.md` must answer (app type and
+baseline, trust boundaries and access control, the input-surface inventory, the framework
+protections already in force) are in [context-playbook.md](context-playbook.md). Do that pass
+before you rate anything; severity is a statement about a threat model, and without one you are
+rating in the abstract.
 
 ## Severity rubric (likelihood × impact)
 
@@ -74,6 +65,48 @@ radius = MEDIUM.
 > This rubric calibrates *your* judgement; it never overrides ultrasec's conservative
 > gate. An uncertain high/critical finding stays **needs-human** — `verify`/`revalidate`
 > never auto-dismiss it. Use the rubric to *rank and describe*, not to silently drop.
+
+## Calibration: the same pattern, rated differently
+
+A rubric without worked cases doesn't calibrate. Each pair below is the *same* code pattern with
+a different answer, because context decides. Learn the reasoning, not the verdicts.
+
+| pattern | this one is… | …and this one isn't | why |
+|---|---|---|---|
+| **`md5()`** | HIGH — hashing passwords | **nothing** — an ETag, a cache key, a shard selector | collision/preimage resistance is only required where an attacker benefits from forging |
+| **Missing `HttpOnly`** | MEDIUM — on the session cookie | **nothing** — on a UI-theme cookie | rate what the cookie carries, not the flag |
+| **SQL injection** | CRITICAL — unauthenticated, DB user can read every table | MEDIUM — admin-only endpoint, read-only DB user, one table | likelihood (who reaches it) × impact (what the credential grants) |
+| **Reflected XSS** | HIGH — fires for every visitor of a shared link | MEDIUM — needs a victim to paste a crafted URL while authenticated | how much of the attack the victim has to perform |
+| **`Math.random()`** | HIGH — password-reset tokens | **nothing** — a UI animation seed, a retry jitter | predictability only matters where the value is a secret |
+| **IDOR** | HIGH — reads another tenant's invoices | MEDIUM — reads your own soft-deleted draft | does it cross a boundary the system explicitly gates? |
+| **Open redirect** | HIGH — it's the OAuth `redirect_uri` | LOW — a marketing link with no token in flight | impact comes from what travels through the redirect |
+| **Hardcoded key** | CRITICAL — `SECRET_KEY`/`APP_KEY` (session forgery) | LOW — a public analytics site id | rate by what the credential opens |
+| **`0.0.0.0/0`** | HIGH — port 22 or 3306 | **nothing** — port 443 on a public web tier | rate against the deployment, not the pattern |
+| **No app-level rate limit** | MEDIUM — on the login endpoint of a self-hosted app | **hardening note** — where a CDN/gateway enforces it | a layer that exists elsewhere is not a missing layer |
+| **CSRF token absent** | HIGH — cookie session, `SameSite=None`, state-changing POST | **nothing** — `Authorization: Bearer` API | CSRF requires ambient credentials |
+| **Dependency CVE 9.8** | HIGH — in KEV, the vulnerable symbol is imported | LOW — dev-only, symbol never imported, no fix available | see the ladder below |
+
+Two habits these encode: **name the boundary being crossed** before you pick a level, and when
+you can't decide between two levels, write the one-sentence attacker scenario for each — the
+weaker one usually collapses.
+
+## Severity vs the engine's `risk` score
+
+Two rankings coexist and they answer different questions. Don't reconcile them by overwriting one
+with the other.
+
+- **`severity`** is *your* judgment about this finding in *this* application: likelihood ×
+  impact, under the trust model in `CONTEXT.md`. It is what the report is sorted and read by.
+- **`risk`** (0–100) is deterministic vulnerability-management triage for CVE-bearing findings:
+  severity ⊕ EPSS ⊕ CISA KEV, in that order of authority. It answers "which of these 200
+  advisories do I patch first", not "how bad is this bug here". KEV membership floors it high on
+  purpose — known-exploited outranks a higher CVSS that nobody is using.
+
+So: use `risk` to **order** the dependency work, use the rubric to **rate** what you confirmed,
+and if the two disagree loudly on a specific finding, say why in the report. Under
+`--offline`/`--no-enrich` there is no EPSS/KEV, and `risk` degrades to severity alone — a
+different list, which the report should acknowledge. The full triage ladder is in
+[supply-chain.md](supply-chain.md).
 
 ## Logging hygiene (opt-in `scan --log-hygiene`)
 
@@ -106,25 +139,25 @@ report what you can show reaches an untrusted value, not every log statement.
    test it.
 9. **Skipping business logic & creative attacks.** Scanners already check SQLi/XSS/SSRF;
    the value of a manual pass is the logic errors they can't — see
-   [hunting-heuristics.md](hunting-heuristics.md).
+   [attack-classes.md](attack-classes.md).
 10. **Giving up too early.** "It uses parameterized queries, so no SQLi" is lazy — check
     every `raw()`, every dynamic identifier, search/FTS, and any path that bypasses the
     builder. Push before concluding "nothing here."
+11. **Reporting a degraded run as a complete one.** If `manifest.extraction.ast` is `false`,
+    `truncation` is non-zero, or `toolStatus` shows scanners skipped, the audit covered less
+    than it looks like. Say so — it's the same contract as never dropping a finding silently.
 
 ## Reporting completeness
 
 The rendered report (via `narrative` → `render --narrative`) should carry, beyond the
-findings:
+findings: **`positivePatterns`** (what the codebase does well — honest praise calibrates trust in
+what you *did* report) and **`hardeningNotes`** (defense-in-depth suggestions, explicitly not
+findings, kept out of the severity counts). Both are advisory prose, never grounding-dropped and
+never status-changing. How to write them, and the rest of the report, is in
+[narrative-playbook.md](narrative-playbook.md).
 
-- **`positivePatterns`** — what the codebase does well (solid auth, parameterized
-  queries, good secret hygiene). Honest praise calibrates trust and helps the team
-  prioritise the real findings.
-- **`hardeningNotes`** — defense-in-depth suggestions, explicitly **not** findings and
-  kept out of the severity counts.
-
-Both are advisory prose: they cite no finding ids and are never grounding-dropped, but
-they also never change a finding's status. An honest "no exploitable vulnerabilities
-found" is a valid result — but push hard (anti-pattern 10) before you reach it.
+An honest "no exploitable vulnerabilities found" is a valid result — but push hard (anti-pattern
+10) before you reach it.
 
 ## Coverage improves with more runs
 

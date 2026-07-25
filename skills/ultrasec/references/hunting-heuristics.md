@@ -57,48 +57,17 @@ groups them for you), run the value through these lenses:
 or a missing authz check while reviewing crypto — report it. Attackers don't respect
 category boundaries.
 
-## The non-taint attack classes (what taint BFS can't reach)
+## Where the classes live
 
-Pick the classes relevant to what `context`/`map` told you the app is. Split large
-surfaces per subsystem.
+Which classes to hunt, and the mechanism-level method for each — what to grep, how to prove it,
+how to rate it, and what usually turns out to be nothing — is
+[attack-classes.md](attack-classes.md): access control and IDOR, auth/session/JWT/OAuth, crypto,
+deserialization, SSRF bypasses, race conditions and TOCTOU, injection variants the catalog
+doesn't carry, file upload, CSRF/CORS, GraphQL, the AI/agentic surface, and mobile. Where each
+hides in your stack is [frameworks.md](frameworks.md).
 
-**Access control (deep).** Beyond "is there a check": is it the right check?
-- A path to the same state change that checks a *weaker* permission, or none.
-- A request-body field (`role`, `ownerId`, `isAdmin`) that overrides what the permission
-  system meant to restrict (**mass assignment**).
-- Endpoints that gate authentication but forget authorization (IDOR — reads/writes
-  another user's object by id with no ownership check).
-- Bulk / batch / export / import paths — do they enforce per-item permissions?
-
-**Feature abuse & data leakage** (bugs in the *design*, not the code):
-- **Export/backup as exfiltration** — can a low-priv user trigger an export/snapshot that
-  includes data above their access level, other users' data, or deleted/draft content?
-- **Import/restore as injection** — can import overwrite data, create records that skip
-  validation, or write into collections the user can't write to via the UI?
-- **Search/filter/sort as oracle** — do queries reveal that content exists which the user
-  can't read? Does sorting by a hidden field leak its values through ordering?
-- **Enumeration via side effects** — do "doesn't exist" and "no access" differ in message,
-  status, timing, or size? Enumerate users via reset/invite/registration.
-- **Preview/draft/staging leakage** — are preview tokens scoped to one item or do they
-  unlock more? Can drafts surface via search, RSS, sitemaps, or list endpoints? Can cache
-  headers make a CDN serve private content?
-- **Notification/webhook as SSRF** — a user-set callback/webhook/notification URL the
-  server fetches; validated against internal networks? After a redirect?
-
-**Chained attacks & trust boundaries** (safe alone, dangerous combined):
-- **Multi-step chains** — info disclosure (learn an id) + IDOR (fetch it) + missing rate
-  limit (brute-force the id space). Open redirect + OAuth callback = token theft.
-- **Cross-component trust gaps** — A validates and hands to B; does B re-validate or trust
-  A? What about plugin/extension code touching core state or bypassing permission hooks?
-- **Second-order** — data safe when stored, dangerous when later used in a different
-  context (see round-trip, above).
-- **Scope / capability escalation** — tokens/keys/OAuth scopes granting more than their
-  name implies; a `read` scope that also lists drafts; a session surviving a role
-  downgrade; an AI/MCP tool integration that inherits the user's full session.
-- **Timing & ordering** — act on a resource between soft- and hard-delete; use a token
-  between revocation and cache expiry; use a feature before setup/migration completes.
-- **Rollback / recovery abuse** — undelete/restore/revert that restores more than intended
-  or bypasses current permissions.
+Pick the ones relevant to what `context`/`map` told you the app is, and split large surfaces per
+subsystem. Two lenses that don't belong to any single class stay here:
 
 **Wildcard.** No category — just break it. Read the boring code; ask why the weird code
 exists. Half-finished/experimental/bolted-on features got the least review. Use the API
@@ -128,6 +97,43 @@ is the manual backstop:
 > shouldn't read. An error string leaks only if it's ever populated with secrets. No
 > concrete attacker scenario ⇒ it's at most a **hardening note**, not a finding — see
 > [severity-and-discipline.md](severity-and-discipline.md).
+
+## Recon commands
+
+`dossier` and `graph` show you what the engine already found. These are for what it didn't —
+run them from the repo root, read the hits, and turn what survives into a `Discovery`.
+
+```bash
+# The route table vs the guard list — the delta is where authz bugs live.
+rg -n "router\.(get|post|put|patch|delete)|@(app|router)\.(route|get|post)|Route::|@(Get|Post|Request)Mapping"
+rg -n "requireAuth|isAuthenticated|@login_required|before_action|@PreAuthorize|authorize|can\(|policy"
+
+# Raw SQL and the ORM escape hatches (where "we use an ORM" stops being true).
+rg -n "\.raw\(|whereRaw|orderByRaw|\.extra\(|RawSQL|find_by_sql|nativeQuery|queryRawUnsafe|createQuery"
+
+# Shell, dynamic code, deserialization.
+rg -n "shell=True|exec\(|execSync|spawnSync|child_process|new Function|\beval\(|vm\.run"
+rg -n "pickle\.loads|yaml\.load\(|unserialize\(|readObject|BinaryFormatter|Marshal\.load|TypeNameHandling"
+
+# Output sinks that bypass the framework's escaping.
+rg -n "dangerouslySetInnerHTML|innerHTML|\|safe\b|mark_safe|html_safe|\{!!|th:utext|text/template"
+
+# Secrets, tokens, and comparisons that leak.
+rg -n "Math\.random|new Random\(|math/rand" ; rg -n "==\s*(token|secret|signature|hmac)|\.equals\(.*[Tt]oken"
+rg -n "jwt\.decode|verify_signature|algorithms=|parseClaimsJwt|InsecureSkipVerify|rejectUnauthorized:\s*false|verify=False"
+
+# CI: the highest-severity grep in most repos.
+rg -n "pull_request_target" -A 30 .github/workflows/ | rg -n "checkout|head\.(sha|ref)"
+rg -n 'run:' -A 5 .github/workflows/ | rg -n '\$\{\{ *github\.(event|head_ref)'
+
+# Debris and posture.
+rg -n "TODO|FIXME|HACK|XXX" -g '!node_modules' | rg -in "secur|auth|token|password|temporar"
+rg -n "DEBUG\s*=\s*True|app\.run\(.*debug=True|APP_DEBUG=true|NODE_ENV\s*!==\s*.production"
+git log --all --diff-filter=D --name-only -- '*.env*' '*.pem' '*.key' | head   # deleted ≠ gone
+```
+
+Two habits: `-g '!node_modules'`-style exclusions keep the signal readable, and every hit needs
+the **impact** traced before it becomes a finding — a grep result is a lead, not a bug.
 
 ## Emit them grounded
 

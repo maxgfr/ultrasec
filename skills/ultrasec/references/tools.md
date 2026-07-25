@@ -3,7 +3,11 @@
 ultrasec runs whatever scanners are installed and normalizes their JSON into the
 unified `Finding` model (category · cwe · severity · file:line · message ·
 references). Nothing is required — the link-graph + taint reasoning is the
-always-on core. `node scripts/ultrasec.mjs tools` shows status + install hints.
+always-on core. `ultrasec tools` shows status + install hints.
+
+**What to *do* with what they produce** — dependency-CVE triage, secrets response, per-tool
+false-positive profiles, and the CI/IaC classes none of them cover — is
+[supply-chain.md](supply-chain.md). This file is what each tool is and how the belt runs.
 
 | tool | category | what it adds | install |
 |------|----------|--------------|---------|
@@ -27,13 +31,22 @@ always-on core. `node scripts/ultrasec.mjs tools` shows status + install hints.
 | **hadolint** | config | Dockerfile lint + ShellCheck on the bash inside `RUN` | `brew install hadolint` |
 | **kingfisher** | secret | offline checksum/entropy/lang-aware secret pre-filter, git history, SARIF | `brew install kingfisher` |
 
+Highest-leverage first if you're installing anything: **trivy** (deps + secrets + IaC in one),
+then `gitleaks`, then the language-native one for the stack (`govulncheck`, `cargo-audit`,
+`pip-audit`), then a SAST engine.
+
 ## How it runs
 
 `scan --tools auto` (default) runs every installed adapter; `--tools a,b` selects;
 `--tools none`/`--no-tools` disables. Each adapter is detected on PATH, executed
-in the repo dir (timeout-bounded), and its output parsed — even when the tool exits
+in the repo dir (300 s timeout), and its output parsed — even when the tool exits
 non-zero (scanners exit non-zero *when they find issues*). A missing or failing
-tool is skipped gracefully and recorded, never fatal.
+tool is skipped gracefully and recorded in `manifest.toolStatus`, never fatal.
+
+**Read `manifest.toolStatus` before trusting a clean result.** It distinguishes `ran` (0 findings
+is a real result) from `skipped` (not installed — a coverage hole you should name in the report)
+from `failed`. Adapters run **serially**; parallelism in an ultrasec audit comes from the agent
+fan-out, not the engine.
 
 Severity is normalized to critical/high/medium/low/info: label vocabularies are
 aliased; tools that emit only a CVSS vector or score (cargo-audit, osv-scanner)
@@ -46,68 +59,10 @@ they're `network: true` and skipped under `--offline`. **v1 limitation**: only
 the root lockfile is audited, not per-workspace sub-lockfiles in a monorepo;
 trivy/osv-scanner already walk the tree recursively and cover that gap.
 
-## Supply-chain audit: SBOM (syft) + package-checker
-
-When `syft` is installed, `scan` generates a CycloneDX SBOM (`sbom.cdx.json`)
-before running the adapters — a dossier deliverable in its own right (linked
-from `DOSSIER.md`), and faster input for the two adapters that can consume it
-instead of re-walking the tree themselves: grype switches its `argv` to
-`sbom:<path>` mode, and package-checker appends it as an extra `--source`
-alongside its default GHSA/OSV feed. Absence is the normal path — most hosts
-don't ship `syft` — so a scan without it just falls back to each adapter
-scanning the repo directory directly; nothing is fatal either way.
-
-package-checker ([maxgfr/package-checker.sh](https://github.com/maxgfr/package-checker.sh),
-same author as ultrasec) runs **upstream's latest release by default** —
-executing it at scan time is first-party trust, not a third-party
-supply-chain hole. `command()` (`src/tools/package-checker.ts`) resolves the
-latest tag + downloads `script.sh` via a short-timeout `curl` (the
-`ToolAdapter.command()` contract is synchronous, so this can't use `fetch`),
-caches it content-addressed under `<cache dir>/package-checker/script-<tag>-<hash12>.sh`,
-and runs that. Any failure in that chain — offline, DNS, rate-limited, a
-malformed API response, a full disk — falls straight back to the vendored,
-sha256-pinned copy (`src/vendor/package-checker.sh` +
-`src/vendor/package-checker.meta.json`, synced by
-`scripts/sync-package-checker.mjs`, drift-gated by
-`pnpm run check:package-checker` folded into `check:build`, and kept fresh by
-the scheduled `.github/workflows/update-package-checker.yml` auto-bump PR).
-Set `ULTRASEC_PACKAGE_CHECKER_PINNED=1` to force the vendored copy
-unconditionally (hardened/air-gapped hosts) — this is also what the test
-suite sets by default so it never hits the network. The vendored copy ships
-embedded as a generated TS string constant in the bundle
-(`src/vendor/package-checker-script.ts`) so it survives any packaging path
-that only copies `scripts/ultrasec.mjs`. Either way it needs `bash`, `awk`
-and `curl` — nothing to `npm install`.
-
-Coverage — 12 ecosystems, one script, detect-then-load: npm, yarn, pnpm, bun,
-deno, PyPI, Go, Cargo, RubyGems, Composer, Maven/Gradle, NuGet, Pub, Hex,
-Swift, and GitHub Actions workflow files, matched against GHSA + OSV advisory
-feeds.
-
-**Network stance**: the script resolves its default feeds via
-`find_default_source()` (Homebrew share → `./data/` → `/app/data/` → a remote
-GitHub raw URL) with no env var or flag to redirect that search to an
-arbitrary directory, and `./data/` resolves against the scanned repo's cwd,
-not ultrasec's cache dir — so this adapter cannot be made offline-safe by
-pointing it at a cache dir. It is `network: true` and skipped under
-`--offline`. For air-gapped use, warm the feeds once and point the script at
-them explicitly:
-
-```sh
-bash <vendored script.sh> --fetch-all <dir>
-bash <vendored script.sh> <repo> --source <dir>/*.purl --export-json <file>
-```
-
-**Feed-poisoning guard**: precisely because `./data/` resolves against the
-*scanned repo's own cwd* and is preferred over Homebrew/`/app/data`/the real
-upstream feed, a repo that commits its own `data/ghsa.purl` (or `data/osv.purl`,
-or a per-ecosystem `data/{ghsa,osv}-<eco>.purl`) makes `find_default_source()`
-silently substitute it for the real advisory feed — suppressing real findings
-or injecting fake ones. `package-checker.ts`'s `applicable(repo)` detects any
-`<repo>/data/*.purl` file (the exact shape probed) and SKIPS the adapter with
-an explicit note rather than trusting a feed the scanned repo controls; use
-trivy or osv-scanner (their own local vuln DBs, not repo-writable) to still get
-coverage on such a repo.
+When `syft` is installed, `scan` generates a CycloneDX SBOM (`sbom.cdx.json`) before running the
+adapters — a dossier deliverable in its own right, and faster input for grype (`sbom:` mode) and
+package-checker (`--source`). Absence is the normal path; without it each adapter scans the repo
+directory directly.
 
 ## Correlation, risk scoring & SARIF
 
@@ -133,151 +88,51 @@ worklist (all keyless, no LLM calls):
   `security-severity` or `level`, CWE from rule tags, location from the first
   result region. Used by the kingfisher adapter and ready for the next ones.
 
-## Keeping native tools fresh: `tools --upgrade`
+The ordering the composite `risk` encodes — KEV, then EPSS, then CVSS — and how to work a ranked
+list are in [supply-chain.md](supply-chain.md).
 
-ultrasec is latest-first everywhere — docker mode tracks `:latest` with
-`--pull always`, `package-checker` resolves upstream's latest release at scan
-time — and `tools --upgrade` completes that story for NATIVE binaries: for
-every INSTALLED tool it infers which package manager put it there and drives
-that manager's own "upgrade to latest" command. `--dry-run` prints the exact
-commands without running any of them.
+## Keeping the toolchain fresh
 
-```bash
-node scripts/ultrasec.mjs tools --upgrade --dry-run   # preview
-node scripts/ultrasec.mjs tools --upgrade              # actually upgrade
-```
+ultrasec is latest-first everywhere and never asks you to chase a version by hand:
 
-**Origin inference** (`inferOrigin`, `src/tools/origin.ts`) reasons purely from
-the installed binary's resolved, symlink-followed absolute path (`resolveBinaryPath`
-in `src/tools/registry.ts`), checked in this order:
+- `scan --docker` runs each scanner from its official image's rolling `latest` tag with
+  `--pull always`, so a stale cached `latest` is never silently reused. Only Docker is required;
+  reported paths are rewritten from `/work` back to repo-relative automatically.
+- `package-checker` resolves upstream's latest release at every scan, with a vendored,
+  sha256-pinned fallback for offline/air-gapped hosts (`ULTRASEC_PACKAGE_CHECKER_PINNED=1`).
+- `tools --upgrade [--dry-run]` completes the story for natively-installed binaries: it infers
+  which package manager (brew/pipx/go/cargo/corepack/npm) put each tool there from its own
+  resolved binary path and drives that manager's real upgrade command. apt-owned and unrecognized
+  origins print a hint instead — **ultrasec never runs `sudo`**. Per-tool failures are recorded,
+  never fatal.
 
-| # | Signal | Manager | Upgrade command |
-|---|---|---|---|
-| 1 | tool name is `npm` | `npm` | `npm install -g npm@latest` — npm has no separate Homebrew formula, so self-upgrade is the only universally correct move regardless of how Node was installed |
-| 1 | tool name is `pnpm`/`yarn`, or the path contains `/corepack/` | `corepack` | `corepack up` — pnpm/yarn "ship via Corepack, not a separate install" (this registry's own stance); deliberately overrides even a `brew install pnpm` formula |
-| 2 | `/opt/homebrew/` or `/usr/local/Cellar/` in the path | `brew` | `brew upgrade <formula>` — both dirs are Homebrew-exclusive, unambiguous on their own |
-| 2 | `/usr/local/bin/` in the path **and** a `brew` binary sits alongside it | `brew` | `brew upgrade <formula>` — bare `/usr/local/bin` is also the generic Linux/FHS "manually installed" dir, so it only counts as brew when a sibling `brew` confirms it (no PATH search, no subprocess) |
-| 3 | `.local/pipx` or `pipx/venvs` in the path | `pipx` | `pipx upgrade <package>` |
-| 4 | under `$GOPATH/bin`, or `~/go/bin` when GOPATH is unset | `go` | `go install <module-path>@latest` |
-| 5 | under `~/.cargo/bin` | `cargo` | `cargo install <crate> --force` (`--force` because `cargo install` no-ops a same-version reinstall) |
-| 6 | Linux only: `/usr/bin/*` and `dpkg -S` claims it | `apt` | **print-only** — `sudo apt install --only-upgrade <pkg>`; ultrasec never runs `sudo` |
-| — | nothing matched | `unknown` | **print-only** — falls back to the tool's registry install hint |
+Run `tools` at audit start; with the user's consent (or a standing preference), `tools --upgrade`
+— `--dry-run` first to see the exact commands.
 
-The package/module/crate identifier defaults to the tool's own name and is
-overridden per manager via `ToolSpec.packageIds` (`src/tools/registry.ts`) only
-where it genuinely differs — today that's exclusively the three Go-installed
-tools, whose import path has nothing in common with the binary it builds:
-`govulncheck` → `golang.org/x/vuln/cmd/govulncheck@latest`, `gosec` →
-`github.com/securego/gosec/v2/cmd/gosec@latest`, `osv-scanner` →
-`github.com/google/osv-scanner/cmd/osv-scanner@latest`. Every brew/pipx/cargo
-entry today has a formula/package/crate name identical to the binary, so none
-needed an override.
-
-`npm-audit`/`pnpm-audit`/`yarn-audit` probe and upgrade their REAL binary
-(`ToolSpec.binaryName`: `npm`/`pnpm`/`yarn`) rather than their display name.
-`package-checker` is skipped entirely — it isn't a single PATH binary (its
-presence check is bash+awk+curl) and already self-updates at scan time; the
-summary notes this instead of attempting a command. Docker-mode scans get a
-one-line reminder that they already refresh via `--pull always`.
-
-Per-tool outcomes (`upgraded`/`already-latest`/`failed`/`skipped-unknown-origin`)
-are independent and never fatal — one tool's upgrade failing (wrong exit code,
-timeout, missing manager) is recorded and the run continues; `tools --upgrade`
-itself never throws and never exits non-zero for a per-tool failure. Versions
-are compared before/after via the same `detect()` probe the default listing
-uses, so an actual version change prints `old → new`; an unchanged version
-(or one that isn't cheaply parseable) prints `already-latest`.
-
-## Via Docker (no native install)
-
-Two ways to get the scanners without installing them on the host:
-
-- **`scan --docker`** runs each scanner from its official image's rolling
-  `latest` tag on demand (repo bind-mounted at `/work`, paths rewritten back to
-  repo-relative). `docker run` always carries `--pull always` (`src/tools/run.ts`
-  `runDocker`) so a stale cached `latest` is never silently reused — trading
-  reproducibility for always-current CVE/rule coverage. Only Docker is needed.
-  Adapters with an official image: trivy (`ghcr.io/aquasecurity/trivy`),
-  gitleaks (`ghcr.io/gitleaks/gitleaks`), osv-scanner
-  (`ghcr.io/google/osv-scanner`), semgrep (`semgrep/semgrep`, entrypoint isn't
-  the tool so the runner prepends `semgrep`), bandit
-  (`ghcr.io/pycqa/bandit/bandit`), gosec (`ghcr.io/securego/gosec`), checkov
-  (`bridgecrew/checkov`), hadolint (`hadolint/hadolint`) — all track `:latest`.
-  opengrep, kingfisher → native-only for now.
-- **Toolbox image** (`docker/Dockerfile` + `docker-compose.yml`) bakes the engine +
-  the scanners into one image (`docker compose build`), so the whole audit runs
-  in-container with everything on PATH. Baked in: trivy, gitleaks, osv-scanner,
-  semgrep, gosec, hadolint, bandit, checkov, grype, syft, pip-audit. Every tool
-  installs its **latest release by default**; each has an optional
-  `--build-arg <TOOL>_VERSION=x.y.z` to pin it instead (see `docker/Dockerfile`).
-  Image freshness is therefore the freshness of the last build —
-  `docker compose build --no-cache` re-resolves every tool's latest release;
-  arch (amd64/arm64) is auto-detected. The grype vulnerability DB and
-  package-checker's feeds are deliberately NOT baked in (per-run,
-  network-fetched state) — see the comment in `docker/Dockerfile` for the
-  air-gapped warm-up commands.
-
-## Recommended additions (researched, not yet adapters)
-
-Net-new coverage worth adding next (none overlap trivy), phase-2 candidates:
-
-- **GuardDog** (`ghcr.io/datadog/guarddog`) — malicious-package / typosquat
-  detection, a class no CVE scanner sees (opt-in network). Adapter sketch:
-  `category: "dep"`, `argv` runs `guarddog npm|pypi verify <lockfile> --output-format json`
-  per detected ecosystem (mirrors the pm-audit multi-ecosystem gate), `parse`
-  maps each flagged package into a Finding the same way package-checker does.
-- **TruffleHog** — *live* secret verification (verified/unverified) to feed the
-  `verified` field on secret-category findings; `category: "secret"`.
-- **cppcheck** — C/C++ memory-safety via SARIF (needs stderr capture).
-
-Brakeman and CodeQL were screened out (non-commercial / private-repo licence);
-**osv-scalibr** was screened out too — it's an inventory extractor already
-embedded in osv-scanner v2, not a standalone advisory source. Also screened out,
-one-liners: **lockfile-lint** — checks lockfile *integrity* (registry pinning,
-no injected entries), a niche supply-chain-tampering concern distinct from the
-per-dependency advisories every adapter here reports; **OSSF Scorecard** — scores
-a repo's overall security *posture* (branch protection, CI hygiene, …), not
-per-dependency vulnerabilities, so it doesn't fit the Finding model. Add one by
-following "Adding an adapter" below.
+The origin-inference table, the package-checker vendoring/feed-poisoning guard, the Docker image
+list and toolbox build, the researched-but-not-yet-built adapters, and the `ToolAdapter` contract
+for adding one are all in [`docs/tooling-internals.md`](../../../docs/tooling-internals.md)
+(maintainer reference, not shipped with the skill).
 
 ## Triaging tool findings
 
-Tool findings arrive `open` like taint candidates — adjudicate them too. Scanners
-are noisy (especially SAST): confirm reachability and exploitability before
-promoting, and use the same conservative verify gate. Dependency CVEs are usually
-high-confidence (a known-vulnerable version is installed) but still check whether
-the vulnerable code path is actually used (`govulncheck` does this for Go).
+Tool findings arrive `open` like taint candidates and are adjudicated the same way, under the
+same `[file:line]` gate and the same conservative verify policy. Two rules to start from:
 
-## Adding an adapter
+- **SAST findings are pattern matches**, not proofs. Confirm reachability and exploitability
+  before promoting. Each engine has a characteristic noise profile — Bandit's `B101`/`B404`,
+  gosec's `G104`/`G304`, Semgrep's `generic.secrets` — catalogued in
+  [supply-chain.md](supply-chain.md).
+- **Dependency CVEs are high-confidence on *presence* and low-confidence on *relevance*.** The
+  vulnerable version really is installed; whether the vulnerable path is reachable, shipped, or
+  matters in your deployment is the judgment. `govulncheck` answers reachability mechanically for
+  Go, which is why its findings carry more weight than a plain lockfile match.
 
-Implement `ToolAdapter` (`{ name, category, argv(repo), parse(raw) }`) in
-`src/tools/<tool>.ts`, register it in `src/tools/index.ts`, add it to the registry
-in `src/tools/registry.ts`, and add a parse test against a frozen sample of the
-tool's real JSON under `tests/fixtures/tool-output/`.
+Corroboration (`sources[]` longer than one) is a confidence prior for verify, never a verdict.
 
-Three optional hooks (`src/tools/run.ts`) cover the rest of what a real-world
-adapter needs beyond `argv`/`parse`:
-- **`command()`** — override the executable (argv0 prefix), e.g. `["bash", scriptPath()]`
-  or `["yarn", "npm"]`; return `null` for a graceful "not installed" skip. Replaces
-  the default PATH probe of `name` (see `package-checker.ts`, `pm-audit.ts`).
-- **`applicable(repo)`** — a repo-content gate: `null` runs the tool, a string is a
-  skip note (e.g. `"no requirements.txt"`); unlike `enumerate`, the result is
-  **not** appended to argv (see `pip-audit.ts`).
-- **`network`** — `true`, or a function answering per-run, when the tool hits the
-  network on every invocation (registry/feed queries); skipped under `--offline`.
+## What the belt does not cover
 
-**Tool takes no positional file args (it scans by flag/config, not a path list)?
-Use `applicable`, not `enumerate`** — `enumerate` is only for tools that scan
-explicit *files* (its return value is appended to argv); a tool with nothing to
-point at a directory needs a content gate instead.
-
-Notes:
-- **SARIF output?** Skip a bespoke parser — delegate to
-  `parseSarif(raw, { tool, category, defaultCwe })` (see `kingfisher.ts`).
-- **dep/SCA adapter?** Pass `pkg`, `version`, and `aliases` (every advisory id —
-  the CVE is auto-picked) so cross-tool correlation and EPSS/KEV scoring work.
-- **Scans files, not a directory** (e.g. hadolint)? Add `enumerate(repo)`
-  returning the repo-relative paths to scan; the runner appends them to argv and
-  skips the run cleanly when none are found.
-- `makeToolFinding` sets `sources: [tool]`; the correlator unions them — don't set
-  `sources` by hand.
+No DAST, no fuzzing, no authenticated crawling, no runtime testing — and no coverage of
+authorization or business logic. Everything in [attack-classes.md](attack-classes.md) is manual
+by construction. A clean scanner run means the known-pattern layer is clean, nothing more, and
+the report should say so.

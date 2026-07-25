@@ -28,7 +28,28 @@ Every finding is grounded in real code. The contract:
 - When you add a finding the engine didn't enumerate (authz, business logic…),
   give it the same shape: a real `[file:line]` for `sink` (and a `path` if it
   spans files), a `cwe`, a `severity`, and a `message` that states the exploit.
-  `check` will hold it to the same grounding bar.
+  `check` will hold it to the same grounding bar. The complete `Finding` JSON, field by field
+  with a filled example, is in [schemas.md](schemas.md).
+
+- **Citing something that isn't there.** The hardest citation in an audit is a *missing* control —
+  "there is no ownership check here". `check` only verifies that the line you cite exists, so an
+  authz finding is structurally under-specified unless you make the absence concrete. Cite the
+  line where the check **should** be and say what should be there: the load that returns the
+  object (`invoice.js:42` — `findById(req.params.id)` with no owner predicate), plus a path step
+  at the route registration showing which guards *do* apply (`routes.js:88` — "requireAuth only").
+  Two resolvable lines that bracket the gap beat one vague one, and they survive a refactor.
+
+- **`why` carries the argument.** Each path step's `why` should say what makes the value keep
+  flowing — "concatenated into the SQL string", "passed as argv[1] to a shell", "stored, then
+  rendered unescaped by the profile template". `"calls f()"` is what the engine writes when it
+  only knows the edge exists; when you author a path, do better, because `why` is what a reviewer
+  reads to check your reasoning without re-deriving it.
+
+- **Line ranges, generated and vendored files.** Cite the single most specific line, not a range:
+  the sink call, the assignment that taints, the guard that's missing. If the only honest citation
+  is in generated, minified or vendored code, cite the **generator or the dependency
+  declaration** instead — a finding pinned to a build artifact is unactionable and breaks on the
+  next build.
 
 - `exploitPath` is a concrete trigger ("GET /user?id=1 OR 1=1") — include it for
   every `supported` finding; it's what makes a report actionable and what proves

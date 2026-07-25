@@ -11,7 +11,7 @@ like everything else.
 ## 1. Emit the region worklist
 
 ```
-node scripts/ultrasec.mjs investigate --run .ultrasec
+ultrasec investigate --run .ultrasec
 ```
 
 Writes `INVESTIGATE.todo.json` + `INVESTIGATE.md`. Each region lists its files,
@@ -19,10 +19,15 @@ graph neighbours, and a hunt prompt. Work the highest-attack-surface regions fir
 
 ## 2. Hunt and emit grounded Discovery[]
 
-For each region, read the real code and look for what the engine can't. Bring the
-attacker-mindset angles and the full non-taint taxonomy (feature abuse, chained
-attacks, wildcard, obvious-things) from
-[hunting-heuristics.md](hunting-heuristics.md) — the headline classes:
+Regions are ranked by attack-surface score, but **override that with judgment**: an
+auth/payments module with three sinks outranks a logging directory with thirty. Weight toward
+crown-jewel data, internet-exposed entry points, recent churn, and code with no CODEOWNER.
+
+For each region, read the real code and look for what the engine can't. The mechanism-level
+method per class — what to grep, how to prove it, how to rate it, what turns out to be nothing —
+is [attack-classes.md](attack-classes.md); the lenses to apply before you know the class are in
+[hunting-heuristics.md](hunting-heuristics.md); stack-specific hiding places are in
+[frameworks.md](frameworks.md). The headline classes:
 
 - **Broken access control / IDOR** — an endpoint that reads/writes another user's
   object with no ownership check; a parallel path that checks a weaker permission; a
@@ -43,21 +48,29 @@ Emit `INVESTIGATE.json` — an array of:
            { "file": "src/x.js", "line": 42, "why": "reads any user's record" }] }
 ```
 
-`category` is one of taint/sast/dep/secret/config/authz/crypto/other; `severity`
-critical…info. Cite **resolvable `[file:line]`** for the primary location and every
-path step.
+`category` is one of `taint`/`sast`/`dep`/`secret`/`config`/`authz`/`crypto`/`logs`/`other`;
+`severity` critical…info. Cite **resolvable `[file:line]`** for the primary location and every
+path step. Full field reference: [schemas.md](schemas.md).
+
+Choosing a `category` when it isn't obvious: anything about *who may* (IDOR, missing authz, mass
+assignment, privilege escalation) is `authz`; key/hash/randomness/comparison misuse is `crypto`;
+business logic, race conditions and feature abuse are `other`; a multi-hop data flow you traced
+by hand is `taint`. The category groups the report — it never affects the gate, so don't
+agonize.
 
 ## 3. Apply (ingest)
 
 ```
-node scripts/ultrasec.mjs investigate --apply INVESTIGATE.json --run .ultrasec
+ultrasec investigate --apply INVESTIGATE.json --run .ultrasec
 ```
 
 - Each discovery becomes an `ultrasec-ai` finding, `status: open`, `confidence: low`
   — recall-oriented; adjudicate it with `verify` like any candidate.
 - **Citations are checked first.** An out-of-range or nonexistent `[file:line]`
   (primary or any path step) is **rejected** and reported — so `check` can never
-  later fail on an AI-invented line. Don't guess line numbers.
+  later fail on an AI-invented line. Don't guess line numbers: get them from `dossier`/`graph`,
+  or with `rg -n '<pattern>' <file>`. Because bad citations bounce, over-reporting is cheap and
+  under-reporting is not.
 - A discovery at the **same `file:line` (and category+cwe|title)** as an existing
   finding folds into that finding's `sources` (no duplicate) — your independent hit
   corroborates it.

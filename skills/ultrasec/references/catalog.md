@@ -26,6 +26,12 @@ you a glance; a missed flow is a missed bug.
 | redirect | CWE-601 | medium | `res.redirect` |
 | buffer | CWE-120 | high | C/C++ best-effort: `strcpy`, `strcat`, `sprintf`, `gets`, `memcpy` |
 
+> **The severity column is a starting prior, not a verdict.** It says how bad this class *usually*
+> is, with no knowledge of your app. Stored XSS in an admin panel outranks the `medium` shown
+> here; `md5` used for an ETag is not a finding at all. Rate what you confirm with
+> [severity-and-discipline.md](severity-and-discipline.md), which carries worked pairs for
+> exactly these cases.
+
 Receiver-gated rules only match when the call's receiver is in a known set (e.g.
 `db`/`collection`/`Model` for NoSQL, an HTTP client for SSRF member calls) so common
 look-alikes (`Array.prototype.find`, a plain `merge()`, a `cache.get()`) don't flood
@@ -60,16 +66,27 @@ type-coercion/validation (`parseInt`, `Number`, `validator.*`, `zod`/`Joi`). The
 **lower confidence and annotate** a candidate — they do not auto-dismiss it; you
 confirm the sanitizer actually covers the flow.
 
+## Extraction tier changes what gets enumerated
+
+Symbols and call sites come from tree-sitter when the grammars are available and from regex
+extractors when they aren't. The dossier records which ran, in `manifest.extraction`. This is not
+a detail: measured on a 69-file TypeScript repo, the regex tier produced **27 taint candidates
+instead of 66**, lost every cross-file command-injection candidate, and dropped two CWE classes
+entirely. `ast: false` means the catalog below was applied to a thinner view of the code — check
+it before concluding a class is absent, and say so in the report.
+
 ## What needs YOU (not in the catalog)
 
-Taint enumeration is structural. These classes need cross-file/semantic reasoning
-and are your job to find and add: **broken access control / IDOR**, **missing
-authorization**, **business-logic abuse**, **auth/session/SSO** flaws, **race
-conditions**, **mass assignment**, **feature abuse & data leakage**, **chained
-attacks**, **SSTI** in custom templating, and **ReDoS**. Hunt them with the
-attacker-mindset angles and the non-taint taxonomy in
-[hunting-heuristics.md](hunting-heuristics.md), and calibrate severity with
-[severity-and-discipline.md](severity-and-discipline.md).
+Taint enumeration is structural: it connects a known source to a known sink. Everything whose bug
+is an **absence** is out of reach and is your job — broken access control and IDOR, missing
+authorization, business logic, auth/session/JWT/SSO, crypto misuse beyond weak-hash detection,
+deserialization gadget availability, SSRF allow-list bypasses, race conditions and TOCTOU, mass
+assignment, ReDoS, file upload, CSRF/CORS, GraphQL field authz, request smuggling, and the
+LLM/agentic surface.
+
+Mechanism-level method per class is in [attack-classes.md](attack-classes.md); the lenses to
+apply before you know the class are in [hunting-heuristics.md](hunting-heuristics.md); where each
+hides in your stack is [frameworks.md](frameworks.md).
 
 ## Extending the catalog
 

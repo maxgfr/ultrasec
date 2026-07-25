@@ -24,7 +24,7 @@ candidate ranking; **you** decide where to look and when to stop.
 
 1. **Map the attack surface (cheap, no taint, no tools, no network).**
    ```
-   node scripts/ultrasec.mjs map --repo . --out .ultrasec
+   ultrasec map --repo . --out .ultrasec
    ```
    Reads `MAP.md` / `attack-surface.json`: entry points by kind (http/cli/env/ws…),
    sinks by CWE class, and **suggested targets** — top-level dirs ranked by
@@ -34,12 +34,25 @@ candidate ranking; **you** decide where to look and when to stop.
 
 2. **Prioritise (engine suggests, you override).** The `suggestedTargets` list is a
    deterministic default — highest attack-surface density first, with already-scanned
-   dirs marked. Override it with judgement: an auth/payments module with few sinks
-   may outrank a noisy logging dir. Pick the next target.
+   dirs marked. **Sink density is a proxy, not the answer**: it over-ranks noisy utility code and
+   under-ranks the auth module with three careful sinks. Re-rank by:
+
+   - **Crown jewels** — what holds credentials, money, PII, or the keys to everything else
+     (auth, payments, tenancy, admin, key management, migrations).
+   - **Exposure** — internet-facing before internal, unauthenticated before authenticated.
+     Cross-reference `attack-surface.json`'s `entryPoints` with the guard list from `CONTEXT.md`.
+   - **Churn** — `git log --since=6.months --name-only | sort | uniq -c | sort -rn` — recently
+     and heavily changed code has had the least review time.
+   - **Ownership gaps** — files with no CODEOWNER, or an owner who left. `--blame` surfaces both.
+   - **Test coverage** — what the suite doesn't exercise, nobody has reasoned about either.
+   - **Provenance** — vendored, generated, acquired or "temporary" code, and anything whose
+     comments say experimental.
+
+   Pick the next target and say why in the report; the ordering *is* the audit's thesis.
 
 3. **Drill in — scoped scan, merged into the same run.**
    ```
-   node scripts/ultrasec.mjs scan --repo . --scope <target-dir> --merge --resume --out .ultrasec
+   ultrasec scan --repo . --scope <target-dir> --merge --resume --out .ultrasec
    ```
    - `--scope` prunes the walk to that subtree (the load-bearing scale knob).
    - `--merge` folds the pass into the existing dossier — prior verdicts are
@@ -59,22 +72,48 @@ candidate ranking; **you** decide where to look and when to stop.
 
 5. **Loop until the budget or the targets are dry.** Re-run `map --out .ultrasec`:
    already-scanned targets are marked ✅ and the next un-covered one is suggested.
-   Move to it. Stop when the remaining targets are below your risk bar or the budget
-   is spent. Coverage is tracked in `manifest.scopes`, so the audit is **resumable
+   Move to it. Coverage is tracked in `manifest.scopes`, so the audit is **resumable
    across sessions** — pick up exactly where you left off.
+
+   **Define the risk bar before you start, and write it in the report.** On a repo you can't
+   finish, "where we stopped" is a finding in itself. A workable default: keep going while the
+   next target is internet-reachable, or touches credentials/money/PII, or has changed in the
+   last quarter; stop when the remaining targets are internal-only, non-sensitive and stable.
+   Then say exactly that, and name the scopes left uncovered — a report that doesn't state its
+   boundary reads as complete.
+
+**Monorepo specifics.** Workspace boundaries are usually trust boundaries — check whether one
+package's API assumes another validated. Shared internal libraries are blast-radius multipliers:
+a bug there is every consumer's bug, so weight them up even at low sink density. And note that
+npm/pnpm/yarn-audit only see the **root** lockfile; per-workspace sub-lockfiles need
+trivy/osv-scanner, which walk the tree ([tools.md](tools.md)).
 
 ## Incremental re-audit (CI / "what changed?")
 
 After a first full or map-driven pass, re-audit only what moved:
 ```
-node scripts/ultrasec.mjs scan --repo . --diff origin/main --merge --resume --out .ultrasec
+ultrasec scan --repo . --diff origin/main --merge --resume --out .ultrasec
 ```
 `--diff <ref>`/`--since <commit>` scans only files changed since the ref **plus their
-reverse-dependents** (the call sites that reach a changed sink, via the cached
-graph), and merges into the dossier. Diff-based scanning helps most on large repos,
+reverse-dependents** (the call sites that reach a changed sink, via the cached graph, 2 hops
+deep), and merges into the dossier. Diff-based scanning helps most on large repos,
 where each change touches little code. (`--diff` reflects git state, so it is not
 reproducible across machines the way a full scan is — the resolved ref is recorded
 in the manifest.)
+
+In CI, gate on `check` rather than on the finding count:
+
+```
+ultrasec scan  --repo . --diff origin/main --merge --resume --out .ultrasec --offline
+ultrasec check --run .ultrasec --min-severity high     # exit 1 fails the job
+```
+
+`--min-severity` limits the gate to the tier you want to block on; `--offline` keeps CI off the
+advisory feeds (rank by severity, no EPSS/KEV). Cache `~/.cache/ultrasec` and the tree-sitter
+grammar cache between runs, or every job pays the cold-start download — and a job that downloads
+nothing silently runs on the thinner **regex** extraction tier (`manifest.extraction.ast: false`).
+Note that `--diff` is not a substitute for a periodic full pass: it cannot see a bug in code
+nobody touched.
 
 ## Fan-out (optional, same as deep-audit)
 

@@ -1,10 +1,10 @@
 # Revalidate playbook (git-history false-positive cut)
 
-deepsec's revalidate pass cuts false positives 50%+ by re-checking each candidate
-against git history. ultrasec does the same in its own idiom: the engine emits
-compact, deterministic **git facts** about each promoted finding's cited location,
-and you decide whether it's still a live issue. The git facts come from the
-hardened argv `git()` path and degrade gracefully (a non-git repo just yields
+A finding can be real *and* already fixed — the code moved, the line was patched, the file was
+deleted. Re-checking each promoted finding against git history is a cheap, high-yield
+false-positive cut, and it is the pass most audits skip. The engine emits compact, deterministic
+**git facts** about each cited location and you decide whether it's still live. The facts come
+from the hardened argv `git()` path and degrade gracefully (a non-git repo just yields
 `fileExists:false` / `null`).
 
 **Scope:** findings the pipeline already promoted — `status ∈ {confirmed, needs-human}`.
@@ -13,7 +13,7 @@ Run it *after* `verify --apply`, before the final `render`.
 ## 1. Emit the worklist
 
 ```
-node scripts/ultrasec.mjs revalidate --run .ultrasec
+ultrasec revalidate --run .ultrasec
 ```
 
 Writes `REVALIDATE.todo.json` + `REVALIDATE.md`. Per finding you get:
@@ -37,12 +37,31 @@ Set `verdict` to one of:
 - `false-positive` — it was never a real issue.
 - `uncertain` — you can't tell from the facts.
 
-Save as `REVALIDATE.json` (array of `{id, verdict, fixedIn?, note?}`).
+Save as `REVALIDATE.json` (array of `{id, verdict, fixedIn?, note?}` — filled example in
+[schemas.md](schemas.md)).
+
+**`fixed` is the verdict that gets over-used.** The facts tell you the line *changed*; only the
+code tells you the bug is gone. Before you write `fixed`, rule out all five:
+
+| what you might be seeing | how to tell | verdict |
+|---|---|---|
+| The line moved, and the bug moved with it | read the current function, not the line — is the sink still fed by the same source? | `still-valid` |
+| A reformat, rename or lint pass touched it | the diff changes whitespace/identifiers, not data flow | `still-valid` |
+| Fixed on one path, not the others | the finding's route is patched; a sibling route still reaches the same sink | `still-valid`, and note the surviving path |
+| The file was deleted | `renamedTo` is best-effort — if it resolves, re-check there; if the code genuinely went away | `fixed` |
+| A real fix | you can point at the commit and say what it changed (parameterized, argv-array, guard added) | `fixed` + `fixedIn` |
+
+If you can't tell from the facts alone, that is exactly what `uncertain` is for — it lands
+`needs-human`, which is cheaper than a wrong `fixed`.
+
+**Where git facts mislead.** A shallow clone, a squash-merged history or a submodule boundary
+makes `lineLastChanged` meaningless or absent; `commitsSinceFinding` is `null` without `--blame`
+provenance. Absent facts are not evidence of a fix — default to `still-valid`/`uncertain`.
 
 ## 3. Apply (conservative)
 
 ```
-node scripts/ultrasec.mjs revalidate --apply REVALIDATE.json --run .ultrasec
+ultrasec revalidate --apply REVALIDATE.json --run .ultrasec
 ```
 
 - `still-valid` → kept as-is (flagged if its location drifted).

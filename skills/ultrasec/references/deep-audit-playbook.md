@@ -24,7 +24,7 @@ gate). No LLM calls and no API keys are added by the engine.
 
 ## Portability contract
 
-Every step is a plain `node scripts/ultrasec.mjs …` call. Parallel subagents are
+Every step is a plain `ultrasec …` call. Parallel subagents are
 an **optimization, not a requirement**:
 
 - **Harness with subagents** (e.g. Claude Code): one analyzer subagent per facet,
@@ -51,42 +51,40 @@ an **optimization, not a requirement**:
    sink clusters before decomposing.
 
 2. **Decompose** into facets — two complementary axes:
-   - **By vulnerability class**: SQLi, command/code injection, path traversal,
-     SSRF, deserialization, XSS, secrets/deps (tool triage), and the non-taint
-     classes only reasoning finds — **authorization/IDOR, business logic, weak
-     crypto, SSO/session, feature abuse & data leakage, chained attacks**, plus a
-     **wildcard** facet and an **obvious-things** sweep. The attacker-mindset angles
-     and the full taxonomy for these are in
-     [hunting-heuristics.md](hunting-heuristics.md).
+   - **By vulnerability class**: the taint classes the engine enumerates (SQLi, command/code
+     injection, path traversal, SSRF, deserialization, XSS), the tool output (secrets, deps,
+     IaC), and the classes only reasoning finds — **authorization/IDOR, business logic,
+     auth/session/JWT, crypto, race conditions, feature abuse, chained attacks** — plus a
+     **wildcard** facet and an **obvious-things** sweep. Method per class:
+     [attack-classes.md](attack-classes.md); lenses: [hunting-heuristics.md](hunting-heuristics.md).
    - **By entry point / module**: each HTTP route group, CLI, queue consumer,
      webhook — the places untrusted input enters. Use `graph` and `paths` to see
      which files each touches.
 
-3. **Fan out — one analyzer per facet.** Give each subagent a self-contained task
-   (it shares none of your context):
+3. **Fan out — one analyzer per facet.** `orchestrate --run <run> --phase adjudicate` emits the
+   analyzer contract (`<run>/orchestration/agents/analyzer.md`) with the real ids batched and
+   absolute paths baked in — **dispatch that**, don't hand-write a prompt. The emitted contract
+   is generated from the same source as the apply parser, so its response schema can't drift out
+   of sync with what `--apply` accepts; a hand-written one silently can.
 
-   > You are auditing ONE facet of a security review. Run, from the repo root:
-   > `node scripts/ultrasec.mjs paths --kind <class> --run <run>` (and `graph`
-   > `dossier <id>` as needed). For each relevant candidate, open the cited code,
-   > decide if untrusted data really reaches the sink unsanitized and is
-   > exploitable, and ALSO look for <class> bugs the engine didn't enumerate.
-   > Reply with a JSON array of `{id?, title, severity, cwe, file, line, path,
-   > exploitPath, verdict}` — `verdict` ∈ supported|partial|unsupported|refuted.
-   > Cite real `[file:line]`. Default to the harsher verdict ONLY when you can
-   > disprove it; otherwise mark `partial`/leave for a human.
-
-4. **Merge.** Collect the facets' findings. New findings you discovered (not in
-   the dossier) get appended; for enumerated candidates, collect the verdicts.
+4. **Merge.** Collect the facets' fragments. New findings (not in the dossier) go in through
+   `investigate --apply` so their citations are checked; for enumerated candidates, collect the
+   verdicts for `verify --apply`.
 
 5. **Verify adversarially.** `verify --run <run>` emits the ONE
    `VERIFY.todo.json`; `orchestrate --run <run> --phase verify` batches its ids
    into read-only skeptic subagents (contract + workflow, emitted). Each skeptic
-   opens the cited code, tries to **refute** the claim (needs ≥ majority to
-   kill), and RETURNS its verdicts — subagents never write. You, the sole
-   writer, merge the fragments and reassemble:
+   opens the cited code, tries to **refute** the claim, and RETURNS its verdicts — subagents
+   never write. You, the sole writer, merge the fragments and reassemble:
    `verify --apply <fragments> --run <run>` (a directory picks up every
-   `*verdict*.json`, sorted). The conservative policy keeps uncertain
-   high-severity items as needs-human.
+   `*verdict*.json`, sorted).
+
+   **When you run several skeptics over the same finding**, the merge rule is
+   *escalate-only*, matching `--cross-check`: take the **least harsh** verdict any skeptic
+   returned. One credible `supported` beats two `refuted`s, because a refutation has to be
+   positive and cited to count, and disagreement on a high/critical finding is itself a reason to
+   leave it for a human. Don't hold a vote — the conservative policy already resolves ties toward
+   needs-human.
 
 6. **Gate.** `check --run <run> --semantic`. Fix dangling citations; adjudicate
    leftovers. Re-run until it passes.
@@ -121,7 +119,17 @@ only schedules them.
 
 ## Budget
 
-Scale to the ask. "any obvious bugs" → a few class facets, single-vote verify.
-"thorough audit" / "be exhaustive" → every class + every entry point, 3-shard
-adversarial verify, a completeness loop. Cost is dominated by how many candidates
-you open — the engine has already narrowed the repo for you.
+Scale to the ask. Cost is dominated by how many candidates you *open* — the engine has already
+narrowed the repo, and reading a `dossier` packet is the unit of spend.
+
+| ask | facets | verify | loop |
+|---|---|---|---|
+| "any obvious bugs" | 3–4 classes, top-`risk` candidates only | one skeptic pass | none |
+| standard audit | every enumerated class + the 3–4 non-taint classes the app's trust model makes serious | one skeptic pass over the full worklist | one round |
+| "thorough" / "be exhaustive" | every class × every entry-point group | 3 shards, independent skeptics per finding | until dry |
+
+`orchestrate` batches **8 ids per subagent**; that is the granularity to plan around. "Under
+budget" at step 7 means you can still afford a full round — a fan-out plus the merge and re-verify
+of whatever it surfaces. **"Nothing new"** means a round produced no candidate at a location you
+hadn't already adjudicated; a round that only re-derives known findings is dry even if it is
+loud. Two consecutive dry rounds is a reasonable stopping rule for an exhaustive audit.

@@ -1,7 +1,7 @@
 # Powered mode (opt-in autonomy)
 
-`run` sequences the whole AI pipeline — `context → triage → investigate → verify →
-revalidate → narrative → check → render`. By default it is **keyless and
+`run` sequences the seven AI stages — `context → triage → investigate → verify → revalidate →
+narrative → implement` — and then always runs `check` + `render`. By default it is **keyless and
 network-free**: it scans deterministically, emits every worklist, and prints a TODO
 list — **zero external calls**. Powered mode is a thin automation layer that drives
 *your* agent CLI to fill those worklists; it calls the **same** emit/apply functions
@@ -10,20 +10,20 @@ as the manual path (no duplicated logic).
 ## Default (no keys, no calls)
 
 ```
-node scripts/ultrasec.mjs run --repo . --out .ultrasec
+ultrasec run --repo . --out .ultrasec
 ```
 
 Scans (deterministic taint, no external tools), emits `CONTEXT.todo.md`,
-`TRIAGE.*`, `INVESTIGATE.*`, `VERIFY.*`, `REVALIDATE.*`, `NARRATIVE.*`, runs the
+`TRIAGE.*`, `INVESTIGATE.*`, `VERIFY.*`, `REVALIDATE.*`, `NARRATIVE.*`, `IMPLEMENT.*`, runs the
 grounding `check`, and renders the report. Then fill each worklist yourself (or hand
 them to any agent) and `--apply`, exactly as in the manual workflow.
 
 ## Powered (drive an external agent CLI)
 
 ```
-node scripts/ultrasec.mjs run --repo . --powered --agent claude
-node scripts/ultrasec.mjs run --repo . --powered --agent codex --cross-check claude
-node scripts/ultrasec.mjs run --repo . --powered --agent "mytool exec {prompt} --cwd {run}"
+ultrasec run --repo . --powered --agent claude
+ultrasec run --repo . --powered --agent codex --cross-check claude
+ultrasec run --repo . --powered --agent "mytool exec {prompt} --cwd {run}"
 ```
 
 - `--agent` is a built-in name (`claude`, `codex`) or a generic argv template where
@@ -34,9 +34,24 @@ node scripts/ultrasec.mjs run --repo . --powered --agent "mytool exec {prompt} -
 - `--cross-check <cli>` (verify + revalidate only) runs a **second** agent over the
   same worklist. Any **high/critical** finding the two land on a different status is
   escalated to **needs-human** — cross-check can only *escalate* (toward human
-  review), never downgrade.
-- `--stages a,b,c` runs a subset (kept in canonical order); `--no-scan` reuses an
-  existing dossier (e.g. one produced by a full `scan` with external tools).
+  review), never downgrade. Pick a genuinely different model or vendor for the second agent;
+  two runs of the same model agree with themselves and buy you nothing. A high disagreement rate
+  is a signal about the *worklist* (ambiguous claims, thin evidence), not just about the models.
+- `--stages a,b,c` runs a subset, kept in canonical order. The legal tokens are exactly the seven
+  stage names — `context, triage, investigate, verify, revalidate, narrative, implement`.
+  `check` and `render` are unconditional post-steps and are **not** selectable; `--stages check`
+  exits 2.
+- `--no-scan` reuses an existing dossier (e.g. one produced by a full `scan` with external
+  tools). Without one it exits 2.
+- **Failure semantics.** Stages are independent: one that errors is recorded and the run
+  continues, and `run` exits 1 at the end if any errored. Malformed agent output is **not**
+  silently ignored — each `--apply` parser is fail-closed, so a garbage `verdicts.json` exits 2
+  rather than folding nothing and reporting success. Re-run just the failed stage with
+  `--stages <name> --no-scan`.
+
+**When *not* to use powered mode:** auditing code you don't trust with an agent that has network
+or broad filesystem access. The worklists contain attacker-influenced source. Sandbox it, or
+stay in the default keyless mode and adjudicate yourself.
 
 ## Security model
 
