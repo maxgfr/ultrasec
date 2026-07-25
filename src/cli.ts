@@ -37,11 +37,14 @@ USAGE
 COMMANDS
   map        Cheap attack-surface recon: where untrusted input enters + what sinks
              exist, with suggested scoped targets. No taint BFS, no tools, no
-             network — fast on huge repos. Flags: --scope · --out · --json.
+             network — fast on huge repos. Writes MAP.md + attack-surface.json only
+             when --out is given (else MAP.md goes to stdout). Flags: --repo ·
+             --out · --scope/--include/--exclude/--max-files/--gitignore · --json.
   context    Project-context primer: emit a deterministic scaffold (frameworks,
              entry points, auth middleware, sanitizers) + a brief; you author
-             CONTEXT.md, which is injected into every dossier + verify worklist.
-             Highest-leverage first step. Flags: --repo · --out · --scope · --json.
+             CONTEXT.md, which is injected into every dossier + every stage worklist.
+             Highest-leverage first step. Flags: --repo · --out ·
+             --scope/--include/--exclude/--max-files/--gitignore · --json.
   scan       Scan a repo: detect stack, run available tools (correlated across
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
@@ -50,11 +53,12 @@ COMMANDS
              logging-hygiene checks) · --blame (git-blame/CODEOWNERS provenance) ·
              --scope/--include/--exclude/--max-files/--gitignore (focus) ·
              --budget quick|standard|thorough · --max-candidates · --max-depth ·
-             --diff <ref>/--since <commit> · --merge · --resume (incremental).
+             --diff <ref>/--since <commit> · --merge · --resume (incremental) · --json.
   import     Ingest an upstream AI scanner's exported findings (deepsec) into the
              dossier: map → correlate → risk-rank → fold in (preserving verdicts).
-             ultrasec never runs it — data ingest only. Flags: --run · --format
-             deepsec-json · --no-enrich/--offline · --blame.
+             ultrasec never runs it — data ingest only. Flags: <findings.json>|--file ·
+             --run · --repo · --format deepsec-json · --no-enrich/--offline ·
+             --blame/--provenance · --json.
   logs       Blue-team log forensics: ingest existing log files (nginx/access,
              JSON-lines, syslog/auth.log, generic-timestamped, raw) and run
              deterministic attack-signature detection (SQLi/XSS/traversal/
@@ -72,24 +76,36 @@ COMMANDS
              never sudo. Docker scans and package-checker already self-refresh.
              Flags: --upgrade · --dry-run (print the commands, run nothing) ·
              --json.
-  graph      Show the links into/out of a file or symbol.
+  graph      Show the links into/out of a file or symbol. Reads <run>/graph.json
+             with --run, else live-scans --repo. Flags: <file|symbol> · --depth n
+             (default 1) · --run · --repo · --json.
   paths      List candidate cross-file source→sink chains.
+             Flags: --run · --kind <k> · --severity <s> · --json.
   dossier    Print the grounding packet for one finding (real code + neighbours).
+             The id may be a unique PREFIX. Flags: <finding-id> · --run · --repo.
   triage     Fast, code-free first pass over OPEN candidates: emit / apply
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
-             it is ignored (kept open for verify). Flags: --run · --apply.
-  verify     Emit / apply the adversarial finding↔evidence worklist.
+             it is ignored (kept open for verify). Flags: --run · --apply · --json.
+  verify     Emit / apply the adversarial finding↔evidence worklist. --shards n
+             --shard i splits the emit across fan-out workers, writing
+             VERIFY.todo.<i>.json (the .md brief always covers the FULL worklist).
+             --apply takes a file, a comma-list, or a DIRECTORY (picks up every
+             *verdict*.json, sorted) and fails closed if every fragment is stale.
+             Flags: --run · --shards · --shard · --apply · --json.
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]
              as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
-             existing findings' sources). Flags: --run · --repo · --apply · --scope.
+             existing findings' sources). Flags: --run · --repo · --apply ·
+             --scope/--include/--exclude/--max-files/--gitignore · --json.
   revalidate Git-history false-positive cut: emit compact git facts (does the
              cited line still exist? when did it last change?) for confirmed /
              needs-human findings; --apply folds in still-valid/fixed/
              false-positive/uncertain (fixed → dismissed + fixed-in commit;
-             high-sev false-positive → needs-human). Flags: --run · --repo · --apply.
+             high-sev false-positive → needs-human), and fails closed if every
+             fragment is stale. Flags: --run · --repo · --apply · --json.
   narrative  Emit the report-narrative worklist (reportable findings + a Narrative
              scaffold); you author NARRATIVE.json, folded in via 'render --narrative'.
+             Flags: --run · --json.
   implement  Emit a remediation-PRD draft (IMPLEMENT.md) + a structured worklist
              (IMPLEMENT.todo.json) from confirmed (→ fix) / needs-human (→ investigate)
              findings, folding the grounded NARRATIVE.json (fixes, patches, root causes)
@@ -98,20 +114,29 @@ COMMANDS
   render     Render SUMMARY/REPORT.md + a self-contained index.html.
              --narrative <file> folds in AI-authored sections (exec summary, fixes,
              attack chains, root causes), clearly marked + grounding-checked.
-  check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
-             --semantic also folds in the verify verdicts.
+  check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
+             READ-ONLY — it writes nothing and changes no status; --semantic ALSO
+             fails when a candidate is still unadjudicated. Exit 0 ok · 1 gate
+             failed · 2 unreadable run. Flags: --run · --repo · --semantic ·
+             --min-severity critical|high|medium|low|info · --json.
   clean      Remove the intermediate scan artifacts, KEEPING the rendered
              deliverables (REPORT/SUMMARY/index.html + findings.json); --all wipes
              the whole run dir, --keep-output keeps everything. With --docker also
              removes the scanner images + toolbox image + trivy cache volume
-             (--dry-run to preview).
+             (--dry-run to preview). NOTE: CONTEXT.md, MAP.md, sbom.cdx.json,
+             LOGSTATS.json, NARRATIVE.json, IMPLEMENT.md and orchestration/ count as
+             intermediates; a run that was never rendered is removed whole.
+             Flags: --run · --all · --keep-output · --docker · --dry-run · --json.
   run        Orchestrate the AI stages (context → triage → investigate → verify →
-             revalidate → narrative → implement → check → render). DEFAULT makes ZERO external
-             calls: scans + emits every worklist + prints the agent TODO. --powered
-             drives an agent CLI per worklist (keys live in that CLI, not ultrasec);
-             --cross-check <cli> escalates high/critical verify/revalidate
-             disagreement to needs-human. Flags: --repo · --out · --powered ·
-             --agent <name|tpl> · --cross-check <name|tpl> · --stages · --no-scan.
+             revalidate → narrative → implement), then ALWAYS check + render. DEFAULT
+             makes ZERO external calls: scans + emits every worklist + prints the agent
+             TODO. --powered drives an agent CLI per worklist (keys live in that CLI,
+             not ultrasec); --cross-check <cli> escalates high/critical verify/
+             revalidate disagreement to needs-human. --stages selects a subset of the
+             SEVEN stage names above — 'check'/'render' are unconditional post-steps
+             and are NOT valid --stages tokens. Flags: --repo · --out · --powered ·
+             --agent <name|tpl> · --cross-check <name|tpl> · --stages · --no-scan ·
+             --scope/--include/--exclude/--max-files/--gitignore · --json.
   orchestrate Emit the run's multi-agent orchestration from its CURRENT worklists
              into <run>/orchestration/: one <phase>.workflow.mjs per ready phase
              (adjudicate | verify | revalidate | investigate, real ids batched
@@ -124,9 +149,14 @@ COMMANDS
 GLOBAL
   --help, -h     Show this help.
   --version, -v  Print the version.
-  --json         Machine-readable output (where supported).
+  --json         Machine-readable output (every command above except render/dossier).
+
+EXIT CODES
+  0  ok        1  a gate failed (check) / nothing usable ingested (import)
+  2  usage or runtime error (bad flag value, unreadable run, unresolvable git ref)
 
 Each command's flags are listed above; \`--help\`/\`-h\` (anywhere) prints this help.
+Full reference incl. artifacts written per command: skills/ultrasec/references/commands.md.
 `;
 
 // Single source of truth for the command→handler mapping. The test-suite asserts

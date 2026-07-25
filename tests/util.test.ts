@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { parseArgs, flagStr, flagBool, listFlag, own, shortHash, byStr } from "../src/util.js";
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { join } from "node:path";
+import { parseArgs, flagStr, flagBool, listFlag, own, shortHash, byStr, BOOLEAN_FLAGS } from "../src/util.js";
 
 describe("parseArgs", () => {
   it("collects positionals", () => {
@@ -107,5 +109,40 @@ describe("shortHash", () => {
 describe("byStr", () => {
   it("orders deterministically", () => {
     expect(["c", "a", "b"].sort(byStr)).toEqual(["a", "b", "c"]);
+  });
+});
+
+// BOOLEAN_FLAGS declares, in a comment, that it "MUST stay in sync with every
+// flag read via flagBool()". Nothing enforced that, and `no-redact` drifted out
+// of the set: `logs --no-redact <dir>` swallowed the path and exited 2 (only the
+// flags-last form worked). This test is that contract, executable.
+describe("BOOLEAN_FLAGS covers every flagBool() call site", () => {
+  const SRC = join(import.meta.dirname, "..", "src");
+
+  const tsFiles = (dir: string): string[] =>
+    readdirSync(dir).flatMap((e) => {
+      const p = join(dir, e);
+      if (statSync(p).isDirectory()) return e === "vendor" ? [] : tsFiles(p);
+      return p.endsWith(".ts") && !p.endsWith(".d.ts") ? [p] : [];
+    });
+
+  it("has no flagBool key missing from the set", () => {
+    const missing = new Map<string, string>();
+    for (const file of tsFiles(SRC)) {
+      for (const m of readFileSync(file, "utf8").matchAll(/flagBool\(\s*\w+\s*,\s*["']([^"']+)["']/g)) {
+        const flag = m[1] ?? "";
+        if (!BOOLEAN_FLAGS.has(flag)) missing.set(flag, file);
+      }
+    }
+    expect(
+      [...missing].map(([flag, file]) => `--${flag} (${file})`),
+      "a flagBool() flag outside BOOLEAN_FLAGS greedily swallows the next positional",
+    ).toEqual([]);
+  });
+
+  it("keeps --no-redact from swallowing the log path", () => {
+    const a = parseArgs(["logs", "--no-redact", "./var/log"]);
+    expect(a._).toEqual(["logs", "./var/log"]);
+    expect(flagBool(a, "no-redact")).toBe(true);
   });
 });

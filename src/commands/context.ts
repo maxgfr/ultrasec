@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs } from "../util.js";
+import { flagStr, flagBool, listFlag, numFlag, println, eprintln, isScannableDir, type ParsedArgs } from "../util.js";
 import { scanRepo } from "../scan.js";
 import { buildAttackSurface } from "../map.js";
 import { buildContextScaffold, renderContextScaffoldMd } from "../context.js";
@@ -13,6 +13,11 @@ import { buildContextScaffold, renderContextScaffoldMd } from "../context.js";
 export function runContext(args: ParsedArgs): number {
   const repo = resolve(flagStr(args, "repo") ?? ".");
   const out = resolve(flagStr(args, "out") ?? ".ultrasec");
+
+  if (!isScannableDir(repo)) {
+    eprintln(`ultrasec context: --repo '${repo}' is not a directory.`);
+    return 2;
+  }
 
   const scanOpts = {
     scope: listFlag(args, "scope"),

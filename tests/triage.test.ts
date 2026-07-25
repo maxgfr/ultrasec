@@ -100,4 +100,20 @@ describe("parseTriage", () => {
     expect(parseTriage('[{"id":"a","verdict":"noise"},{"id":"b","verdict":"bogus"},{"verdict":"keep"}]')).toEqual([{ id: "a", verdict: "noise" }]);
     expect(parseTriage('{"triage":[{"id":"c","verdict":"keep"}]}')[0]!.id).toBe("c");
   });
+
+  it("accepts an explicitly empty batch — 'nothing is noise' is a real answer", () => {
+    expect(parseTriage("[]")).toEqual([]);
+    expect(parseTriage('{"triage":[]}')).toEqual([]);
+  });
+
+  // Same fail-closed contract as parseVerdicts/parseRevalidations: folding zero rows
+  // looks exactly like a completed triage pass, so it must be an error, not a no-op.
+  it("throws on an unrecognized shape rather than folding nothing", () => {
+    expect(() => parseTriage('{"rows":[{"id":"a","verdict":"noise"}]}')).toThrow(/fail-closed/);
+    expect(() => parseTriage('"noise"')).toThrow(/fail-closed/);
+  });
+
+  it("throws when rows exist but none are usable", () => {
+    expect(() => parseTriage('[{"id":"a","verdict":"bogus"},{"verdict":"noise"}]')).toThrow(/none usable/);
+  });
 });

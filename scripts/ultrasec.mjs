@@ -12332,6 +12332,7 @@ var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 
 // src/util.ts
 import { createHash as createHash4 } from "crypto";
+import { statSync as statSync5 } from "fs";
 var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "help",
   "version",
@@ -12355,7 +12356,8 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "keep-output",
   "all",
   "eco",
-  "list"
+  "list",
+  "no-redact"
 ]);
 var SHORT_FLAGS = { h: "help", v: "version" };
 function parseArgs(argv) {
@@ -12422,6 +12424,13 @@ function numFlag(args2, name2) {
 }
 function own(obj, key) {
   return obj != null && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : void 0;
+}
+function isScannableDir(path) {
+  try {
+    return statSync5(path).isDirectory();
+  } catch {
+    return false;
+  }
 }
 function shortHash2(input, len = 12) {
   return createHash4("sha256").update(input).digest("hex").slice(0, len);
@@ -13319,7 +13328,7 @@ function extractionTier() {
 }
 
 // src/walk.ts
-import { readFileSync as readFileSync9, readdirSync as readdirSync4, lstatSync as lstatSync2, statSync as statSync5, realpathSync as realpathSync3 } from "fs";
+import { readFileSync as readFileSync9, readdirSync as readdirSync4, lstatSync as lstatSync2, statSync as statSync6, realpathSync as realpathSync3 } from "fs";
 import { join as join18, relative, resolve as resolve4, sep as sep3 } from "path";
 var DEFAULT_IGNORE_DIRS = /* @__PURE__ */ new Set([
   ".git",
@@ -13505,7 +13514,7 @@ function walkWithMeta(root, opts = {}) {
         try {
           const real = realpathSync3(abs);
           if (real !== rootReal && !real.startsWith(rootReal + sep3)) continue;
-          const target = statSync5(abs);
+          const target = statSync6(abs);
           if (target.isDirectory()) continue;
           st = target;
         } catch {
@@ -14438,6 +14447,10 @@ function renderMapMd(repo, s) {
 async function runMap(args2) {
   const repo = resolve6(flagStr(args2, "repo") ?? ".");
   const out2 = flagStr(args2, "out");
+  if (!isScannableDir(repo)) {
+    eprintln(`ultrasec map: --repo '${repo}' is not a directory.`);
+    return 2;
+  }
   const scope = listFlag(args2, "scope");
   const include = listFlag(args2, "include");
   const exclude = listFlag(args2, "exclude");
@@ -14967,7 +14980,7 @@ function saveScanCache(run2, cache) {
 }
 
 // src/tools/scoring.ts
-import { existsSync as existsSync10, mkdirSync as mkdirSync7, readFileSync as readFileSync14, statSync as statSync6, writeFileSync as writeFileSync8 } from "fs";
+import { existsSync as existsSync10, mkdirSync as mkdirSync7, readFileSync as readFileSync14, statSync as statSync7, writeFileSync as writeFileSync8 } from "fs";
 import { gunzipSync as gunzipSync2 } from "zlib";
 import { homedir as homedir3 } from "os";
 import { join as join27 } from "path";
@@ -15036,7 +15049,7 @@ function cacheDir() {
 }
 function fresh(path) {
   try {
-    return existsSync10(path) && Date.now() - statSync6(path).mtimeMs < TTL_MS;
+    return existsSync10(path) && Date.now() - statSync7(path).mtimeMs < TTL_MS;
   } catch {
     return false;
   }
@@ -16172,12 +16185,20 @@ var REVDEP_DEPTH = 2;
 async function runScan(args2) {
   const repo = resolve8(flagStr(args2, "repo") ?? ".");
   const out2 = resolve8(flagStr(args2, "out") ?? ".ultrasec");
+  if (!isScannableDir(repo)) {
+    eprintln(`ultrasec: --repo '${repo}' is not a directory. Aborting \u2014 an unscannable path must not report a clean audit.`);
+    return 2;
+  }
   const scope = listFlag(args2, "scope");
   const include = listFlag(args2, "include");
   const exclude = listFlag(args2, "exclude");
   const maxFiles = numFlag(args2, "max-files");
   const gitignore = flagBool(args2, "gitignore");
   const budgetName = flagStr(args2, "budget");
+  if (budgetName !== void 0 && !own(BUDGETS, budgetName)) {
+    eprintln(`ultrasec: unknown --budget '${budgetName}' (expected ${Object.keys(BUDGETS).join("|")}).`);
+    return 2;
+  }
   const preset = own(BUDGETS, budgetName ?? "standard") ?? BUDGETS.standard;
   const maxDepth = numFlag(args2, "max-depth") ?? preset.maxDepth;
   const explicitMaxCandidates = numFlag(args2, "max-candidates");
@@ -16547,6 +16568,10 @@ function loadContextDoc(run2) {
 function runContext(args2) {
   const repo = resolve9(flagStr(args2, "repo") ?? ".");
   const out2 = resolve9(flagStr(args2, "out") ?? ".ultrasec");
+  if (!isScannableDir(repo)) {
+    eprintln(`ultrasec context: --repo '${repo}' is not a directory.`);
+    return 2;
+  }
   const scanOpts = {
     scope: listFlag(args2, "scope"),
     include: listFlag(args2, "include"),
@@ -16720,10 +16745,10 @@ async function runImport(args2) {
 
 // src/commands/logs.ts
 import { resolve as resolve11, join as join38, dirname as dirname5, extname as extname2, sep as sep5 } from "path";
-import { existsSync as existsSync19, statSync as statSync8, readdirSync as readdirSync6, mkdirSync as mkdirSync11, writeFileSync as writeFileSync12, openSync, readSync, closeSync } from "fs";
+import { existsSync as existsSync19, statSync as statSync9, readdirSync as readdirSync6, mkdirSync as mkdirSync11, writeFileSync as writeFileSync12, openSync, readSync, closeSync } from "fs";
 
 // src/logs/analyze.ts
-import { createReadStream, statSync as statSync7 } from "fs";
+import { createReadStream, statSync as statSync8 } from "fs";
 import { createInterface as createInterface2 } from "readline";
 import { relative as relative4, sep as sep4 } from "path";
 
@@ -17442,7 +17467,7 @@ function estimateTotalLines(sizeBytes, bytesRead, linesRead) {
 async function analyzeFile(absPath, relPath, opts, state) {
   let sizeBytes = 0;
   try {
-    sizeBytes = statSync7(absPath).size;
+    sizeBytes = statSync8(absPath).size;
   } catch {
   }
   const stream = createReadStream(absPath, { encoding: "utf8" });
@@ -17671,13 +17696,13 @@ function expandInputs(inputs) {
   for (const raw of inputs) {
     const p = resolve11(raw);
     if (!existsSync19(p)) throw new Error(`path not found: ${raw}`);
-    const st = statSync8(p);
+    const st = statSync9(p);
     if (st.isDirectory()) {
       for (const entry of readdirSync6(p).sort(byStr2)) {
         const full = join38(p, entry);
         let est;
         try {
-          est = statSync8(full);
+          est = statSync9(full);
         } catch {
           continue;
         }
@@ -17830,7 +17855,7 @@ function runDossier(args2) {
 import { resolve as resolve14 } from "path";
 
 // src/stage.ts
-import { mkdirSync as mkdirSync12, writeFileSync as writeFileSync13, readFileSync as readFileSync18, readdirSync as readdirSync7, statSync as statSync9 } from "fs";
+import { mkdirSync as mkdirSync12, writeFileSync as writeFileSync13, readFileSync as readFileSync18, readdirSync as readdirSync7, statSync as statSync10 } from "fs";
 import { join as join40, resolve as resolve13 } from "path";
 function stageFiles(stem) {
   return { todo: `${stem}.todo.json`, md: `${stem}.md` };
@@ -17847,7 +17872,7 @@ function collectApplyFiles(applyPath, dirRegex) {
   const abs = resolve13(applyPath);
   let isDir = false;
   try {
-    isDir = statSync9(abs).isDirectory();
+    isDir = statSync10(abs).isDirectory();
   } catch {
   }
   if (isDir) {
@@ -18053,8 +18078,13 @@ Triage: dismissed as noise.` };
 }
 function parseTriage(raw) {
   const data = JSON.parse(raw);
-  const arr = Array.isArray(data) ? data : Array.isArray(data?.triage) ? data.triage : [];
-  return arr.filter((v) => v && typeof v.id === "string" && TRIAGE_VERDICTS.includes(v.verdict)).map((v) => ({ id: v.id, verdict: v.verdict }));
+  const arr = Array.isArray(data) ? data : Array.isArray(data?.triage) ? data.triage : null;
+  if (arr === null) throw new Error(`unrecognized triage shape \u2014 expected a JSON array or {"triage":[...]} (fail-closed)`);
+  const out2 = arr.filter((v) => v && typeof v.id === "string" && TRIAGE_VERDICTS.includes(v.verdict)).map((v) => ({ id: v.id, verdict: v.verdict }));
+  if (arr.length > 0 && out2.length === 0) {
+    throw new Error(`${arr.length} row(s), none usable \u2014 each needs a string "id" and a "verdict" among ${TRIAGE_VERDICTS.join("|")} (fail-closed)`);
+  }
+  return out2;
 }
 
 // src/commands/triage.ts
@@ -19653,7 +19683,7 @@ import { join as join47, resolve as resolve25 } from "path";
 
 // src/powered/agent.ts
 import { spawnSync as spawnSync2 } from "child_process";
-import { existsSync as existsSync23, statSync as statSync10 } from "fs";
+import { existsSync as existsSync23, statSync as statSync11 } from "fs";
 var BUILTINS2 = {
   claude: { name: "claude", argv: (p) => ["claude", "-p", p] },
   codex: { name: "codex", argv: (p) => ["codex", "exec", p] }
@@ -19677,7 +19707,7 @@ var defaultSpawn = (cmd, args2, cwd) => {
 };
 function nonEmptyFile(p) {
   try {
-    return existsSync23(p) && statSync10(p).size > 0;
+    return existsSync23(p) && statSync11(p).size > 0;
   } catch {
     return false;
   }
@@ -20428,11 +20458,14 @@ USAGE
 COMMANDS
   map        Cheap attack-surface recon: where untrusted input enters + what sinks
              exist, with suggested scoped targets. No taint BFS, no tools, no
-             network \u2014 fast on huge repos. Flags: --scope \xB7 --out \xB7 --json.
+             network \u2014 fast on huge repos. Writes MAP.md + attack-surface.json only
+             when --out is given (else MAP.md goes to stdout). Flags: --repo \xB7
+             --out \xB7 --scope/--include/--exclude/--max-files/--gitignore \xB7 --json.
   context    Project-context primer: emit a deterministic scaffold (frameworks,
              entry points, auth middleware, sanitizers) + a brief; you author
-             CONTEXT.md, which is injected into every dossier + verify worklist.
-             Highest-leverage first step. Flags: --repo \xB7 --out \xB7 --scope \xB7 --json.
+             CONTEXT.md, which is injected into every dossier + every stage worklist.
+             Highest-leverage first step. Flags: --repo \xB7 --out \xB7
+             --scope/--include/--exclude/--max-files/--gitignore \xB7 --json.
   scan       Scan a repo: detect stack, run available tools (correlated across
              scanners), build the link-graph, enumerate candidate taint paths,
              rank by EPSS/KEV/CVSS risk, write the audit dossier.
@@ -20441,11 +20474,12 @@ COMMANDS
              logging-hygiene checks) \xB7 --blame (git-blame/CODEOWNERS provenance) \xB7
              --scope/--include/--exclude/--max-files/--gitignore (focus) \xB7
              --budget quick|standard|thorough \xB7 --max-candidates \xB7 --max-depth \xB7
-             --diff <ref>/--since <commit> \xB7 --merge \xB7 --resume (incremental).
+             --diff <ref>/--since <commit> \xB7 --merge \xB7 --resume (incremental) \xB7 --json.
   import     Ingest an upstream AI scanner's exported findings (deepsec) into the
              dossier: map \u2192 correlate \u2192 risk-rank \u2192 fold in (preserving verdicts).
-             ultrasec never runs it \u2014 data ingest only. Flags: --run \xB7 --format
-             deepsec-json \xB7 --no-enrich/--offline \xB7 --blame.
+             ultrasec never runs it \u2014 data ingest only. Flags: <findings.json>|--file \xB7
+             --run \xB7 --repo \xB7 --format deepsec-json \xB7 --no-enrich/--offline \xB7
+             --blame/--provenance \xB7 --json.
   logs       Blue-team log forensics: ingest existing log files (nginx/access,
              JSON-lines, syslog/auth.log, generic-timestamped, raw) and run
              deterministic attack-signature detection (SQLi/XSS/traversal/
@@ -20463,24 +20497,36 @@ COMMANDS
              never sudo. Docker scans and package-checker already self-refresh.
              Flags: --upgrade \xB7 --dry-run (print the commands, run nothing) \xB7
              --json.
-  graph      Show the links into/out of a file or symbol.
+  graph      Show the links into/out of a file or symbol. Reads <run>/graph.json
+             with --run, else live-scans --repo. Flags: <file|symbol> \xB7 --depth n
+             (default 1) \xB7 --run \xB7 --repo \xB7 --json.
   paths      List candidate cross-file source\u2192sink chains.
+             Flags: --run \xB7 --kind <k> \xB7 --severity <s> \xB7 --json.
   dossier    Print the grounding packet for one finding (real code + neighbours).
+             The id may be a unique PREFIX. Flags: <finding-id> \xB7 --run \xB7 --repo.
   triage     Fast, code-free first pass over OPEN candidates: emit / apply
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
-             it is ignored (kept open for verify). Flags: --run \xB7 --apply.
-  verify     Emit / apply the adversarial finding\u2194evidence worklist.
+             it is ignored (kept open for verify). Flags: --run \xB7 --apply \xB7 --json.
+  verify     Emit / apply the adversarial finding\u2194evidence worklist. --shards n
+             --shard i splits the emit across fan-out workers, writing
+             VERIFY.todo.<i>.json (the .md brief always covers the FULL worklist).
+             --apply takes a file, a comma-list, or a DIRECTORY (picks up every
+             *verdict*.json, sorted) and fails closed if every fragment is stale.
+             Flags: --run \xB7 --shards \xB7 --shard \xB7 --apply \xB7 --json.
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]
              as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
-             existing findings' sources). Flags: --run \xB7 --repo \xB7 --apply \xB7 --scope.
+             existing findings' sources). Flags: --run \xB7 --repo \xB7 --apply \xB7
+             --scope/--include/--exclude/--max-files/--gitignore \xB7 --json.
   revalidate Git-history false-positive cut: emit compact git facts (does the
              cited line still exist? when did it last change?) for confirmed /
              needs-human findings; --apply folds in still-valid/fixed/
              false-positive/uncertain (fixed \u2192 dismissed + fixed-in commit;
-             high-sev false-positive \u2192 needs-human). Flags: --run \xB7 --repo \xB7 --apply.
+             high-sev false-positive \u2192 needs-human), and fails closed if every
+             fragment is stale. Flags: --run \xB7 --repo \xB7 --apply \xB7 --json.
   narrative  Emit the report-narrative worklist (reportable findings + a Narrative
              scaffold); you author NARRATIVE.json, folded in via 'render --narrative'.
+             Flags: --run \xB7 --json.
   implement  Emit a remediation-PRD draft (IMPLEMENT.md) + a structured worklist
              (IMPLEMENT.todo.json) from confirmed (\u2192 fix) / needs-human (\u2192 investigate)
              findings, folding the grounded NARRATIVE.json (fixes, patches, root causes)
@@ -20489,20 +20535,29 @@ COMMANDS
   render     Render SUMMARY/REPORT.md + a self-contained index.html.
              --narrative <file> folds in AI-authored sections (exec summary, fixes,
              attack chains, root causes), clearly marked + grounding-checked.
-  check      Gate: every finding must cite resolvable [file:line] (anti-hallucination);
-             --semantic also folds in the verify verdicts.
+  check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
+             READ-ONLY \u2014 it writes nothing and changes no status; --semantic ALSO
+             fails when a candidate is still unadjudicated. Exit 0 ok \xB7 1 gate
+             failed \xB7 2 unreadable run. Flags: --run \xB7 --repo \xB7 --semantic \xB7
+             --min-severity critical|high|medium|low|info \xB7 --json.
   clean      Remove the intermediate scan artifacts, KEEPING the rendered
              deliverables (REPORT/SUMMARY/index.html + findings.json); --all wipes
              the whole run dir, --keep-output keeps everything. With --docker also
              removes the scanner images + toolbox image + trivy cache volume
-             (--dry-run to preview).
+             (--dry-run to preview). NOTE: CONTEXT.md, MAP.md, sbom.cdx.json,
+             LOGSTATS.json, NARRATIVE.json, IMPLEMENT.md and orchestration/ count as
+             intermediates; a run that was never rendered is removed whole.
+             Flags: --run \xB7 --all \xB7 --keep-output \xB7 --docker \xB7 --dry-run \xB7 --json.
   run        Orchestrate the AI stages (context \u2192 triage \u2192 investigate \u2192 verify \u2192
-             revalidate \u2192 narrative \u2192 implement \u2192 check \u2192 render). DEFAULT makes ZERO external
-             calls: scans + emits every worklist + prints the agent TODO. --powered
-             drives an agent CLI per worklist (keys live in that CLI, not ultrasec);
-             --cross-check <cli> escalates high/critical verify/revalidate
-             disagreement to needs-human. Flags: --repo \xB7 --out \xB7 --powered \xB7
-             --agent <name|tpl> \xB7 --cross-check <name|tpl> \xB7 --stages \xB7 --no-scan.
+             revalidate \u2192 narrative \u2192 implement), then ALWAYS check + render. DEFAULT
+             makes ZERO external calls: scans + emits every worklist + prints the agent
+             TODO. --powered drives an agent CLI per worklist (keys live in that CLI,
+             not ultrasec); --cross-check <cli> escalates high/critical verify/
+             revalidate disagreement to needs-human. --stages selects a subset of the
+             SEVEN stage names above \u2014 'check'/'render' are unconditional post-steps
+             and are NOT valid --stages tokens. Flags: --repo \xB7 --out \xB7 --powered \xB7
+             --agent <name|tpl> \xB7 --cross-check <name|tpl> \xB7 --stages \xB7 --no-scan \xB7
+             --scope/--include/--exclude/--max-files/--gitignore \xB7 --json.
   orchestrate Emit the run's multi-agent orchestration from its CURRENT worklists
              into <run>/orchestration/: one <phase>.workflow.mjs per ready phase
              (adjudicate | verify | revalidate | investigate, real ids batched
@@ -20515,9 +20570,14 @@ COMMANDS
 GLOBAL
   --help, -h     Show this help.
   --version, -v  Print the version.
-  --json         Machine-readable output (where supported).
+  --json         Machine-readable output (every command above except render/dossier).
+
+EXIT CODES
+  0  ok        1  a gate failed (check) / nothing usable ingested (import)
+  2  usage or runtime error (bad flag value, unreadable run, unresolvable git ref)
 
 Each command's flags are listed above; \`--help\`/\`-h\` (anywhere) prints this help.
+Full reference incl. artifacts written per command: skills/ultrasec/references/commands.md.
 `;
 var COMMAND_HANDLERS = {
   tools: runTools,

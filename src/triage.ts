@@ -107,11 +107,22 @@ export function applyTriage(dossier: Dossier, inputs: TriageInput[]): ApplyTriag
   return { findings, applied, dismissed, kept };
 }
 
-/** Parse a TRIAGE.json body: a JSON array or {triage:[...]}, tolerant. */
+/**
+ * Parse a TRIAGE.json body: a JSON array or {triage:[...]}. Individual malformed rows
+ * are skipped, but — like `parseVerdicts`/`parseRevalidations` — an unrecognized shape
+ * or an all-unusable batch THROWS rather than folding zero rows and reporting success.
+ * A silent no-op reads exactly like a completed triage pass, which is the one thing an
+ * audit tool must never do.
+ */
 export function parseTriage(raw: string): TriageInput[] {
   const data = JSON.parse(raw) as unknown;
-  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.triage) ? (data as any).triage : [];
-  return (arr as any[])
+  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.triage) ? (data as any).triage : null;
+  if (arr === null) throw new Error(`unrecognized triage shape — expected a JSON array or {"triage":[...]} (fail-closed)`);
+  const out = (arr as any[])
     .filter((v) => v && typeof v.id === "string" && (TRIAGE_VERDICTS as readonly string[]).includes(v.verdict))
     .map((v) => ({ id: v.id as string, verdict: v.verdict as TriageVerdict }));
+  if (arr.length > 0 && out.length === 0) {
+    throw new Error(`${arr.length} row(s), none usable — each needs a string "id" and a "verdict" among ${TRIAGE_VERDICTS.join("|")} (fail-closed)`);
+  }
+  return out;
 }

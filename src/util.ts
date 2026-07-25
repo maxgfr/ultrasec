@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { statSync } from "node:fs";
 
 // ── Tiny zero-dependency arg parser ──────────────────────────────────────────
 // Supports: positionals, `--flag value`, `--flag=value`, boolean `--flag`, and
@@ -47,6 +48,7 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "all",
   "eco",
   "list",
+  "no-redact",
 ]);
 
 /** Single-dash short-flag aliases, as documented in the CLI's GLOBAL help. Each
@@ -140,6 +142,20 @@ export function numFlag(args: ParsedArgs, name: string): number | undefined {
  *  "toString", "valueOf", …) can never return an inherited function. */
 export function own<T>(obj: Record<string, T> | null | undefined, key: string): T | undefined {
   return obj != null && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+}
+
+/**
+ * Is this path a directory we can actually walk? The single definition of
+ * "scannable repo", shared by every command that takes `--repo`, so a
+ * mistyped path fails identically everywhere instead of walking zero files
+ * and reporting a clean audit.
+ */
+export function isScannableDir(path: string): boolean {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false; // missing, or a permission error we can't walk through
+  }
 }
 
 /** Short, stable content hash for deriving idempotent ids. */

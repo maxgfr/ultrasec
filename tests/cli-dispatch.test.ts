@@ -43,6 +43,26 @@ describe("CLI dispatch table", () => {
     out.mockRestore();
   });
 
+  // A path that can't be walked, or a budget name that doesn't exist, used to
+  // produce a successful run: `scan --repo /typo` exited 0 with "0 findings" and
+  // `--budget thorogh` silently fell back to `standard`. Both are audits that
+  // LOOK clean or LOOK thorough and aren't. They fail closed now.
+  it.each(["scan", "map", "context"])("%s exits 2 on a --repo that isn't a directory", async (cmd) => {
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const bad = join(import.meta.dirname, "fixtures", "definitely-not-a-repo");
+    const code = await dispatch(cmd, parseArgs([cmd, "--repo", bad, "--out", join(bad, "out"), "--no-enrich", "--no-tools"]));
+    err.mockRestore();
+    expect(code).toBe(2);
+  });
+
+  it("scan exits 2 on an unknown --budget instead of silently using standard", async () => {
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const repo = join(import.meta.dirname, "fixtures", "vuln-express");
+    const code = await dispatch("scan", parseArgs(["scan", "--repo", repo, "--budget", "thorogh", "--no-enrich", "--no-tools"]));
+    err.mockRestore();
+    expect(code).toBe(2);
+  });
+
   it("version prints the version and exits 0", async () => {
     let printed = "";
     const out = vi.spyOn(process.stdout, "write").mockImplementation((c: any) => {

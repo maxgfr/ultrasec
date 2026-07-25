@@ -1,6 +1,6 @@
 import { resolve, join } from "node:path";
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
-import { flagStr, flagBool, listFlag, numFlag, println, type ParsedArgs } from "../util.js";
+import { flagStr, flagBool, listFlag, numFlag, println, eprintln, isScannableDir, type ParsedArgs } from "../util.js";
 import { scanRepo } from "../scan.js";
 import { buildAttackSurface, renderMapMd } from "../map.js";
 
@@ -12,6 +12,12 @@ import { buildAttackSurface, renderMapMd } from "../map.js";
 export async function runMap(args: ParsedArgs): Promise<number> {
   const repo = resolve(flagStr(args, "repo") ?? ".");
   const out = flagStr(args, "out");
+
+  if (!isScannableDir(repo)) {
+    eprintln(`ultrasec map: --repo '${repo}' is not a directory.`);
+    return 2;
+  }
+
   const scope = listFlag(args, "scope");
   const include = listFlag(args, "include");
   const exclude = listFlag(args, "exclude");

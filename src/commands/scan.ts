@@ -1,6 +1,6 @@
 import { resolve, join, relative } from "node:path";
 import { existsSync } from "node:fs";
-import { flagStr, flagBool, listFlag, numFlag, own, println, eprintln, byStr, type ParsedArgs } from "../util.js";
+import { flagStr, flagBool, listFlag, numFlag, own, println, eprintln, byStr, isScannableDir, type ParsedArgs } from "../util.js";
 import { scanRepo, scanRepoCached, extractionTier } from "../scan.js";
 import { buildGraph, reverseDependents } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
@@ -36,6 +36,14 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const repo = resolve(flagStr(args, "repo") ?? ".");
   const out = resolve(flagStr(args, "out") ?? ".ultrasec");
 
+  // A path that doesn't exist must NEVER read as a clean audit — a typo'd --repo
+  // used to walk zero files and exit 0 with "0 findings", the most dangerous
+  // possible silent failure for a security tool.
+  if (!isScannableDir(repo)) {
+    eprintln(`ultrasec: --repo '${repo}' is not a directory. Aborting — an unscannable path must not report a clean audit.`);
+    return 2;
+  }
+
   // Scope knobs (large-repo focus): prune the walk so a huge tree is never fully read.
   const scope = listFlag(args, "scope");
   const include = listFlag(args, "include");
@@ -44,8 +52,15 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const gitignore = flagBool(args, "gitignore");
 
   // Budget knobs: rank-then-cap taint candidates; explicit flags override the preset.
-  // own() guards against a `--budget constructor`-style prototype-member name.
+  // own() guards against a `--budget constructor`-style prototype-member name. An
+  // unrecognized name is an ERROR, not a silent fall-back to `standard` — asking for
+  // `--budget thorogh` and quietly getting a narrower scan is how coverage is lost
+  // without anyone noticing (`logs --budget` has always failed closed this way).
   const budgetName = flagStr(args, "budget");
+  if (budgetName !== undefined && !own(BUDGETS, budgetName)) {
+    eprintln(`ultrasec: unknown --budget '${budgetName}' (expected ${Object.keys(BUDGETS).join("|")}).`);
+    return 2;
+  }
   const preset = own(BUDGETS, budgetName ?? "standard") ?? BUDGETS.standard!;
   const maxDepth = numFlag(args, "max-depth") ?? preset.maxDepth;
   const explicitMaxCandidates = numFlag(args, "max-candidates");
