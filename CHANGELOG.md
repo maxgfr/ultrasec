@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.19.0](https://github.com/maxgfr/ultrasec/compare/v1.18.0...v1.19.0) (2026-07-26)
+
+
+### Features
+
+* **engine:** re-pin codeindex v2.20.1 ([bf49cf7](https://github.com/maxgfr/ultrasec/commit/bf49cf7d2db59dda6746285acc9bc847af1aeeeb))
+
 # [1.18.0](https://github.com/maxgfr/ultrasec/compare/v1.17.0...v1.18.0) (2026-07-25)
 
 
