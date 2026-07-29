@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { realpathSync as realpathSync5 } from "fs";
+import { realpathSync as realpathSync7 } from "fs";
 import { pathToFileURL as pathToFileURL3 } from "url";
 
 // src/vendor/codeindex-engine.mjs
@@ -653,9 +653,9 @@ function diffFiles(dir, spec) {
     }
   }
   const byPath = new Map(out2.map((f) => [f.path, f]));
-  const num2 = sh("git", [...gitArgs(dir), "diff", "-z", "-M", "--numstat", ...rangeArgs(spec)]);
-  if (num2.ok) {
-    const toks = num2.stdout.split("\0");
+  const num22 = sh("git", [...gitArgs(dir), "diff", "-z", "-M", "--numstat", ...rangeArgs(spec)]);
+  if (num22.ok) {
+    const toks = num22.stdout.split("\0");
     let i2 = 0;
     while (i2 < toks.length) {
       const head = toks[i2++];
@@ -2087,16 +2087,16 @@ async function Module2(moduleArg = {}) {
     if (endPtr - idx > 16 && heapOrArray.buffer && UTF8Decoder) {
       return UTF8Decoder.decode(heapOrArray.subarray(idx, endPtr));
     }
-    var str2 = "";
+    var str22 = "";
     while (idx < endPtr) {
       var u0 = heapOrArray[idx++];
       if (!(u0 & 128)) {
-        str2 += String.fromCharCode(u0);
+        str22 += String.fromCharCode(u0);
         continue;
       }
       var u1 = heapOrArray[idx++] & 63;
       if ((u0 & 224) == 192) {
-        str2 += String.fromCharCode((u0 & 31) << 6 | u1);
+        str22 += String.fromCharCode((u0 & 31) << 6 | u1);
         continue;
       }
       var u2 = heapOrArray[idx++] & 63;
@@ -2106,13 +2106,13 @@ async function Module2(moduleArg = {}) {
         u0 = (u0 & 7) << 18 | u1 << 12 | u2 << 6 | heapOrArray[idx++] & 63;
       }
       if (u0 < 65536) {
-        str2 += String.fromCharCode(u0);
+        str22 += String.fromCharCode(u0);
       } else {
         var ch = u0 - 65536;
-        str2 += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
+        str22 += String.fromCharCode(55296 | ch >> 10, 56320 | ch & 1023);
       }
     }
-    return str2;
+    return str22;
   }, "UTF8ArrayToString");
   var getDylinkMetadata = /* @__PURE__ */ __name((binary2) => {
     var offset = 0;
@@ -2878,7 +2878,7 @@ async function Module2(moduleArg = {}) {
   _fd_close.sig = "ii";
   var INT53_MAX = 9007199254740992;
   var INT53_MIN = -9007199254740992;
-  var bigintToI53Checked = /* @__PURE__ */ __name((num2) => num2 < INT53_MIN || num2 > INT53_MAX ? NaN : Number(num2), "bigintToI53Checked");
+  var bigintToI53Checked = /* @__PURE__ */ __name((num22) => num22 < INT53_MIN || num22 > INT53_MAX ? NaN : Number(num22), "bigintToI53Checked");
   function _fd_seek(fd, offset, whence, newOffset) {
     offset = bigintToI53Checked(offset);
     return 70;
@@ -2896,7 +2896,7 @@ async function Module2(moduleArg = {}) {
     }
   }, "printChar");
   var _fd_write = /* @__PURE__ */ __name((fd, iov, iovcnt, pnum) => {
-    var num2 = 0;
+    var num22 = 0;
     for (var i2 = 0; i2 < iovcnt; i2++) {
       var ptr = LE_HEAP_LOAD_U32((iov >> 2) * 4);
       var len = LE_HEAP_LOAD_U32((iov + 4 >> 2) * 4);
@@ -2904,9 +2904,9 @@ async function Module2(moduleArg = {}) {
       for (var j = 0; j < len; j++) {
         printChar(fd, HEAPU8[ptr + j]);
       }
-      num2 += len;
+      num22 += len;
     }
-    LE_HEAP_STORE_U32((pnum >> 2) * 4, num2);
+    LE_HEAP_STORE_U32((pnum >> 2) * 4, num22);
     return 0;
   }, "_fd_write");
   _fd_write.sig = "iippp";
@@ -2971,10 +2971,10 @@ async function Module2(moduleArg = {}) {
     }
     quit_(1, e);
   }, "handleException");
-  var lengthBytesUTF8 = /* @__PURE__ */ __name((str2) => {
+  var lengthBytesUTF8 = /* @__PURE__ */ __name((str22) => {
     var len = 0;
-    for (var i2 = 0; i2 < str2.length; ++i2) {
-      var c2 = str2.charCodeAt(i2);
+    for (var i2 = 0; i2 < str22.length; ++i2) {
+      var c2 = str22.charCodeAt(i2);
       if (c2 <= 127) {
         len++;
       } else if (c2 <= 2047) {
@@ -2988,12 +2988,12 @@ async function Module2(moduleArg = {}) {
     }
     return len;
   }, "lengthBytesUTF8");
-  var stringToUTF8Array = /* @__PURE__ */ __name((str2, heap, outIdx, maxBytesToWrite) => {
+  var stringToUTF8Array = /* @__PURE__ */ __name((str22, heap, outIdx, maxBytesToWrite) => {
     if (!(maxBytesToWrite > 0)) return 0;
     var startIdx = outIdx;
     var endIdx = outIdx + maxBytesToWrite - 1;
-    for (var i2 = 0; i2 < str2.length; ++i2) {
-      var u = str2.codePointAt(i2);
+    for (var i2 = 0; i2 < str22.length; ++i2) {
+      var u = str22.codePointAt(i2);
       if (u <= 127) {
         if (outIdx >= endIdx) break;
         heap[outIdx++] = u;
@@ -3018,30 +3018,30 @@ async function Module2(moduleArg = {}) {
     heap[outIdx] = 0;
     return outIdx - startIdx;
   }, "stringToUTF8Array");
-  var stringToUTF8 = /* @__PURE__ */ __name((str2, outPtr, maxBytesToWrite) => stringToUTF8Array(str2, HEAPU8, outPtr, maxBytesToWrite), "stringToUTF8");
+  var stringToUTF8 = /* @__PURE__ */ __name((str22, outPtr, maxBytesToWrite) => stringToUTF8Array(str22, HEAPU8, outPtr, maxBytesToWrite), "stringToUTF8");
   var stackAlloc = /* @__PURE__ */ __name((sz) => __emscripten_stack_alloc(sz), "stackAlloc");
-  var stringToUTF8OnStack = /* @__PURE__ */ __name((str2) => {
-    var size = lengthBytesUTF8(str2) + 1;
+  var stringToUTF8OnStack = /* @__PURE__ */ __name((str22) => {
+    var size = lengthBytesUTF8(str22) + 1;
     var ret = stackAlloc(size);
-    stringToUTF8(str2, ret, size);
+    stringToUTF8(str22, ret, size);
     return ret;
   }, "stringToUTF8OnStack");
   var AsciiToString = /* @__PURE__ */ __name((ptr) => {
-    var str2 = "";
+    var str22 = "";
     while (1) {
       var ch = HEAPU8[ptr++];
-      if (!ch) return str2;
-      str2 += String.fromCharCode(ch);
+      if (!ch) return str22;
+      str22 += String.fromCharCode(ch);
     }
   }, "AsciiToString");
-  var stringToUTF16 = /* @__PURE__ */ __name((str2, outPtr, maxBytesToWrite) => {
+  var stringToUTF16 = /* @__PURE__ */ __name((str22, outPtr, maxBytesToWrite) => {
     maxBytesToWrite ??= 2147483647;
     if (maxBytesToWrite < 2) return 0;
     maxBytesToWrite -= 2;
     var startPtr = outPtr;
-    var numCharsToWrite = maxBytesToWrite < str2.length * 2 ? maxBytesToWrite / 2 : str2.length;
+    var numCharsToWrite = maxBytesToWrite < str22.length * 2 ? maxBytesToWrite / 2 : str22.length;
     for (var i2 = 0; i2 < numCharsToWrite; ++i2) {
-      var codeUnit = str2.charCodeAt(i2);
+      var codeUnit = str22.charCodeAt(i2);
       LE_HEAP_STORE_I16((outPtr >> 1) * 2, codeUnit);
       outPtr += 2;
     }
@@ -3383,8 +3383,8 @@ function parseAnyPredicate(steps, index, operator, textPredicates) {
         if (c2.name === captureName1) nodes1.push(c2.node);
         if (c2.name === captureName2) nodes2.push(c2.node);
       }
-      const compare = /* @__PURE__ */ __name((n1, n2, positive) => {
-        return positive ? n1.text === n2.text : n1.text !== n2.text;
+      const compare = /* @__PURE__ */ __name((n1, n2, positive2) => {
+        return positive2 ? n1.text === n2.text : n1.text !== n2.text;
       }, "compare");
       return matchAll ? nodes1.every((n1) => nodes2.some((n2) => compare(n1, n2, isPositive))) : nodes1.some((n1) => nodes2.some((n2) => compare(n1, n2, isPositive)));
     });
@@ -3428,8 +3428,8 @@ function parseMatchPredicate(steps, index, operator, textPredicates) {
     for (const c2 of captures) {
       if (c2.name === captureName) nodes.push(c2.node.text);
     }
-    const test = /* @__PURE__ */ __name((text, positive) => {
-      return positive ? regex.test(text) : !regex.test(text);
+    const test = /* @__PURE__ */ __name((text, positive2) => {
+      return positive2 ? regex.test(text) : !regex.test(text);
     }, "test");
     if (nodes.length === 0) return !isPositive;
     return matchAll ? nodes.every((text) => test(text, isPositive)) : nodes.some((text) => test(text, isPositive));
@@ -5841,8 +5841,8 @@ function collectAll(root, spec, defNames, maxCalls, wantImports) {
     if (wantRefs) {
       const how = spec.imports[type];
       if (how === "string") {
-        const str2 = findFirst(node, (n) => /string/.test(n.type));
-        if (str2) addRef(str2.text.replace(/^['"]|['"]$/g, ""));
+        const str22 = findFirst(node, (n) => /string/.test(n.type));
+        if (str22) addRef(str22.text.replace(/^['"]|['"]$/g, ""));
       } else if (how === "path") {
         const name2 = node.childForFieldName("name") ?? node.childForFieldName("module_name");
         addRef((name2 ?? node).text.replace(/^(import|from)\s+/, "").split(/\s+/)[0]);
@@ -9948,14 +9948,14 @@ function buildEmbeddingIndex(scan2, model) {
   return { embedVersion: EMBED_VERSION, modelId: model.modelId, dim: model.dim, records };
 }
 function serializeEmbeddings(index) {
-  const header2 = JSON.stringify({
+  const header3 = JSON.stringify({
     embedVersion: index.embedVersion,
     modelId: index.modelId,
     dim: index.dim,
     count: index.records.length,
     records: index.records.map((r) => ({ file: r.file, symbol: r.symbol ?? "", line: r.line ?? 0 }))
   });
-  const headerBuf = Buffer.from(header2, "utf8");
+  const headerBuf = Buffer.from(header3, "utf8");
   const body2 = Buffer.alloc(index.records.length * index.dim);
   let off = 0;
   for (const r of index.records) {
@@ -9974,10 +9974,10 @@ function deserializeEmbeddings(bytes) {
     throw new Error("embeddings.bin: bad magic (not a codeindex embeddings artifact)");
   }
   const headerLen = buf.readUInt32LE(4);
-  const header2 = JSON.parse(buf.toString("utf8", 8, 8 + headerLen));
+  const header3 = JSON.parse(buf.toString("utf8", 8, 8 + headerLen));
   const bodyOff = 8 + headerLen;
-  const { dim } = header2;
-  const records = header2.records.map((m, i2) => {
+  const { dim } = header3;
+  const records = header3.records.map((m, i2) => {
     const vec = new Int8Array(dim);
     for (let d = 0; d < dim; d++) vec[d] = buf.readInt8(bodyOff + i2 * dim + d);
     const rec = { file: m.file, vec };
@@ -9985,7 +9985,7 @@ function deserializeEmbeddings(bytes) {
     if (m.line) rec.line = m.line;
     return rec;
   });
-  return { embedVersion: header2.embedVersion, modelId: header2.modelId, dim, records };
+  return { embedVersion: header3.embedVersion, modelId: header3.modelId, dim, records };
 }
 var MAGIC;
 var init_embed = __esm({
@@ -10371,9 +10371,9 @@ function renderRepoMap(scan2, graph, opts = {}) {
   const maxSymbols = opts.maxSymbolsPerFile ?? 8;
   const ranked = [...graph.files].filter((f) => f.fileKind === "code").sort((a, b) => (b.pagerank ?? 0) - (a.pagerank ?? 0) || b.symbols - a.symbols || byStr(a.rel, b.rel));
   const records = new Map(scan2.files.map((f) => [f.rel, f]));
-  const header2 = `# repo map \u2014 ${graph.fileCount} files
+  const header3 = `# repo map \u2014 ${graph.fileCount} files
 `;
-  let out2 = header2;
+  let out2 = header3;
   let files = 0;
   for (const node of ranked) {
     const rec = records.get(node.rel);
@@ -12991,7 +12991,7 @@ function parseFlags(args2) {
       if (v === void 0) throw new Error(`missing value for ${a}`);
       return v;
     };
-    const num2 = () => {
+    const num22 = () => {
       const raw = next();
       const n = Number(raw);
       if (!Number.isFinite(n) || n <= 0) throw new Error(`${a} expects a positive number, got "${raw}"`);
@@ -13007,12 +13007,12 @@ function parseFlags(args2) {
     else if (a === "--scope") flags2.scope = next();
     else if (a === "--no-gitignore") flags2.gitignore = false;
     else if (a === "--ignore-dir") flags2.ignoreDirs.push(next());
-    else if (a === "--max-files") flags2.maxFiles = num2();
-    else if (a === "--max-bytes") flags2.maxBytes = num2();
-    else if (a === "--max-calls") flags2.maxCalls = num2();
+    else if (a === "--max-files") flags2.maxFiles = num22();
+    else if (a === "--max-bytes") flags2.maxBytes = num22();
+    else if (a === "--max-calls") flags2.maxCalls = num22();
     else if (a === "--ignore-case") flags2.ignoreCase = true;
-    else if (a === "--max-hits") flags2.maxHits = num2();
-    else if (a === "--budget-tokens") flags2.budgetTokens = num2();
+    else if (a === "--max-hits") flags2.maxHits = num22();
+    else if (a === "--budget-tokens") flags2.budgetTokens = num22();
     else if (a === "--no-ast") flags2.noAst = true;
     else if (a === "--index") flags2.indexDir = next();
     else if (a === "--no-index-cache") flags2.noIndexCache = true;
@@ -13023,14 +13023,14 @@ function parseFlags(args2) {
       flags2.workers = n;
     } else if (a === "--since") flags2.since = next();
     else if (a === "--config") flags2.config = resolve2(next());
-    else if (a === "--limit") flags2.limit = num2();
+    else if (a === "--limit") flags2.limit = num22();
     else if (a === "--no-fuzzy") flags2.fuzzy = false;
     else if (a === "--semantic") flags2.semantic = true;
     else if (a === "--recall") flags2.recall = true;
     else if (a === "--run") flags2.run = true;
     else if (a === "--base") flags2.base = next();
     else if (a === "--staged") flags2.staged = true;
-    else if (a === "--depth") flags2.depth = num2();
+    else if (a === "--depth") flags2.depth = num22();
     else if (a === "--kind") flags2.kind = next();
     else if (a === "--json") flags2.json = true;
     else if (!a.startsWith("--") && flags2.positional === void 0) flags2.positional = a;
@@ -13546,6 +13546,7 @@ var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto",
 var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 
 // src/util.ts
+import { AsyncLocalStorage } from "async_hooks";
 import { createHash as createHash4 } from "crypto";
 import { statSync as statSync6 } from "fs";
 var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
@@ -13572,14 +13573,17 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "all",
   "eco",
   "list",
-  "no-redact"
+  "no-redact",
+  // `mcp` only.
+  "allow-remote",
+  "allow-write"
 ]);
 var SHORT_FLAGS = { h: "help", v: "version" };
 function parseArgs(argv) {
   const _ = [];
   const flags2 = /* @__PURE__ */ Object.create(null);
   const set = (key, val) => {
-    if (Object.prototype.hasOwnProperty.call(flags2, key)) {
+    if (Object.hasOwn(flags2, key)) {
       const cur = flags2[key];
       if (Array.isArray(cur)) cur.push(val);
       else flags2[key] = [cur, val];
@@ -13638,7 +13642,7 @@ function numFlag(args2, name2) {
   return Number.isFinite(n) ? n : void 0;
 }
 function own(obj, key) {
-  return obj != null && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : void 0;
+  return obj != null && Object.hasOwn(obj, key) ? obj[key] : void 0;
 }
 function isScannableDir(path) {
   try {
@@ -13653,11 +13657,21 @@ function shortHash2(input, len = 12) {
 function byStr2(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
+var outputSink = new AsyncLocalStorage();
 function eprintln(msg) {
-  process.stderr.write(msg + "\n");
+  const sink = outputSink.getStore();
+  if (sink) sink.err.push(msg);
+  else process.stderr.write(msg + "\n");
 }
 function println(msg) {
-  process.stdout.write(msg + "\n");
+  const sink = outputSink.getStore();
+  if (sink) sink.out.push(msg);
+  else process.stdout.write(msg + "\n");
+}
+async function captureOutput(fn) {
+  const sink = { out: [], err: [] };
+  const result = await outputSink.run(sink, async () => await fn());
+  return { result, stdout: sink.out.join("\n"), stderr: sink.err.join("\n") };
 }
 
 // src/commands/tools.ts
@@ -14814,10 +14828,10 @@ function buildGraph2(scan2) {
   const symbolDefs = {};
   for (const [name2, files] of defs) symbolDefs[name2] = [...files].sort(byStr2);
   const edgeMap = /* @__PURE__ */ new Map();
-  const resolve27 = buildFileResolver(scan2);
+  const resolve29 = buildFileResolver(scan2);
   for (const f of scan2.files) {
     for (const imp of f.imports) {
-      const to = resolve27(f.rel, imp.spec);
+      const to = resolve29(f.rel, imp.spec);
       if (to && to !== f.rel) add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
     }
     for (const c2 of f.calls) {
@@ -16068,9 +16082,9 @@ function logSince(repo, file, sinceRef) {
   return out2.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
 }
 function parseLineLog(raw) {
-  const header2 = raw.split(/\r?\n/).find((l) => l.includes("\0"));
-  if (!header2) return null;
-  const [commit, author, date] = header2.split("\0");
+  const header3 = raw.split(/\r?\n/).find((l) => l.includes("\0"));
+  if (!header3) return null;
+  const [commit, author, date] = header3.split("\0");
   if (!commit || !commit.trim()) return null;
   return { commit: commit.trim(), author: author?.trim() || void 0, date: date?.trim() || void 0 };
 }
@@ -16492,7 +16506,7 @@ function cvssBaseScore(vector) {
   const a = CIA[m.A ?? ""];
   if ([av, ac, ui, pr, c2, in_, a].some((x) => x === void 0)) return null;
   const iss = 1 - (1 - c2) * (1 - in_) * (1 - a);
-  const impact = scope === "C" ? 7.52 * (iss - 0.029) - 3.25 * Math.pow(iss - 0.02, 15) : 6.42 * iss;
+  const impact = scope === "C" ? 7.52 * (iss - 0.029) - 3.25 * (iss - 0.02) ** 15 : 6.42 * iss;
   if (impact <= 0) return 0;
   const exploitability = 8.22 * av * ac * pr * ui;
   const raw = scope === "C" ? 1.08 * (impact + exploitability) : impact + exploitability;
@@ -17663,7 +17677,7 @@ function detectFrameworks(repo) {
       const pkg = JSON.parse(readFileSync17(pkgPath, "utf8"));
       const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {} };
       for (const name2 of Object.keys(deps)) {
-        const label = Object.prototype.hasOwnProperty.call(JS_FRAMEWORKS, name2) ? JS_FRAMEWORKS[name2] : void 0;
+        const label = Object.hasOwn(JS_FRAMEWORKS, name2) ? JS_FRAMEWORKS[name2] : void 0;
         if (label) found.add(label);
       }
     } catch {
@@ -19392,8 +19406,8 @@ function lineCountDetailed(repo, file) {
   }
 }
 function lineCount(repo, file) {
-  const outcome = lineCountDetailed(repo, file);
-  return outcome.status === "ok" ? outcome.lines : null;
+  const outcome2 = lineCountDetailed(repo, file);
+  return outcome2.status === "ok" ? outcome2.lines : null;
 }
 function locsOf(f) {
   const locs = [];
@@ -20125,8 +20139,8 @@ function mergeNarrative(n, dossier) {
   if (n.hardeningNotes?.length) out2.hardeningNotes = n.hardeningNotes;
   const rem = (n.remediations ?? []).filter((r) => confirmed.has(r.id));
   if (rem.length) out2.remediations = rem;
-  const chains = (n.attackChains ?? []).filter((c2) => c2.findingIds.length > 0 && c2.findingIds.every((id) => confirmed.has(id)));
-  if (chains.length) out2.attackChains = chains;
+  const chains2 = (n.attackChains ?? []).filter((c2) => c2.findingIds.length > 0 && c2.findingIds.every((id) => confirmed.has(id)));
+  if (chains2.length) out2.attackChains = chains2;
   const rc = (n.rootCauses ?? []).filter((g) => g.findingIds.length > 0 && g.findingIds.every((id) => confirmed.has(id)));
   if (rc.length) out2.rootCauses = rc;
   return out2;
@@ -20904,7 +20918,7 @@ var BUILTINS2 = {
   codex: { name: "codex", argv: (p) => ["codex", "exec", p] }
 };
 function resolveTemplate(tpl) {
-  if (Object.prototype.hasOwnProperty.call(BUILTINS2, tpl)) return BUILTINS2[tpl];
+  if (Object.hasOwn(BUILTINS2, tpl)) return BUILTINS2[tpl];
   const parts2 = tpl.trim().split(/\s+/).filter(Boolean);
   if (!parts2.length) throw new Error("empty agent template");
   return {
@@ -21659,6 +21673,1205 @@ function runOrchestrate(args2) {
   return 0;
 }
 
+// src/commands/registry.ts
+var COMMAND_HANDLERS = {
+  tools: runTools,
+  graph: runGraph,
+  map: runMap,
+  scan: runScan,
+  context: runContext,
+  import: runImport,
+  logs: runLogs,
+  dossier: runDossier,
+  triage: runTriage,
+  paths: runPaths,
+  verify: runVerify,
+  investigate: runInvestigate,
+  revalidate: runRevalidate,
+  narrative: runNarrative,
+  implement: runImplement,
+  check: runCheck,
+  render: runRender,
+  clean: runClean,
+  run: runRun,
+  orchestrate: runOrchestrate
+};
+
+// src/mcp/stdio.ts
+import { createInterface as createInterface3 } from "readline";
+
+// src/mcp/handlers.ts
+import { existsSync as existsSync29, readFileSync as readFileSync24, realpathSync as realpathSync5, statSync as statSync13 } from "fs";
+import { isAbsolute as isAbsolute2, join as join55, resolve as resolve27, sep as sep7 } from "path";
+
+// src/run-lock.ts
+var chains = /* @__PURE__ */ new Map();
+function withRunLock(dir, fn) {
+  const prev = chains.get(dir) ?? Promise.resolve();
+  const next = prev.then(fn, fn);
+  const tail = next.then(noop, noop);
+  chains.set(dir, tail);
+  tail.then(() => {
+    if (chains.get(dir) === tail) chains.delete(dir);
+  }, noop);
+  return next;
+}
+function noop() {
+}
+
+// src/mcp/handlers.ts
+var ToolError = class extends Error {
+};
+var MAX_READ_LINES = 2e3;
+var MAX_READ_BYTES = 8 * 1024 * 1024;
+var DEFAULT_BUDGET = "quick";
+var SCANNING_TOOLS = /* @__PURE__ */ new Set(["ultrasec_scan", "ultrasec_map", "ultrasec_graph", "ultrasec_investigate"]);
+var WRITE_TOOL_NAMES = /* @__PURE__ */ new Set(["ultrasec_scan", "ultrasec_clean"]);
+var COMMAND_OF = {
+  ultrasec_map: "map",
+  ultrasec_paths: "paths",
+  ultrasec_dossier: "dossier",
+  ultrasec_graph: "graph",
+  ultrasec_triage: "triage",
+  ultrasec_verify: "verify",
+  ultrasec_investigate: "investigate",
+  ultrasec_revalidate: "revalidate",
+  ultrasec_check: "check",
+  ultrasec_render: "render",
+  ultrasec_tools: "tools",
+  ultrasec_scan: "scan",
+  ultrasec_clean: "clean"
+};
+function str2(v) {
+  return typeof v === "string" && v.trim() !== "" ? v : void 0;
+}
+function num2(v) {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : NaN;
+  return Number.isFinite(n) ? n : void 0;
+}
+function bool(v) {
+  return v === true || v === "true";
+}
+function strArray2(v) {
+  return Array.isArray(v) && v.every((x) => typeof x === "string") ? v : void 0;
+}
+function positive(v, key) {
+  const n = num2(v);
+  if (n === void 0) return void 0;
+  if (n <= 0) throw new ToolError(`\`${key}\` must be greater than 0.`);
+  return n;
+}
+function requiredRepo(args2, defaults) {
+  const repo = str2(args2.repo) ?? defaults.defaultRun;
+  if (!repo) throw new ToolError("`repo` is required: an absolute path to the repository root.");
+  const abs = resolve27(repo);
+  if (!isScannableDir(abs)) {
+    throw new ToolError(`\`repo\` is not a directory: ${abs}. Refusing to continue \u2014 an unscannable path must not report a clean audit.`);
+  }
+  return abs;
+}
+function resolveRun(args2, repo) {
+  const explicit = str2(args2.run) ?? str2(args2.out);
+  if (explicit) {
+    if (!isAbsolute2(explicit)) throw new ToolError("`run` must be an absolute path.");
+    return resolve27(explicit);
+  }
+  return join55(repo, ".ultrasec");
+}
+function requireRun(run2) {
+  if (!existsSync29(join55(run2, "dossier.json")) && !existsSync29(join55(run2, "findings.json"))) {
+    throw new ToolError(`no audit run at ${run2} \u2014 scan the repo first with ultrasec_scan (it writes there). If the run lives elsewhere, pass \`run\`.`);
+  }
+}
+function toArgs(positional, flags2) {
+  const out2 = /* @__PURE__ */ Object.create(null);
+  for (const [k, v] of Object.entries(flags2)) {
+    if (v === void 0 || v === null) continue;
+    if (Array.isArray(v)) out2[k] = v.map(String);
+    else if (typeof v === "boolean") {
+      if (v) out2[k] = true;
+    } else out2[k] = String(v);
+  }
+  return { _: positional, flags: out2 };
+}
+async function callTool2(name2, args2, defaults = {}) {
+  if (WRITE_TOOL_NAMES.has(name2) && !defaults.allowWrite) {
+    throw new ToolError(`${name2} writes to your repository and is disabled \u2014 start the server with --allow-write to enable it.`);
+  }
+  if (name2 === "ultrasec_tools") return runCommand(name2, [], {});
+  const repo = requiredRepo(args2, defaults);
+  const run2 = resolveRun(args2, repo);
+  if (name2 === "ultrasec_read") return outcome(name2, handleRead(args2, repo, run2));
+  return await withRunLock(run2, async () => {
+    if (SCANNING_TOOLS.has(name2)) {
+      await warmGrammars({ label: "ultrasec" });
+    }
+    return dispatch(name2, args2, repo, run2);
+  });
+}
+async function dispatch(name2, args2, repo, run2) {
+  switch (name2) {
+    case "ultrasec_scan":
+      return runCommand(name2, [], {
+        repo,
+        out: run2,
+        budget: str2(args2.budget) ?? DEFAULT_BUDGET,
+        scope: strArray2(args2.scope),
+        include: strArray2(args2.include),
+        exclude: strArray2(args2.exclude),
+        "max-files": positive(args2.max_files, "max_files"),
+        "max-candidates": positive(args2.max_candidates, "max_candidates"),
+        "max-depth": positive(args2.max_depth, "max_depth"),
+        offline: bool(args2.offline),
+        diff: str2(args2.diff),
+        merge: bool(args2.merge),
+        json: true
+      });
+    case "ultrasec_map":
+      return runCommand(name2, [], {
+        repo,
+        out: run2,
+        scope: strArray2(args2.scope),
+        include: strArray2(args2.include),
+        exclude: strArray2(args2.exclude),
+        "max-files": positive(args2.max_files, "max_files"),
+        json: true
+      });
+    case "ultrasec_clean":
+      requireRun(run2);
+      return runCommand(name2, [], { repo, run: run2, all: bool(args2.all), "keep-output": bool(args2.keep_output), json: true });
+    case "ultrasec_dossier": {
+      requireRun(run2);
+      const id = str2(args2.id);
+      if (!id) throw new ToolError("`id` is required \u2014 the finding id, from ultrasec_paths.");
+      return runCommand(name2, [id], { repo, run: run2, json: true });
+    }
+    case "ultrasec_graph": {
+      requireRun(run2);
+      const target = str2(args2.target);
+      if (!target) throw new ToolError("`target` is required \u2014 a repo-relative file path or a symbol name.");
+      return runCommand(name2, [target], { repo, run: run2, depth: positive(args2.depth, "depth"), json: true });
+    }
+    case "ultrasec_paths":
+      requireRun(run2);
+      return runCommand(name2, [], { repo, run: run2, kind: str2(args2.kind), severity: str2(args2.severity), json: true });
+    case "ultrasec_verify": {
+      requireRun(run2);
+      const shards = positive(args2.shards, "shards");
+      const shard2 = num2(args2.shard);
+      if (shards !== void 0 && shard2 !== void 0 && (shard2 < 0 || shard2 >= shards)) {
+        throw new ToolError(`\`shard\` must be between 0 and ${shards - 1}.`);
+      }
+      return runCommand(name2, [], { repo, run: run2, shards, shard: shard2, json: true });
+    }
+    case "ultrasec_check":
+      requireRun(run2);
+      return runCommand(name2, [], { repo, run: run2, semantic: bool(args2.semantic), "min-severity": str2(args2.min_severity), json: true });
+    case "ultrasec_render":
+      requireRun(run2);
+      return runCommand(name2, [], { repo, run: run2, narrative: str2(args2.narrative), json: true });
+    default:
+      requireRun(run2);
+      return runCommand(name2, [], { repo, run: run2, json: true });
+  }
+}
+async function runCommand(name2, positional, flags2) {
+  const command = COMMAND_OF[name2];
+  if (!command) throw new ToolError(`unknown tool: ${name2}`);
+  const handler = COMMAND_HANDLERS[command];
+  if (!handler) throw new ToolError(`no handler for ${command}`);
+  const { result: code, stdout, stderr } = await captureOutput(() => handler(toArgs(positional, flags2)));
+  if (code === 2) throw new ToolError(stderr.trim() || stdout.trim() || `${command} could not run.`);
+  const payload = parseJson2(stdout);
+  return {
+    text: JSON.stringify(
+      {
+        ...payload !== void 0 ? typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload : { result: payload } : { output: stdout },
+        ok: code === 0,
+        exit_code: code,
+        ...stderr.trim() ? { notes: stderr.trim().split("\n") } : {}
+      },
+      null,
+      2
+    ) + "\n",
+    artifact: artifactFor(name2, flags2)
+  };
+}
+function parseJson2(text) {
+  const trimmed = text.trim();
+  if (!trimmed.startsWith("{") && !trimmed.startsWith("[")) return void 0;
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return void 0;
+  }
+}
+function outcome(name2, result) {
+  return { text: JSON.stringify(result, null, 2) + "\n" };
+}
+function artifactFor(name2, flags2) {
+  const run2 = typeof flags2.run === "string" ? flags2.run : typeof flags2.out === "string" ? flags2.out : void 0;
+  if (!run2) return void 0;
+  if (name2 === "ultrasec_map") return join55(run2, "MAP.md");
+  if (name2 === "ultrasec_scan") return join55(run2, "findings.json");
+  if (name2 === "ultrasec_triage") return join55(run2, "TRIAGE.todo.json");
+  if (name2 === "ultrasec_verify") return join55(run2, "VERIFY.todo.json");
+  if (name2 === "ultrasec_investigate") return join55(run2, "INVESTIGATE.todo.json");
+  return void 0;
+}
+function handleRead(args2, repo, run2) {
+  const raw = str2(args2.path);
+  if (!raw) throw new ToolError("`path` is required \u2014 a repo-relative path, or an absolute path inside the repo or its run.");
+  const target = isAbsolute2(raw) ? raw : join55(repo, raw);
+  let real;
+  try {
+    real = realpathSync5(target);
+  } catch {
+    throw new ToolError(`no such file: ${raw}`);
+  }
+  const allowed = [repo, run2].map((d) => {
+    try {
+      return realpathSync5(d);
+    } catch {
+      return resolve27(d);
+    }
+  });
+  if (!allowed.some((root) => real === root || real.startsWith(root + sep7))) {
+    throw new ToolError(`path is outside the repo and its run: ${raw}. Use your own file tool for anything else.`);
+  }
+  const st = statSync13(real);
+  if (!st.isFile()) throw new ToolError(`not a file: ${raw}`);
+  if (st.size > MAX_READ_BYTES) throw new ToolError(`file is too large to read (${st.size} bytes): ${raw}`);
+  const lines = readFileSync24(real, "utf8").split("\n");
+  const total = lines.length;
+  const start2 = Math.max(1, Math.floor(num2(args2.start_line) ?? 1));
+  if (start2 > total) throw new ToolError(`start_line ${start2} is past the end of the file (${total} lines).`);
+  const requestedEnd = Math.floor(num2(args2.end_line) ?? total);
+  const end = Math.min(total, Math.max(start2, requestedEnd), start2 + MAX_READ_LINES - 1);
+  return {
+    path: isAbsolute2(raw) ? real : raw,
+    start_line: start2,
+    end_line: end,
+    total_lines: total,
+    truncated: end < Math.min(total, requestedEnd),
+    content: lines.slice(start2 - 1, end).join("\n")
+  };
+}
+
+// src/mcp/protocol.ts
+var PROTOCOL_VERSIONS2 = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
+var LATEST_PROTOCOL2 = PROTOCOL_VERSIONS2[PROTOCOL_VERSIONS2.length - 1];
+var ASSUMED_HTTP_PROTOCOL = "2025-03-26";
+var ANNOTATIONS_SINCE2 = "2025-03-26";
+var RICH_TOOLS_SINCE2 = "2025-06-18";
+var DEFAULT_MAX_RESPONSE_BYTES2 = 1e6;
+function isProtocolVersion(v) {
+  return typeof v === "string" && PROTOCOL_VERSIONS2.includes(v);
+}
+function negotiateProtocol2(requested) {
+  return isProtocolVersion(requested) ? requested : LATEST_PROTOCOL2;
+}
+function validateArgs2(schema, args2) {
+  for (const key of schema.required) {
+    const v = args2[key];
+    if (v === void 0 || v === null || v === "") return `\`${key}\` is required`;
+  }
+  for (const [key, value] of Object.entries(args2)) {
+    if (value === void 0 || value === null) continue;
+    const spec = schema.properties[key];
+    if (!spec?.type) continue;
+    const actual = Array.isArray(value) ? "array" : typeof value;
+    if (spec.type === "number") {
+      if (actual === "number") continue;
+      if (actual === "string" && value.trim() !== "" && Number.isFinite(Number(value))) continue;
+      return `\`${key}\` must be a number, got ${actual === "string" ? JSON.stringify(value) : actual}`;
+    }
+    if (spec.type === "array") {
+      if (actual !== "array") return `\`${key}\` must be an array, got ${actual}`;
+      const arr = value;
+      if (spec.items?.type === "string" && !arr.every((x) => typeof x === "string")) {
+        return `\`${key}\` must be an array of strings`;
+      }
+      if (spec.enum) {
+        const bad = arr.find((x) => typeof x === "string" && !spec.enum.includes(x));
+        if (bad !== void 0) return `\`${key}\` contains "${String(bad)}" \u2014 allowed: ${spec.enum.join(", ")}`;
+      }
+      continue;
+    }
+    if (actual !== spec.type) return `\`${key}\` must be a ${spec.type}, got ${actual}`;
+    if (spec.enum && typeof value === "string" && !spec.enum.includes(value)) {
+      return `\`${key}\` must be one of: ${spec.enum.join(", ")}`;
+    }
+  }
+  return void 0;
+}
+var NARROWER2 = {
+  ultrasec_scan: 'drop to `budget: "quick"`, narrow with `scope`/`include`, or lower `max_candidates`',
+  ultrasec_map: "narrow with `scope`/`include`, or lower `max_files`",
+  ultrasec_paths: "filter with `severity` or `kind`",
+  ultrasec_graph: "lower `depth`",
+  ultrasec_dossier: "one finding at a time \u2014 pass a single `id`",
+  ultrasec_triage: "the worklist is very large; triage in severity order via `ultrasec_paths` first",
+  ultrasec_verify: "split the worklist with `shards`/`shard`",
+  ultrasec_read: "pass `start_line`/`end_line` to read a window instead of the whole file"
+};
+function capResponse2(text, tool, maxBytes, artifact) {
+  const bytes = Buffer.byteLength(text, "utf8");
+  if (bytes <= maxBytes) return text;
+  return JSON.stringify(
+    {
+      truncated: true,
+      tool,
+      bytes,
+      maxBytes,
+      reason: "This response exceeds the configured limit and was withheld rather than sent as an unusable partial payload.",
+      narrower: NARROWER2[tool] ?? "narrow the request and call again",
+      ...artifact ? { artifact, artifactNote: "The full result is on disk here \u2014 read it directly if you need all of it." } : {}
+    },
+    null,
+    2
+  ) + "\n";
+}
+function structuredContentFor2(text, capped, hasSchema) {
+  if (capped || !hasSchema) return void 0;
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return void 0;
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return void 0;
+  return parsed;
+}
+var LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+function isOriginAllowed(origin, allowed = []) {
+  if (origin === void 0) return true;
+  const o = origin.trim();
+  if (o === "" || o === "null") return true;
+  if (LOOPBACK_ORIGIN.test(o)) return true;
+  return allowed.some((a) => a === "*" || a.toLowerCase() === o.toLowerCase());
+}
+
+// src/mcp/tools.ts
+var SEVERITY_ENUM = [...SEVERITIES2];
+var repoProp2 = { type: "string", description: "Absolute path to the repository root." };
+var runProp = { type: "string", description: "The audit run directory (default: <repo>/.ultrasec)." };
+var scopeProps2 = {
+  scope: { type: "array", items: { type: "string" }, description: "Restrict the walk to these subtrees." },
+  include: { type: "array", items: { type: "string" }, description: "Glob(s) to include." },
+  exclude: { type: "array", items: { type: "string" }, description: "Glob(s) to skip." }
+};
+var JUDGMENT_NOTE = "The engine finds CANDIDATES; you decide whether each is really reachable and exploitable.";
+var RUN_NOTE = "Requires a run: scan the repo once with ultrasec_scan first.";
+var TOOLS3 = [
+  {
+    name: "ultrasec_map",
+    title: "Map the attack surface, cheaply",
+    description: "Recon without a full audit: the repo's entry points, the untrusted-input sources and the dangerous sinks, with no network and no taint analysis. Start here on a large repo \u2014 it is the fast way to see what is worth scanning before paying for ultrasec_scan.",
+    inputSchema: {
+      type: "object",
+      properties: { repo: repoProp2, out: runProp, ...scopeProps2, max_files: { type: "number", description: "Stop after this many files." } },
+      required: ["repo"]
+    }
+  },
+  {
+    name: "ultrasec_paths",
+    title: "List the candidate source\u2192sink chains",
+    description: "The taint paths the scan found: each a chain from an untrusted input to a dangerous sink, across files. This is the audit's work-queue \u2014 read it in severity order and adjudicate each one. " + JUDGMENT_NOTE + " " + RUN_NOTE,
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoProp2,
+        run: runProp,
+        kind: { type: "string", description: "Keep only this sink kind (e.g. sql, command, path, ssrf, xss)." },
+        severity: { type: "string", enum: SEVERITY_ENUM, description: "Keep only findings at this severity." }
+      },
+      required: ["repo"]
+    }
+  },
+  {
+    name: "ultrasec_dossier",
+    title: "Grounding packet for one finding",
+    description: "Everything you need to judge ONE finding: the real code along its taint path, the surrounding call graph, and what the engine believes about it. Read this before calling a finding real or noise \u2014 the path alone is not evidence of exploitability. " + RUN_NOTE,
+    inputSchema: {
+      type: "object",
+      properties: { repo: repoProp2, run: runProp, id: { type: "string", description: "The finding id, from ultrasec_paths." } },
+      required: ["repo", "id"]
+    }
+  },
+  {
+    name: "ultrasec_graph",
+    title: "Call-graph neighbours of a file or symbol",
+    description: "What links to and from a file or symbol. Use it when a dossier's taint path stops short and you need to see whether the data really reaches the sink \u2014 or where else it goes. " + RUN_NOTE,
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoProp2,
+        run: runProp,
+        target: { type: "string", description: "A repo-relative file path or a symbol name." },
+        depth: { type: "number", description: "How many hops to follow (default 1)." }
+      },
+      required: ["repo", "target"]
+    }
+  },
+  {
+    name: "ultrasec_triage",
+    title: "Build a noise/keep worklist",
+    description: "Emit the candidate findings as a worklist for you to mark noise or keep, before spending real effort on them. The first pass of any audit: a scan returns candidates, and most of them are not bugs. " + JUDGMENT_NOTE + " " + RUN_NOTE,
+    inputSchema: { type: "object", properties: { repo: repoProp2, run: runProp }, required: ["repo"] }
+  },
+  {
+    name: "ultrasec_verify",
+    title: "Build a claim-support worklist",
+    description: "Go past 'the finding exists' to 'the evidence supports it'. Emits a claim-by-evidence worklist for you to adjudicate each as supported / partial / refuted / unsupported. This is the adversarial pass \u2014 try to REFUTE each finding, and keep the ones that survive. " + RUN_NOTE,
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoProp2,
+        run: runProp,
+        shards: { type: "number", description: "Split the worklist into this many shards, to adjudicate in parallel." },
+        shard: { type: "number", description: "Which shard to emit, 0-based." }
+      },
+      required: ["repo"]
+    }
+  },
+  {
+    name: "ultrasec_investigate",
+    title: "Worklist for the bugs no scanner finds",
+    description: "The attack-surface regions worth reading by hand, for the vulnerability classes taint analysis cannot see: broken authorization and IDOR, business logic, auth and JWT handling, crypto misuse, races. The engine cannot find these \u2014 it can only tell you where to look. " + RUN_NOTE,
+    inputSchema: { type: "object", properties: { repo: repoProp2, run: runProp }, required: ["repo"] }
+  },
+  {
+    name: "ultrasec_revalidate",
+    title: "Re-check findings against current code",
+    description: "Emit a worklist to decide, per finding, whether it is still valid, already fixed, a false positive, or uncertain \u2014 by comparing the cited line against what the code says now. Use it on a run that is no longer fresh. " + RUN_NOTE,
+    inputSchema: { type: "object", properties: { repo: repoProp2, run: runProp }, required: ["repo"] }
+  },
+  {
+    name: "ultrasec_check",
+    title: "The anti-hallucination gate",
+    description: "Prove every [file:line] in the run resolves to a real line of the repository. A finding that cites a line that does not exist is an invented finding, and this is what catches it. A result with ok:false is a real verdict, not a tool failure. " + RUN_NOTE,
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoProp2,
+        run: runProp,
+        semantic: { type: "boolean", description: "Also fail when candidates remain unadjudicated." },
+        min_severity: { type: "string", enum: SEVERITY_ENUM, description: "Only gate on findings at or above this severity." }
+      },
+      required: ["repo"]
+    }
+  },
+  {
+    name: "ultrasec_render",
+    title: "Render the audit report",
+    description: "Turn the run plus the narrative you wrote into SUMMARY.md, REPORT.md and a self-contained index.html. Run it after ultrasec_check passes \u2014 rendering an unvalidated run just makes an ungrounded report look finished. " + RUN_NOTE,
+    inputSchema: {
+      type: "object",
+      properties: { repo: repoProp2, run: runProp, narrative: { type: "string", description: "Absolute path to the NARRATIVE.json you authored." } },
+      required: ["repo"]
+    }
+  },
+  {
+    name: "ultrasec_tools",
+    title: "Which external scanners are available",
+    description: "Report which of the external scanners (Trivy, Semgrep, gitleaks, grype, osv-scanner, Syft\u2026) are installed on this machine. A scan degrades honestly without them rather than failing \u2014 this is how you find out what a given run could actually see. Reads nothing but the PATH.",
+    inputSchema: { type: "object", properties: {}, required: [] }
+  },
+  {
+    name: "ultrasec_read",
+    title: "Read a file from the repo or the run",
+    description: "Read a file, or a line range of one, from the audited repository or its run directory. Use it to widen the code around a finding, or to read a worklist the audit wrote. Reads are confined to the repo and the run; anything else is your own file tool's job.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoProp2,
+        run: runProp,
+        path: { type: "string", description: "Repo-relative path, or an absolute path inside the repo or its run directory." },
+        start_line: { type: "number", description: "First line to return, 1-based (default 1)." },
+        end_line: { type: "number", description: "Last line to return, inclusive (default: end of file, capped)." }
+      },
+      required: ["repo", "path"]
+    },
+    outputSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        start_line: { type: "number" },
+        end_line: { type: "number" },
+        total_lines: { type: "number" },
+        truncated: { type: "boolean" },
+        content: { type: "string" }
+      },
+      required: ["path", "start_line", "end_line", "total_lines", "truncated", "content"]
+    }
+  }
+];
+var WRITE_TOOLS = [
+  {
+    name: "ultrasec_scan",
+    title: "Run the cross-file security scan",
+    description: "SLOW and WRITES TO THE REPO: walks the repository, builds the cross-file link graph, enumerates source\u2192sink taint paths, runs whatever external scanners are installed, and writes the run to <repo>/.ultrasec. Budget 'quick' is the default here (3 hops / 200 candidates) because 'standard' and 'thorough' take minutes and an MCP client will time out; raise it when you mean to wait. " + JUDGMENT_NOTE,
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoProp2,
+        out: runProp,
+        budget: {
+          type: "string",
+          enum: ["quick", "standard", "thorough"],
+          description: "quick (3 hops/200 candidates, the default here), standard (6/1000), thorough (8/5000). Higher budgets take minutes."
+        },
+        ...scopeProps2,
+        max_files: { type: "number", description: "Stop after this many files." },
+        max_candidates: { type: "number", description: "Cap taint candidates, overriding the budget." },
+        max_depth: { type: "number", description: "Cap call-graph depth, overriding the budget." },
+        offline: { type: "boolean", description: "Skip network enrichment (EPSS/KEV/CVE lookups)." },
+        diff: { type: "string", description: "Scan only what changed since this git ref, plus its reverse dependents." },
+        merge: { type: "boolean", description: "Fold this scan into the existing run instead of replacing it." }
+      },
+      required: ["repo"]
+    }
+  },
+  {
+    name: "ultrasec_clean",
+    title: "Delete audit intermediates",
+    description: "DESTRUCTIVE: removes the run's intermediate files from disk. With all:true it removes the whole run directory, including any worklist you have not yet folded back in. There is no undo \u2014 re-scanning is the only way back.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoProp2,
+        run: runProp,
+        all: { type: "boolean", description: "Remove the entire run directory, not just intermediates." },
+        keep_output: { type: "boolean", description: "Keep the rendered report." }
+      },
+      required: ["repo"]
+    }
+  }
+];
+var TOOL_META2 = {
+  ultrasec_map: { openWorld: false },
+  ultrasec_paths: { openWorld: false },
+  ultrasec_dossier: { openWorld: false },
+  ultrasec_graph: { openWorld: false },
+  ultrasec_triage: { openWorld: false },
+  ultrasec_verify: { openWorld: false },
+  ultrasec_investigate: { openWorld: false },
+  ultrasec_revalidate: { openWorld: false },
+  ultrasec_check: { openWorld: false },
+  ultrasec_render: { openWorld: false },
+  ultrasec_tools: { openWorld: false },
+  ultrasec_read: { openWorld: false },
+  // Reaches the network for CVE/EPSS/KEV enrichment unless `offline` is set,
+  // and shells out to whatever scanners are installed.
+  ultrasec_scan: { write: true, destructive: false, idempotent: false, openWorld: true },
+  ultrasec_clean: { write: true, destructive: true, idempotent: true, openWorld: false }
+};
+function annotationsFor2(name2) {
+  const meta = TOOL_META2[name2];
+  if (!meta) return void 0;
+  return {
+    readOnlyHint: !meta.write,
+    ...meta.write ? { destructiveHint: meta.destructive === true, idempotentHint: meta.idempotent === true } : {},
+    openWorldHint: meta.openWorld === true
+  };
+}
+function toolsFor2(protocolVersion, opts = {}) {
+  const base = opts.allowWrite ? [...TOOLS3, ...WRITE_TOOLS] : TOOLS3;
+  const withAnnotations = protocolVersion >= ANNOTATIONS_SINCE2;
+  const withRich = protocolVersion >= RICH_TOOLS_SINCE2;
+  return base.map((t) => {
+    const decl = {
+      name: t.name,
+      description: t.description,
+      // A destructive delete never inherits a repo the caller didn't name.
+      inputSchema: t.name === "ultrasec_clean" ? t.inputSchema : applyDefaultRepo(t.inputSchema, opts.defaultRun)
+    };
+    if (withRich && t.title) decl.title = t.title;
+    if (withRich && t.outputSchema) decl.outputSchema = t.outputSchema;
+    if (withAnnotations) {
+      const a = annotationsFor2(t.name);
+      if (a) decl.annotations = a;
+    }
+    return decl;
+  });
+}
+function applyDefaultRepo(schema, defaultRepo) {
+  const existing = schema.properties.repo;
+  if (!defaultRepo || !existing) return schema;
+  return {
+    type: "object",
+    properties: {
+      ...schema.properties,
+      repo: { ...existing, description: `${existing.description} Optional \u2014 defaults to ${defaultRepo}.` }
+    },
+    required: schema.required.filter((r) => r !== "repo")
+  };
+}
+
+// src/mcp/prompts.ts
+var PromptError = class extends Error {
+};
+var repoArg = { name: "repo", description: "Absolute path to the repository root.", required: true };
+var PROMPTS = [
+  {
+    name: "audit_repo",
+    title: "Audit a repository, end to end",
+    description: "The full audit workflow: scan for candidates, triage the noise out, judge what survives against the real code, adversarially verify it, and gate every citation. Produces findings you can defend, not a scanner dump.",
+    arguments: [repoArg, { name: "scope", description: "Restrict the audit to a subtree, for a large repo.", required: false }]
+  },
+  {
+    name: "judge_finding",
+    title: "Judge one candidate finding",
+    description: "The adjudication workflow for a single candidate: read the real code along its taint path, decide whether the input is genuinely attacker-controlled and genuinely reaches the sink, and record a verdict you could defend to the maintainer.",
+    arguments: [repoArg, { name: "id", description: "The finding id, from ultrasec_paths.", required: true }]
+  },
+  {
+    name: "write_narrative",
+    title: "Write the audit report",
+    description: "The reporting workflow: turn verified findings into a report that a maintainer can act on \u2014 what is exploitable, how, what it costs, and what to fix first \u2014 with every claim citing a real line.",
+    arguments: [repoArg]
+  }
+];
+function getPrompt(name2, args2 = {}) {
+  const decl = PROMPTS.find((p) => p.name === name2);
+  if (!decl) throw new PromptError(`unknown prompt: ${name2 || "(none given)"}`);
+  for (const arg of decl.arguments) {
+    if (arg.required && !str3(args2[arg.name])) throw new PromptError(`\`${arg.name}\` is required for prompt "${name2}"`);
+  }
+  const text = name2 === "audit_repo" ? auditRepo(args2) : name2 === "judge_finding" ? judgeFinding(args2) : writeNarrative(args2);
+  return { description: decl.description, messages: [{ role: "user", content: { type: "text", text } }] };
+}
+var CORE_RULE = `The engine finds CANDIDATES; you decide. A taint path is a hypothesis \u2014 that some input reaches some sink \u2014 not a vulnerability. Read the real code along it before calling anything a finding. Every claim cites a [file:line] that resolves.`;
+var GATE = `\`ultrasec_check\` returning \`ok: false\` is a VERDICT, not a tool failure. A citation that does not resolve is an invented finding, and that is exactly what the gate exists to catch. Fix it or drop it, and check again.`;
+var FP_RULE = `**A false positive is not a harmless mistake here.** A report a maintainer stops trusting is worse than no report: the real finding gets dismissed with the noise around it. When you cannot establish exploitability, say so and mark it needs-human \u2014 an honest "I could not determine this" is a usable result; a confident wrong one is not.`;
+function auditRepo(args2) {
+  const repo = str3(args2.repo);
+  const scope = str3(args2.scope);
+  return `Audit \`${repo}\` for real, exploitable security bugs${scope ? `, scoped to \`${scope}\`` : ""}.
+
+${CORE_RULE}
+
+**Sequence:**
+
+1. \`ultrasec_map\`${scope ? ` with \`scope: ["${scope}"]\`` : ""} \u2014 cheap recon first. Where does untrusted input enter, and what dangerous sinks exist? On a large repo this is what tells you where a scan is worth spending time.
+2. \`ultrasec_scan\`${scope ? ` with the same scope` : ""}. It defaults to \`budget: "quick"\` here because higher budgets run for minutes; raise it when the map says the surface is bigger than that.
+3. \`ultrasec_paths\` \u2014 the candidate chains, in severity order. This is your work-queue.
+4. \`ultrasec_triage\` \u2014 first pass: mark the obvious noise as noise before spending real effort. Most candidates are not bugs.
+5. For each survivor: \`ultrasec_dossier\` on its id, read the real code, and judge it. \`ultrasec_graph\` when the path stops short and you need to see whether the data really arrives. \`ultrasec_read\` for the full context around a line.
+6. \`ultrasec_investigate\` \u2014 the classes taint analysis CANNOT see: broken authorization and IDOR, business logic, auth and JWT handling, crypto misuse, races. The engine can only tell you where to look; the finding is yours.
+7. \`ultrasec_verify\` \u2014 the adversarial pass. Try to REFUTE each surviving finding. What survives a genuine attempt to kill it is what you report.
+8. \`ultrasec_check\`, then \`ultrasec_render\`.
+
+${FP_RULE}
+
+${GATE}`;
+}
+function judgeFinding(args2) {
+  const repo = str3(args2.repo);
+  const id = str3(args2.id);
+  return `Judge candidate finding \`${id}\` in \`${repo}\`.
+
+${CORE_RULE}
+
+**Sequence:**
+
+1. \`ultrasec_dossier\` on \`${id}\` \u2014 the code along the taint path, plus what the engine believes about it.
+2. \`ultrasec_read\` the full function at each end of the path. An excerpt hides the guard clause that makes the whole thing safe.
+3. \`ultrasec_graph\` on the source and the sink if the path has gaps \u2014 a chain the engine drew through a dynamic dispatch may not exist at runtime.
+4. Decide, and say which of these it is.
+
+**The three questions, in order.** Is the input genuinely attacker-controlled, or does it come from config, a constant, or another trusted service? Does it genuinely REACH the sink \u2014 same variable, no validation, no encoding, no parameterisation in between? And is the sink genuinely dangerous AS CALLED \u2014 a shell command with a fixed argv is not command injection.
+
+**Any "no" makes it noise. All three "yes" makes it a finding**, and then say what an attacker actually does with it: the input they control, the value they send, and what they get. If you cannot write that sentence, you have not established exploitability yet.
+
+${FP_RULE}
+
+Record the verdict, then re-run \`ultrasec_check\`.`;
+}
+function writeNarrative(args2) {
+  const repo = str3(args2.repo);
+  return `Write the audit report for \`${repo}\`.
+
+${CORE_RULE}
+
+**Sequence:**
+
+1. \`ultrasec_paths\` and \`ultrasec_check\` \u2014 take stock of what survived verification, and confirm every citation still resolves before writing a word.
+2. \`ultrasec_dossier\` on each finding you intend to report, to get its citations exactly right.
+3. Write the narrative: per finding, what an attacker does, what they get, and the specific fix. Ordered by real risk, not by the scanner's severity label.
+4. \`ultrasec_render\` to produce SUMMARY.md, REPORT.md and the self-contained HTML.
+
+**Write for the maintainer who has to act.** A finding without a concrete attack is a lint warning; a fix without a file and line is homework. Severity is about what the attacker gains and how reachable it is \u2014 an unauthenticated RCE on a public endpoint and the same class of bug behind an admin login are not the same finding.
+
+**Report what you could NOT determine, in its own section.** Coverage the scan did not reach, findings you left needs-human, classes you did not look for. A report that is silent about its own limits reads as a clean bill of health for everything it never examined.
+
+${GATE}`;
+}
+function str3(v) {
+  return typeof v === "string" && v.trim() !== "" ? v : void 0;
+}
+var DECLARED = new Set([...TOOLS3, ...WRITE_TOOLS].map((t) => t.name));
+
+// src/mcp/resources.ts
+import { existsSync as existsSync30, readdirSync as readdirSync9, readFileSync as readFileSync25, realpathSync as realpathSync6, statSync as statSync14 } from "fs";
+import { basename as basename4, dirname as dirname7, join as join56, resolve as resolve28, sep as sep8 } from "path";
+import { fileURLToPath as fileURLToPath4 } from "url";
+var SKILL_NAME = "ultrasec";
+var URI_SCHEME = "skill://";
+function resolveSkillRoot(moduleDir) {
+  const here = moduleDir ?? dirname7(fileURLToPath4(import.meta.url));
+  const candidates = [resolve28(here, ".."), resolve28(here, "..", "skills", SKILL_NAME), resolve28(here, "..", "..", "skills", SKILL_NAME)];
+  return candidates.find((dir) => existsSync30(join56(dir, "SKILL.md")));
+}
+function listResources(moduleDir) {
+  const root = resolveSkillRoot(moduleDir);
+  if (!root) return [];
+  const out2 = [describe(root, "SKILL.md", `${SKILL_NAME}: the skill`)];
+  const refDir = join56(root, "references");
+  if (!existsSync30(refDir)) return out2;
+  for (const file of readdirSync9(refDir).sort()) {
+    if (!file.endsWith(".md")) continue;
+    out2.push(describe(root, join56("references", file), `${SKILL_NAME} reference: ${basename4(file, ".md")}`));
+  }
+  return out2;
+}
+function readResource(uri, moduleDir) {
+  if (!uri.startsWith(URI_SCHEME)) {
+    throw new ResourceError(`unknown resource scheme in "${uri}" (expected ${URI_SCHEME}\u2026)`);
+  }
+  const root = resolveSkillRoot(moduleDir);
+  if (!root) throw new ResourceError("no skill payload found next to this build \u2014 nothing to read");
+  const rel = uri.slice(URI_SCHEME.length);
+  if (!rel) throw new ResourceError("empty resource path");
+  const target = resolve28(root, rel);
+  const rootReal = realpathSync6(root);
+  let targetReal;
+  try {
+    targetReal = realpathSync6(target);
+  } catch {
+    throw new ResourceError(`no such resource: ${uri}`);
+  }
+  if (targetReal !== rootReal && !targetReal.startsWith(rootReal + sep8)) {
+    throw new ResourceError(`resource path escapes the skill root: ${uri}`);
+  }
+  if (!statSync14(targetReal).isFile()) throw new ResourceError(`not a file: ${uri}`);
+  return { uri, mimeType: "text/markdown", text: readFileSync25(targetReal, "utf8") };
+}
+var ResourceError = class extends Error {
+};
+function describe(root, rel, fallbackTitle) {
+  const decl = {
+    uri: `${URI_SCHEME}${rel.split(sep8).join("/")}`,
+    name: rel.split(sep8).join("/"),
+    title: fallbackTitle,
+    mimeType: "text/markdown"
+  };
+  const summary = firstProse(join56(root, rel));
+  if (summary) decl.description = summary;
+  return decl;
+}
+function firstProse(file) {
+  let text;
+  try {
+    text = readFileSync25(file, "utf8");
+  } catch {
+    return void 0;
+  }
+  const body2 = text.startsWith("---\n") ? text.slice(text.indexOf("\n---", 3) + 4) : text;
+  for (const block of body2.split(/\n\s*\n/)) {
+    const line = block.trim();
+    if (!line || line.startsWith("#") || line.startsWith(">") || line.startsWith("|") || line.startsWith("```")) continue;
+    const flat = line.replace(/\s+/g, " ").replace(/[*`]/g, "");
+    return flat.length > 300 ? `${flat.slice(0, 297)}\u2026` : flat;
+  }
+  return void 0;
+}
+
+// src/mcp/server.ts
+var ERR_INVALID_REQUEST = -32600;
+var ERR_METHOD_NOT_FOUND = -32601;
+var ERR_INVALID_PARAMS = -32602;
+var ERR_INTERNAL = -32603;
+function createServer(opts = {}) {
+  const serverInfo = { name: opts.serverName ?? "ultrasec", version: VERSION };
+  const maxBytes = opts.maxResponseBytes ?? DEFAULT_MAX_RESPONSE_BYTES2;
+  let protocol = LATEST_PROTOCOL2;
+  const cancelled = /* @__PURE__ */ new Set();
+  const CANCELLED_MAX = 1024;
+  const listTools = () => toolsFor2(protocol, { defaultRun: opts.defaultRun, allowWrite: opts.allowWrite });
+  async function handle2(msg, send) {
+    if (msg === null || typeof msg !== "object" || Array.isArray(msg)) {
+      send({ jsonrpc: "2.0", id: null, error: { code: ERR_INVALID_REQUEST, message: "invalid request: expected a JSON-RPC object" } });
+      return;
+    }
+    if (msg.id === void 0 || msg.id === null) {
+      if (msg.method === "notifications/cancelled") {
+        const target = msg.params?.requestId;
+        if (typeof target === "string" || typeof target === "number") {
+          if (cancelled.size >= CANCELLED_MAX) cancelled.delete(cancelled.values().next().value);
+          cancelled.add(String(target));
+        }
+      }
+      return;
+    }
+    const id = msg.id;
+    const reply = (out2) => {
+      if (cancelled.delete(String(id))) return;
+      send({ jsonrpc: "2.0", id, ...out2 });
+    };
+    try {
+      switch (msg.method) {
+        case "initialize": {
+          protocol = negotiateProtocol2(msg.params?.protocolVersion);
+          reply({
+            result: {
+              protocolVersion: protocol,
+              // Three primitives, because a skill is three things: the engine
+              // (tools), the method (prompts) and the documentation the method
+              // refers to (resources). A client given only the first has to
+              // invent the other two.
+              capabilities: {
+                tools: { listChanged: false },
+                resources: { subscribe: false, listChanged: false },
+                prompts: { listChanged: false }
+              },
+              serverInfo
+            }
+          });
+          return;
+        }
+        case "ping":
+          reply({ result: {} });
+          return;
+        case "tools/list":
+          reply({ result: { tools: listTools() } });
+          return;
+        case "tools/call":
+          await handleToolCall(msg, reply);
+          return;
+        case "resources/list":
+          reply({ result: { resources: listResources(opts.skillDir) } });
+          return;
+        case "resources/read": {
+          const uri = typeof msg.params?.uri === "string" ? msg.params.uri : "";
+          if (!uri) {
+            reply({ error: { code: ERR_INVALID_PARAMS, message: "`uri` is required" } });
+            return;
+          }
+          try {
+            reply({ result: { contents: [readResource(uri, opts.skillDir)] } });
+          } catch (e) {
+            if (e instanceof ResourceError) reply({ error: { code: ERR_INVALID_PARAMS, message: e.message } });
+            else reply({ error: { code: ERR_INTERNAL, message: errMessage2(e) } });
+          }
+          return;
+        }
+        case "prompts/list":
+          reply({ result: { prompts: PROMPTS } });
+          return;
+        case "prompts/get": {
+          const name2 = typeof msg.params?.name === "string" ? msg.params.name : "";
+          const args2 = msg.params?.arguments ?? {};
+          try {
+            reply({ result: getPrompt(name2, args2) });
+          } catch (e) {
+            if (e instanceof PromptError) reply({ error: { code: ERR_INVALID_PARAMS, message: e.message } });
+            else reply({ error: { code: ERR_INTERNAL, message: errMessage2(e) } });
+          }
+          return;
+        }
+        default:
+          reply({ error: { code: ERR_METHOD_NOT_FOUND, message: `method not found: ${String(msg.method)}` } });
+          return;
+      }
+    } catch (e) {
+      reply({ error: { code: ERR_INTERNAL, message: errMessage2(e) } });
+    }
+  }
+  async function handleToolCall(msg, reply) {
+    const params = msg.params ?? {};
+    const name2 = typeof params.name === "string" ? params.name : "";
+    const args2 = params.arguments ?? {};
+    const decl = listTools().find((t) => t.name === name2);
+    if (!decl) {
+      reply({ error: { code: ERR_INVALID_PARAMS, message: `unknown tool: ${name2 || "(none given)"}` } });
+      return;
+    }
+    const invalid = validateArgs2(decl.inputSchema, args2);
+    if (invalid) {
+      reply({ error: { code: ERR_INVALID_PARAMS, message: invalid } });
+      return;
+    }
+    try {
+      const { text: raw, artifact } = await callTool2(name2, args2, { defaultRun: opts.defaultRun, allowWrite: opts.allowWrite });
+      const text = capResponse2(raw, name2, maxBytes, artifact);
+      const capped = text !== raw;
+      const structured = protocol >= RICH_TOOLS_SINCE2 ? structuredContentFor2(text, capped, decl.outputSchema !== void 0) : void 0;
+      reply({ result: { content: [{ type: "text", text }], ...structured ? { structuredContent: structured } : {} } });
+    } catch (e) {
+      if (e instanceof ToolError) {
+        reply({ result: { content: [{ type: "text", text: e.message }], isError: true } });
+        return;
+      }
+      reply({ error: { code: ERR_INTERNAL, message: errMessage2(e) } });
+    }
+  }
+  return {
+    handle: handle2,
+    protocolVersion: () => protocol,
+    setProtocolVersion: (v) => {
+      protocol = v;
+    },
+    tools: listTools
+  };
+}
+function errMessage2(e) {
+  return e instanceof Error ? e.message : String(e);
+}
+
+// src/mcp/stdio.ts
+var MAX_IN_FLIGHT = 4;
+async function runStdioServer(opts = {}) {
+  const input = opts.input ?? process.stdin;
+  const output = opts.output ?? process.stdout;
+  const emit2 = output.write.bind(output);
+  let restore;
+  if (!opts.captureStdout && output === process.stdout) {
+    const original = process.stdout.write;
+    process.stdout.write = ((chunk, ...rest) => process.stderr.write(chunk, ...rest));
+    restore = () => {
+      process.stdout.write = original;
+    };
+  }
+  const server = createServer(opts);
+  const send = (msg) => {
+    emit2(JSON.stringify(msg) + "\n");
+  };
+  const inFlight = /* @__PURE__ */ new Set();
+  const track = (p) => {
+    inFlight.add(p);
+    void p.finally(() => inFlight.delete(p));
+    return p;
+  };
+  const drainToLimit = async () => {
+    while (inFlight.size >= MAX_IN_FLIGHT) await Promise.race(inFlight);
+  };
+  const rl = createInterface3({ input, terminal: false });
+  try {
+    for await (const line of rl) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(trimmed);
+      } catch {
+        send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } });
+        continue;
+      }
+      await drainToLimit();
+      if (Array.isArray(parsed)) {
+        track(
+          (async () => {
+            const out2 = [];
+            await Promise.all(parsed.map((m) => server.handle(m, (r) => void out2.push(r))));
+            if (out2.length) emit2(JSON.stringify(out2) + "\n");
+          })().catch(reportInternal(send))
+        );
+        continue;
+      }
+      if (parsed === null || typeof parsed !== "object") {
+        send({ jsonrpc: "2.0", id: null, error: { code: ERR_INVALID_REQUEST, message: "invalid request: expected a JSON-RPC object" } });
+        continue;
+      }
+      track(server.handle(parsed, send).catch(reportInternal(send)));
+    }
+    await Promise.all(inFlight);
+  } finally {
+    rl.close();
+    restore?.();
+  }
+}
+function reportInternal(send) {
+  return (e) => {
+    send({ jsonrpc: "2.0", id: null, error: { code: -32603, message: e instanceof Error ? e.message : String(e) } });
+  };
+}
+
+// src/mcp/http.ts
+import { createServer as createHttpServer } from "http";
+var MCP_PATH = "/mcp";
+var MAX_BODY_BYTES = 4 * 1024 * 1024;
+var CORS_HEADERS = "content-type, accept, mcp-protocol-version, mcp-session-id, authorization, last-event-id";
+var LOOPBACK_BIND = /* @__PURE__ */ new Set(["127.0.0.1", "::1", "localhost"]);
+function startHttpServer(opts = {}) {
+  const bind = opts.bind ?? "127.0.0.1";
+  if (!LOOPBACK_BIND.has(bind) && !opts.allowRemote) {
+    return Promise.reject(
+      new Error(
+        `refusing to bind ${bind}: ultrasec's MCP server clones arbitrary git URLs and reads local files. Pass --allow-remote if that is really what you want.`
+      )
+    );
+  }
+  const server = createHttpServer((req, res) => {
+    void route(req, res, opts).catch((e) => {
+      if (res.headersSent) {
+        res.destroy();
+        return;
+      }
+      sendJson(res, 500, { jsonrpc: "2.0", id: null, error: { code: -32603, message: e instanceof Error ? e.message : String(e) } });
+    });
+  });
+  server.requestTimeout = 0;
+  server.headersTimeout = 6e4;
+  server.keepAliveTimeout = 12e4;
+  return new Promise((resolve29, reject) => {
+    server.once("error", reject);
+    server.listen(opts.port ?? 0, bind, () => {
+      server.removeListener("error", reject);
+      const addr2 = server.address();
+      const port = typeof addr2 === "object" && addr2 ? addr2.port : opts.port ?? 0;
+      const host = bind.includes(":") ? `[${bind}]` : bind;
+      resolve29({
+        server,
+        port,
+        url: `http://${host}:${port}${MCP_PATH}`,
+        close: () => new Promise((done) => {
+          server.closeAllConnections?.();
+          server.close(() => done());
+        })
+      });
+    });
+  });
+}
+async function route(req, res, opts) {
+  const path = (req.url ?? "").split("?")[0];
+  const origin = header2(req, "origin");
+  if (!isOriginAllowed(origin, opts.allowOrigin)) {
+    sendJson(res, 403, { error: "origin not allowed", origin });
+    return;
+  }
+  if (req.method === "OPTIONS") {
+    res.writeHead(204, {
+      ...corsHeaders(origin),
+      "access-control-allow-methods": "POST, GET, DELETE, OPTIONS",
+      "access-control-allow-headers": CORS_HEADERS,
+      "access-control-max-age": "86400"
+    });
+    res.end();
+    return;
+  }
+  if (path !== MCP_PATH) {
+    sendJson(res, 404, { error: `not found: ${path} (the MCP endpoint is ${MCP_PATH})` }, origin);
+    return;
+  }
+  if (req.method === "GET" || req.method === "DELETE") {
+    res.writeHead(405, { allow: "POST, OPTIONS", ...corsHeaders(origin) });
+    res.end(JSON.stringify({ error: `${req.method} is not supported: this server is stateless and offers no server-initiated stream` }));
+    return;
+  }
+  if (req.method !== "POST") {
+    res.writeHead(405, { allow: "POST, OPTIONS", ...corsHeaders(origin) });
+    res.end(JSON.stringify({ error: `${req.method} is not supported` }));
+    return;
+  }
+  const contentType = (header2(req, "content-type") ?? "").split(";")[0].trim().toLowerCase();
+  if (contentType && contentType !== "application/json") {
+    sendJson(res, 415, { error: `unsupported content-type "${contentType}" \u2014 send application/json` }, origin);
+    return;
+  }
+  const accept = (header2(req, "accept") ?? "").toLowerCase();
+  if (accept && !/application\/json|text\/event-stream|\*\/\*/.test(accept)) {
+    sendJson(res, 406, { error: "this endpoint replies with application/json" }, origin);
+    return;
+  }
+  const declared = header2(req, "mcp-protocol-version");
+  if (declared !== void 0 && !isProtocolVersion(declared)) {
+    sendJson(res, 400, { error: `unsupported MCP-Protocol-Version: ${declared}` }, origin);
+    return;
+  }
+  const protocol = declared ?? ASSUMED_HTTP_PROTOCOL;
+  let raw;
+  try {
+    raw = await readBody(req);
+  } catch (e) {
+    if (e.message === "too large") {
+      sendJson(res, 413, { error: `request body exceeds ${MAX_BODY_BYTES} bytes` }, origin);
+      return;
+    }
+    sendJson(res, 400, { error: `could not read request body: ${e.message}` }, origin);
+    return;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    sendJson(res, 200, { jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } }, origin);
+    return;
+  }
+  const mcp = createServer(opts);
+  mcp.setProtocolVersion(protocol);
+  const out2 = [];
+  const collect2 = (m) => void out2.push(m);
+  const messages = Array.isArray(parsed) ? parsed : [parsed];
+  for (const m of messages) await mcp.handle(m, collect2);
+  if (out2.length === 0) {
+    res.writeHead(202, corsHeaders(origin));
+    res.end();
+    return;
+  }
+  sendJson(res, 200, Array.isArray(parsed) ? out2 : out2[0], origin);
+}
+function header2(req, name2) {
+  const v = req.headers[name2];
+  return Array.isArray(v) ? v[0] : v;
+}
+function corsHeaders(origin) {
+  return origin ? { "access-control-allow-origin": origin, vary: "origin" } : {};
+}
+function sendJson(res, status, body2, origin, extra = {}) {
+  const text = JSON.stringify(body2);
+  res.writeHead(status, {
+    "content-type": "application/json",
+    "content-length": String(Buffer.byteLength(text, "utf8")),
+    ...corsHeaders(origin),
+    ...extra
+  });
+  res.end(text);
+}
+var DRAIN_LIMIT = MAX_BODY_BYTES * 8;
+function readBody(req) {
+  return new Promise((resolve29, reject) => {
+    const chunks = [];
+    let size = 0;
+    let over = false;
+    const declared = Number(req.headers["content-length"]);
+    if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) over = true;
+    req.on("data", (c2) => {
+      size += c2.length;
+      if (over) {
+        if (size > DRAIN_LIMIT) {
+          req.destroy();
+          reject(new Error("too large"));
+        }
+        return;
+      }
+      if (size > MAX_BODY_BYTES) {
+        over = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(c2);
+    });
+    req.on("end", () => {
+      if (over) reject(new Error("too large"));
+      else resolve29(Buffer.concat(chunks).toString("utf8"));
+    });
+    req.on("error", reject);
+    req.on("aborted", () => reject(new Error("client aborted the request")));
+  });
+}
+
 // src/cli.ts
 var HELP2 = `ultrasec ${VERSION} \u2014 cross-file security audit (taint + AI + tool orchestration)
 
@@ -21781,6 +22994,14 @@ COMMANDS
              every conservative --apply fold stays with you (one writer).
              Flags: --run \xB7 --phase <name> \xB7 --eco (runbook + contracts only) \xB7
              --list (phase status as JSON).
+  mcp        Serve the audit over the Model Context Protocol, so a non-Claude-Code
+             host (Cursor, Zed, Claude Desktop) gets the tools, the workflows as
+             prompts, and SKILL.md + references/ as resources. Read-only unless
+             --allow-write, which additionally exposes scan and clean.
+             Flags: --transport stdio|http (default stdio) \xB7 --repo <dir> (a
+             default repo makes it optional on every tool) \xB7 --allow-write \xB7
+             --port <n> \xB7 --bind <addr> \xB7 --allow-origin <o,...> \xB7 --allow-remote \xB7
+             --max-response-bytes <n>.
 
 GLOBAL
   --help, -h     Show this help.
@@ -21794,29 +23015,7 @@ EXIT CODES
 Each command's flags are listed above; \`--help\`/\`-h\` (anywhere) prints this help.
 Full reference incl. artifacts written per command: skills/ultrasec/references/commands.md.
 `;
-var COMMAND_HANDLERS = {
-  tools: runTools,
-  graph: runGraph,
-  map: runMap,
-  scan: runScan,
-  context: runContext,
-  import: runImport,
-  logs: runLogs,
-  dossier: runDossier,
-  triage: runTriage,
-  paths: runPaths,
-  verify: runVerify,
-  investigate: runInvestigate,
-  revalidate: runRevalidate,
-  narrative: runNarrative,
-  implement: runImplement,
-  check: runCheck,
-  render: runRender,
-  clean: runClean,
-  run: runRun,
-  orchestrate: runOrchestrate
-};
-async function dispatch(cmd, args2) {
+async function dispatch2(cmd, args2) {
   if (cmd === void 0 || cmd === "help") {
     println(HELP2);
     return 0;
@@ -21825,12 +23024,59 @@ async function dispatch(cmd, args2) {
     println(VERSION);
     return 0;
   }
+  if (cmd === "mcp") return runMcp(args2);
   const handler = COMMAND_HANDLERS[cmd];
   if (!handler) {
     eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
     return 2;
   }
   return handler(args2);
+}
+async function runMcp(args2) {
+  const transport = flagStr(args2, "transport") ?? "stdio";
+  if (transport !== "stdio" && transport !== "http") {
+    eprintln(`ultrasec: invalid --transport "${transport}" (expected: stdio, http)`);
+    return 2;
+  }
+  const maxResponseBytes = numFlag(args2, "max-response-bytes");
+  if (flagStr(args2, "max-response-bytes") !== void 0 && (maxResponseBytes === void 0 || maxResponseBytes <= 0)) {
+    eprintln("ultrasec: invalid --max-response-bytes");
+    return 2;
+  }
+  const options = {
+    // A default repo makes `repo` optional on every tool, for a server
+    // dedicated to one project.
+    defaultRun: flagStr(args2, "repo"),
+    allowWrite: flagBool(args2, "allow-write"),
+    maxResponseBytes
+  };
+  if (transport === "stdio") {
+    await runStdioServer(options);
+    return 0;
+  }
+  const port = numFlag(args2, "port") ?? 7340;
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    eprintln("ultrasec: invalid --port");
+    return 2;
+  }
+  const allowOriginRaw = flagStr(args2, "allow-origin");
+  const allowOrigin = allowOriginRaw ? allowOriginRaw.split(",").map((s) => s.trim()).filter(Boolean) : void 0;
+  let running;
+  try {
+    running = await startHttpServer({ ...options, port, bind: flagStr(args2, "bind"), allowOrigin, allowRemote: flagBool(args2, "allow-remote") });
+  } catch (e) {
+    eprintln(`ultrasec: ${e.message}`);
+    return 2;
+  }
+  eprintln(`ultrasec: MCP server listening on ${running.url}`);
+  eprintln(`  client: claude mcp add --transport http ultrasec ${running.url}`);
+  for (const sig of ["SIGINT", "SIGTERM"]) {
+    process.once(sig, () => {
+      void running.close().then(() => process.exit(0));
+    });
+  }
+  await new Promise((res) => running.server.once("close", res));
+  return 0;
 }
 var SCANNING_COMMANDS = /* @__PURE__ */ new Set(["scan", "run", "graph", "map", "context", "investigate", "logs"]);
 async function main() {
@@ -21845,14 +23091,14 @@ async function main() {
     process.exit(0);
   }
   if (SCANNING_COMMANDS.has(args2._[0] ?? "")) await warmGrammars({ label: "ultrasec" });
-  const code = await dispatch(args2._[0], args2);
+  const code = await dispatch2(args2._[0], args2);
   process.exit(code);
 }
 function isEntrypoint() {
   const argv1 = process.argv[1];
   if (!argv1) return false;
   try {
-    return import.meta.url === pathToFileURL3(realpathSync5(argv1)).href;
+    return import.meta.url === pathToFileURL3(realpathSync7(argv1)).href;
   } catch {
     return false;
   }
@@ -21866,6 +23112,6 @@ if (isEntrypoint()) {
 export {
   COMMAND_HANDLERS,
   HELP2 as HELP,
-  dispatch
+  dispatch2 as dispatch
 };
 // "Copyright" and "@license" are already caught by DIRECTIVE_RE.

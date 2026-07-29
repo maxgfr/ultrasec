@@ -120,7 +120,7 @@ function detectFrameworks(repo: string): string[] {
       const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
       const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
       for (const name of Object.keys(deps)) {
-        const label = Object.prototype.hasOwnProperty.call(JS_FRAMEWORKS, name) ? JS_FRAMEWORKS[name] : undefined;
+        const label = Object.hasOwn(JS_FRAMEWORKS, name) ? JS_FRAMEWORKS[name] : undefined;
         if (label) found.add(label);
       }
     } catch {

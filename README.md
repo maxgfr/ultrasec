@@ -117,6 +117,92 @@ rank-then-cap candidates (truncation is reported, never silent); `--merge` folds
 scoped pass into one dossier (preserving prior verdicts); `--resume` reuses a
 content-hashed scan cache. Full loop: [scale-audit playbook](skills/ultrasec/references/scale-audit-playbook.md).
 
+## Use it as an MCP server
+
+The skill shells out to the CLI and parses its output. An MCP server skips both:
+your agent calls ultrasec as typed tools, with JSON schemas in and structured
+results out. Same engine, same run directory, no wrapper — the tools call the
+same command handlers the CLI does, so a tool result and a CLI run cannot
+disagree.
+
+```bash
+# stdio — the default, and what Claude Code / Claude Desktop / Cursor expect
+claude mcp add ultrasec -- node /abs/path/to/scripts/ultrasec.mjs mcp
+
+# or over HTTP, on loopback
+node scripts/ultrasec.mjs mcp --transport http --port 7340
+claude mcp add --transport http ultrasec http://127.0.0.1:7340/mcp
+```
+
+```jsonc
+// Claude Desktop takes stdio servers only — a remote URL here will not work.
+{ "mcpServers": { "ultrasec": { "command": "node", "args": ["/abs/path/to/scripts/ultrasec.mjs", "mcp"] } } }
+// Cursor, HTTP:
+{ "mcpServers": { "ultrasec": { "url": "http://127.0.0.1:7340/mcp" } } }
+```
+
+It serves all three MCP primitives, because a skill is three things: the engine
+(**tools**), the method (**prompts**), and the documentation the method refers
+to (**resources**). A client given only the tools has to invent the rest — and
+here that means reporting a candidate list as a findings list.
+
+### Tools
+
+Twelve read tools. `ultrasec_map` is the cheap way in:
+
+| Tool | What it does |
+|------|--------------|
+| `ultrasec_map` | Attack-surface recon: entry points, sources, sinks. No taint BFS, no network |
+| `ultrasec_paths` | The candidate source→sink chains — the audit's work-queue |
+| `ultrasec_dossier` | One finding's real code + call graph, for judging it |
+| `ultrasec_graph` | Links in/out of a file or symbol, when a path has gaps |
+| `ultrasec_triage` | Noise/keep worklist — the cheap first pass |
+| `ultrasec_verify` | The adversarial pass: try to refute each finding |
+| `ultrasec_investigate` | Where to look for authz/IDOR, business logic, crypto, races |
+| `ultrasec_revalidate` | Still valid / fixed / false positive, against current code |
+| `ultrasec_check` | The anti-hallucination gate: every `[file:line]` must resolve |
+| `ultrasec_render` | SUMMARY.md + REPORT.md + self-contained HTML |
+| `ultrasec_tools` | Which external scanners are installed on this machine |
+| `ultrasec_read` | A file, or a line range, from the repo or the run |
+
+`--allow-write` additionally exposes `ultrasec_scan` and `ultrasec_clean` — the
+two tools that write to (and delete from) **your** repository. They are off by
+default so an auto-approving agent cannot reach them.
+
+Pass `--repo <dir>` at startup to dedicate the server to one project — `repo`
+then becomes optional on every tool except `ultrasec_clean`, which never
+inherits a target it was not given.
+
+### Prompts — the workflow, not just the tools
+
+| Prompt | Arguments | What it drives |
+|--------|-----------|----------------|
+| `audit_repo` | `repo`, `scope?` | map → scan → triage → judge each survivor → investigate → verify → check |
+| `judge_finding` | `repo`, `id` | The three questions that decide whether one candidate is real |
+| `write_narrative` | `repo` | Verified findings → a report a maintainer can act on |
+
+Each carries the thesis the engine rests on: **it finds candidates, you decide**
+— and the reason it matters, which is that a report a maintainer stops trusting
+gets the real finding dismissed along with the noise.
+
+### Resources — the skill's own documentation
+
+`SKILL.md` and all 21 `references/*.md` are served under `skill://`, read off
+disk at request time — so a documentation fix reaches every client without a
+rebuild.
+
+Three things worth knowing:
+
+- **`scan` defaults to `budget: quick` here**, not `standard`. Higher budgets
+  run for minutes and an MCP client will time out, losing the scan. Raise it
+  when the map says the surface warrants it.
+- **Calls on one run are serialized.** Every `--apply` fold is
+  read-merge-write over the same dossier; two interleaved lose one side's
+  verdicts, silently, because the surviving file is still valid JSON.
+- **The HTTP transport binds `127.0.0.1` and refuses anything else** unless you
+  pass `--allow-remote`. This server reads local files and runs scanners; an
+  exposed port is a read-anything primitive for whoever finds it.
+
 ## Extra recall, provenance & deepsec interop
 
 Three opt-in additions, all keeping the zero-dependency / no-API-key core intact:

@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 
@@ -49,6 +50,9 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "eco",
   "list",
   "no-redact",
+  // `mcp` only.
+  "allow-remote",
+  "allow-write",
 ]);
 
 /** Single-dash short-flag aliases, as documented in the CLI's GLOBAL help. Each
@@ -63,7 +67,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   // Repeated flags accumulate (e.g. `--scope a --scope b`) instead of last-wins,
   // so a multi-value flag is never silently narrowed.
   const set = (key: string, val: string | boolean): void => {
-    if (Object.prototype.hasOwnProperty.call(flags, key)) {
+    if (Object.hasOwn(flags, key)) {
       const cur = flags[key]!;
       if (Array.isArray(cur)) cur.push(val);
       else flags[key] = [cur, val];
@@ -141,7 +145,7 @@ export function numFlag(args: ParsedArgs, name: string): number | undefined {
  *  an OWN property, so a key equal to an Object.prototype member ("constructor",
  *  "toString", "valueOf", …) can never return an inherited function. */
 export function own<T>(obj: Record<string, T> | null | undefined, key: string): T | undefined {
-  return obj != null && Object.prototype.hasOwnProperty.call(obj, key) ? obj[key] : undefined;
+  return obj != null && Object.hasOwn(obj, key) ? obj[key] : undefined;
 }
 
 /**
@@ -168,10 +172,48 @@ export function byStr(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
 }
 
+// ── Output sink ──────────────────────────────────────────────────────────────
+// The commands print their results. That is right for a CLI and fatal for the
+// MCP server, whose stdout carries JSON-RPC frames and nothing else — a single
+// stray line there corrupts the stream for the rest of the session.
+//
+// So the sink is injectable, scoped with AsyncLocalStorage rather than a module
+// variable. That distinction is the whole point: a command is async, so two
+// tool calls interleave, and a global sink would land one command's output in
+// the other's buffer. ALS follows the async context instead, so each capture
+// collects exactly its own call.
+//
+// With no store — every CLI invocation — this is the same direct write it
+// always was.
+interface OutputSink {
+  out: string[];
+  err: string[];
+}
+
+const outputSink = new AsyncLocalStorage<OutputSink>();
+
 export function eprintln(msg: string): void {
-  process.stderr.write(msg + "\n");
+  const sink = outputSink.getStore();
+  if (sink) sink.err.push(msg);
+  else process.stderr.write(msg + "\n");
 }
 
 export function println(msg: string): void {
-  process.stdout.write(msg + "\n");
+  const sink = outputSink.getStore();
+  if (sink) sink.out.push(msg);
+  else process.stdout.write(msg + "\n");
+}
+
+export interface Captured<T> {
+  result: T;
+  stdout: string;
+  stderr: string;
+}
+
+// Run `fn` with everything it prints collected instead of written. Used by the
+// MCP server to turn a command's printed result into a tool result.
+export async function captureOutput<T>(fn: () => T | Promise<T>): Promise<Captured<T>> {
+  const sink: OutputSink = { out: [], err: [] };
+  const result = await outputSink.run(sink, async () => await fn());
+  return { result, stdout: sink.out.join("\n"), stderr: sink.err.join("\n") };
 }

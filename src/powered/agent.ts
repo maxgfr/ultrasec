@@ -33,7 +33,7 @@ const BUILTINS: Record<string, ArgvTemplate> = {
  * so each token is its own argv element — never a shell string.
  */
 export function resolveTemplate(tpl: string): ArgvTemplate {
-  if (Object.prototype.hasOwnProperty.call(BUILTINS, tpl)) return BUILTINS[tpl]!;
+  if (Object.hasOwn(BUILTINS, tpl)) return BUILTINS[tpl]!;
   const parts = tpl.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) throw new Error("empty agent template");
   return {

@@ -18,15 +18,37 @@ function helpCommands(): string[] {
   return names;
 }
 
+// `mcp` is documented and dispatched, but deliberately NOT in COMMAND_HANDLERS.
+// That table maps a command to a function which runs, prints, and returns an
+// exit code; `mcp` blocks for the life of the server and must never write to
+// stdout, which every entry in the table does by design. dispatch() routes it
+// before the table lookup.
+const DISPATCHED_OUTSIDE_THE_TABLE = new Set(["mcp"]);
+
 describe("CLI dispatch table", () => {
   it("every command in HELP maps to a real handler (and vice-versa)", () => {
     const advertised = new Set(helpCommands());
     const wired = new Set(Object.keys(COMMAND_HANDLERS));
     expect(advertised.size).toBeGreaterThan(0);
     // No help entry without a handler…
-    for (const cmd of advertised) expect(wired.has(cmd), `HELP lists \`${cmd}\` but no handler is wired`).toBe(true);
+    for (const cmd of advertised) {
+      if (DISPATCHED_OUTSIDE_THE_TABLE.has(cmd)) continue;
+      expect(wired.has(cmd), `HELP lists \`${cmd}\` but no handler is wired`).toBe(true);
+    }
     // …and no handler left undocumented.
     for (const cmd of wired) expect(advertised.has(cmd), `\`${cmd}\` dispatches but HELP never documents it`).toBe(true);
+  });
+
+  it("still routes the commands that bypass the table", async () => {
+    // The exemption above must not become a hole: `mcp` has to be reachable,
+    // and reject a bad argument rather than fall through to "unknown command".
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const code = await dispatch("mcp", parseArgs(["mcp", "--transport", "bogus"]));
+    err.mockRestore();
+    expect(code).toBe(2);
+    for (const cmd of DISPATCHED_OUTSIDE_THE_TABLE) {
+      expect(helpCommands(), `\`${cmd}\` bypasses the table and must stay documented`).toContain(cmd);
+    }
   });
 
   it("an unknown command exits 2 without running anything", async () => {

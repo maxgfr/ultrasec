@@ -2,27 +2,10 @@ import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { warmGrammars } from "./vendor/codeindex-engine.mjs";
 import { VERSION } from "./types.js";
-import { parseArgs, flagBool, println, eprintln, type ParsedArgs } from "./util.js";
-import { runTools } from "./commands/tools.js";
-import { runGraph } from "./commands/graph.js";
-import { runMap } from "./commands/map.js";
-import { runScan } from "./commands/scan.js";
-import { runContext } from "./commands/context.js";
-import { runImport } from "./commands/import.js";
-import { runLogs } from "./commands/logs.js";
-import { runDossier } from "./commands/dossier.js";
-import { runTriage } from "./commands/triage.js";
-import { runInvestigate } from "./commands/investigate.js";
-import { runPaths } from "./commands/paths.js";
-import { runVerify } from "./commands/verify.js";
-import { runRevalidate } from "./commands/revalidate.js";
-import { runNarrative } from "./commands/narrative.js";
-import { runImplement } from "./commands/implement.js";
-import { runCheck } from "./commands/check.js";
-import { runRender } from "./commands/render.js";
-import { runClean } from "./commands/clean.js";
-import { runRun } from "./commands/run.js";
-import { runOrchestrate } from "./commands/orchestrate.js";
+import { parseArgs, flagBool, flagStr, numFlag, println, eprintln, type ParsedArgs } from "./util.js";
+import { COMMAND_HANDLERS, type CommandHandler } from "./commands/registry.js";
+import { runStdioServer } from "./mcp/stdio.js";
+import { startHttpServer } from "./mcp/http.js";
 
 export const HELP = `ultrasec ${VERSION} — cross-file security audit (taint + AI + tool orchestration)
 
@@ -145,6 +128,14 @@ COMMANDS
              every conservative --apply fold stays with you (one writer).
              Flags: --run · --phase <name> · --eco (runbook + contracts only) ·
              --list (phase status as JSON).
+  mcp        Serve the audit over the Model Context Protocol, so a non-Claude-Code
+             host (Cursor, Zed, Claude Desktop) gets the tools, the workflows as
+             prompts, and SKILL.md + references/ as resources. Read-only unless
+             --allow-write, which additionally exposes scan and clean.
+             Flags: --transport stdio|http (default stdio) · --repo <dir> (a
+             default repo makes it optional on every tool) · --allow-write ·
+             --port <n> · --bind <addr> · --allow-origin <o,...> · --allow-remote ·
+             --max-response-bytes <n>.
 
 GLOBAL
   --help, -h     Show this help.
@@ -162,29 +153,9 @@ Full reference incl. artifacts written per command: skills/ultrasec/references/c
 // Single source of truth for the command→handler mapping. The test-suite asserts
 // every command named in HELP has an entry here (and vice-versa), so the help
 // text can never drift from what actually dispatches.
-type CommandHandler = (args: ParsedArgs) => number | Promise<number>;
-export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
-  tools: runTools,
-  graph: runGraph,
-  map: runMap,
-  scan: runScan,
-  context: runContext,
-  import: runImport,
-  logs: runLogs,
-  dossier: runDossier,
-  triage: runTriage,
-  paths: runPaths,
-  verify: runVerify,
-  investigate: runInvestigate,
-  revalidate: runRevalidate,
-  narrative: runNarrative,
-  implement: runImplement,
-  check: runCheck,
-  render: runRender,
-  clean: runClean,
-  run: runRun,
-  orchestrate: runOrchestrate,
-};
+// The command table lives in commands/registry.ts, so the MCP server can reach
+// the same handlers without importing this module.
+export { COMMAND_HANDLERS, type CommandHandler };
 
 export async function dispatch(cmd: string | undefined, args: ParsedArgs): Promise<number> {
   if (cmd === undefined || cmd === "help") {
@@ -195,12 +166,78 @@ export async function dispatch(cmd: string | undefined, args: ParsedArgs): Promi
     println(VERSION);
     return 0;
   }
+  // `mcp` is not in COMMAND_HANDLERS: that table maps a command to a function
+  // that runs and returns an exit code, and this one blocks for the life of the
+  // server. It also must never print to stdout, which every entry in that table
+  // does by design.
+  if (cmd === "mcp") return runMcp(args);
   const handler = COMMAND_HANDLERS[cmd];
   if (!handler) {
     eprintln(`ultrasec: unknown command \`${cmd}\`. Run \`ultrasec --help\`.`);
     return 2;
   }
   return handler(args);
+}
+
+// Serve the audit over the Model Context Protocol. Returns only when the
+// server stops, so `dispatch` does not fall through while it is still running.
+async function runMcp(args: ParsedArgs): Promise<number> {
+  const transport = flagStr(args, "transport") ?? "stdio";
+  if (transport !== "stdio" && transport !== "http") {
+    eprintln(`ultrasec: invalid --transport "${transport}" (expected: stdio, http)`);
+    return 2;
+  }
+  const maxResponseBytes = numFlag(args, "max-response-bytes");
+  if (flagStr(args, "max-response-bytes") !== undefined && (maxResponseBytes === undefined || maxResponseBytes <= 0)) {
+    eprintln("ultrasec: invalid --max-response-bytes");
+    return 2;
+  }
+  const options = {
+    // A default repo makes `repo` optional on every tool, for a server
+    // dedicated to one project.
+    defaultRun: flagStr(args, "repo"),
+    allowWrite: flagBool(args, "allow-write"),
+    maxResponseBytes,
+  };
+
+  if (transport === "stdio") {
+    // Nothing is written to stdout here: from this point stdout carries
+    // JSON-RPC frames only, and runStdioServer guards that.
+    await runStdioServer(options);
+    return 0;
+  }
+
+  const port = numFlag(args, "port") ?? 7340;
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    eprintln("ultrasec: invalid --port");
+    return 2;
+  }
+  const allowOriginRaw = flagStr(args, "allow-origin");
+  const allowOrigin = allowOriginRaw
+    ? allowOriginRaw
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean)
+    : undefined;
+  let running: Awaited<ReturnType<typeof startHttpServer>>;
+  try {
+    running = await startHttpServer({ ...options, port, bind: flagStr(args, "bind"), allowOrigin, allowRemote: flagBool(args, "allow-remote") });
+  } catch (e) {
+    eprintln(`ultrasec: ${(e as Error).message}`);
+    return 2;
+  }
+  // stderr, not stdout: an HTTP server's stdout is not a protocol stream, but
+  // keeping the two transports identical here means no one has to remember
+  // which is which.
+  eprintln(`ultrasec: MCP server listening on ${running.url}`);
+  eprintln(`  client: claude mcp add --transport http ultrasec ${running.url}`);
+  for (const sig of ["SIGINT", "SIGTERM"] as const) {
+    process.once(sig, () => {
+      void running.close().then(() => process.exit(0));
+    });
+  }
+  await new Promise<void>((res) => running.server.once("close", res));
+  return 0;
 }
 
 // Commands that walk the repo and extract symbols. Only these pay for the
