@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.20.0](https://github.com/maxgfr/ultrasec/compare/v1.19.0...v1.20.0) (2026-07-29)
+
+
+### Features
+
+* **mcp:** serve ultrasec over the Model Context Protocol ([fe63983](https://github.com/maxgfr/ultrasec/commit/fe63983fc5a640ae454e6df7efb530757422be22))
+
 # [1.19.0](https://github.com/maxgfr/ultrasec/compare/v1.18.0...v1.19.0) (2026-07-26)
 
 
