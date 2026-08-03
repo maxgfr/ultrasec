@@ -99,7 +99,7 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
 
-    for (const sink of findSinks(lang, f.calls)) {
+    for (const sink of findSinks(lang, f.calls, undefined, f.imports)) {
       totalSinks++;
       la.sinks++;
       da.sinks++;

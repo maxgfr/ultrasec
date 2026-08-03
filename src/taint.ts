@@ -122,7 +122,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     const lang = langForFile(file.rel);
     if (!lang) continue;
 
-    for (const sink of findSinks(lang, file.calls, extraSinks)) {
+    for (const sink of findSinks(lang, file.calls, extraSinks, file.imports)) {
       const sinkSym = enclosingSymbolName(file.symbols, sink.line);
       const sinkStep: PathStep = {
         file: file.rel,

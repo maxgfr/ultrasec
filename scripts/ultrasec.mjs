@@ -14054,6 +14054,7 @@ function inferOrigin(binaryAbsPath, toolName, ctx = {}) {
 
 // src/tools/run.ts
 import { execFileSync as execFileSync3 } from "child_process";
+import { join as join22, relative } from "path";
 
 // src/tools/normalize.ts
 var SEVERITY_ALIASES = Object.assign(/* @__PURE__ */ Object.create(null), {
@@ -14383,8 +14384,32 @@ function runNative(adapter, repo, ctx) {
   if (applicableNote) return { name: adapter.name, ran: false, ok: false, findings: [], note: applicableNote };
   const argv = buildArgv(adapter, repo, repo, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
-  const { stdout, failed: failed2, err: err2 } = exec(cmd[0], [...cmd.slice(1), ...argv], repo);
+  const dirs = adapter.workspaces?.(repo) ?? [];
+  if (dirs.length > 1) return runEachWorkspace(adapter, repo, cmd, argv, dirs);
+  const cwd = dirs[0] ?? repo;
+  const { stdout, failed: failed2, err: err2 } = exec(cmd[0], [...cmd.slice(1), ...argv], cwd);
   return finish(adapter, repo, stdout, failed2, err2, false);
+}
+function runEachWorkspace(adapter, repo, cmd, argv, dirs) {
+  const findings = [];
+  const covered = [];
+  const failures = [];
+  for (const dir of dirs) {
+    const rel = relative(repo, dir) || ".";
+    const { stdout, failed: failed2, err: err2 } = exec(cmd[0], [...cmd.slice(1), ...argv], dir);
+    const one = finish(adapter, dir, stdout, failed2, err2, false);
+    if (!one.ok) {
+      failures.push(`${rel}: ${one.note}`);
+      continue;
+    }
+    for (const f of one.findings) findings.push(rel === "." ? f : { ...f, ...f.sink ? { sink: { ...f.sink, file: join22(rel, f.sink.file) } } : {} });
+    covered.push(rel);
+  }
+  const note = [
+    `${findings.length} finding(s) across ${covered.length} workspace(s): ${covered.join(", ") || "none"}`,
+    ...failures.map((f) => `failed ${f}`)
+  ].join(" \xB7 ");
+  return { name: adapter.name, ran: covered.length > 0, ok: covered.length > 0, findings, note };
 }
 function runDocker(adapter, repo, ctx) {
   if (blockedOffline(adapter, ctx)) {
@@ -14553,7 +14578,7 @@ function runUpgrade(statuses, dryRun) {
 import { resolve as resolve5 } from "path";
 
 // src/scan.ts
-import { resolve as resolve3, join as join22 } from "path";
+import { resolve as resolve3, join as join23 } from "path";
 
 // src/lang.ts
 var LANGS = [
@@ -14595,7 +14620,7 @@ function toEngineOptions(repo, opts) {
     maxBytes: opts.maxBytes ?? 15e5,
     maxFiles: opts.maxFiles,
     gitignore: opts.gitignore === true,
-    out: join22(resolve3(repo), DOSSIER_DIRNAME)
+    out: join23(resolve3(repo), DOSSIER_DIRNAME)
   };
 }
 var REFERENCE_KINDS7 = /* @__PURE__ */ new Set(["reexport", "reexport-all", "default"]);
@@ -14645,7 +14670,7 @@ function extractionTier() {
 
 // src/walk.ts
 import { readFileSync as readFileSync10, readdirSync as readdirSync4, lstatSync as lstatSync2, statSync as statSync7, realpathSync as realpathSync3 } from "fs";
-import { join as join23, relative, resolve as resolve4, sep as sep3 } from "path";
+import { join as join24, relative as relative2, resolve as resolve4, sep as sep3 } from "path";
 var DEFAULT_IGNORE_DIRS = /* @__PURE__ */ new Set([
   ".git",
   "node_modules",
@@ -14781,6 +14806,26 @@ function parseGitignore2(content) {
 function walk2(root, opts = {}) {
   return walkWithMeta(root, opts).files;
 }
+var MANIFEST_MAX_DEPTH = 3;
+function findManifestDirs(root, names, maxDepth = MANIFEST_MAX_DEPTH) {
+  const found = [];
+  const visit = (dir, depth) => {
+    let entries;
+    try {
+      entries = readdirSync4(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    if (entries.some((e) => e.isFile() && names.includes(e.name))) found.push({ dir, depth });
+    if (depth >= maxDepth) return;
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith(".") || DEFAULT_IGNORE_DIRS.has(e.name)) continue;
+      visit(join24(dir, e.name), depth + 1);
+    }
+  };
+  visit(root, 0);
+  return found.sort((a, b) => a.depth - b.depth || byStr2(a.dir, b.dir)).map((f) => f.dir);
+}
 function walkWithMeta(root, opts = {}) {
   const ignore = opts.ignoreDirs ?? DEFAULT_IGNORE_DIRS;
   const maxBytes = opts.maxBytes ?? MAX_FILE_BYTES;
@@ -14791,7 +14836,7 @@ function walkWithMeta(root, opts = {}) {
   const giRules = [];
   if (opts.gitignore) {
     try {
-      for (const r of parseGitignore2(readFileSync10(join23(root, ".gitignore"), "utf8"))) giRules.push({ re: globToRe(r.glob), negated: r.negated });
+      for (const r of parseGitignore2(readFileSync10(join24(root, ".gitignore"), "utf8"))) giRules.push({ re: globToRe(r.glob), negated: r.negated });
     } catch {
     }
   }
@@ -14819,7 +14864,7 @@ function walkWithMeta(root, opts = {}) {
     }
     for (const name2 of entries.sort(byStr2)) {
       if (truncated) return;
-      const abs = join23(dir, name2);
+      const abs = join24(dir, name2);
       let st;
       try {
         st = lstatSync2(abs);
@@ -14837,7 +14882,7 @@ function walkWithMeta(root, opts = {}) {
           continue;
         }
       }
-      const rel = relative(root, abs).split(sep3).join("/");
+      const rel = relative2(root, abs).split(sep3).join("/");
       if (st.isDirectory()) {
         if (ignore.has(name2)) continue;
         if (scopes && !dirInScope(rel, scopes)) continue;
@@ -15000,7 +15045,7 @@ function reverseDependents(graph, seeds, depth) {
 
 // src/store.ts
 import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync6, readFileSync as readFileSync11, existsSync as existsSync10 } from "fs";
-import { join as join24 } from "path";
+import { join as join25 } from "path";
 function emptySeverityCounts() {
   return { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
 }
@@ -15011,10 +15056,10 @@ function countBySeverity(findings) {
 }
 function writeDossier(outDir, d) {
   mkdirSync5(outDir, { recursive: true });
-  writeFileSync6(join24(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
-  writeFileSync6(join24(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
-  writeFileSync6(join24(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
-  writeFileSync6(join24(outDir, "DOSSIER.md"), renderDossierMd(d));
+  writeFileSync6(join25(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
+  writeFileSync6(join25(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
+  writeFileSync6(join25(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
+  writeFileSync6(join25(outDir, "DOSSIER.md"), renderDossierMd(d));
 }
 function mergeDossier(prev, next) {
   const byId = /* @__PURE__ */ new Map();
@@ -15063,8 +15108,8 @@ function mergeDossier(prev, next) {
   return { manifest, findings, graph };
 }
 function loadDossier(outDir) {
-  const read = (name2) => JSON.parse(readFileSync11(join24(outDir, name2), "utf8"));
-  if (!existsSync10(join24(outDir, "findings.json"))) {
+  const read = (name2) => JSON.parse(readFileSync11(join25(outDir, name2), "utf8"));
+  if (!existsSync10(join25(outDir, "findings.json"))) {
     throw new Error(`no audit dossier at ${outDir} (run \`ultrasec scan --out ${outDir}\` first)`);
   }
   return { manifest: read("manifest.json"), findings: read("findings.json"), graph: read("graph.json") };
@@ -15240,11 +15285,11 @@ function runGraph(args2) {
 }
 
 // src/commands/map.ts
-import { resolve as resolve6, join as join26 } from "path";
+import { resolve as resolve6, join as join27 } from "path";
 import { mkdirSync as mkdirSync6, writeFileSync as writeFileSync7, readFileSync as readFileSync12, existsSync as existsSync11 } from "fs";
 
 // src/map.ts
-import { join as join25 } from "path";
+import { join as join26 } from "path";
 
 // src/catalog.ts
 function appliesTo(languages, langId) {
@@ -15436,6 +15481,14 @@ var SINKS = [
     languages: ["*"],
     callees: ["search", "bind", "searchSync"],
     receivers: ["ldap", "ldapClient", "ldapjs", "client", "conn", "connection", "ld"],
+    // `search` is the most over-loaded method name in the catalog: without these
+    // two gates the rule fired on every Elasticsearch `client.search()` and on
+    // every bare `search(opts)` helper — 30+ high-severity false positives on a
+    // single real repo, drowning the findings that mattered. The receiver list
+    // stays permissive (an ldapjs client IS usually named `client`); the import
+    // is what says which technology this actually is.
+    requireReceiver: true,
+    requireModule: ["ldap", "activedirectory", "unboundid", "novell.ldap"],
     title: "LDAP injection",
     note: "Tainted data concatenated into an LDAP filter/DN. Escape with the LDAP escaping API (ldap.escape / escapeFilter / escapeDN)."
   },
@@ -15537,15 +15590,17 @@ var LOG_SINKS = [
     note: "Untrusted data written to a log without newline/CRLF stripping \u2014 verify neutralization; typically low severity."
   }
 ];
-function findSinks(lang, calls, extraSinks) {
+function findSinks(lang, calls, extraSinks, imports) {
   const rules = extraSinks && extraSinks.length ? [...SINKS, ...extraSinks] : SINKS;
   const out2 = [];
+  const specs = (imports ?? []).map((i2) => i2.spec.toLowerCase());
   for (const c2 of calls) {
     for (const rule of rules) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (!rule.callees.includes(c2.callee)) continue;
       if (rule.requireReceiver && !c2.receiver) continue;
       if (rule.receivers && c2.receiver && !rule.receivers.includes(c2.receiver)) continue;
+      if (rule.requireModule && specs.length && !rule.requireModule.some((m) => specs.some((s) => s.includes(m)))) continue;
       out2.push({
         line: c2.line,
         callee: c2.callee,
@@ -15663,7 +15718,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
     const da = dirAgg.get(dir) ?? dirAgg.set(dir, { dir, files: 0, sources: 0, sinks: 0, score: 0 }).get(dir);
     la.files++;
     da.files++;
-    const sources = findSources(lang, readText2(join25(scan2.repo, f.rel)));
+    const sources = findSources(lang, readText2(join26(scan2.repo, f.rel)));
     for (const s of sources) {
       totalSources++;
       la.sources++;
@@ -15671,7 +15726,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
       const arr = entryByKind.get(s.kind) ?? entryByKind.set(s.kind, []).get(s.kind);
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
-    for (const sink of findSinks(lang, f.calls)) {
+    for (const sink of findSinks(lang, f.calls, void 0, f.imports)) {
       totalSinks++;
       la.sinks++;
       da.sinks++;
@@ -15774,7 +15829,7 @@ async function runMap(args2) {
   const gitignore = flagBool(args2, "gitignore");
   let coveredScopes = [];
   if (out2) {
-    const mPath = join26(resolve6(out2), "manifest.json");
+    const mPath = join27(resolve6(out2), "manifest.json");
     if (existsSync11(mPath)) {
       try {
         const m = JSON.parse(readFileSync12(mPath, "utf8"));
@@ -15788,8 +15843,8 @@ async function runMap(args2) {
   if (out2) {
     const outDir = resolve6(out2);
     mkdirSync6(outDir, { recursive: true });
-    writeFileSync7(join26(outDir, "attack-surface.json"), JSON.stringify(surface, null, 2));
-    writeFileSync7(join26(outDir, "MAP.md"), renderMapMd(repo, surface));
+    writeFileSync7(join27(outDir, "attack-surface.json"), JSON.stringify(surface, null, 2));
+    writeFileSync7(join27(outDir, "MAP.md"), renderMapMd(repo, surface));
   }
   if (flagBool(args2, "json")) {
     println(JSON.stringify(surface, null, 2));
@@ -15797,16 +15852,16 @@ async function runMap(args2) {
   }
   println(renderMapMd(repo, surface));
   if (out2) println(`
-wrote ${join26(resolve6(out2), "MAP.md")} + attack-surface.json`);
+wrote ${join27(resolve6(out2), "MAP.md")} + attack-surface.json`);
   return 0;
 }
 
 // src/commands/scan.ts
-import { resolve as resolve8, join as join39, relative as relative3 } from "path";
-import { existsSync as existsSync19 } from "fs";
+import { resolve as resolve8, join as join39, relative as relative4 } from "path";
+import { existsSync as existsSync18 } from "fs";
 
 // src/taint.ts
-import { join as join27 } from "path";
+import { join as join28 } from "path";
 var DEFAULT_MAX_DEPTH = 6;
 var DEFAULT_MAX_CANDIDATES = 1e3;
 function severityRank(s) {
@@ -15825,7 +15880,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
   const lineCache = /* @__PURE__ */ new Map();
   const content = (rel) => {
     let c2 = contentCache.get(rel);
-    if (c2 === void 0) contentCache.set(rel, c2 = readText2(join27(scan2.repo, rel)));
+    if (c2 === void 0) contentCache.set(rel, c2 = readText2(join28(scan2.repo, rel)));
     return c2;
   };
   const lines = (rel) => {
@@ -15880,7 +15935,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls, extraSinks)) {
+    for (const sink of findSinks(lang, file.calls, extraSinks, file.imports)) {
       const sinkSym = enclosingSymbolName(file.symbols, sink.line);
       const sinkStep = {
         file: file.rel,
@@ -15924,7 +15979,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
 }
 
 // src/sinks.ts
-import { join as join28 } from "path";
+import { join as join29 } from "path";
 var DEFAULT_MAX_CANDIDATES2 = 1e3;
 function severityRank2(s) {
   return SEVERITIES2.indexOf(s);
@@ -15936,14 +15991,14 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
   const lineCache = /* @__PURE__ */ new Map();
   const lines = (rel) => {
     let l = lineCache.get(rel);
-    if (!l) lineCache.set(rel, l = readText2(join28(scan2.repo, rel)).split(/\r?\n/));
+    if (!l) lineCache.set(rel, l = readText2(join29(scan2.repo, rel)).split(/\r?\n/));
     return l;
   };
   const findings = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls)) {
+    for (const sink of findSinks(lang, file.calls, void 0, file.imports)) {
       const key = `${file.rel}:${sink.line}:${sink.kind}`;
       if (taken.has(key)) continue;
       taken.add(key);
@@ -15972,7 +16027,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
 }
 
 // src/logs/hygiene.ts
-import { join as join29 } from "path";
+import { join as join30 } from "path";
 
 // src/logs/secrets.ts
 var SECRET_PATTERNS = [
@@ -16052,14 +16107,14 @@ function enumerateSensitiveLogCandidates(scan2, opts = {}) {
   const lineCache = /* @__PURE__ */ new Map();
   const lines = (rel) => {
     let l = lineCache.get(rel);
-    if (!l) lineCache.set(rel, l = readText2(join29(scan2.repo, rel)).split(/\r?\n/));
+    if (!l) lineCache.set(rel, l = readText2(join30(scan2.repo, rel)).split(/\r?\n/));
     return l;
   };
   const findings = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls, LOG_SINKS)) {
+    for (const sink of findSinks(lang, file.calls, LOG_SINKS, file.imports)) {
       if (sink.kind !== "log") continue;
       const raw = lines(file.rel)[sink.line - 1] ?? "";
       const nameHit = SENSITIVE_NAME_RE.test(raw);
@@ -16200,7 +16255,7 @@ function fileRenamedTo(repo, file) {
 
 // src/provenance.ts
 import { existsSync as existsSync12, readFileSync as readFileSync13 } from "fs";
-import { join as join30 } from "path";
+import { join as join31 } from "path";
 function compileCodeowner(pattern) {
   const dirOnly = pattern.endsWith("/") && pattern.length > 1;
   let core = dirOnly ? pattern.slice(0, -1) : pattern;
@@ -16231,7 +16286,7 @@ function ownerFor(rules, file) {
 var CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
 function loadCodeowners(repo) {
   for (const p of CODEOWNERS_PATHS) {
-    const abs = join30(repo, p);
+    const abs = join31(repo, p);
     if (existsSync12(abs)) {
       try {
         return parseCodeowners(readFileSync13(abs, "utf8"));
@@ -16273,10 +16328,10 @@ function addProvenance(findings, repo, opts = {}) {
 
 // src/cache.ts
 import { mkdirSync as mkdirSync7, writeFileSync as writeFileSync8, readFileSync as readFileSync14 } from "fs";
-import { join as join31 } from "path";
+import { join as join32 } from "path";
 var CACHE_VERSION = 2;
 function cachePath(run2) {
-  return join31(run2, "cache", "scan-cache.json");
+  return join32(run2, "cache", "scan-cache.json");
 }
 function loadScanCache(run2) {
   try {
@@ -16288,7 +16343,7 @@ function loadScanCache(run2) {
   }
 }
 function saveScanCache(run2, cache) {
-  const dir = join31(run2, "cache");
+  const dir = join32(run2, "cache");
   mkdirSync7(dir, { recursive: true });
   const entries = {};
   for (const [k, v] of [...cache.entries()].sort((a, b) => byStr2(a[0], b[0]))) entries[k] = v;
@@ -16299,7 +16354,7 @@ function saveScanCache(run2, cache) {
 import { existsSync as existsSync13, mkdirSync as mkdirSync8, readFileSync as readFileSync15, statSync as statSync8, writeFileSync as writeFileSync9 } from "fs";
 import { gunzipSync as gunzipSync2 } from "zlib";
 import { homedir as homedir3 } from "os";
-import { join as join32 } from "path";
+import { join as join33 } from "path";
 var SEVERITY_WEIGHT = {
   critical: 1,
   high: 0.8,
@@ -16361,7 +16416,7 @@ var KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vu
 var TTL_MS = 24 * 60 * 60 * 1e3;
 var FETCH_TIMEOUT_MS = 2e4;
 function cacheDir() {
-  return process.env.ULTRASEC_CACHE_DIR || join32(homedir3(), ".cache", "ultrasec");
+  return process.env.ULTRASEC_CACHE_DIR || join33(homedir3(), ".cache", "ultrasec");
 }
 function fresh(path) {
   try {
@@ -16383,7 +16438,7 @@ async function fetchBuf(url) {
 }
 async function loadCached(url, file, gz) {
   const dir = cacheDir();
-  const path = join32(dir, file);
+  const path = join33(dir, file);
   if (fresh(path)) {
     try {
       return readFileSync15(path, "utf8");
@@ -16431,7 +16486,7 @@ async function enrichFindings(findings, opts = {}) {
 // src/tools/sbom.ts
 import { execFileSync as execFileSync6 } from "child_process";
 import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync10 } from "fs";
-import { join as join33, relative as relative2, resolve as resolve7 } from "path";
+import { join as join34, relative as relative3, resolve as resolve7 } from "path";
 function componentCount(cdxJson) {
   try {
     const data = JSON.parse(cdxJson);
@@ -16441,7 +16496,7 @@ function componentCount(cdxJson) {
   }
 }
 function syftExcludeArgs(repo, outDir) {
-  const rel = relative2(repo, outDir);
+  const rel = relative3(repo, outDir);
   if (!rel || rel === "." || rel.startsWith("..")) return [];
   return ["--exclude", `./${rel}/**`];
 }
@@ -16455,7 +16510,7 @@ function generateSbom(repo, outDir) {
       stdio: ["ignore", "pipe", "ignore"]
     });
     mkdirSync9(outDir, { recursive: true });
-    const path = join33(outDir, "sbom.cdx.json");
+    const path = join34(outDir, "sbom.cdx.json");
     writeFileSync10(path, stdout);
     const count = componentCount(stdout);
     return { path: resolve7(path), note: `sbom.cdx.json${count !== void 0 ? ` (${count} components)` : ""}` };
@@ -16533,7 +16588,7 @@ var trivy = {
 
 // src/tools/gitleaks.ts
 import { existsSync as existsSync14 } from "fs";
-import { join as join34 } from "path";
+import { join as join35 } from "path";
 var gitleaks = {
   name: "gitleaks",
   category: "secret",
@@ -16542,7 +16597,7 @@ var gitleaks = {
   // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
   argv: (target) => {
     const onHost = existsSync14(target);
-    const hasGit = onHost && existsSync14(join34(target, ".git"));
+    const hasGit = onHost && existsSync14(join35(target, ".git"));
     const base = ["detect", "--source", target, "--report-format", "json", "--report-path", "-", "--no-banner", "--redact", "--exit-code", "0"];
     return hasGit ? base : [...base, "--no-git"];
   },
@@ -16713,15 +16768,15 @@ var opengrep = {
 };
 
 // src/tools/cargo-audit.ts
-import { existsSync as existsSync15 } from "fs";
-import { join as join35 } from "path";
+var CARGO_LOCKFILES = ["Cargo.lock"];
 var cargoAudit = {
   name: "cargo-audit",
   category: "dep",
   // Gate on Cargo.lock (same pattern as pip-audit's requirements.txt gate):
   // without it, cargo-audit exits non-zero on every non-Rust repo and used to
   // surface as noisy "run failed" instead of a clean, expected skip.
-  applicable: (repo) => existsSync15(join35(repo, "Cargo.lock")) ? null : "no Cargo.lock",
+  applicable: (repo) => findManifestDirs(repo, CARGO_LOCKFILES).length ? null : "no Cargo.lock (checked the root and its subdirectories)",
+  workspaces: (repo) => findManifestDirs(repo, CARGO_LOCKFILES),
   argv: () => ["audit", "--format", "json"],
   parse(raw) {
     const data = JSON.parse(raw || "{}");
@@ -17064,13 +17119,13 @@ var grype = {
 };
 
 // src/tools/pip-audit.ts
-import { existsSync as existsSync16 } from "fs";
+import { existsSync as existsSync15 } from "fs";
 import { join as join36 } from "path";
 var pipAudit = {
   name: "pip-audit",
   category: "dep",
   network: true,
-  applicable: (repo) => existsSync16(join36(repo, "requirements.txt")) ? null : "no requirements.txt",
+  applicable: (repo) => existsSync15(join36(repo, "requirements.txt")) ? null : "no requirements.txt",
   argv: () => ["-r", "requirements.txt", "-f", "json", "--progress-spinner", "off"],
   parse(raw) {
     let data;
@@ -17111,9 +17166,12 @@ var pipAudit = {
 };
 
 // src/tools/pm-audit.ts
-import { existsSync as existsSync17 } from "fs";
+import { existsSync as existsSync16 } from "fs";
 import { join as join37 } from "path";
 import { execFileSync as execFileSync7 } from "child_process";
+var NPM_LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json"];
+var PNPM_LOCKFILES = ["pnpm-lock.yaml"];
+var YARN_LOCKFILES = ["yarn.lock"];
 function ghsaFromUrl(url) {
   const m = /GHSA-[0-9a-z]{4}-[0-9a-z]{4}-[0-9a-z]{4}/i.exec(String(url ?? ""));
   return m ? m[0].toUpperCase() : void 0;
@@ -17196,7 +17254,7 @@ function parseNpmV7(data, lockfile) {
   return out2;
 }
 function npmLockfileName(repo) {
-  if (!existsSync17(join37(repo, "package-lock.json")) && existsSync17(join37(repo, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
+  if (!existsSync16(join37(repo, "package-lock.json")) && existsSync16(join37(repo, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
   return "package-lock.json";
 }
 var npmAudit = {
@@ -17204,7 +17262,8 @@ var npmAudit = {
   category: "dep",
   network: true,
   command: () => detect("npm").installed ? ["npm"] : null,
-  applicable: (repo) => existsSync17(join37(repo, "package-lock.json")) || existsSync17(join37(repo, "npm-shrinkwrap.json")) ? null : "no package-lock.json",
+  applicable: (repo) => findManifestDirs(repo, NPM_LOCKFILES).length ? null : "no package-lock.json (checked the root and its subdirectories)",
+  workspaces: (repo) => findManifestDirs(repo, NPM_LOCKFILES),
   argv: () => ["audit", "--json"],
   parse(raw, repo) {
     const data = parseJson(raw);
@@ -17220,7 +17279,8 @@ var pnpmAudit = {
   category: "dep",
   network: true,
   command: () => detect("pnpm").installed ? ["pnpm"] : null,
-  applicable: (repo) => existsSync17(join37(repo, "pnpm-lock.yaml")) ? null : "no pnpm-lock.yaml",
+  applicable: (repo) => findManifestDirs(repo, PNPM_LOCKFILES).length ? null : "no pnpm-lock.yaml (checked the root and its subdirectories)",
+  workspaces: (repo) => findManifestDirs(repo, PNPM_LOCKFILES),
   argv: () => ["audit", "--json"],
   parse(raw) {
     const data = parseJson(raw);
@@ -17270,7 +17330,8 @@ var yarnAudit = {
   category: "dep",
   network: true,
   streaming: true,
-  applicable: (repo) => existsSync17(join37(repo, "yarn.lock")) ? null : "no yarn.lock",
+  applicable: (repo) => findManifestDirs(repo, YARN_LOCKFILES).length ? null : "no yarn.lock (checked the root and its subdirectories)",
+  workspaces: (repo) => findManifestDirs(repo, YARN_LOCKFILES),
   command: () => {
     const major = yarnMajor();
     if (major === null) return null;
@@ -17306,7 +17367,7 @@ var yarnAudit = {
 // src/tools/package-checker.ts
 import { execFileSync as execFileSync8 } from "child_process";
 import { createHash as createHash5 } from "crypto";
-import { existsSync as existsSync18, mkdirSync as mkdirSync10, readFileSync as readFileSync16, readdirSync as readdirSync5, rmSync as rmSync3, writeFileSync as writeFileSync11 } from "fs";
+import { existsSync as existsSync17, mkdirSync as mkdirSync10, readFileSync as readFileSync16, readdirSync as readdirSync5, rmSync as rmSync3, writeFileSync as writeFileSync11 } from "fs";
 import { join as join38 } from "path";
 function hasRepoLocalPurlFeed(repo) {
   let entries;
@@ -17320,7 +17381,7 @@ function hasRepoLocalPurlFeed(repo) {
 function scriptPath() {
   const dir = join38(cacheDir(), "package-checker");
   const path = join38(dir, `script-${PACKAGE_CHECKER_SHA256.slice(0, 12)}.sh`);
-  if (!existsSync18(path)) {
+  if (!existsSync17(path)) {
     mkdirSync10(dir, { recursive: true });
     writeFileSync11(path, PACKAGE_CHECKER_SH);
   }
@@ -17362,7 +17423,7 @@ function fetchAndCacheScript(tag) {
   const dir = join38(cacheDir(), "package-checker");
   const path = join38(dir, `script-${tag}-${sha12}.sh`);
   try {
-    if (!existsSync18(path)) {
+    if (!existsSync17(path)) {
       mkdirSync10(dir, { recursive: true });
       writeFileSync11(path, buf);
     }
@@ -17528,10 +17589,10 @@ async function runScan(args2) {
       eprintln(`ultrasec: --diff/--since needs a git work tree and a resolvable ref (got '${diffRef}'). Aborting \u2014 no silent full scan.`);
       return 2;
     }
-    const relOut = relative3(repo, out2);
+    const relOut = relative4(repo, out2);
     const changed = relOut && relOut !== "." && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
-    if (existsSync19(join39(out2, "graph.json"))) {
+    if (existsSync18(join39(out2, "graph.json"))) {
       try {
         targets = reverseDependents(loadDossier(out2).graph, changed, REVDEP_DEPTH);
         diffNote = `--diff ${diffRef}: ${changed.length} changed \u2192 ${targets.length} file(s) incl. reverse-deps`;
@@ -17595,7 +17656,7 @@ async function runScan(args2) {
   const nextDossier = { manifest, findings, graph };
   let final = nextDossier;
   let mergedNote = "";
-  if (flagBool(args2, "merge") && existsSync19(join39(out2, "findings.json"))) {
+  if (flagBool(args2, "merge") && existsSync18(join39(out2, "findings.json"))) {
     try {
       const prev = loadDossier(out2);
       final = mergeDossier(prev, nextDossier);
@@ -17671,7 +17732,7 @@ import { mkdirSync as mkdirSync11, writeFileSync as writeFileSync12 } from "fs";
 import { join as join41, resolve as resolve9 } from "path";
 
 // src/context.ts
-import { existsSync as existsSync20, readFileSync as readFileSync17 } from "fs";
+import { existsSync as existsSync19, readFileSync as readFileSync17 } from "fs";
 import { join as join40 } from "path";
 var MAX_SCAFFOLD = 40;
 var AUTH_RE = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
@@ -17759,7 +17820,7 @@ var TEXT_MANIFESTS = [
 function detectFrameworks(repo) {
   const found = /* @__PURE__ */ new Set();
   const pkgPath = join40(repo, "package.json");
-  if (existsSync20(pkgPath)) {
+  if (existsSync19(pkgPath)) {
     try {
       const pkg = JSON.parse(readFileSync17(pkgPath, "utf8"));
       const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {} };
@@ -17772,7 +17833,7 @@ function detectFrameworks(repo) {
   }
   for (const m of TEXT_MANIFESTS) {
     const p = join40(repo, m.file);
-    if (!existsSync20(p)) continue;
+    if (!existsSync19(p)) continue;
     let raw;
     try {
       raw = readFileSync17(p, "utf8");
@@ -17871,7 +17932,7 @@ function renderContextScaffoldMd(repo, run2, s) {
 }
 function loadContextDoc(run2) {
   const p = join40(run2, "CONTEXT.md");
-  if (!existsSync20(p)) return void 0;
+  if (!existsSync19(p)) return void 0;
   try {
     const s = readFileSync17(p, "utf8").trim();
     return s.length ? s : void 0;
@@ -17922,7 +17983,7 @@ function runContext(args2) {
 
 // src/commands/import.ts
 import { resolve as resolve10, join as join42 } from "path";
-import { existsSync as existsSync21, readFileSync as readFileSync18 } from "fs";
+import { existsSync as existsSync20, readFileSync as readFileSync18 } from "fs";
 
 // src/tools/deepsec.ts
 function slugToCategory(slug) {
@@ -18012,7 +18073,7 @@ async function runImport(args2) {
     return 1;
   }
   let prev;
-  if (existsSync21(join42(run2, "findings.json"))) {
+  if (existsSync20(join42(run2, "findings.json"))) {
     try {
       prev = loadDossier(run2);
     } catch (e) {
@@ -18061,12 +18122,12 @@ async function runImport(args2) {
 
 // src/commands/logs.ts
 import { resolve as resolve11, join as join43, dirname as dirname7, extname as extname3, sep as sep5 } from "path";
-import { existsSync as existsSync22, statSync as statSync10, readdirSync as readdirSync6, mkdirSync as mkdirSync12, writeFileSync as writeFileSync13, openSync, readSync, closeSync } from "fs";
+import { existsSync as existsSync21, statSync as statSync10, readdirSync as readdirSync6, mkdirSync as mkdirSync12, writeFileSync as writeFileSync13, openSync, readSync, closeSync } from "fs";
 
 // src/logs/analyze.ts
 import { createReadStream, statSync as statSync9 } from "fs";
 import { createInterface as createInterface2 } from "readline";
-import { relative as relative4, sep as sep4 } from "path";
+import { relative as relative5, sep as sep4 } from "path";
 
 // src/logs/detect.ts
 var LOG_FORMATS = ["nginx-combined", "common", "json-lines", "syslog", "generic", "raw"];
@@ -18845,7 +18906,7 @@ async function analyzeLogs(paths, opts) {
   const windowSeconds = opts.windowSec ?? DEFAULT_WINDOW_SECONDS;
   const state = newState(maxLines, windowSeconds);
   for (const absPath of paths) {
-    const relPath = relative4(opts.base, absPath).split(sep4).join("/");
+    const relPath = relative5(opts.base, absPath).split(sep4).join("/");
     if (state.budgetRemaining <= 0) {
       state.truncation.push(`${relPath}: not read \u2014 the ${maxLines.toLocaleString("en-US")}-line run budget was already exhausted`);
       continue;
@@ -19011,7 +19072,7 @@ function expandInputs(inputs) {
   const out2 = /* @__PURE__ */ new Set();
   for (const raw of inputs) {
     const p = resolve11(raw);
-    if (!existsSync22(p)) throw new Error(`path not found: ${raw}`);
+    if (!existsSync21(p)) throw new Error(`path not found: ${raw}`);
     const st = statSync10(p);
     if (st.isDirectory()) {
       for (const entry of readdirSync6(p).sort(byStr2)) {
@@ -19540,7 +19601,7 @@ function runTriage(args2) {
 import { resolve as resolve16 } from "path";
 
 // src/check.ts
-import { existsSync as existsSync23, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
+import { existsSync as existsSync22, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
 import { join as join46, resolve as resolve15, sep as sep6 } from "path";
 function insideRepo(repo, file) {
   const base = resolve15(repo);
@@ -19561,7 +19622,7 @@ function countNewlines(fd, chunkBytes = LINE_COUNT_CHUNK_BYTES) {
 function lineCountDetailed(repo, file) {
   if (!insideRepo(repo, file)) return { status: "missing" };
   const abs = join46(repo, file);
-  if (!existsSync23(abs)) return { status: "missing" };
+  if (!existsSync22(abs)) return { status: "missing" };
   let fd;
   try {
     fd = openSync2(abs, "r");
@@ -20427,11 +20488,11 @@ function runNarrative(args2) {
 import { resolve as resolve21 } from "path";
 
 // src/implement.ts
-import { existsSync as existsSync24, readFileSync as readFileSync20 } from "fs";
+import { existsSync as existsSync23, readFileSync as readFileSync20 } from "fs";
 import { join as join48 } from "path";
 function loadNarrative(run2, dossier, file) {
   const p = file ?? join48(run2, "NARRATIVE.json");
-  if (!existsSync24(p)) return void 0;
+  if (!existsSync23(p)) return void 0;
   try {
     const merged = mergeNarrative(parseNarrative(readFileSync20(p, "utf8")), dossier);
     return hasNarrativeContent(merged) ? merged : void 0;
@@ -21012,7 +21073,7 @@ function runRender(args2) {
 
 // src/commands/clean.ts
 import { execFileSync as execFileSync9 } from "child_process";
-import { existsSync as existsSync25, rmSync as rmSync4, readdirSync as readdirSync8 } from "fs";
+import { existsSync as existsSync24, rmSync as rmSync4, readdirSync as readdirSync8 } from "fs";
 import { join as join50, resolve as resolve24 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
@@ -21044,7 +21105,7 @@ function runClean(args2) {
   const all = flagBool(args2, "all");
   const removed = [];
   const kept = [];
-  if (!keepOutput && existsSync25(run2)) {
+  if (!keepOutput && existsSync24(run2)) {
     if (all) {
       if (!dry) rmSync4(run2, { recursive: true, force: true });
       removed.push(`output  ${run2}`);
@@ -21099,12 +21160,12 @@ function runClean(args2) {
 }
 
 // src/commands/run.ts
-import { existsSync as existsSync27 } from "fs";
+import { existsSync as existsSync26 } from "fs";
 import { join as join52, resolve as resolve25 } from "path";
 
 // src/powered/agent.ts
 import { spawnSync as spawnSync2 } from "child_process";
-import { existsSync as existsSync26, statSync as statSync12 } from "fs";
+import { existsSync as existsSync25, statSync as statSync12 } from "fs";
 var BUILTINS2 = {
   claude: { name: "claude", argv: (p) => ["claude", "-p", p] },
   codex: { name: "codex", argv: (p) => ["codex", "exec", p] }
@@ -21128,7 +21189,7 @@ var defaultSpawn = (cmd, args2, cwd) => {
 };
 function nonEmptyFile(p) {
   try {
-    return existsSync26(p) && statSync12(p).size > 0;
+    return existsSync25(p) && statSync12(p).size > 0;
   } catch {
     return false;
   }
@@ -21353,7 +21414,7 @@ function runRun(args2) {
     }
   }
   const stages = ALL_STAGES.filter((s) => !requested || requested.includes(s));
-  if (noScan && !existsSync27(join52(run2, "findings.json"))) {
+  if (noScan && !existsSync26(join52(run2, "findings.json"))) {
     eprintln(`ultrasec run: --no-scan but no dossier at ${run2} \u2014 run \`scan\` first or drop --no-scan.`);
     return 2;
   }
@@ -21409,12 +21470,12 @@ function runRun(args2) {
 }
 
 // src/commands/orchestrate.ts
-import { existsSync as existsSync29, realpathSync as realpathSync4 } from "fs";
+import { existsSync as existsSync28, realpathSync as realpathSync4 } from "fs";
 import { join as join55 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 
 // src/orchestrate.ts
-import { existsSync as existsSync28, mkdirSync as mkdirSync14, readFileSync as readFileSync23, writeFileSync as writeFileSync17 } from "fs";
+import { existsSync as existsSync27, mkdirSync as mkdirSync14, readFileSync as readFileSync23, writeFileSync as writeFileSync17 } from "fs";
 import { join as join54, resolve as resolve26 } from "path";
 
 // src/orchestrate-templates.ts
@@ -21696,7 +21757,7 @@ var PHASES = ["adjudicate", "verify", "revalidate", "investigate"];
 var SMALL_WORKLIST = 3;
 var BATCH_SIZE = 8;
 function readIds(path, id) {
-  if (!existsSync28(path)) return null;
+  if (!existsSync27(path)) return null;
   try {
     const items = JSON.parse(readFileSync23(path, "utf8"));
     if (!Array.isArray(items)) return null;
@@ -21769,7 +21830,7 @@ function repoOf(run2) {
 }
 function orchestrateRun(runDir, engineAbs, opts = {}) {
   const run2 = resolve26(runDir);
-  if (!existsSync28(run2)) {
+  if (!existsSync27(run2)) {
     return { exitCode: 2, written: [], notices: [], errors: [`run dir not found: ${run2}`], phases: [] };
   }
   const phases = listPhases(run2, engineAbs);
@@ -21837,7 +21898,7 @@ function runOrchestrate(args2) {
   }
   const engineAbs = realpathSync4(fileURLToPath3(import.meta.url));
   if (flagBool(args2, "list")) {
-    if (!existsSync29(runFlag)) {
+    if (!existsSync28(runFlag)) {
       eprintln(`ultrasec orchestrate: run dir not found: ${runFlag}.`);
       return 2;
     }
@@ -21897,7 +21958,7 @@ var COMMAND_HANDLERS = {
 import { createInterface as createInterface3 } from "readline";
 
 // src/mcp/handlers.ts
-import { existsSync as existsSync30, readFileSync as readFileSync24, realpathSync as realpathSync5, statSync as statSync13 } from "fs";
+import { existsSync as existsSync29, readFileSync as readFileSync24, realpathSync as realpathSync5, statSync as statSync13 } from "fs";
 import { isAbsolute as isAbsolute2, join as join56, resolve as resolve27, sep as sep7 } from "path";
 
 // src/run-lock.ts
@@ -21975,7 +22036,7 @@ function resolveRun(args2, repo) {
   return join56(repo, ".ultrasec");
 }
 function requireRun(run2) {
-  if (!existsSync30(join56(run2, "dossier.json")) && !existsSync30(join56(run2, "findings.json"))) {
+  if (!existsSync29(join56(run2, "dossier.json")) && !existsSync29(join56(run2, "findings.json"))) {
     throw new ToolError(`no audit run at ${run2} \u2014 scan the repo first with ultrasec_scan (it writes there). If the run lives elsewhere, pass \`run\`.`);
   }
 }
@@ -22610,7 +22671,7 @@ function str3(v) {
 var DECLARED = new Set([...TOOLS3, ...WRITE_TOOLS].map((t) => t.name));
 
 // src/mcp/resources.ts
-import { existsSync as existsSync31, readdirSync as readdirSync9, readFileSync as readFileSync25, realpathSync as realpathSync6, statSync as statSync14 } from "fs";
+import { existsSync as existsSync30, readdirSync as readdirSync9, readFileSync as readFileSync25, realpathSync as realpathSync6, statSync as statSync14 } from "fs";
 import { basename as basename4, dirname as dirname8, join as join57, resolve as resolve28, sep as sep8 } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 var SKILL_NAME = "ultrasec";
@@ -22618,14 +22679,14 @@ var URI_SCHEME = "skill://";
 function resolveSkillRoot(moduleDir) {
   const here = moduleDir ?? dirname8(fileURLToPath4(import.meta.url));
   const candidates = [resolve28(here, ".."), resolve28(here, "..", "skills", SKILL_NAME), resolve28(here, "..", "..", "skills", SKILL_NAME)];
-  return candidates.find((dir) => existsSync31(join57(dir, "SKILL.md")));
+  return candidates.find((dir) => existsSync30(join57(dir, "SKILL.md")));
 }
 function listResources(moduleDir) {
   const root = resolveSkillRoot(moduleDir);
   if (!root) return [];
   const out2 = [describe(root, "SKILL.md", `${SKILL_NAME}: the skill`)];
   const refDir = join57(root, "references");
-  if (!existsSync31(refDir)) return out2;
+  if (!existsSync30(refDir)) return out2;
   for (const file of readdirSync9(refDir).sort()) {
     if (!file.endsWith(".md")) continue;
     out2.push(describe(root, join57("references", file), `${SKILL_NAME} reference: ${basename4(file, ".md")}`));

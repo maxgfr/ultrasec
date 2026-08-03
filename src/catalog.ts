@@ -27,6 +27,12 @@ export interface SinkRule {
   /** If set, a call with NO receiver (bare `foo(x)`) is skipped — for verb-shaped
    *  callees (`get`/`post`) that are only a sink as a member call (`axios.get`). */
   requireReceiver?: boolean;
+  /** If set, the rule only fires in a file importing one of these module
+   *  substrings. For a technology-specific sink whose method name is generic
+   *  (`client.search` is LDAP *or* Elasticsearch), the import is what
+   *  disambiguates. Ignored when the file has no imports recorded, so the regex
+   *  extraction tier — which may not see them — never loses the rule entirely. */
+  requireModule?: string[];
   title: string;
   note: string;
 }
@@ -213,6 +219,14 @@ export const SINKS: SinkRule[] = [
     languages: ["*"],
     callees: ["search", "bind", "searchSync"],
     receivers: ["ldap", "ldapClient", "ldapjs", "client", "conn", "connection", "ld"],
+    // `search` is the most over-loaded method name in the catalog: without these
+    // two gates the rule fired on every Elasticsearch `client.search()` and on
+    // every bare `search(opts)` helper — 30+ high-severity false positives on a
+    // single real repo, drowning the findings that mattered. The receiver list
+    // stays permissive (an ldapjs client IS usually named `client`); the import
+    // is what says which technology this actually is.
+    requireReceiver: true,
+    requireModule: ["ldap", "activedirectory", "unboundid", "novell.ldap"],
     title: "LDAP injection",
     note: "Tainted data concatenated into an LDAP filter/DN. Escape with the LDAP escaping API (ldap.escape / escapeFilter / escapeDN).",
   },
@@ -340,9 +354,10 @@ export interface SinkHit {
  * `LOG_SINKS` under `scan --log-hygiene`). Omitted/empty ⇒ matches exactly
  * `SINKS`, byte-identical to before this param existed.
  */
-export function findSinks(lang: LangSpec, calls: Call[], extraSinks?: SinkRule[]): SinkHit[] {
+export function findSinks(lang: LangSpec, calls: Call[], extraSinks?: SinkRule[], imports?: readonly { spec: string }[]): SinkHit[] {
   const rules = extraSinks && extraSinks.length ? [...SINKS, ...extraSinks] : SINKS;
   const out: SinkHit[] = [];
+  const specs = (imports ?? []).map((i) => i.spec.toLowerCase());
   for (const c of calls) {
     for (const rule of rules) {
       if (!appliesTo(rule.languages, lang.id)) continue;
@@ -354,6 +369,9 @@ export function findSinks(lang: LangSpec, calls: Call[], extraSinks?: SinkRule[]
       // it (cuts false positives like `arr.call(...)` matching the command rule).
       // Rules with no `receivers` (e.g. sql) match any receiver.
       if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) continue;
+      // Technology gate. Only enforced when imports were actually extracted:
+      // an empty list means we couldn't see them, not that there are none.
+      if (rule.requireModule && specs.length && !rule.requireModule.some((m) => specs.some((s) => s.includes(m)))) continue;
       out.push({
         line: c.line,
         callee: c.callee,
