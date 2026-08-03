@@ -310,12 +310,12 @@ const READ_ONLY_COMMANDS = new Set(["dossier", "graph", "paths", "check", "tools
  *
  * `mcp` is excluded: its stdout carries JSON-RPC frames and it never returns.
  */
-async function withArchiving(args: ParsedArgs, argv: string[], run: () => Promise<number>): Promise<number> {
+async function withArchiving(args: ParsedArgs, argv: string[], execute: () => Promise<number>): Promise<number> {
   const reportPath = flagStr(args, "report");
   // `scan` names its run dir `--out`; every later stage calls it `--run`.
   const runDir = flagStr(args, "run") ?? flagStr(args, "out");
   const journal = runDir !== undefined && !READ_ONLY_COMMANDS.has(args._[0] ?? "") && !flagBool(args, "no-journal");
-  if ((!reportPath && !journal) || args._[0] === "mcp") return run();
+  if ((!reportPath && !journal) || args._[0] === "mcp") return execute();
 
   // Fail BEFORE running: writing a report is the point of passing the flag, and
   // discovering the extension is unusable after a ten-minute scan is useless.
@@ -327,7 +327,7 @@ async function withArchiving(args: ParsedArgs, argv: string[], run: () => Promis
     }
   }
 
-  const { result, stdout, stderr } = await teeOutput(run);
+  const { result, stdout, stderr } = await teeOutput(execute);
   const transcript: Transcript = { command: `ultrasec ${argv.join(" ")}`, stdout, stderr, code: result, at: new Date().toISOString() };
 
   if (reportPath) {

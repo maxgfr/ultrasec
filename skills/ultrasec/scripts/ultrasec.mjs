@@ -23372,11 +23372,11 @@ async function main() {
   process.exit(code);
 }
 var READ_ONLY_COMMANDS = /* @__PURE__ */ new Set(["dossier", "graph", "paths", "check", "tools", "help", "version"]);
-async function withArchiving(args2, argv, run2) {
+async function withArchiving(args2, argv, execute) {
   const reportPath = flagStr(args2, "report");
   const runDir = flagStr(args2, "run") ?? flagStr(args2, "out");
   const journal = runDir !== void 0 && !READ_ONLY_COMMANDS.has(args2._[0] ?? "") && !flagBool(args2, "no-journal");
-  if (!reportPath && !journal || args2._[0] === "mcp") return run2();
+  if (!reportPath && !journal || args2._[0] === "mcp") return execute();
   if (reportPath) {
     const ext = extname4(reportPath).replace(/^\./, "").toLowerCase();
     if (!REPORT_FORMATS.includes(ext)) {
@@ -23384,7 +23384,7 @@ async function withArchiving(args2, argv, run2) {
       return 2;
     }
   }
-  const { result, stdout, stderr } = await teeOutput(run2);
+  const { result, stdout, stderr } = await teeOutput(execute);
   const transcript = { command: `ultrasec ${argv.join(" ")}`, stdout, stderr, code: result, at: (/* @__PURE__ */ new Date()).toISOString() };
   if (reportPath) {
     try {
