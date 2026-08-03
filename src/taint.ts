@@ -20,6 +20,19 @@ export interface TaintOptions {
    *  --log-hygiene`, CWE-117 log injection). Default false ⇒ the sink-matching
    *  step is byte-identical to before this option existed. */
   includeLogSinks?: boolean;
+  /**
+   * Drop candidates whose SOURCE is an environment read (`process.env`,
+   * `os.getenv`). Opt-in, default false ⇒ enumeration unchanged.
+   *
+   * Treating the environment as attacker-controlled models configuration
+   * injection, which is a real class — but it presumes the operator of the
+   * deployment is a threat actor, and most trust models say otherwise. On one
+   * real audit these accounted for 100 of the 138 refuted candidates, crowding
+   * out the flows rooted in actual user input. The default stays permissive
+   * (recall first); this is the knob for an auditor who has decided their
+   * operator is trusted.
+   */
+  excludeEnvSources?: boolean;
 }
 
 export interface TaintResult {
@@ -78,6 +91,8 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
   const emitted = new Set<string>();
 
   const emit = (sink: SinkHit, sinkFile: string, sinkSym: string | undefined, srcHit: SourceHit, srcFile: string, hops: PathStep[]): void => {
+    // Opt-in: treat deployment configuration as trusted (see excludeEnvSources).
+    if (opts.excludeEnvSources && srcHit.kind === "env") return;
     const id = shortHash(`${srcFile}:${srcHit.line}->${sinkFile}:${sink.line}:${sink.kind}`);
     if (emitted.has(id)) return;
     emitted.add(id);

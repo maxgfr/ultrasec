@@ -114,7 +114,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // into the taint sink catalog for this run only — default false keeps the
   // sink-matching step (and therefore every golden/snapshot) byte-identical.
   const logHygieneOn = flagBool(args, "log-hygiene");
-  const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn });
+  // `--no-env-sources`: drop flows rooted in process.env / os.getenv. Opt-in, so
+  // the default candidate set is unchanged (see TaintOptions.excludeEnvSources).
+  const excludeEnvSources = flagBool(args, "no-env-sources");
+  const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn, excludeEnvSources });
   const taintFindings = taint.findings;
 
   // Orphan-sink recall (opt-in `--sinks`): dangerous sinks the source-gated taint

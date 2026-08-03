@@ -15900,6 +15900,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
   const findings = [];
   const emitted = /* @__PURE__ */ new Set();
   const emit2 = (sink, sinkFile, sinkSym, srcHit, srcFile, hops) => {
+    if (opts.excludeEnvSources && srcHit.kind === "env") return;
     const id = shortHash2(`${srcFile}:${srcHit.line}->${sinkFile}:${sink.line}:${sink.kind}`);
     if (emitted.has(id)) return;
     emitted.add(id);
@@ -17614,7 +17615,8 @@ async function runScan(args2) {
   const scan2 = cache ? scanRepoCached(repo, scanOpts, cache) : scanRepo2(repo, scanOpts);
   const graph = buildGraph2(scan2);
   const logHygieneOn = flagBool(args2, "log-hygiene");
-  const taint = enumerateTaint(scan2, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn });
+  const excludeEnvSources = flagBool(args2, "no-env-sources");
+  const taint = enumerateTaint(scan2, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn, excludeEnvSources });
   const taintFindings = taint.findings;
   const sinksOn = flagBool(args2, "sinks");
   const sinkCand = sinksOn ? enumerateSinkCandidates(scan2, taintFindings, { maxCandidates }) : { findings: [], truncated: 0, total: 0 };
