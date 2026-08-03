@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import type { Finding } from "../types.js";
-import type { ToolAdapter } from "./run.js";
+import type { RunContext, ToolAdapter } from "./run.js";
 import { makeToolFinding, normalizeSeverity, firstCwe, cvesIn, parseJsonStream } from "./normalize.js";
 import { detect } from "./registry.js";
 import { findManifestDirs } from "../walk.js";
@@ -132,11 +132,29 @@ export function parseNpmV7(data: any, lockfile: string): Finding[] {
   return out;
 }
 
-/** Resolve which npm lockfile is present at the repo root (package-lock.json
+/** Resolve which npm lockfile is present in the audited directory (package-lock.json
  *  is preferred; npm-shrinkwrap.json is the legacy alternative). */
-function npmLockfileName(repo: string): string {
-  if (!existsSync(join(repo, "package-lock.json")) && existsSync(join(repo, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
+function npmLockfileName(dir: string): string {
+  if (!existsSync(join(dir, "package-lock.json")) && existsSync(join(dir, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
   return "package-lock.json";
+}
+
+/**
+ * Repo-relative path of the lockfile this invocation audited.
+ *
+ * The prefix has to be applied HERE, not to the finished findings: `makeToolFinding`
+ * derives the finding id from this path, so a later re-anchor would leave every
+ * workspace's copy of an advisory sharing one id, and every citation pointing at a
+ * root-level lockfile that may not exist.
+ */
+function lockfileIn(ctx: RunContext | undefined, name: string): string {
+  const ws = ctx?.workspace;
+  return ws ? `${ws}/${name}` : name;
+}
+
+/** Absolute directory being audited (the workspace, or the repo root). */
+function auditedDir(repo: string, ctx?: RunContext): string {
+  return ctx?.workspace ? join(repo, ctx.workspace) : repo;
 }
 
 export const npmAudit: ToolAdapter = {
@@ -147,10 +165,10 @@ export const npmAudit: ToolAdapter = {
   applicable: (repo) => (findManifestDirs(repo, NPM_LOCKFILES).length ? null : "no package-lock.json (checked the root and its subdirectories)"),
   workspaces: (repo) => findManifestDirs(repo, NPM_LOCKFILES),
   argv: () => ["audit", "--json"],
-  parse(raw, repo): Finding[] {
+  parse(raw, repo, ctx): Finding[] {
     const data = parseJson(raw);
     if (!data || typeof data !== "object") return [];
-    const lockfile = npmLockfileName(repo);
+    const lockfile = lockfileIn(ctx, npmLockfileName(auditedDir(repo, ctx)));
     if (data.auditReportVersion === 2) return parseNpmV7(data, lockfile);
     if (data.advisories) return parseNpmV6Advisories(data, lockfile, "npm-audit");
     return [];
@@ -165,12 +183,12 @@ export const pnpmAudit: ToolAdapter = {
   applicable: (repo) => (findManifestDirs(repo, PNPM_LOCKFILES).length ? null : "no pnpm-lock.yaml (checked the root and its subdirectories)"),
   workspaces: (repo) => findManifestDirs(repo, PNPM_LOCKFILES),
   argv: () => ["audit", "--json"],
-  parse(raw): Finding[] {
+  parse(raw, _repo, ctx): Finding[] {
     const data = parseJson(raw);
     if (!data || typeof data !== "object") return [];
     // pnpm's registry audit emits the same legacy shape as npm 6, regardless
     // of the pnpm version installed.
-    return parseNpmV6Advisories(data, "pnpm-lock.yaml", "pnpm-audit");
+    return parseNpmV6Advisories(data, lockfileIn(ctx, "pnpm-lock.yaml"), "pnpm-audit");
   },
 };
 
@@ -196,7 +214,7 @@ function yarnMajor(): number | null {
   return yarnMajorCache;
 }
 
-function yarnBerryFinding(entry: any): Finding | null {
+function yarnBerryFinding(entry: any, lockfile: string): Finding | null {
   const pkg = entry?.value;
   if (typeof pkg !== "string" || !pkg) return null;
   const c = entry?.children ?? {};
@@ -214,7 +232,7 @@ function yarnBerryFinding(entry: any): Finding | null {
     title: c.Issue || `${pkg} advisory`,
     severity: normalizeSeverity(c.Severity, "medium"),
     message: `${pkg}${version ? `@${version}` : ""}: ${c.Issue || ident}` + (vulnerable ? ` (vulnerable: ${vulnerable})` : ""),
-    file: "yarn.lock",
+    file: lockfile,
     references: [c.URL].filter(Boolean),
     pkg,
     version,
@@ -238,8 +256,9 @@ export const yarnAudit: ToolAdapter = {
     const major = yarnMajor();
     return major !== null && major >= 2 ? ["audit", "--json", "--recursive"] : ["audit", "--json"];
   },
-  parse(raw): Finding[] {
+  parse(raw, _repo, ctx): Finding[] {
     try {
+      const lockfile = lockfileIn(ctx, "yarn.lock");
       const lines = raw ? (parseJsonStream(raw) as any[]) : [];
       const out: Finding[] = [];
       for (const m of lines) {
@@ -247,12 +266,12 @@ export const yarnAudit: ToolAdapter = {
         // classic: {type: "auditAdvisory", data: {advisory: {...npm-v6 shape}}}
         if (m.type === "auditAdvisory" && m.data?.advisory) {
           const a = m.data.advisory;
-          out.push(npmV6AdvisoryFinding("yarn-audit", String(a.id ?? ""), a, "yarn.lock"));
+          out.push(npmV6AdvisoryFinding("yarn-audit", String(a.id ?? ""), a, lockfile));
           continue;
         }
         // berry: {value: "<pkg>", children: {ID, Issue, URL, Severity, ...}}
         if (typeof m.value === "string" && m.children && typeof m.children === "object") {
-          const f = yarnBerryFinding(m);
+          const f = yarnBerryFinding(m, lockfile);
           if (f) out.push(f);
         }
         // Anything else (auditSummary, info lines, …) is skipped silently.

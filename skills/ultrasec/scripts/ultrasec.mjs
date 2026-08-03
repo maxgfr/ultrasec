@@ -14054,7 +14054,7 @@ function inferOrigin(binaryAbsPath, toolName, ctx = {}) {
 
 // src/tools/run.ts
 import { execFileSync as execFileSync3 } from "child_process";
-import { join as join22, relative } from "path";
+import { relative } from "path";
 
 // src/tools/normalize.ts
 var SEVERITY_ALIASES = Object.assign(/* @__PURE__ */ Object.create(null), {
@@ -14385,25 +14385,24 @@ function runNative(adapter, repo, ctx) {
   const argv = buildArgv(adapter, repo, repo, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
   const dirs = adapter.workspaces?.(repo) ?? [];
-  if (dirs.length > 1) return runEachWorkspace(adapter, repo, cmd, argv, dirs);
-  const cwd = dirs[0] ?? repo;
-  const { stdout, failed: failed2, err: err2 } = exec(cmd[0], [...cmd.slice(1), ...argv], cwd);
-  return finish(adapter, repo, stdout, failed2, err2, false);
+  if (dirs.length) return runEachWorkspace(adapter, repo, cmd, argv, dirs, ctx);
+  const { stdout, failed: failed2, err: err2 } = exec(cmd[0], [...cmd.slice(1), ...argv], repo);
+  return finish(adapter, repo, stdout, failed2, err2, false, ctx);
 }
-function runEachWorkspace(adapter, repo, cmd, argv, dirs) {
+function runEachWorkspace(adapter, repo, cmd, argv, dirs, ctx) {
   const findings = [];
   const covered = [];
   const failures = [];
   for (const dir of dirs) {
-    const rel = relative(repo, dir) || ".";
+    const rel = relative(repo, dir);
     const { stdout, failed: failed2, err: err2 } = exec(cmd[0], [...cmd.slice(1), ...argv], dir);
-    const one = finish(adapter, dir, stdout, failed2, err2, false);
+    const one = finish(adapter, repo, stdout, failed2, err2, false, { ...ctx, workspace: rel });
     if (!one.ok) {
-      failures.push(`${rel}: ${one.note}`);
+      failures.push(`${rel || "."}: ${one.note}`);
       continue;
     }
-    for (const f of one.findings) findings.push(rel === "." ? f : { ...f, ...f.sink ? { sink: { ...f.sink, file: join22(rel, f.sink.file) } } : {} });
-    covered.push(rel);
+    findings.push(...one.findings);
+    covered.push(rel || ".");
   }
   const note = [
     `${findings.length} finding(s) across ${covered.length} workspace(s): ${covered.join(", ") || "none"}`,
@@ -14425,11 +14424,11 @@ function runDocker(adapter, repo, ctx) {
   const { stdout, failed: failed2, err: err2 } = exec("docker", args2, repo);
   return finish(adapter, repo, stdout, failed2, err2, true);
 }
-function finish(adapter, repo, stdout, failed2, err2, docker2) {
+function finish(adapter, repo, stdout, failed2, err2, docker2, ctx) {
   if (failed2) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err2 ?? "no output"}` };
   try {
     const base = docker2 ? MOUNT : repo;
-    const findings = relativizeFindings(adapter.parse(stdout, repo), base);
+    const findings = relativizeFindings(adapter.parse(stdout, repo, ctx), base);
     return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker2 ? " (docker)" : ""}` };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };
@@ -16779,7 +16778,8 @@ var cargoAudit = {
   applicable: (repo) => findManifestDirs(repo, CARGO_LOCKFILES).length ? null : "no Cargo.lock (checked the root and its subdirectories)",
   workspaces: (repo) => findManifestDirs(repo, CARGO_LOCKFILES),
   argv: () => ["audit", "--format", "json"],
-  parse(raw) {
+  parse(raw, _repo, ctx) {
+    const lockfile = ctx?.workspace ? `${ctx.workspace}/Cargo.lock` : "Cargo.lock";
     const data = JSON.parse(raw || "{}");
     const out2 = [];
     for (const item of data.vulnerabilities?.list ?? []) {
@@ -16794,7 +16794,7 @@ var cargoAudit = {
           title: adv.title || adv.id,
           severity: deriveSeverity(adv.cvss, "high"),
           message: `${pkg.name}@${pkg.version}: ${adv.title || adv.id}` + (patched ? ` (patched: ${patched})` : ""),
-          file: "Cargo.lock",
+          file: lockfile,
           references: [adv.url, ...adv.aliases ?? []].filter(Boolean),
           pkg: pkg.name,
           version: pkg.version,
@@ -16817,7 +16817,7 @@ var cargoAudit = {
             severity: "low",
             confidence: "low",
             message: `${pkg.name}@${pkg.version}: ${kind}${adv.title ? ` \u2014 ${adv.title}` : ""}`,
-            file: "Cargo.lock",
+            file: lockfile,
             references: adv.url ? [adv.url] : []
           })
         );
@@ -17254,9 +17254,16 @@ function parseNpmV7(data, lockfile) {
   }
   return out2;
 }
-function npmLockfileName(repo) {
-  if (!existsSync16(join37(repo, "package-lock.json")) && existsSync16(join37(repo, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
+function npmLockfileName(dir) {
+  if (!existsSync16(join37(dir, "package-lock.json")) && existsSync16(join37(dir, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
   return "package-lock.json";
+}
+function lockfileIn(ctx, name2) {
+  const ws = ctx?.workspace;
+  return ws ? `${ws}/${name2}` : name2;
+}
+function auditedDir(repo, ctx) {
+  return ctx?.workspace ? join37(repo, ctx.workspace) : repo;
 }
 var npmAudit = {
   name: "npm-audit",
@@ -17266,10 +17273,10 @@ var npmAudit = {
   applicable: (repo) => findManifestDirs(repo, NPM_LOCKFILES).length ? null : "no package-lock.json (checked the root and its subdirectories)",
   workspaces: (repo) => findManifestDirs(repo, NPM_LOCKFILES),
   argv: () => ["audit", "--json"],
-  parse(raw, repo) {
+  parse(raw, repo, ctx) {
     const data = parseJson(raw);
     if (!data || typeof data !== "object") return [];
-    const lockfile = npmLockfileName(repo);
+    const lockfile = lockfileIn(ctx, npmLockfileName(auditedDir(repo, ctx)));
     if (data.auditReportVersion === 2) return parseNpmV7(data, lockfile);
     if (data.advisories) return parseNpmV6Advisories(data, lockfile, "npm-audit");
     return [];
@@ -17283,10 +17290,10 @@ var pnpmAudit = {
   applicable: (repo) => findManifestDirs(repo, PNPM_LOCKFILES).length ? null : "no pnpm-lock.yaml (checked the root and its subdirectories)",
   workspaces: (repo) => findManifestDirs(repo, PNPM_LOCKFILES),
   argv: () => ["audit", "--json"],
-  parse(raw) {
+  parse(raw, _repo, ctx) {
     const data = parseJson(raw);
     if (!data || typeof data !== "object") return [];
-    return parseNpmV6Advisories(data, "pnpm-lock.yaml", "pnpm-audit");
+    return parseNpmV6Advisories(data, lockfileIn(ctx, "pnpm-lock.yaml"), "pnpm-audit");
   }
 };
 var yarnMajorCache;
@@ -17301,7 +17308,7 @@ function yarnMajor() {
   }
   return yarnMajorCache;
 }
-function yarnBerryFinding(entry) {
+function yarnBerryFinding(entry, lockfile) {
   const pkg = entry?.value;
   if (typeof pkg !== "string" || !pkg) return null;
   const c2 = entry?.children ?? {};
@@ -17319,7 +17326,7 @@ function yarnBerryFinding(entry) {
     title: c2.Issue || `${pkg} advisory`,
     severity: normalizeSeverity(c2.Severity, "medium"),
     message: `${pkg}${version ? `@${version}` : ""}: ${c2.Issue || ident}` + (vulnerable ? ` (vulnerable: ${vulnerable})` : ""),
-    file: "yarn.lock",
+    file: lockfile,
     references: [c2.URL].filter(Boolean),
     pkg,
     version,
@@ -17342,19 +17349,20 @@ var yarnAudit = {
     const major = yarnMajor();
     return major !== null && major >= 2 ? ["audit", "--json", "--recursive"] : ["audit", "--json"];
   },
-  parse(raw) {
+  parse(raw, _repo, ctx) {
     try {
+      const lockfile = lockfileIn(ctx, "yarn.lock");
       const lines = raw ? parseJsonStream(raw) : [];
       const out2 = [];
       for (const m of lines) {
         if (!m || typeof m !== "object") continue;
         if (m.type === "auditAdvisory" && m.data?.advisory) {
           const a = m.data.advisory;
-          out2.push(npmV6AdvisoryFinding("yarn-audit", String(a.id ?? ""), a, "yarn.lock"));
+          out2.push(npmV6AdvisoryFinding("yarn-audit", String(a.id ?? ""), a, lockfile));
           continue;
         }
         if (typeof m.value === "string" && m.children && typeof m.children === "object") {
-          const f = yarnBerryFinding(m);
+          const f = yarnBerryFinding(m, lockfile);
           if (f) out2.push(f);
         }
       }
@@ -23363,10 +23371,11 @@ async function main() {
   const code = await withArchiving(args2, argv, () => dispatch2(args2._[0], args2));
   process.exit(code);
 }
+var READ_ONLY_COMMANDS = /* @__PURE__ */ new Set(["dossier", "graph", "paths", "check", "tools", "help", "version"]);
 async function withArchiving(args2, argv, run2) {
   const reportPath = flagStr(args2, "report");
   const runDir = flagStr(args2, "run") ?? flagStr(args2, "out");
-  const journal = runDir !== void 0 && !flagBool(args2, "no-journal");
+  const journal = runDir !== void 0 && !READ_ONLY_COMMANDS.has(args2._[0] ?? "") && !flagBool(args2, "no-journal");
   if (!reportPath && !journal || args2._[0] === "mcp") return run2();
   if (reportPath) {
     const ext = extname4(reportPath).replace(/^\./, "").toLowerCase();

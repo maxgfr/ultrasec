@@ -285,6 +285,21 @@ async function main(): Promise<void> {
 }
 
 /**
+ * Commands that must leave the run directory untouched, and therefore never
+ * journal into it.
+ *
+ * Two promises depend on this. `check` is the CI gate, documented as writing
+ * nothing — a journal entry would be a write. And the orchestration contracts let
+ * fan-out subagents run `dossier`/`graph`/`paths` precisely because they don't
+ * write, with the orchestrator as the sole writer; several subagents appending to
+ * one JOURNAL.md would break that.
+ *
+ * `--report` still works for these: it writes where the caller pointed, not into
+ * the run.
+ */
+const READ_ONLY_COMMANDS = new Set(["dossier", "graph", "paths", "check", "tools", "help", "version"]);
+
+/**
  * Run a command, archiving its output when asked.
  *
  * `--report <path>` writes this one command's transcript; a run directory gets an
@@ -299,7 +314,7 @@ async function withArchiving(args: ParsedArgs, argv: string[], run: () => Promis
   const reportPath = flagStr(args, "report");
   // `scan` names its run dir `--out`; every later stage calls it `--run`.
   const runDir = flagStr(args, "run") ?? flagStr(args, "out");
-  const journal = runDir !== undefined && !flagBool(args, "no-journal");
+  const journal = runDir !== undefined && !READ_ONLY_COMMANDS.has(args._[0] ?? "") && !flagBool(args, "no-journal");
   if ((!reportPath && !journal) || args._[0] === "mcp") return run();
 
   // Fail BEFORE running: writing a report is the point of passing the flag, and

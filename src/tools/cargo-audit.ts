@@ -18,7 +18,10 @@ export const cargoAudit: ToolAdapter = {
   applicable: (repo) => (findManifestDirs(repo, CARGO_LOCKFILES).length ? null : "no Cargo.lock (checked the root and its subdirectories)"),
   workspaces: (repo) => findManifestDirs(repo, CARGO_LOCKFILES),
   argv: () => ["audit", "--format", "json"],
-  parse(raw): Finding[] {
+  parse(raw, _repo, ctx): Finding[] {
+    // Prefix here, not after the fact: makeToolFinding derives the finding id from
+    // this path, so a later re-anchor would collide two workspaces onto one id.
+    const lockfile = ctx?.workspace ? `${ctx.workspace}/Cargo.lock` : "Cargo.lock";
     const data = JSON.parse(raw || "{}") as any;
     const out: Finding[] = [];
 
@@ -34,7 +37,7 @@ export const cargoAudit: ToolAdapter = {
           title: adv.title || adv.id,
           severity: deriveSeverity(adv.cvss, "high"),
           message: `${pkg.name}@${pkg.version}: ${adv.title || adv.id}` + (patched ? ` (patched: ${patched})` : ""),
-          file: "Cargo.lock",
+          file: lockfile,
           references: [adv.url, ...(adv.aliases ?? [])].filter(Boolean),
           pkg: pkg.name,
           version: pkg.version,
@@ -57,7 +60,7 @@ export const cargoAudit: ToolAdapter = {
             severity: "low",
             confidence: "low",
             message: `${pkg.name}@${pkg.version}: ${kind}${adv.title ? ` — ${adv.title}` : ""}`,
-            file: "Cargo.lock",
+            file: lockfile,
             references: adv.url ? [adv.url] : [],
           }),
         );

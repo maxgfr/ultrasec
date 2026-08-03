@@ -165,3 +165,33 @@ describe("archiving is additive — stdout never changes", () => {
     expect(existsSync(join(quiet, JOURNAL_FILE))).toBe(false);
   });
 });
+
+// The read-only commands must stay read-only. `check` is the CI gate documented
+// as writing nothing, and the orchestration contracts let fan-out subagents run
+// `dossier`/`graph`/`paths` precisely because they don't write — several of them
+// appending to one JOURNAL.md would break the one-writer rule the whole fan-out
+// design rests on.
+describe("read-only commands never journal", () => {
+  for (const cmd of ["check", "paths"]) {
+    it.runIf(existsSync(BUNDLE))(`${cmd} leaves the run directory without a JOURNAL.md`, () => {
+      const run = seedRun();
+      cli([cmd, "--run", run]);
+      expect(existsSync(join(run, JOURNAL_FILE)), `${cmd} wrote a journal entry`).toBe(false);
+    });
+  }
+
+  it.runIf(existsSync(BUNDLE))("but --report still works for them — it writes where you pointed", () => {
+    const run = seedRun();
+    const report = join(run, "paths.md");
+    cli(["paths", "--run", run, "--report", report]);
+    expect(existsSync(report)).toBe(true);
+    expect(existsSync(join(run, JOURNAL_FILE))).toBe(false);
+  });
+
+  it.runIf(existsSync(BUNDLE))("a writing command still journals", () => {
+    const run = seedRun();
+    writeFileSync(join(run, "verdicts.json"), JSON.stringify([{ id: "f1", verdict: "refuted" }]));
+    cli(["verify", "--run", run, "--apply", join(run, "verdicts.json")]);
+    expect(existsSync(join(run, JOURNAL_FILE))).toBe(true);
+  });
+});

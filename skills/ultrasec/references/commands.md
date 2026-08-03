@@ -24,6 +24,10 @@ Run the engine by its absolute path — see the `<skill-dir>` note in
 alongside the other deliverables. It answers "what did this audit actually cover?" an hour later,
 when the scrollback is gone. Best-effort: a journal write never fails a command.
 
+The read-only commands — `dossier`, `graph`, `paths`, `check`, `tools` — never journal, so
+`check` keeps writing nothing and a fan-out subagent running `dossier` stays a non-writer.
+`--report` still works for them; it writes where you pointed, not into the run.
+
 ## Recon
 
 ### `map --repo <dir>`

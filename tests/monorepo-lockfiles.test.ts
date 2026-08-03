@@ -74,3 +74,66 @@ describe("the package-manager audits apply in a monorepo", () => {
     });
   }
 });
+
+// The bug this section exists to prevent: the first implementation re-anchored
+// findings AFTER the adapter had built them, so every citation kept the
+// workspace-relative name. On a repo whose only lockfile is web/pnpm-lock.yaml,
+// 62 real advisories all cited `pnpm-lock.yaml` at the root — a path that does
+// not exist — and `ultrasec check` failed the grounding gate on all of them.
+// Worse, the finding id is derived from that path, so two workspaces carrying
+// the same advisory collapsed onto one id.
+describe("workspace findings cite a path that actually resolves", () => {
+  const advisory = (id: string) =>
+    JSON.stringify({
+      advisories: {
+        [id]: {
+          module_name: "left-pad",
+          findings: [{ version: "1.0.0" }],
+          severity: "high",
+          title: "Prototype pollution",
+          url: "https://github.com/advisories/GHSA-aaaa-bbbb-cccc",
+          github_advisory_id: "GHSA-aaaa-bbbb-cccc",
+        },
+      },
+    });
+
+  it("prefixes the lockfile with the workspace, so the citation resolves", () => {
+    const findings = pnpmAudit.parse(advisory("1"), "/repo", { workspace: "web" });
+    expect(findings.map((f) => f.sink?.file)).toEqual(["web/pnpm-lock.yaml"]);
+  });
+
+  it("leaves the root case untouched", () => {
+    expect(pnpmAudit.parse(advisory("1"), "/repo", {})[0]!.sink?.file).toBe("pnpm-lock.yaml");
+    expect(pnpmAudit.parse(advisory("1"), "/repo")[0]!.sink?.file).toBe("pnpm-lock.yaml");
+  });
+
+  it("gives the SAME advisory in two workspaces two distinct ids", () => {
+    const a = pnpmAudit.parse(advisory("1"), "/repo", { workspace: "web" })[0]!;
+    const b = pnpmAudit.parse(advisory("1"), "/repo", { workspace: "admin" })[0]!;
+    expect(a.sink?.file).toBe("web/pnpm-lock.yaml");
+    expect(b.sink?.file).toBe("admin/pnpm-lock.yaml");
+    // Ids are content-derived from the cited path; colliding here would make the
+    // two indistinguishable to verify/dossier and let one overwrite the other.
+    expect(a.id).not.toBe(b.id);
+  });
+
+  it("applies to yarn and cargo too", () => {
+    const yarn = yarnAudit.parse(
+      JSON.stringify({ type: "auditAdvisory", data: { advisory: { id: 1, module_name: "x", findings: [{ version: "1" }], severity: "low", title: "t" } } }),
+      "/repo",
+      {
+        workspace: "front",
+      },
+    );
+    expect(yarn[0]!.sink?.file).toBe("front/yarn.lock");
+
+    const cargo = cargoAudit.parse(
+      JSON.stringify({ vulnerabilities: { list: [{ advisory: { id: "RUSTSEC-2021-0001", title: "t" }, package: { name: "p", version: "1" } }] } }),
+      "/repo",
+      {
+        workspace: "crates/core",
+      },
+    );
+    expect(cargo[0]!.sink?.file).toBe("crates/core/Cargo.lock");
+  });
+});
