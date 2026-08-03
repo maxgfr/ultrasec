@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.21.0](https://github.com/maxgfr/ultrasec/compare/v1.20.0...v1.21.0) (2026-08-03)
+
+
+### Features
+
+* **skill:** release the apply-loss fix, monorepo lockfiles and the privacy dimension ([d190d43](https://github.com/maxgfr/ultrasec/commit/d190d43dc17d683ba1c712d0c7bbd9c1e3c356f1)), closes [#6](https://github.com/maxgfr/ultrasec/issues/6)
+
 # [1.20.0](https://github.com/maxgfr/ultrasec/compare/v1.19.0...v1.20.0) (2026-07-29)
 
 
