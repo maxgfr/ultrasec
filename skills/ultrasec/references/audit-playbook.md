@@ -4,6 +4,11 @@ The everyday workflow: narrow the repo to a handful of evidence-backed candidate
 each from the real code, gate, and report. Commands are shown as `ultrasec …`; run the engine by
 its absolute path (see [SKILL.md](../SKILL.md)).
 
+> **What did this run cover?** Every command that names a run directory appends to
+> `<run>/JOURNAL.md` — command, headline result, refused `--apply` rows, exit code. Read it
+> before you trust a run you didn't watch, and pass `--report <file>` to archive any single
+> command's output. Both are additive; `--no-journal` opts out.
+
 > **Optional stages, all additive.** `context` (trust model), `triage` (cheap noise cut),
 > `investigate` (the classes the engine can't enumerate), `revalidate` (git-history FP cut),
 > `narrative` + `implement` (report and remediation plan). A quick audit can skip all of them;
@@ -85,6 +90,10 @@ misuse, race conditions, feature abuse, chained attacks. Method per class:
 [attack-classes.md](attack-classes.md); where each hides in your stack:
 [frameworks.md](frameworks.md); the lenses to apply first:
 [hunting-heuristics.md](hunting-heuristics.md).
+
+If the app is built around personal data, this is also where you ask where that data goes and how
+long it stays — file those as `category: "privacy"`. Method:
+[privacy-and-data-protection.md](privacy-and-data-protection.md).
 
 **Ingest discoveries through `investigate --apply`, never by editing `findings.json`.** Hand
 editing bypasses the citation gate and breaks the content-derived `id` that makes re-scans and

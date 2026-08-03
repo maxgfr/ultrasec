@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { JOURNAL_FILE } from "../transcript.js";
 import { existsSync, rmSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
@@ -16,7 +17,9 @@ const VOLUME_NAME_FILTER = "trivy-cache"; // substring match: ultrasec_trivy-cac
 
 // The human-facing outputs a user actually wants to keep after an audit. Everything
 // else in the run dir is an intermediate ultrasec can regenerate from a re-scan.
-const DELIVERABLES = new Set(["SUMMARY.md", "REPORT.md", "index.html", "findings.json"]);
+// JOURNAL.md is a deliverable, not scratch: it is the record of what the audit
+// covered, and it outlives the intermediates it describes.
+const DELIVERABLES = new Set(["SUMMARY.md", "REPORT.md", "index.html", "findings.json", JOURNAL_FILE]);
 
 /** The Docker artifacts ultrasec is responsible for (pinned scanner images + toolbox). */
 export function dockerImages(): string[] {

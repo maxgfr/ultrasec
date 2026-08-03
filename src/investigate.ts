@@ -65,7 +65,9 @@ export function buildInvestigateWorklist(surface: AttackSurface, graph: Graph): 
       neighbors: [...nb].sort(byStr).slice(0, MAX_NEIGHBORS_PER_REGION),
       prompt:
         "What the deterministic pass can't see: missing/incorrect authorization & IDOR, " +
-        "business-logic flaws, and multi-hop taint that crosses these files. Cite resolvable [file:line].",
+        "business-logic flaws, multi-hop taint that crosses these files, and personal-data " +
+        "handling (data leaving to a third-party processor, a control narrower than its name, " +
+        "reversible pseudonymisation, absent retention). Cite resolvable [file:line].",
     });
   }
   return regions;

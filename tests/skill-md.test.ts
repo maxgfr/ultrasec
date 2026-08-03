@@ -86,9 +86,14 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
   //                 sheet + references/commands.md; six new references absorbed the
   //                 depth. Room was made for the run-health check, the symptom table,
   //                 Common mistakes / Do not, and the References index.
+  //   2400 -> 2470: the body was sitting exactly at the cap, so the privacy dimension
+  //                 could not be routed at all. Bought: the personal-data pointer in
+  //                 rule 4 + the References index (the method itself is a reference,
+  //                 not body), and three cheat-sheet lines for --report/--no-journal,
+  //                 --strict and --no-env-sources. Routing, which is what the body is for.
   it("keeps the SKILL.md body within its word budget", () => {
     const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
-    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2400);
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2470);
   });
 
   // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits

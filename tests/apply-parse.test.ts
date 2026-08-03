@@ -128,6 +128,27 @@ describe("investigate --apply surfaces every refused row instead of dropping it"
     expect(parsed.dropped[0].reason).toMatch(/severity/);
   });
 
+  it("accepts a `privacy` discovery — personal-data handling is a first-class category", () => {
+    const run = seed();
+    const file = join(run, "INVESTIGATE.json");
+    writeFileSync(
+      file,
+      JSON.stringify([
+        {
+          ...GOOD_DISCOVERY,
+          title: "Raw question persisted with no retention policy",
+          category: "privacy",
+          cwe: "CWE-359",
+        },
+      ]),
+    );
+
+    const { code } = capture(() => runInvestigate(parseArgs(["--run", run, "--apply", file, "--repo", REPO])));
+
+    expect(code).toBe(0);
+    expect(loadDossier(run).findings.find((f) => f.category === "privacy")?.title).toBe("Raw question persisted with no retention policy");
+  });
+
   it("still fails closed (exit 2) when NOTHING in the file is usable", () => {
     const run = seed();
     const file = join(run, "INVESTIGATE.json");

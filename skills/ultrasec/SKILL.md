@@ -26,7 +26,9 @@ flows are real and exploitable, find the subtle bugs the tools miss, and verify.
 >    it. Uncertain ⇒ leave it `needs-human`. Aggressive auto-suppression discards real bugs.
 > 4. **Use the tools, then go beyond them.** Run the installed scanners (`tools`), triage their
 >    output, and add what only semantic reasoning finds — authz/IDOR, business logic, auth,
->    crypto, races: [references/attack-classes.md](references/attack-classes.md).
+>    crypto, races: [references/attack-classes.md](references/attack-classes.md). Personal data
+>    asks a different question — where it goes, how long it stays:
+>    [references/privacy-and-data-protection.md](references/privacy-and-data-protection.md).
 > 5. **Only report what you can exploit.** Every finding needs a concrete attacker scenario
 >    (who · what they send · what they get) — not "potentially". A gap another layer already
 >    prevents is a *hardening note*, not a finding:
@@ -60,6 +62,7 @@ ultrasec scan    --repo . --out .ultrasec       # graph + cross-file taint + too
   # budget: --budget quick|standard|thorough  --max-candidates N  --max-depth N
   # again:  --diff origin/main --merge --resume        # incremental, folds into one run
   # recall: --sinks (orphan sinks)  --log-hygiene (CWE-117/532)  --blame (git provenance)
+  #         --no-env-sources (drop process.env/os.getenv-rooted flows — opt-in)
   # net:    --offline / --no-enrich (no EPSS/KEV)      --docker (scanners without installing)
 ultrasec paths   --run .ultrasec                # the candidate chains  (--kind sql --severity high)
 ultrasec dossier <id> --run .ultrasec           # ONE finding's real code + path (id may be a prefix)
@@ -67,7 +70,8 @@ ultrasec graph   <file|symbol> --run .ultrasec  # cross-file links into/out of a
 ultrasec triage  --run .ultrasec                # cheap noise|keep fast-lane  (--apply TRIAGE.json)
 ultrasec investigate --run .ultrasec            # hunt authz/logic  (--apply INVESTIGATE.json)
 ultrasec verify  --run .ultrasec                # adversarial worklist → write verdicts.json
-ultrasec verify  --apply verdicts.json --run .ultrasec       # a file, comma-list, or DIRECTORY
+ultrasec verify  --apply verdicts.json --run .ultrasec       # a file, comma-list, DIRECTORY, or -
+  # any --apply: refused rows are listed with their reason; --strict exits 1 on any
 ultrasec revalidate --run .ultrasec             # git-history FP cut  (--apply REVALIDATE.json)
 ultrasec check   --run .ultrasec --semantic     # THE GATE: grounded + adjudicated (--min-severity)
 ultrasec narrative --run .ultrasec              # → you author NARRATIVE.json
@@ -76,8 +80,9 @@ ultrasec implement --run .ultrasec              # remediation-PRD draft → the 
 ultrasec run     --repo . --out .ultrasec       # sequence every stage (ZERO external calls)
 ultrasec orchestrate --run .ultrasec --phase verify   # emit the multi-agent fan-out
 ultrasec logs    ./var/log --out .ultrasec-logs # blue team: forensics over EXISTING log files
+  # anywhere: --report out.md|html|json (archive this output)  --no-journal (skip JOURNAL.md)
 ultrasec import  findings.json --run .ultrasec  # ingest a deepsec export as candidates
-ultrasec clean   --run .ultrasec                # keeps REPORT/SUMMARY/index.html/findings.json
+ultrasec clean   --run .ultrasec                # keeps REPORT/SUMMARY/index.html/findings/JOURNAL
 ```
 
 ## Route by situation
@@ -261,7 +266,9 @@ calibration pairs) · [citation-format.md](references/citation-format.md) (the g
 · [schemas.md](references/schemas.md) (every worklist JSON).
 
 **Security knowledge** — [attack-classes.md](references/attack-classes.md) (the classes taint
-can't reach) · [frameworks.md](references/frameworks.md) (per-stack hiding places) ·
+can't reach) · [privacy-and-data-protection.md](references/privacy-and-data-protection.md) (transfers,
+retention, pseudonymisation) ·
+[frameworks.md](references/frameworks.md) (per-stack hiding places) ·
 [hunting-heuristics.md](references/hunting-heuristics.md) (attacker lenses + recon commands) ·
 [supply-chain.md](references/supply-chain.md) (deps, secrets, CI, IaC) ·
 [catalog.md](references/catalog.md) (what the engine enumerates).

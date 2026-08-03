@@ -13542,7 +13542,7 @@ var VERSION = "1.20.0";
 var SCHEMA_VERSION2 = 6;
 var SEVERITIES2 = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
-var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "other"];
+var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "privacy", "other"];
 var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 
 // src/util.ts
@@ -19729,7 +19729,7 @@ function buildInvestigateWorklist(surface, graph) {
       sources: t.sources,
       files,
       neighbors: [...nb].sort(byStr2).slice(0, MAX_NEIGHBORS_PER_REGION),
-      prompt: "What the deterministic pass can't see: missing/incorrect authorization & IDOR, business-logic flaws, and multi-hop taint that crosses these files. Cite resolvable [file:line]."
+      prompt: "What the deterministic pass can't see: missing/incorrect authorization & IDOR, business-logic flaws, multi-hop taint that crosses these files, and personal-data handling (data leaving to a third-party processor, a control narrower than its name, reversible pseudonymisation, absent retention). Cite resolvable [file:line]."
     });
   }
   return regions;
@@ -21079,7 +21079,7 @@ import { existsSync as existsSync24, rmSync as rmSync4, readdirSync as readdirSy
 import { join as join50, resolve as resolve24 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
-var DELIVERABLES = /* @__PURE__ */ new Set(["SUMMARY.md", "REPORT.md", "index.html", "findings.json"]);
+var DELIVERABLES = /* @__PURE__ */ new Set(["SUMMARY.md", "REPORT.md", "index.html", "findings.json", JOURNAL_FILE]);
 function dockerImages() {
   return [...new Set(ADAPTERS.map((a) => a.dockerImage).filter((x) => Boolean(x))), TOOLBOX_IMAGE];
 }

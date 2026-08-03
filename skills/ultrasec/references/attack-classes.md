@@ -12,6 +12,12 @@ read) → **how to prove it** → **how to rate it** → **what usually turns ou
 Pick the classes that match what `context`/`map` told you the app is. Auditing a CLI for CSRF is
 wasted time; auditing a payments API without touching race conditions is negligence.
 
+One class lives in its own file because its question is different in kind — not "can an attacker
+reach this?" but "whose data is this, where does it go, and how long does it stay?":
+**[privacy-and-data-protection.md](privacy-and-data-protection.md)**. Read it whenever the app is
+built around personal data (case management, health, support, assistants, anything public-sector);
+on those systems it is routinely the larger half of the audit, and no scanner sees any of it.
+
 ---
 
 ## Access control (the highest-yield class, every time)
@@ -344,7 +350,9 @@ cleartext or world-readable local storage.
 5. Rate with [severity-and-discipline.md](severity-and-discipline.md); a flag is not a finding
    until you can name who attacks it, with what, and what they get.
 
-Related: [hunting-heuristics.md](hunting-heuristics.md) (the lenses to apply before you know the
+Related: [privacy-and-data-protection.md](privacy-and-data-protection.md) (personal-data
+handling — transfers, retention, reversible pseudonymisation) ·
+[hunting-heuristics.md](hunting-heuristics.md) (the lenses to apply before you know the
 class) · [frameworks.md](frameworks.md) (where these live in your stack) ·
 [supply-chain.md](supply-chain.md) (dependencies, CI, cloud) ·
 [adjudication.md](adjudication.md) (proving it).
