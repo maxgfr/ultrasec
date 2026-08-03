@@ -44,7 +44,7 @@ function seed(): string {
       counts: { findings: 1, bySeverity: { critical: 0, high: 1, medium: 0, low: 0, info: 0 } },
     },
     findings: [f],
-    graph: { files: [], symbols: [], links: [] },
+    graph: { files: [], edges: [], symbolDefs: {} },
   };
   writeDossier(run, d);
   return run;
