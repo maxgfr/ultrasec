@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from "n
 import { join, resolve } from "node:path";
 import { countBySeverity, writeDossier, type Dossier } from "./store.js";
 import type { Finding } from "./types.js";
+import type { DroppedRow, ParseResult } from "./apply-parse.js";
 
 // The shared stage harness. Every new AI stage (context/triage/investigate/
 // revalidate/narrative) follows the proven `verify` shape: the engine EMITS a
@@ -62,20 +63,48 @@ export function collectApplyFiles(applyPath: string, dirRegex: RegExp): string[]
 }
 
 /**
- * Read + parse every apply file, concatenating the parsed arrays. Throws an Error
- * whose message is prefixed with the offending `<path>: ` on a read/parse failure,
- * so the caller can surface exactly which file failed.
+ * Read + parse every apply file, concatenating the parsed rows AND the rows each
+ * parser refused. Throws an Error whose message is prefixed with the offending
+ * `<path>: ` on a read/parse failure, so the caller can surface exactly which file
+ * failed.
+ *
+ * The `dropped` rows travel with the result so no caller can accidentally fold a
+ * partially-parsed file and report success — see `apply-parse.ts` for why that
+ * mattered enough to change every signature.
+ *
+ * `applyPath` of `-` reads stdin instead, so verdicts can be piped in.
  */
-export function readApply<T>(applyPath: string, dirRegex: RegExp, parse: (raw: string) => T[]): T[] {
-  const out: T[] = [];
-  for (const f of collectApplyFiles(applyPath, dirRegex)) {
+export function readApply<T>(applyPath: string, dirRegex: RegExp, parse: (raw: string) => ParseResult<T>): ParseResult<T> {
+  if (applyPath === "-") {
+    let raw: string;
     try {
-      out.push(...parse(readFileSync(f, "utf8")));
+      raw = readFileSync(0, "utf8");
+    } catch (e) {
+      throw new Error(`<stdin>: ${(e as Error).message}`);
+    }
+    try {
+      return parse(raw);
+    } catch (e) {
+      throw new Error(`<stdin>: ${(e as Error).message}`);
+    }
+  }
+
+  const files = collectApplyFiles(applyPath, dirRegex);
+  const rows: T[] = [];
+  const dropped: DroppedRow[] = [];
+  for (const f of files) {
+    let parsed: ParseResult<T>;
+    try {
+      parsed = parse(readFileSync(f, "utf8"));
     } catch (e) {
       throw new Error(`${f}: ${(e as Error).message}`);
     }
+    rows.push(...parsed.rows);
+    // Only qualify by file when the fold spans several — a single-file apply
+    // reads better without the path repeated on every line.
+    dropped.push(...parsed.dropped.map((d) => (files.length > 1 ? { ...d, file: f } : d)));
   }
-  return out;
+  return { rows, dropped };
 }
 
 /**

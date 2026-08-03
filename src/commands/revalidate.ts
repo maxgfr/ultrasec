@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
+import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../revalidate.js";
 
@@ -22,17 +23,18 @@ export function runRevalidate(args: ParsedArgs): number {
 
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
-    let inputs: ReturnType<typeof parseRevalidations>;
+    let parsed: ReturnType<typeof parseRevalidations>;
     try {
-      inputs = readApply(applyPath, /revalidat.*\.json$/i, parseRevalidations);
+      parsed = readApply(applyPath, /revalidat.*\.json$/i, parseRevalidations);
     } catch (e) {
       eprintln(`ultrasec revalidate: cannot read revalidations at ${(e as Error).message}`);
       return 2;
     }
+    const strict = flagBool(args, "strict");
     // Recompute git facts from CURRENT repo state so the drift guard + inferred
     // fixing commits reflect HEAD, not whatever was emitted earlier.
     const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo));
-    const res = applyRevalidations(dossier, inputs, facts);
+    const res = applyRevalidations(dossier, parsed.rows, facts);
     // Fail closed on an entirely stale fragment: every verdict targeting an id
     // outside the revalidation scope means the false-positive cut never engaged.
     if (res.applied === 0 && res.ignored.length > 0) {
@@ -54,12 +56,13 @@ export function runRevalidate(args: ParsedArgs): number {
             needsHuman: res.needsHuman,
             flagged: res.flagged,
             ignored: res.ignored,
+            dropped: parsed.dropped,
           },
           null,
           2,
         ),
       );
-      return 0;
+      return strict && parsed.dropped.length > 0 ? 1 : 0;
     }
     println(`ultrasec revalidate --apply → updated ${run}/findings.json`);
     println(
@@ -67,7 +70,7 @@ export function runRevalidate(args: ParsedArgs): number {
     );
     if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
     for (const fl of res.flagged) println(`  ⚠️  ${fl.id}: ${fl.reason}`);
-    return 0;
+    return surfaceDropped(parsed.dropped, strict, println);
   }
 
   // Emit mode

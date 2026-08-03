@@ -74,19 +74,19 @@ describe("readApply — concatenated parse with tolerant errors", () => {
     const dir = tmp();
     writeFileSync(join(dir, "a.verdict.json"), JSON.stringify([{ n: 1 }]));
     writeFileSync(join(dir, "b.verdict.json"), JSON.stringify([{ n: 2 }, { n: 3 }]));
-    const out = readApply<{ n: number }>(dir, /verdict.*\.json$/i, (raw) => JSON.parse(raw));
-    expect(out.map((x) => x.n).sort()).toEqual([1, 2, 3]);
+    const out = readApply<{ n: number }>(dir, /verdict.*\.json$/i, (raw) => ({ rows: JSON.parse(raw), dropped: [] }));
+    expect(out.rows.map((x) => x.n).sort()).toEqual([1, 2, 3]);
   });
 
   it("throws with the offending path prefixed on a missing file", () => {
     const f = join(tmp(), "nope.json");
-    expect(() => readApply(f, /\.json$/, (raw) => JSON.parse(raw))).toThrow(new RegExp(`^${f.replace(/[/.]/g, "\\$&")}: `));
+    expect(() => readApply(f, /\.json$/, (raw) => ({ rows: JSON.parse(raw), dropped: [] }))).toThrow(new RegExp(`^${f.replace(/[/.]/g, "\\$&")}: `));
   });
 
   it("throws with the offending path prefixed on malformed JSON", () => {
     const f = join(tmp(), "bad.json");
     writeFileSync(f, "{not json");
-    expect(() => readApply(f, /\.json$/, (raw) => JSON.parse(raw))).toThrow(new RegExp(`^${f.replace(/[/.]/g, "\\$&")}: `));
+    expect(() => readApply(f, /\.json$/, (raw) => ({ rows: JSON.parse(raw), dropped: [] }))).toThrow(new RegExp(`^${f.replace(/[/.]/g, "\\$&")}: `));
   });
 });
 

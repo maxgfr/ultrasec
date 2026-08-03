@@ -1,0 +1,139 @@
+// Shared shape for every `--apply` parser (verdicts / triage / discoveries /
+// revalidations).
+//
+// The rule these types exist to enforce: a malformed row is NEVER discarded in
+// silence. Before this module each parser dropped bad rows with a bare
+// `continue`/`filter` and only threw when EVERY row was invalid — so a single
+// typo'd `verdict` or `category` made a finding vanish with no diagnostic, in a
+// tool whose whole contract is fail-closed adjudication. A dropped `supported`
+// verdict silently removed a CONFIRMED vulnerability from the final report.
+//
+// Parsers now return every row they refused, with the field and the value that
+// caused it, and the commands surface those alongside the ingest counters.
+
+/** One row the parser refused, and why. */
+export interface DroppedRow {
+  /** 0-based position in the source array — how the author finds the row. */
+  index: number;
+  /** Names the offending field and echoes the value received. */
+  reason: string;
+  /** Source path, set when `--apply` folded more than one file. */
+  file?: string;
+}
+
+/** What every `--apply` parser returns: what it kept, and what it refused. */
+export interface ParseResult<T> {
+  rows: T[];
+  dropped: DroppedRow[];
+}
+
+/**
+ * Render a received value compactly for a rejection message. Strings are quoted
+ * so `"3"` is visibly not `3`; objects collapse to their type rather than dumping
+ * a payload into the terminal.
+ */
+export function describeValue(v: unknown): string {
+  if (v === undefined) return "missing";
+  if (v === null) return "null";
+  if (typeof v === "string") return JSON.stringify(v.length > 40 ? `${v.slice(0, 40)}…` : v);
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return `array(${v.length})`;
+  return typeof v;
+}
+
+/** Reason for a value outside a closed vocabulary. */
+export function notInVocabulary(field: string, value: unknown, allowed: readonly string[]): string {
+  return `${field} ${describeValue(value)} is not one of ${allowed.join("|")}`;
+}
+
+/** Reason for a field of the wrong type (or absent). */
+export function badField(field: string, value: unknown, expected: string): string {
+  return `${field} ${describeValue(value)} — expected ${expected}`;
+}
+
+/**
+ * Coerce an apply payload to its row array, accepting a bare array or any of the
+ * documented wrapper keys. Throws (fail-closed) on anything else.
+ */
+export function coerceRows(data: unknown, wrapperKeys: readonly string[], label: string): unknown[] {
+  if (Array.isArray(data)) return data;
+  for (const key of wrapperKeys) {
+    const nested = (data as Record<string, unknown> | null | undefined)?.[key];
+    if (Array.isArray(nested)) return nested;
+  }
+  const shapes = [`a JSON array`, ...wrapperKeys.map((k) => `{"${k}":[...]}`)].join(" or ");
+  throw new Error(`unrecognized ${label} shape — expected ${shapes} (fail-closed)`);
+}
+
+/**
+ * Fail-closed guard: a non-empty payload that yielded nothing usable is an error,
+ * not an empty fold. The message lists every rejection so the author can fix the
+ * file in one pass instead of bisecting it.
+ */
+export function requireUsable<T>(result: ParseResult<T>, sourceLength: number, requirement: string): ParseResult<T> {
+  if (sourceLength > 0 && result.rows.length === 0) {
+    const detail = result.dropped.map((d) => `row ${d.index}: ${d.reason}`).join("; ");
+    throw new Error(`${sourceLength} row(s), none usable — each needs ${requirement} (fail-closed)${detail ? ` — ${detail}` : ""}`);
+  }
+  return result;
+}
+
+/** Human-readable lines for the dropped rows, in the style of the existing `✗ rejected` output. */
+export function formatDropped(dropped: readonly DroppedRow[]): string[] {
+  return dropped.map((d) => `  ✗ dropped ${d.file ? `${d.file} ` : ""}row ${d.index}: ${d.reason}`);
+}
+
+/**
+ * Print the refused rows and return the stage's exit code. Shared by all four
+ * `--apply` commands so a malformed row reads identically whichever stage saw it.
+ *
+ * `--strict` exits 1 on any drop: a partial fold is a silent coverage loss, and CI
+ * should be able to refuse it even though the valid rows were applied.
+ */
+export function surfaceDropped(dropped: readonly DroppedRow[], strict: boolean, emit: (line: string) => void): number {
+  for (const line of formatDropped(dropped)) emit(line);
+  if (strict && dropped.length > 0) {
+    emit(`  --strict: ${dropped.length} malformed row(s) refused — failing so the loss isn't absorbed silently.`);
+    return 1;
+  }
+  return 0;
+}
+
+/**
+ * The `{id, verdict}` payload shared by verify, triage and revalidate. They differ
+ * only in their wrapper keys, their verdict vocabulary and the extra fields they
+ * carry, so the validation loop lives here once — the same reason `stage.ts` owns
+ * the apply-file resolution.
+ */
+export function parseIdVerdictRows<V extends string, T>(
+  raw: string,
+  opts: {
+    wrapperKeys: readonly string[];
+    label: string;
+    verdicts: readonly V[];
+    /** Called only for rows that passed validation. */
+    build: (row: Record<string, unknown>, verdict: V) => T;
+  },
+): ParseResult<T> {
+  const arr = coerceRows(JSON.parse(raw) as unknown, opts.wrapperKeys, opts.label);
+  const rows: T[] = [];
+  const dropped: DroppedRow[] = [];
+
+  for (const [index, row] of arr.entries()) {
+    if (!row || typeof row !== "object") {
+      dropped.push({ index, reason: badField("row", row, "an object") });
+      continue;
+    }
+    const r = row as Record<string, unknown>;
+    const bad: string[] = [];
+    if (typeof r.id !== "string") bad.push(badField("id", r.id, "a string"));
+    if (!(opts.verdicts as readonly string[]).includes(r.verdict as string)) bad.push(notInVocabulary("verdict", r.verdict, opts.verdicts));
+    if (bad.length) {
+      dropped.push({ index, reason: bad.join(", ") });
+      continue;
+    }
+    rows.push(opts.build(r, r.verdict as V));
+  }
+
+  return requireUsable({ rows, dropped }, arr.length, `a string "id" and a "verdict" among ${opts.verdicts.join("|")}`);
+}

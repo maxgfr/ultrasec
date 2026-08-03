@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
+import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from "../triage.js";
 
@@ -21,19 +22,20 @@ export function runTriage(args: ParsedArgs): number {
 
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
-    let inputs: ReturnType<typeof parseTriage>;
+    let parsed: ReturnType<typeof parseTriage>;
     try {
-      inputs = readApply(applyPath, /triage.*\.json$/i, parseTriage);
+      parsed = readApply(applyPath, /triage.*\.json$/i, parseTriage);
     } catch (e) {
       eprintln(`ultrasec triage: cannot read triage verdicts at ${(e as Error).message}`);
       return 2;
     }
-    const res = applyTriage(dossier, inputs);
+    const strict = flagBool(args, "strict");
+    const res = applyTriage(dossier, parsed.rows);
     persistFindings(run, dossier, res.findings);
 
     if (flagBool(args, "json")) {
-      println(JSON.stringify({ applied: res.applied, dismissed: res.dismissed, kept: res.kept }, null, 2));
-      return 0;
+      println(JSON.stringify({ applied: res.applied, dismissed: res.dismissed, kept: res.kept, dropped: parsed.dropped }, null, 2));
+      return strict && parsed.dropped.length > 0 ? 1 : 0;
     }
     println(`ultrasec triage --apply → updated ${run}/findings.json`);
     println(`  applied ${res.applied} verdict(s): ${res.dismissed} dismissed as noise`);
@@ -41,7 +43,7 @@ export function runTriage(args: ParsedArgs): number {
       println(`  kept open (high/critical 'noise' ignored — must go through verify):`);
       for (const k of res.kept) println(`    - ${k.id} [${k.severity}]`);
     }
-    return 0;
+    return surfaceDropped(parsed.dropped, strict, println);
   }
 
   // Emit mode

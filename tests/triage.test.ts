@@ -97,13 +97,17 @@ describe("applyTriage — conservative quick-dismiss", () => {
 
 describe("parseTriage", () => {
   it("accepts a bare array and a {triage:[]} wrapper, dropping unknown verdicts", () => {
-    expect(parseTriage('[{"id":"a","verdict":"noise"},{"id":"b","verdict":"bogus"},{"verdict":"keep"}]')).toEqual([{ id: "a", verdict: "noise" }]);
-    expect(parseTriage('{"triage":[{"id":"c","verdict":"keep"}]}')[0]!.id).toBe("c");
+    const out = parseTriage('[{"id":"a","verdict":"noise"},{"id":"b","verdict":"bogus"},{"verdict":"keep"}]');
+    expect(out.rows).toEqual([{ id: "a", verdict: "noise" }]);
+    expect(out.dropped.map((d) => d.index)).toEqual([1, 2]);
+    expect(out.dropped[0]!.reason).toMatch(/verdict "bogus" is not one of/);
+    expect(out.dropped[1]!.reason).toMatch(/id missing/);
+    expect(parseTriage('{"triage":[{"id":"c","verdict":"keep"}]}').rows[0]!.id).toBe("c");
   });
 
   it("accepts an explicitly empty batch — 'nothing is noise' is a real answer", () => {
-    expect(parseTriage("[]")).toEqual([]);
-    expect(parseTriage('{"triage":[]}')).toEqual([]);
+    expect(parseTriage("[]")).toEqual({ rows: [], dropped: [] });
+    expect(parseTriage('{"triage":[]}')).toEqual({ rows: [], dropped: [] });
   });
 
   // Same fail-closed contract as parseVerdicts/parseRevalidations: folding zero rows

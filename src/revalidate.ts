@@ -2,6 +2,7 @@ import type { Dossier } from "./store.js";
 import type { Finding, Status } from "./types.js";
 import { isHigh } from "./verify.js";
 import { byStr } from "./util.js";
+import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 import { fileExistsAtHead, lineContentAtHead, lineLastChanged, fileRenamedTo, logSince, type LineChange } from "./git.js";
 
 // The git-history revalidation stage (Phase 2 — the biggest accuracy win, mirrors
@@ -228,28 +229,18 @@ export function applyRevalidations(dossier: Dossier, inputs: RevalidationInput[]
  * rows that all get dropped, throws instead of yielding 0 rows — otherwise the
  * false-positive cut silently never happens ("applied 0", exit 0).
  */
-export function parseRevalidations(raw: string): RevalidationInput[] {
-  const data = JSON.parse(raw) as unknown;
-  const arr = Array.isArray(data)
-    ? data
-    : Array.isArray((data as any)?.revalidations)
-      ? (data as any).revalidations
-      : Array.isArray((data as any)?.verdicts)
-        ? (data as any).verdicts
-        : null;
-  if (arr === null) throw new Error(`unrecognized revalidations shape — expected a JSON array, {"verdicts":[...]} or {"revalidations":[...]} (fail-closed)`);
-  const out = (arr as any[])
-    .filter((v) => v && typeof v.id === "string" && (REVALIDATION_VERDICTS as readonly string[]).includes(v.verdict))
-    .map((v) => ({
+export function parseRevalidations(raw: string): ParseResult<RevalidationInput> {
+  return parseIdVerdictRows(raw, {
+    wrapperKeys: ["revalidations", "verdicts"],
+    label: "revalidations",
+    verdicts: REVALIDATION_VERDICTS,
+    build: (v, verdict) => ({
       id: v.id as string,
-      verdict: v.verdict as RevalidationVerdict,
+      verdict: verdict as RevalidationVerdict,
       fixedIn: typeof v.fixedIn === "string" ? v.fixedIn : undefined,
       note: typeof v.note === "string" ? v.note : undefined,
-    }));
-  if (arr.length > 0 && out.length === 0) {
-    throw new Error(`${arr.length} row(s), none usable — each needs a string "id" and a "verdict" among ${REVALIDATION_VERDICTS.join("|")} (fail-closed)`);
-  }
-  return out;
+    }),
+  });
 }
 
 /** Derive the apply-time git-fact helpers (drift set + inferred fixing commits)

@@ -50,6 +50,9 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "eco",
   "list",
   "no-redact",
+  "strict",
+  "no-journal",
+  "no-env-sources",
   // `mcp` only.
   "allow-remote",
   "allow-write",

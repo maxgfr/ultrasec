@@ -2,6 +2,7 @@ import type { Dossier } from "./store.js";
 import type { Finding, Status } from "./types.js";
 import { isHigh } from "./verify.js";
 import { byStr } from "./util.js";
+import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 
 // The cheap quick-dismiss fast-lane (Phase 4). A compact, code-free worklist of
 // every OPEN candidate so the agent can clear obvious noise in one pass BEFORE the
@@ -114,15 +115,11 @@ export function applyTriage(dossier: Dossier, inputs: TriageInput[]): ApplyTriag
  * A silent no-op reads exactly like a completed triage pass, which is the one thing an
  * audit tool must never do.
  */
-export function parseTriage(raw: string): TriageInput[] {
-  const data = JSON.parse(raw) as unknown;
-  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.triage) ? (data as any).triage : null;
-  if (arr === null) throw new Error(`unrecognized triage shape — expected a JSON array or {"triage":[...]} (fail-closed)`);
-  const out = (arr as any[])
-    .filter((v) => v && typeof v.id === "string" && (TRIAGE_VERDICTS as readonly string[]).includes(v.verdict))
-    .map((v) => ({ id: v.id as string, verdict: v.verdict as TriageVerdict }));
-  if (arr.length > 0 && out.length === 0) {
-    throw new Error(`${arr.length} row(s), none usable — each needs a string "id" and a "verdict" among ${TRIAGE_VERDICTS.join("|")} (fail-closed)`);
-  }
-  return out;
+export function parseTriage(raw: string): ParseResult<TriageInput> {
+  return parseIdVerdictRows(raw, {
+    wrapperKeys: ["triage"],
+    label: "triage",
+    verdicts: TRIAGE_VERDICTS,
+    build: (v, verdict) => ({ id: v.id as string, verdict: verdict as TriageVerdict }),
+  });
 }

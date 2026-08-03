@@ -6,6 +6,7 @@ import { neighbors } from "./neighbors.js";
 import { makeToolFinding } from "./tools/normalize.js";
 import { insideRepo, lineCount } from "./check.js";
 import { byStr } from "./util.js";
+import { badField, coerceRows, notInVocabulary, requireUsable, type DroppedRow, type ParseResult } from "./apply-parse.js";
 
 // The agentic-discovery stage (Phase 5). The deterministic engine can't enumerate
 // authorization/IDOR, business-logic, or subtle multi-hop flows — so it emits a
@@ -205,23 +206,37 @@ export function ingestDiscoveries(dossier: Dossier, discoveries: Discovery[], re
  * dropped, throws instead of silently ingesting nothing. An empty
  * {discoveries:[]} stays valid — a hunter finding nothing is a real outcome.
  */
-export function parseDiscoveries(raw: string): Discovery[] {
-  const data = JSON.parse(raw) as unknown;
-  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.discoveries) ? (data as any).discoveries : null;
-  if (arr === null) throw new Error(`unrecognized discoveries shape — expected a JSON array or {"discoveries":[...]} (fail-closed)`);
-  const out: Discovery[] = [];
-  for (const d of arr as any[]) {
-    if (!d || typeof d !== "object") continue;
-    if (typeof d.title !== "string" || typeof d.message !== "string" || typeof d.file !== "string") continue;
-    if (!Number.isInteger(d.line) || d.line < 1) continue;
-    if (!(CATEGORIES as readonly string[]).includes(d.category)) continue;
-    if (!(SEVERITIES as readonly string[]).includes(d.severity)) continue;
+export function parseDiscoveries(raw: string): ParseResult<Discovery> {
+  const arr = coerceRows(JSON.parse(raw) as unknown, ["discoveries"], "discoveries");
+  const rows: Discovery[] = [];
+  const dropped: DroppedRow[] = [];
+  const drop = (index: number, reason: string) => dropped.push({ index, reason });
+
+  for (const [index, raw] of (arr as any[]).entries()) {
+    const d = raw;
+    if (!d || typeof d !== "object") {
+      drop(index, badField("row", d, "an object"));
+      continue;
+    }
+    // Report every bad field at once: fixing a discovery one error per run is
+    // exactly the friction that made silent drops tolerable in the first place.
+    const bad: string[] = [];
+    for (const field of ["title", "message", "file"] as const) {
+      if (typeof d[field] !== "string") bad.push(badField(field, d[field], "a string"));
+    }
+    if (!Number.isInteger(d.line) || d.line < 1) bad.push(badField("line", d.line, "an integer ≥ 1"));
+    if (!(CATEGORIES as readonly string[]).includes(d.category)) bad.push(notInVocabulary("category", d.category, CATEGORIES));
+    if (!(SEVERITIES as readonly string[]).includes(d.severity)) bad.push(notInVocabulary("severity", d.severity, SEVERITIES));
+    if (bad.length) {
+      drop(index, bad.join(", "));
+      continue;
+    }
     const path = Array.isArray(d.path)
       ? d.path
           .filter((p: any) => p && typeof p.file === "string" && Number.isInteger(p.line) && p.line >= 1)
           .map((p: any) => ({ file: p.file, line: p.line, why: typeof p.why === "string" ? p.why : "" }))
       : undefined;
-    out.push({
+    rows.push({
       title: d.title,
       category: d.category as Category,
       severity: d.severity as Severity,
@@ -232,10 +247,10 @@ export function parseDiscoveries(raw: string): Discovery[] {
       ...(path && path.length ? { path } : {}),
     });
   }
-  if ((arr as any[]).length > 0 && out.length === 0) {
-    throw new Error(
-      `${(arr as any[]).length} row(s), none usable — each needs title/message/file (strings), line ≥ 1, a category among ${CATEGORIES.join("|")} and a severity among ${SEVERITIES.join("|")} (fail-closed)`,
-    );
-  }
-  return out;
+
+  return requireUsable(
+    { rows, dropped },
+    (arr as any[]).length,
+    `title/message/file (strings), line ≥ 1, a category among ${CATEGORIES.join("|")} and a severity among ${SEVERITIES.join("|")}`,
+  );
 }

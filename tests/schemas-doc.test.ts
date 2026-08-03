@@ -47,7 +47,7 @@ describe("references/schemas.md examples are valid JSON", () => {
 
 describe("references/schemas.md examples round-trip through the real --apply parsers", () => {
   it("the verdict example is accepted by parseVerdicts", () => {
-    const rows = parseVerdicts(
+    const { rows } = parseVerdicts(
       blockWhere((v) => isArrayOfObjectsWith("verdict")(v) && (v as { verdict: string }[]).some((r) => (VERDICTS as readonly string[]).includes(r.verdict))),
     );
     expect(rows.length).toBeGreaterThan(0);
@@ -60,7 +60,7 @@ describe("references/schemas.md examples round-trip through the real --apply par
   });
 
   it("the triage example is accepted by parseTriage", () => {
-    const rows = parseTriage(
+    const { rows } = parseTriage(
       blockWhere((v) => isArrayOfObjectsWith("verdict")(v) && (v as { verdict: string }[]).every((r) => r.verdict === "noise" || r.verdict === "keep")),
     );
     expect(rows.length).toBeGreaterThan(0);
@@ -68,7 +68,7 @@ describe("references/schemas.md examples round-trip through the real --apply par
   });
 
   it("the revalidation example is accepted by parseRevalidations", () => {
-    const rows = parseRevalidations(
+    const { rows } = parseRevalidations(
       blockWhere(
         (v) =>
           isArrayOfObjectsWith("verdict")(v) &&
@@ -80,7 +80,7 @@ describe("references/schemas.md examples round-trip through the real --apply par
   });
 
   it("the Discovery example is accepted by parseDiscoveries", () => {
-    const rows = parseDiscoveries(blockWhere(isArrayOfObjectsWith("message")));
+    const { rows } = parseDiscoveries(blockWhere(isArrayOfObjectsWith("message")));
     expect(rows.length).toBeGreaterThan(0);
     for (const d of rows) {
       expect(CATEGORIES as readonly string[]).toContain(d.category);
