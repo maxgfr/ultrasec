@@ -130,7 +130,13 @@ describe("parseDiscoveries", () => {
       { title: "no-line", category: "authz", severity: "high", message: "m", file: "a.js" },
     ]);
     const out = parseDiscoveries(raw);
-    expect(out.map((d) => d.title)).toEqual(["ok"]);
+    expect(out.rows.map((d) => d.title)).toEqual(["ok"]);
+    // Every refused row is reported, naming the field and the value received —
+    // the whole point: a bad category must never vanish in silence.
+    expect(out.dropped.map((d) => d.index)).toEqual([1, 2, 3]);
+    expect(out.dropped[0]!.reason).toMatch(/category "nope" is not one of/);
+    expect(out.dropped[1]!.reason).toMatch(/severity "extreme" is not one of/);
+    expect(out.dropped[2]!.reason).toMatch(/line missing — expected an integer/);
   });
 
   it("accepts a {discoveries:[]} wrapper and normalizes path steps", () => {
@@ -138,8 +144,9 @@ describe("parseDiscoveries", () => {
       discoveries: [{ title: "t", category: "taint", severity: "high", message: "m", file: "a.js", line: 1, path: [{ file: "a.js", line: 1 }] }],
     });
     const out = parseDiscoveries(raw);
-    expect(out).toHaveLength(1);
-    expect(out[0]!.path![0]).toEqual({ file: "a.js", line: 1, why: "" });
+    expect(out.rows).toHaveLength(1);
+    expect(out.dropped).toEqual([]);
+    expect(out.rows[0]!.path![0]).toEqual({ file: "a.js", line: 1, why: "" });
   });
 
   it("fails closed on an unrecognized container shape instead of yielding 0 rows", () => {
@@ -151,7 +158,7 @@ describe("parseDiscoveries", () => {
   });
 
   it("still accepts an empty {discoveries:[]} fragment — a hunter finding nothing is legitimate", () => {
-    expect(parseDiscoveries('{"discoveries":[]}')).toEqual([]);
-    expect(parseDiscoveries("[]")).toEqual([]);
+    expect(parseDiscoveries('{"discoveries":[]}')).toEqual({ rows: [], dropped: [] });
+    expect(parseDiscoveries("[]")).toEqual({ rows: [], dropped: [] });
   });
 });

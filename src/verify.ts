@@ -1,6 +1,7 @@
 import type { Dossier } from "./store.js";
 import { VERDICTS, type Finding, type Status, type Verdict } from "./types.js";
 import { byStr } from "./util.js";
+import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 
 // The adversarial verification gate. The engine emits a claim↔evidence worklist;
 // the AI (skeptic subagents) adjudicates each finding by reading the dossier's
@@ -182,15 +183,16 @@ export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): Apply
  * shape, or rows that all get dropped, throws instead of yielding 0 rows — a
  * fold that silently applies nothing is exactly the bug the gate exists to stop.
  */
-export function parseVerdicts(raw: string): VerdictInput[] {
-  const data = JSON.parse(raw) as unknown;
-  const arr = Array.isArray(data) ? data : Array.isArray((data as any)?.verdicts) ? (data as any).verdicts : null;
-  if (arr === null) throw new Error(`unrecognized verdicts shape — expected a JSON array or {"verdicts":[...]} (fail-closed)`);
-  const out = (arr as any[])
-    .filter((v) => v && typeof v.id === "string" && (VERDICTS as readonly string[]).includes(v.verdict))
-    .map((v) => ({ id: v.id, verdict: v.verdict as Verdict, note: v.note, exploitPath: v.exploitPath }));
-  if (arr.length > 0 && out.length === 0) {
-    throw new Error(`${arr.length} row(s), none usable — each needs a string "id" and a "verdict" among ${VERDICTS.join("|")} (fail-closed)`);
-  }
-  return out;
+export function parseVerdicts(raw: string): ParseResult<VerdictInput> {
+  return parseIdVerdictRows(raw, {
+    wrapperKeys: ["verdicts"],
+    label: "verdicts",
+    verdicts: VERDICTS,
+    build: (v, verdict) => ({
+      id: v.id as string,
+      verdict: verdict as Verdict,
+      note: v.note as string | undefined,
+      exploitPath: v.exploitPath as string | undefined,
+    }),
+  });
 }

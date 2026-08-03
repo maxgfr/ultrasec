@@ -50,8 +50,9 @@ describe("catalog: .split() is no longer treated as command sanitization", () =>
 describe("verify: invalid verdict values are rejected", () => {
   it("keeps only the four valid verdicts", () => {
     const v = parseVerdicts('[{"id":"a","verdict":"INVALID"},{"id":"b","verdict":"supported"}]');
-    expect(v).toHaveLength(1);
-    expect(v[0]!.id).toBe("b");
+    expect(v.rows).toHaveLength(1);
+    expect(v.rows[0]!.id).toBe("b");
+    expect(v.dropped[0]!.reason).toMatch(/verdict "INVALID" is not one of/);
   });
 });
 

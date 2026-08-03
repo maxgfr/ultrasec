@@ -152,14 +152,14 @@ describe("revalFactsFromWorklist", () => {
 
 describe("parseRevalidations", () => {
   it("accepts a bare array and a {revalidations:[]} wrapper, dropping malformed/unknown verdicts", () => {
-    expect(parseRevalidations('[{"id":"a","verdict":"fixed","fixedIn":"sha1"},{"id":"b","verdict":"bogus"},{"noid":1}]')).toEqual([
+    expect(parseRevalidations('[{"id":"a","verdict":"fixed","fixedIn":"sha1"},{"id":"b","verdict":"bogus"},{"noid":1}]').rows).toEqual([
       { id: "a", verdict: "fixed", fixedIn: "sha1", note: undefined },
     ]);
-    expect(parseRevalidations('{"revalidations":[{"id":"c","verdict":"still-valid"}]}')[0]!.id).toBe("c");
+    expect(parseRevalidations('{"revalidations":[{"id":"c","verdict":"still-valid"}]}').rows[0]!.id).toBe("c");
   });
 
   it("accepts the {verdicts:[...]} shape the orchestrate REVALIDATE_SCHEMA emits", () => {
-    expect(parseRevalidations('{"verdicts":[{"id":"c","verdict":"fixed","fixedIn":"sha9","note":"n"}]}')).toEqual([
+    expect(parseRevalidations('{"verdicts":[{"id":"c","verdict":"fixed","fixedIn":"sha9","note":"n"}]}').rows).toEqual([
       { id: "c", verdict: "fixed", fixedIn: "sha9", note: "n" },
     ]);
   });
@@ -173,6 +173,6 @@ describe("parseRevalidations", () => {
   });
 
   it("still accepts a genuinely empty array (a no-op fragment)", () => {
-    expect(parseRevalidations("[]")).toEqual([]);
+    expect(parseRevalidations("[]")).toEqual({ rows: [], dropped: [] });
   });
 });

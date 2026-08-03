@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { join, relative } from "node:path";
 import type { Category, Finding, PathStep, CodeLoc } from "../types.js";
 import { detect } from "./registry.js";
 import { correlate } from "./correlate.js";
@@ -19,6 +20,18 @@ export interface RunContext {
   offline?: boolean;
   /** Absolute path of a CycloneDX SBOM generated this run, if any. */
   sbom?: string;
+  /**
+   * Repo-relative directory this invocation is auditing, for a tool whose
+   * manifest can live below the root (see `ToolAdapter.workspaces`). Empty/absent
+   * ⇒ the repo root.
+   *
+   * An adapter that names a file itself (the lockfile audits) MUST prefix it with
+   * this, because the finding id is derived from that path inside
+   * `makeToolFinding`. Re-anchoring after the fact would leave the id keyed on the
+   * workspace-relative path — so two workspaces carrying the same advisory collide
+   * on one id, and every citation points at a file the repo root doesn't have.
+   */
+  workspace?: string;
 }
 
 export interface ToolAdapter {
@@ -26,8 +39,9 @@ export interface ToolAdapter {
   category: Category;
   /** Args after the binary; `target` is the repo path (native) or /work (docker). */
   argv(target: string, ctx?: RunContext): string[];
-  /** Normalize raw stdout (JSON) into findings. Must not throw on empty input. */
-  parse(raw: string, repo: string): Finding[];
+  /** Normalize raw stdout (JSON) into findings. Must not throw on empty input.
+   *  `ctx.workspace` names the sub-directory being audited, when there is one. */
+  parse(raw: string, repo: string, ctx?: RunContext): Finding[];
   /**
    * Some tools (hadolint) scan explicit files, not a directory. When present,
    * the returned repo-relative paths are appended to argv (they resolve under
@@ -48,6 +62,13 @@ export interface ToolAdapter {
   /** Repo-content gate: null = run; a string = skip note (e.g. "no package-lock.json").
    *  Unlike `enumerate`, the result is NOT appended to argv. */
   applicable?(repo: string): string | null;
+  /**
+   * Directories this tool should be run in, when its manifest can live below the
+   * repo root (monorepos). Returns absolute paths, nearest-first; the runner
+   * execs once per directory and merges the findings, naming each in the note.
+   * Absent ⇒ one run at the repo root, as before.
+   */
+  workspaces?(repo: string): string[];
   /** Needs the network on every run (registry-query audits) → skipped under
    *  --offline. A function answers per-run ("only if feeds not cached"). */
   network?: boolean | (() => boolean);
@@ -166,8 +187,49 @@ function runNative(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
   if (applicableNote) return { name: adapter.name, ran: false, ok: false, findings: [], note: applicableNote };
   const argv = buildArgv(adapter, repo, repo, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
+
+  // A tool whose manifest can live below the root (the package-manager audits)
+  // runs once per workspace — INCLUDING the single-workspace case, which is where
+  // a repo like `web/pnpm-lock.yaml` lives and where getting the prefix wrong
+  // produces findings citing a path the repo doesn't have.
+  const dirs = adapter.workspaces?.(repo) ?? [];
+  if (dirs.length) return runEachWorkspace(adapter, repo, cmd, argv, dirs, ctx);
+
   const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], repo);
-  return finish(adapter, repo, stdout, failed, err, false);
+  return finish(adapter, repo, stdout, failed, err, false, ctx);
+}
+
+/**
+ * Exec one adapter once per workspace directory and merge the results.
+ *
+ * Findings stay relative to the REPO (not the workspace), so a `web/` advisory
+ * cites `web/pnpm-lock.yaml` and correlates with every other tool. The note
+ * names each directory audited: a monorepo where only some workspaces were
+ * covered must never read like a full pass.
+ */
+function runEachWorkspace(adapter: ToolAdapter, repo: string, cmd: string[], argv: string[], dirs: string[], ctx: RunContext): ToolRunResult {
+  const findings: Finding[] = [];
+  const covered: string[] = [];
+  const failures: string[] = [];
+  for (const dir of dirs) {
+    const rel = relative(repo, dir);
+    const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], dir);
+    // Relativize against the REPO, and tell the adapter which workspace it is in,
+    // so the path it records — and therefore the finding id — is repo-relative
+    // from the start.
+    const one = finish(adapter, repo, stdout, failed, err, false, { ...ctx, workspace: rel });
+    if (!one.ok) {
+      failures.push(`${rel || "."}: ${one.note}`);
+      continue;
+    }
+    findings.push(...one.findings);
+    covered.push(rel || ".");
+  }
+  const note = [
+    `${findings.length} finding(s) across ${covered.length} workspace(s): ${covered.join(", ") || "none"}`,
+    ...failures.map((f) => `failed ${f}`),
+  ].join(" · ");
+  return { name: adapter.name, ran: covered.length > 0, ok: covered.length > 0, findings, note };
 }
 
 /** Run one adapter via its official Docker image. Never throws. */
@@ -186,12 +248,20 @@ function runDocker(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
   return finish(adapter, repo, stdout, failed, err, true);
 }
 
-function finish(adapter: ToolAdapter, repo: string, stdout: string, failed: boolean, err: string | undefined, docker: boolean): ToolRunResult {
+function finish(
+  adapter: ToolAdapter,
+  repo: string,
+  stdout: string,
+  failed: boolean,
+  err: string | undefined,
+  docker: boolean,
+  ctx?: RunContext,
+): ToolRunResult {
   if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
   try {
     // Normalize paths to repo-relative: strip /work (docker) or the repo dir (native).
     const base = docker ? MOUNT : repo;
-    const findings = relativizeFindings(adapter.parse(stdout, repo), base);
+    const findings = relativizeFindings(adapter.parse(stdout, repo, ctx), base);
     return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker ? " (docker)" : ""}` };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${(e as Error).message}` };

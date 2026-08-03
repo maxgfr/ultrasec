@@ -10,6 +10,24 @@ a `--repo` that isn't a directory).
 Run the engine by its absolute path — see the `<skill-dir>` note in
 [SKILL.md](../SKILL.md); the examples here write `ultrasec` for brevity.
 
+**Global flags**, accepted by every command:
+
+| flag | effect |
+|---|---|
+| `--json` | machine-readable output (all but `render`/`dossier`) |
+| `--report <path>` | ALSO write this command's output to `<path>`. The extension picks the format — `.md`, `.html` (self-contained, no external assets), `.json` (the structured transcript), `.txt`/`.log`. **stdout is unchanged**; the archive is additive. An unsupported extension exits **2 before the command runs**, so a ten-minute scan never ends in an unwritable report. |
+| `--no-journal` | skip the `JOURNAL.md` entry (see below). |
+
+**`<run>/JOURNAL.md`** — every command that names a run directory (`--run`, or `--out` for
+`scan`) appends one timestamped entry to it: the command line, its headline result, any refused
+`--apply` rows, and the exit code. Append-only, created on first use, and kept by `clean`
+alongside the other deliverables. It answers "what did this audit actually cover?" an hour later,
+when the scrollback is gone. Best-effort: a journal write never fails a command.
+
+The read-only commands — `dossier`, `graph`, `paths`, `check`, `tools` — never journal, so
+`check` keeps writing nothing and a fan-out subagent running `dossier` stays a non-writer.
+`--report` still works for them; it writes where you pointed, not into the run.
+
 ## Recon
 
 ### `map --repo <dir>`
@@ -47,7 +65,14 @@ cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 **Focus** `--scope` · `--include` · `--exclude` · `--max-files` · `--gitignore`
 **Budget** `--budget quick|standard|thorough` · `--max-depth` · `--max-candidates`
 **Incremental** `--diff <ref>` / `--since <commit>` · `--merge` · `--resume`
-**Recall & provenance** `--sinks` · `--log-hygiene` · `--blame` (alias `--provenance`)
+**Recall & provenance** `--sinks` · `--log-hygiene` · `--blame` (alias `--provenance`) ·
+`--no-env-sources`
+
+`--no-env-sources` drops candidates whose SOURCE is an environment read (`process.env`,
+`os.getenv`). Those model configuration injection, which is real, but presume the operator of the
+deployment is an attacker — on a repo whose trust model says otherwise they can dominate the
+dossier. Opt-in: without it, enumeration is unchanged, and the source kind is on the finding
+either way (`env input at …` in the dossier), so batch-refuting them stays equally available.
 
 Writes `manifest.json`, `findings.json`, `graph.json`, `DOSSIER.md`; plus `sbom.cdx.json` when
 `syft` is installed, and `cache/scan-cache.json` under `--resume`.
@@ -138,7 +163,15 @@ Shared `--apply` behaviour: the argument may be **a file, a comma-separated list
 directory**. From a directory each stage picks up its own pattern, sorted for determinism —
 `*verdict*.json` (verify), `*triage*.json`, `*revalidat*.json`, `*investigat*`/`*discover*.json`.
 A directory with no match, or a fragment set where **no id matches the dossier**, exits 2 rather
-than folding nothing and reporting success.
+than folding nothing and reporting success. `--apply -` reads the payload from **stdin**, so a
+generated set of verdicts can be piped straight in.
+
+**Refused rows are always reported.** A row whose schema is wrong — an unknown `verdict`, a
+`category` outside the vocabulary, a missing `id` — is listed as `✗ dropped row N: <field> <value>
+is not one of …`, counted in the summary line, and included in `--json` as `dropped[]`. The valid
+rows still fold, because refusing a whole batch would waste the adjudication; `--strict` exits 1
+when anything was refused, so CI can decline a partial fold. A file where **nothing** is usable
+still exits 2, listing every rejection at once.
 
 `verify` additionally takes `--shards n --shard i`, which writes `VERIFY.todo.<i>.json` (the
 `.md` brief always covers the full worklist). Never let a subagent run `verify --shards` — each
@@ -177,7 +210,7 @@ fails when a candidate is still unadjudicated.
 
 ### `clean --run <dir>`
 By default removes the intermediate artifacts and **preserves the deliverables** —
-`SUMMARY.md`, `REPORT.md`, `index.html`, `findings.json`. Everything else counts as an
+`SUMMARY.md`, `REPORT.md`, `index.html`, `findings.json`, `JOURNAL.md`. Everything else counts as an
 intermediate ultrasec can regenerate, **including files you authored**: `CONTEXT.md`, `MAP.md`,
 `NARRATIVE.json`, `IMPLEMENT.md`, `sbom.cdx.json`, `LOGSTATS.json`, `orchestration/`. Copy those
 out first if you want them. A run that was never rendered has no deliverables, so it is removed

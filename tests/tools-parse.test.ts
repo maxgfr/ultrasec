@@ -97,7 +97,7 @@ describe("cargo-audit adapter", () => {
     expect(cargoAudit.applicable!(withLock)).toBeNull();
 
     const withoutLock = mkdtempSync(join(tmpdir(), "ultrasec-cargo-audit-"));
-    expect(cargoAudit.applicable!(withoutLock)).toBe("no Cargo.lock");
+    expect(cargoAudit.applicable!(withoutLock)).toMatch(/^no Cargo\.lock \(checked the root and its subdirectories\)$/);
   });
 });
 

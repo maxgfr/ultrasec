@@ -71,7 +71,7 @@ export function enumerateSensitiveLogCandidates(scan: RepoScan, opts: SensitiveL
     const lang = langForFile(file.rel);
     if (!lang) continue;
 
-    for (const sink of findSinks(lang, file.calls, LOG_SINKS)) {
+    for (const sink of findSinks(lang, file.calls, LOG_SINKS, file.imports)) {
       if (sink.kind !== "log") continue; // a default-catalog match on this call, not a log sink
 
       const raw = lines(file.rel)[sink.line - 1] ?? "";

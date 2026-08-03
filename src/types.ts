@@ -26,7 +26,12 @@ export type Confidence = (typeof CONFIDENCES)[number];
 // How a finding was surfaced. `taint` = a cross-file source→sink data-flow the
 // engine enumerated for the AI to adjudicate; the rest map to external tools or
 // non-taint reasoning the AI performs (authz/business-logic, weak crypto, …).
-export const CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "other"] as const;
+// "privacy" covers how personal data is handled rather than how it is protected:
+// a transfer to a third-party processor, a control named "anonymisation" that
+// only pseudonymises, a constant public salt, an absent retention policy. Those
+// are findings an auditor must be able to file as such — filing them under
+// "logs" or "secret", as the vocabulary previously forced, distorts the report.
+export const CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "privacy", "other"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
 // Lifecycle of a finding through the conservative verify gate. A candidate is

@@ -2,6 +2,7 @@ import { join, resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
+import { surfaceDropped } from "../apply-parse.js";
 import { buildWorklist, renderWorklistMd, shard, applyVerdicts, parseVerdicts } from "../verify.js";
 import { loadContextDoc } from "../context.js";
 
@@ -43,15 +44,16 @@ export function runVerify(args: ParsedArgs): number {
 }
 
 function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPath: string, args: ParsedArgs): number {
-  let verdicts: ReturnType<typeof parseVerdicts>;
+  let parsed: ReturnType<typeof parseVerdicts>;
   try {
-    verdicts = readApply(applyPath, /verdict.*\.json$/i, parseVerdicts);
+    parsed = readApply(applyPath, /verdict.*\.json$/i, parseVerdicts);
   } catch (e) {
     eprintln(`ultrasec verify: cannot read verdicts at ${(e as Error).message}`);
     return 2;
   }
+  const strict = flagBool(args, "strict");
 
-  const res = applyVerdicts(dossier, verdicts);
+  const res = applyVerdicts(dossier, parsed.rows);
   // Fail closed on an entirely stale fragment: every verdict targeting an
   // unknown id means the fold never engaged — exiting green would silently
   // discard the whole adjudication.
@@ -73,12 +75,13 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
           needsHuman: res.needsHuman,
           keptForHuman: res.keptForHuman,
           ignored: res.ignored,
+          dropped: parsed.dropped,
         },
         null,
         2,
       ),
     );
-    return 0;
+    return strict && parsed.dropped.length > 0 ? 1 : 0;
   }
   println(`ultrasec verify --apply → updated ${join(run, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed · ${res.dismissed} dismissed · ${res.needsHuman} needs-human`);
@@ -87,5 +90,5 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
     println(`  kept for human (high-severity, only 'unsupported' — not auto-dismissed):`);
     for (const k of res.keptForHuman) println(`    - ${k.id} [${k.severity}]`);
   }
-  return 0;
+  return surfaceDropped(parsed.dropped, strict, println);
 }

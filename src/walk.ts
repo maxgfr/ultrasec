@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, lstatSync, statSync, realpathSync } from "node:fs";
+import { readFileSync, readdirSync, lstatSync, statSync, realpathSync, type Dirent } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { byStr } from "./util.js";
 
@@ -217,6 +217,45 @@ export function parseGitignore(content: string): GitignoreRule[] {
 /** Recursively list files under `root`, skipping ignored dirs. Deterministic. */
 export function walk(root: string, opts: WalkOptions = {}): WalkedFile[] {
   return walkWithMeta(root, opts).files;
+}
+
+/** How deep below the repo root a manifest is still considered part of it. Two
+ *  levels covers the shapes that actually occur (`web/`, `packages/api/`) without
+ *  wandering into vendored trees. */
+const MANIFEST_MAX_DEPTH = 3;
+
+/**
+ * Every directory under `root` (root included) holding one of `names`, nearest
+ * first, then alphabetically — the discovery the package-manager audits need.
+ *
+ * Checking only the repo root, as they used to, silently skips every monorepo:
+ * on a repo with `web/pnpm-lock.yaml` and `api/poetry.lock`, `pnpm audit` was
+ * reported as "no pnpm-lock.yaml" while the vendored package-checker — which
+ * does walk the tree — found both and reported 49 advisories. A coverage hole
+ * that reads as a clean result is worse than a loud failure.
+ *
+ * Bounded and dependency-aware: `DEFAULT_IGNORE_DIRS` keeps it out of
+ * node_modules and friends, so a nested dependency's own lockfile is never
+ * mistaken for a workspace.
+ */
+export function findManifestDirs(root: string, names: readonly string[], maxDepth = MANIFEST_MAX_DEPTH): string[] {
+  const found: { dir: string; depth: number }[] = [];
+  const visit = (dir: string, depth: number): void => {
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory: not a reason to fail the audit
+    }
+    if (entries.some((e) => e.isFile() && names.includes(e.name))) found.push({ dir, depth });
+    if (depth >= maxDepth) return;
+    for (const e of entries) {
+      if (!e.isDirectory() || e.name.startsWith(".") || DEFAULT_IGNORE_DIRS.has(e.name)) continue;
+      visit(join(dir, e.name), depth + 1);
+    }
+  };
+  visit(root, 0);
+  return found.sort((a, b) => a.depth - b.depth || byStr(a.dir, b.dir)).map((f) => f.dir);
 }
 
 /** As `walk`, but also reports whether `maxFiles` truncated the result. */

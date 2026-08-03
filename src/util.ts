@@ -50,6 +50,9 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "eco",
   "list",
   "no-redact",
+  "strict",
+  "no-journal",
+  "no-env-sources",
   // `mcp` only.
   "allow-remote",
   "allow-write",
@@ -188,20 +191,28 @@ export function byStr(a: string, b: string): number {
 interface OutputSink {
   out: string[];
   err: string[];
+  /** Also write through to the real streams (`--report` archives, never diverts). */
+  tee?: boolean;
 }
 
 const outputSink = new AsyncLocalStorage<OutputSink>();
 
 export function eprintln(msg: string): void {
   const sink = outputSink.getStore();
-  if (sink) sink.err.push(msg);
-  else process.stderr.write(msg + "\n");
+  if (sink) {
+    sink.err.push(msg);
+    if (!sink.tee) return;
+  }
+  process.stderr.write(msg + "\n");
 }
 
 export function println(msg: string): void {
   const sink = outputSink.getStore();
-  if (sink) sink.out.push(msg);
-  else process.stdout.write(msg + "\n");
+  if (sink) {
+    sink.out.push(msg);
+    if (!sink.tee) return;
+  }
+  process.stdout.write(msg + "\n");
 }
 
 export interface Captured<T> {
@@ -214,6 +225,15 @@ export interface Captured<T> {
 // MCP server to turn a command's printed result into a tool result.
 export async function captureOutput<T>(fn: () => T | Promise<T>): Promise<Captured<T>> {
   const sink: OutputSink = { out: [], err: [] };
+  const result = await outputSink.run(sink, async () => await fn());
+  return { result, stdout: sink.out.join("\n"), stderr: sink.err.join("\n") };
+}
+
+// Same collection, but the streams still receive everything — the shape
+// `--report` and JOURNAL.md need, where the archive is ADDITIVE and a user
+// watching the terminal must see exactly what they saw before.
+export async function teeOutput<T>(fn: () => T | Promise<T>): Promise<Captured<T>> {
+  const sink: OutputSink = { out: [], err: [], tee: true };
   const result = await outputSink.run(sink, async () => await fn());
   return { result, stdout: sink.out.join("\n"), stderr: sink.err.join("\n") };
 }

@@ -62,7 +62,7 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
   for (const file of scan.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls)) {
+    for (const sink of findSinks(lang, file.calls, undefined, file.imports)) {
       const key = `${file.rel}:${sink.line}:${sink.kind}`;
       if (taken.has(key)) continue; // covered by taint, or already emitted this pass
       taken.add(key);

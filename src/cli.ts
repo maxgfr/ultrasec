@@ -3,6 +3,9 @@ import { pathToFileURL } from "node:url";
 import { warmGrammars } from "./vendor/codeindex-engine.mjs";
 import { VERSION } from "./types.js";
 import { parseArgs, flagBool, flagStr, numFlag, println, eprintln, type ParsedArgs } from "./util.js";
+import { teeOutput } from "./util.js";
+import { extname } from "node:path";
+import { appendJournal, writeReport, UnknownReportFormat, REPORT_FORMATS, type Transcript } from "./transcript.js";
 import { COMMAND_HANDLERS, type CommandHandler } from "./commands/registry.js";
 import { runStdioServer } from "./mcp/stdio.js";
 import { startHttpServer } from "./mcp/http.js";
@@ -141,9 +144,19 @@ GLOBAL
   --help, -h     Show this help.
   --version, -v  Print the version.
   --json         Machine-readable output (every command above except render/dossier).
+  --report <p>   ALSO archive this command's output to <p>; the extension picks the
+                 format (.md, .html, .json, .txt/.log). stdout is unchanged; an
+                 unknown extension exits 2 before the command runs.
+  --no-journal   Don't append this command to <run>/JOURNAL.md (the append-only
+                 record of every command run against an audit directory).
+  --strict       On an --apply stage, exit 1 if any row was refused, so a partial
+                 fold can't pass CI. (triage/verify/investigate/revalidate)
+
+  --apply -      Read the payload from stdin instead of a path.
 
 EXIT CODES
   0  ok        1  a gate failed (check) / nothing usable ingested (import)
+                  / rows refused under --strict
   2  usage or runtime error (bad flag value, unreadable run, unresolvable git ref)
 
 Each command's flags are listed above; \`--help\`/\`-h\` (anywhere) prints this help.
@@ -267,8 +280,73 @@ async function main(): Promise<void> {
   // regex fallback, and warmGrammars says so rather than degrading in silence.
   if (SCANNING_COMMANDS.has(args._[0] ?? "")) await warmGrammars({ label: "ultrasec" });
 
-  const code = await dispatch(args._[0], args);
+  const code = await withArchiving(args, argv, () => dispatch(args._[0], args));
   process.exit(code);
+}
+
+/**
+ * Commands that must leave the run directory untouched, and therefore never
+ * journal into it.
+ *
+ * Two promises depend on this. `check` is the CI gate, documented as writing
+ * nothing — a journal entry would be a write. And the orchestration contracts let
+ * fan-out subagents run `dossier`/`graph`/`paths` precisely because they don't
+ * write, with the orchestrator as the sole writer; several subagents appending to
+ * one JOURNAL.md would break that.
+ *
+ * `--report` still works for these: it writes where the caller pointed, not into
+ * the run.
+ */
+const READ_ONLY_COMMANDS = new Set(["dossier", "graph", "paths", "check", "tools", "help", "version"]);
+
+/**
+ * Run a command, archiving its output when asked.
+ *
+ * `--report <path>` writes this one command's transcript; a run directory gets an
+ * appended JOURNAL.md entry unless `--no-journal`. Both are ADDITIVE — the tee'ing
+ * sink still writes every line to the real streams, so stdout is byte-identical to
+ * a run without either flag. With neither requested, `dispatch` runs untouched and
+ * nothing is buffered.
+ *
+ * `mcp` is excluded: its stdout carries JSON-RPC frames and it never returns.
+ */
+async function withArchiving(args: ParsedArgs, argv: string[], execute: () => Promise<number>): Promise<number> {
+  const reportPath = flagStr(args, "report");
+  // `scan` names its run dir `--out`; every later stage calls it `--run`.
+  const runDir = flagStr(args, "run") ?? flagStr(args, "out");
+  const journal = runDir !== undefined && !READ_ONLY_COMMANDS.has(args._[0] ?? "") && !flagBool(args, "no-journal");
+  if ((!reportPath && !journal) || args._[0] === "mcp") return execute();
+
+  // Fail BEFORE running: writing a report is the point of passing the flag, and
+  // discovering the extension is unusable after a ten-minute scan is useless.
+  if (reportPath) {
+    const ext = extname(reportPath).replace(/^\./, "").toLowerCase();
+    if (!REPORT_FORMATS.includes(ext)) {
+      eprintln(`ultrasec: ${new UnknownReportFormat(ext || "(none)").message}`);
+      return 2;
+    }
+  }
+
+  const { result, stdout, stderr } = await teeOutput(execute);
+  const transcript: Transcript = { command: `ultrasec ${argv.join(" ")}`, stdout, stderr, code: result, at: new Date().toISOString() };
+
+  if (reportPath) {
+    try {
+      writeReport(reportPath, transcript);
+    } catch (e) {
+      eprintln(`ultrasec: could not write --report ${reportPath}: ${(e as Error).message}`);
+      return 2;
+    }
+  }
+  // Best-effort: the journal records the audit, it never gates it.
+  if (journal && runDir) {
+    try {
+      appendJournal(runDir, transcript);
+    } catch {
+      /* an unwritable run dir already surfaced through the command itself */
+    }
+  }
+  return result;
 }
 
 // Only auto-run when this bundle is the process entry point — never when a test

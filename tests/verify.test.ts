@@ -114,8 +114,11 @@ describe("priorAnalysis signal (deepsec revalidation) — shown, never auto-appl
 
 describe("parseVerdicts", () => {
   it("accepts a bare array and a {verdicts:[]} wrapper, dropping malformed", () => {
-    expect(parseVerdicts('[{"id":"a","verdict":"supported"},{"bad":1}]')).toEqual([{ id: "a", verdict: "supported", note: undefined, exploitPath: undefined }]);
-    expect(parseVerdicts('{"verdicts":[{"id":"b","verdict":"refuted"}]}')[0]!.id).toBe("b");
+    const out = parseVerdicts('[{"id":"a","verdict":"supported"},{"bad":1}]');
+    expect(out.rows).toEqual([{ id: "a", verdict: "supported", note: undefined, exploitPath: undefined }]);
+    expect(out.dropped).toHaveLength(1);
+    expect(out.dropped[0]!.reason).toMatch(/id missing.*verdict missing/);
+    expect(parseVerdicts('{"verdicts":[{"id":"b","verdict":"refuted"}]}').rows[0]!.id).toBe("b");
   });
 
   it("fails closed on an unrecognized container shape instead of yielding 0 rows", () => {
@@ -127,7 +130,7 @@ describe("parseVerdicts", () => {
   });
 
   it("still accepts a genuinely empty array (a no-op fragment)", () => {
-    expect(parseVerdicts("[]")).toEqual([]);
+    expect(parseVerdicts("[]")).toEqual({ rows: [], dropped: [] });
   });
 });
 

@@ -18,7 +18,7 @@ Two rules apply to everything below:
 |---|---|
 | `severity` | `critical` · `high` · `medium` · `low` · `info` |
 | `confidence` | `high` · `medium` · `low` |
-| `category` | `taint` · `sast` · `dep` · `secret` · `config` · `authz` · `crypto` · `logs` · `other` |
+| `category` | `taint` · `sast` · `dep` · `secret` · `config` · `authz` · `crypto` · `logs` · `privacy` · `other` |
 | `status` | `open` · `confirmed` · `needs-human` · `dismissed` |
 | verify `verdict` | `supported` · `partial` · `unsupported` · `refuted` |
 | triage `verdict` | `noise` · `keep` |

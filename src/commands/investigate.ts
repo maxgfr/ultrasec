@@ -2,6 +2,7 @@ import { resolve } from "node:path";
 import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
+import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { scanRepo } from "../scan.js";
 import { buildAttackSurface } from "../map.js";
@@ -25,31 +26,40 @@ export function runInvestigate(args: ParsedArgs): number {
 
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
-    let discoveries: ReturnType<typeof parseDiscoveries>;
+    let parsed: ReturnType<typeof parseDiscoveries>;
     try {
-      discoveries = readApply(applyPath, /(investigat|discover).*\.json$/i, parseDiscoveries);
+      parsed = readApply(applyPath, /(investigat|discover).*\.json$/i, parseDiscoveries);
     } catch (e) {
       eprintln(`ultrasec investigate: cannot read discoveries at ${(e as Error).message}`);
       return 2;
     }
-    const res = ingestDiscoveries(dossier, discoveries, repo);
+    const strict = flagBool(args, "strict");
+    const res = ingestDiscoveries(dossier, parsed.rows, repo);
     persistFindings(run, dossier, res.findings);
 
     if (flagBool(args, "json")) {
       println(
         JSON.stringify(
-          { ingested: res.ingested, folded: res.folded, rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })) },
+          {
+            ingested: res.ingested,
+            folded: res.folded,
+            rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })),
+            dropped: parsed.dropped,
+          },
           null,
           2,
         ),
       );
-      return 0;
+      return strict && parsed.dropped.length > 0 ? 1 : 0;
     }
     println(`ultrasec investigate --apply → updated ${run}/findings.json`);
-    println(`  ingested ${res.ingested} new ${"ultrasec-ai"} finding(s) · folded ${res.folded} into existing · rejected ${res.rejected.length}`);
+    println(
+      `  ingested ${res.ingested} new ${"ultrasec-ai"} finding(s) · folded ${res.folded} into existing · rejected ${res.rejected.length} · dropped ${parsed.dropped.length}`,
+    );
     for (const r of res.rejected) println(`  ✗ rejected "${r.discovery.title}": ${r.reason}`);
+    const code = surfaceDropped(parsed.dropped, strict, println);
     if (res.ingested) println(`  next: \`ultrasec dossier <id> --run ${run}\` then \`verify\` — adjudicate them like any candidate.`);
-    return 0;
+    return code;
   }
 
   // Emit mode
