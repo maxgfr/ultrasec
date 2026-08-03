@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { join, relative } from "node:path";
 import type { Category, Finding, PathStep, CodeLoc } from "../types.js";
 import { detect } from "./registry.js";
 import { correlate } from "./correlate.js";
@@ -48,6 +49,13 @@ export interface ToolAdapter {
   /** Repo-content gate: null = run; a string = skip note (e.g. "no package-lock.json").
    *  Unlike `enumerate`, the result is NOT appended to argv. */
   applicable?(repo: string): string | null;
+  /**
+   * Directories this tool should be run in, when its manifest can live below the
+   * repo root (monorepos). Returns absolute paths, nearest-first; the runner
+   * execs once per directory and merges the findings, naming each in the note.
+   * Absent ⇒ one run at the repo root, as before.
+   */
+  workspaces?(repo: string): string[];
   /** Needs the network on every run (registry-query audits) → skipped under
    *  --offline. A function answers per-run ("only if feeds not cached"). */
   network?: boolean | (() => boolean);
@@ -166,8 +174,46 @@ function runNative(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
   if (applicableNote) return { name: adapter.name, ran: false, ok: false, findings: [], note: applicableNote };
   const argv = buildArgv(adapter, repo, repo, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
-  const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], repo);
+
+  // A tool whose manifest can live below the root (the package-manager audits)
+  // runs once per workspace. One run at the root, as before, otherwise.
+  const dirs = adapter.workspaces?.(repo) ?? [];
+  if (dirs.length > 1) return runEachWorkspace(adapter, repo, cmd, argv, dirs);
+
+  const cwd = dirs[0] ?? repo;
+  const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], cwd);
   return finish(adapter, repo, stdout, failed, err, false);
+}
+
+/**
+ * Exec one adapter once per workspace directory and merge the results.
+ *
+ * Findings stay relative to the REPO (not the workspace), so a `web/` advisory
+ * cites `web/pnpm-lock.yaml` and correlates with every other tool. The note
+ * names each directory audited: a monorepo where only some workspaces were
+ * covered must never read like a full pass.
+ */
+function runEachWorkspace(adapter: ToolAdapter, repo: string, cmd: string[], argv: string[], dirs: string[]): ToolRunResult {
+  const findings: Finding[] = [];
+  const covered: string[] = [];
+  const failures: string[] = [];
+  for (const dir of dirs) {
+    const rel = relative(repo, dir) || ".";
+    const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], dir);
+    const one = finish(adapter, dir, stdout, failed, err, false);
+    if (!one.ok) {
+      failures.push(`${rel}: ${one.note}`);
+      continue;
+    }
+    // Re-anchor onto the repo so paths line up with every other tool's findings.
+    for (const f of one.findings) findings.push(rel === "." ? f : { ...f, ...(f.sink ? { sink: { ...f.sink, file: join(rel, f.sink.file) } } : {}) });
+    covered.push(rel);
+  }
+  const note = [
+    `${findings.length} finding(s) across ${covered.length} workspace(s): ${covered.join(", ") || "none"}`,
+    ...failures.map((f) => `failed ${f}`),
+  ].join(" · ");
+  return { name: adapter.name, ran: covered.length > 0, ok: covered.length > 0, findings, note };
 }
 
 /** Run one adapter via its official Docker image. Never throws. */

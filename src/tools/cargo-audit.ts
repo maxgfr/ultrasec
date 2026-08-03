@@ -1,5 +1,6 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { findManifestDirs } from "../walk.js";
+
+const CARGO_LOCKFILES = ["Cargo.lock"] as const;
 import type { Finding } from "../types.js";
 import type { ToolAdapter } from "./run.js";
 import { makeToolFinding } from "./normalize.js";
@@ -14,7 +15,8 @@ export const cargoAudit: ToolAdapter = {
   // Gate on Cargo.lock (same pattern as pip-audit's requirements.txt gate):
   // without it, cargo-audit exits non-zero on every non-Rust repo and used to
   // surface as noisy "run failed" instead of a clean, expected skip.
-  applicable: (repo) => (existsSync(join(repo, "Cargo.lock")) ? null : "no Cargo.lock"),
+  applicable: (repo) => (findManifestDirs(repo, CARGO_LOCKFILES).length ? null : "no Cargo.lock (checked the root and its subdirectories)"),
+  workspaces: (repo) => findManifestDirs(repo, CARGO_LOCKFILES),
   argv: () => ["audit", "--format", "json"],
   parse(raw): Finding[] {
     const data = JSON.parse(raw || "{}") as any;

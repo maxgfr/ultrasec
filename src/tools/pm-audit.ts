@@ -5,6 +5,11 @@ import type { Finding } from "../types.js";
 import type { ToolAdapter } from "./run.js";
 import { makeToolFinding, normalizeSeverity, firstCwe, cvesIn, parseJsonStream } from "./normalize.js";
 import { detect } from "./registry.js";
+import { findManifestDirs } from "../walk.js";
+
+const NPM_LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json"] as const;
+const PNPM_LOCKFILES = ["pnpm-lock.yaml"] as const;
+const YARN_LOCKFILES = ["yarn.lock"] as const;
 
 // Native package-manager registry audits (npm/pnpm/yarn) — the vulnerability
 // data every JS project already has a client for, no extra scanner install.
@@ -12,9 +17,12 @@ import { detect } from "./registry.js";
 // --offline) and all exit non-zero when they find something (the runner
 // already recovers stdout on non-zero exit — see src/tools/run.ts `exec`).
 //
-// v1 limitation: only the ROOT lockfile is audited (no monorepo workspace
-// sub-lockfile walk) — trivy/osv-scanner already cover that recursively, so
-// this is a documented gap rather than a silent one.
+// Monorepos: the lockfile is often NOT at the repo root (web/pnpm-lock.yaml,
+// packages/*/package-lock.json). Gating on the root alone reported "no
+// pnpm-lock.yaml" — indistinguishable from a repo with no JS at all — while the
+// vendored package-checker, which walks the tree, found the same lockfiles and
+// reported 49 advisories. Both `applicable` and `workspaces` now use the shared
+// `findManifestDirs` walk, so the audits run where the manifests actually are.
 
 /** Extract a GHSA slug ("GHSA-xxxx-xxxx-xxxx") out of an advisory URL, if any. */
 function ghsaFromUrl(url: unknown): string | undefined {
@@ -136,7 +144,8 @@ export const npmAudit: ToolAdapter = {
   category: "dep",
   network: true,
   command: () => (detect("npm").installed ? ["npm"] : null),
-  applicable: (repo) => (existsSync(join(repo, "package-lock.json")) || existsSync(join(repo, "npm-shrinkwrap.json")) ? null : "no package-lock.json"),
+  applicable: (repo) => (findManifestDirs(repo, NPM_LOCKFILES).length ? null : "no package-lock.json (checked the root and its subdirectories)"),
+  workspaces: (repo) => findManifestDirs(repo, NPM_LOCKFILES),
   argv: () => ["audit", "--json"],
   parse(raw, repo): Finding[] {
     const data = parseJson(raw);
@@ -153,7 +162,8 @@ export const pnpmAudit: ToolAdapter = {
   category: "dep",
   network: true,
   command: () => (detect("pnpm").installed ? ["pnpm"] : null),
-  applicable: (repo) => (existsSync(join(repo, "pnpm-lock.yaml")) ? null : "no pnpm-lock.yaml"),
+  applicable: (repo) => (findManifestDirs(repo, PNPM_LOCKFILES).length ? null : "no pnpm-lock.yaml (checked the root and its subdirectories)"),
+  workspaces: (repo) => findManifestDirs(repo, PNPM_LOCKFILES),
   argv: () => ["audit", "--json"],
   parse(raw): Finding[] {
     const data = parseJson(raw);
@@ -217,7 +227,8 @@ export const yarnAudit: ToolAdapter = {
   category: "dep",
   network: true,
   streaming: true,
-  applicable: (repo) => (existsSync(join(repo, "yarn.lock")) ? null : "no yarn.lock"),
+  applicable: (repo) => (findManifestDirs(repo, YARN_LOCKFILES).length ? null : "no yarn.lock (checked the root and its subdirectories)"),
+  workspaces: (repo) => findManifestDirs(repo, YARN_LOCKFILES),
   command: () => {
     const major = yarnMajor();
     if (major === null) return null;

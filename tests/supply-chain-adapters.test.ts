@@ -163,7 +163,7 @@ describe("npm-audit adapter", () => {
     expect(npmAudit.applicable!(withShrinkwrap)).toBeNull();
 
     const withoutLock = mkdtempSync(join(tmpdir(), "ultrasec-npm-audit-"));
-    expect(npmAudit.applicable!(withoutLock)).toBe("no package-lock.json");
+    expect(npmAudit.applicable!(withoutLock)).toMatch(/^no package-lock\.json \(checked the root and its subdirectories\)$/);
   });
 
   it("command(): probes the real npm binary, not the adapter name", () => {
@@ -209,7 +209,7 @@ describe("pnpm-audit adapter (reuses the npm-v6 parser — pnpm emits the same l
     expect(pnpmAudit.applicable!(withLock)).toBeNull();
 
     const withoutLock = mkdtempSync(join(tmpdir(), "ultrasec-pnpm-audit-"));
-    expect(pnpmAudit.applicable!(withoutLock)).toBe("no pnpm-lock.yaml");
+    expect(pnpmAudit.applicable!(withoutLock)).toMatch(/^no pnpm-lock\.yaml \(checked the root and its subdirectories\)$/);
   });
 
   it("command(): probes the real pnpm binary, not the adapter name", () => {
@@ -274,7 +274,7 @@ describe("yarn-audit adapter — applicable() and command()/argv() version dispa
     expect(yarnAudit.applicable!(withLock)).toBeNull();
 
     const withoutLock = mkdtempSync(join(tmpdir(), "ultrasec-yarn-audit-"));
-    expect(yarnAudit.applicable!(withoutLock)).toBe("no yarn.lock");
+    expect(yarnAudit.applicable!(withoutLock)).toMatch(/^no yarn\.lock \(checked the root and its subdirectories\)$/);
   });
 
   it("command() never throws, and command()/argv() agree with the real yarn on this host (classic vs berry)", () => {
