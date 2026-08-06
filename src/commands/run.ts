@@ -7,8 +7,8 @@ import { runPipeline, ALL_STAGES, type StageName, type PipelineOptions } from ".
 // `ultrasec run --repo <dir> [--out <run>] [--powered] [--agent <name|tpl>]
 //    [--cross-check <name|tpl>] [--stages a,b,c] [--no-scan]`
 //
-// Sequences the AI stages (context → triage → investigate → verify → revalidate →
-// narrative → implement → check → render). The DEFAULT (no --powered) makes ZERO external
+// Sequences the AI stages (context → assumptions → triage → investigate → verify →
+// revalidate → variants → narrative → implement → check → render). The DEFAULT (no --powered) makes ZERO external
 // calls: it only scans + emits the worklists and prints the agent TODO list. With
 // --powered it drives the configured agent CLI per worklist (the keys live in that
 // CLI, not in ultrasec); --cross-check adds a second agent whose high/critical

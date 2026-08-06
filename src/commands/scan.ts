@@ -6,6 +6,7 @@ import { buildGraph, reverseDependents } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
 import { enumerateSinkCandidates } from "../sinks.js";
 import { enumerateSensitiveLogCandidates } from "../logs/hygiene.js";
+import { auditAgenticWorkflows } from "../actions.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
 import { loadScanCache, saveScanCache } from "../cache.js";
@@ -16,6 +17,7 @@ import { generateSbom } from "../tools/sbom.js";
 import { ADAPTERS } from "../tools/index.js";
 import { writeDossier, loadDossier, mergeDossier, countBySeverity, type Dossier } from "../store.js";
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest } from "../types.js";
+import { loadContextDoc } from "../context.js";
 
 // Budget presets scale call-graph depth × candidate breadth. `standard` reproduces
 // the historical defaults (6 hops / 1000 candidates).
@@ -89,7 +91,15 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     if (existsSync(join(out, "graph.json"))) {
       try {
         targets = reverseDependents(loadDossier(out).graph, changed, REVDEP_DEPTH);
-        diffNote = `--diff ${diffRef}: ${changed.length} changed → ${targets.length} file(s) incl. reverse-deps`;
+        // Blast radius: how much else depends on what moved. Risk follows this,
+        // not diff size — Heartbleed was two lines. A small change under a large
+        // fan-in is the shape that deserves the careful read, and saying so here
+        // is the difference between a number and a decision.
+        const downstream = targets.length - changed.length;
+        const wide = downstream >= 50;
+        diffNote =
+          `--diff ${diffRef}: ${changed.length} changed → ${targets.length} file(s) incl. reverse-deps ` +
+          `(blast radius ${downstream}${wide ? " — WIDE: review removed validation/authz here first, whatever the diff size" : ""})`;
       } catch {
         diffNote = `--diff ${diffRef}: ${changed.length} changed file(s) (prior dossier unreadable; reverse-deps skipped)`;
       }
@@ -117,7 +127,11 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // `--no-env-sources`: drop flows rooted in process.env / os.getenv. Opt-in, so
   // the default candidate set is unchanged (see TaintOptions.excludeEnvSources).
   const excludeEnvSources = flagBool(args, "no-env-sources");
-  const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn, excludeEnvSources });
+  // `--strict-scope`: drop candidates whose source sits in a DIFFERENT function
+  // of the same file. Opt-in for the same reason as above — co-location is weak
+  // evidence, not zero evidence (a value can travel through module state).
+  const strictScope = flagBool(args, "strict-scope");
+  const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn, excludeEnvSources, strictScope });
   const taintFindings = taint.findings;
 
   // Orphan-sink recall (opt-in `--sinks`): dangerous sinks the source-gated taint
@@ -136,6 +150,12 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const hygieneCand = logHygieneOn
     ? enumerateSensitiveLogCandidates(scan, { maxCandidates: explicitMaxCandidates })
     : { findings: [] as Finding[], truncated: 0, total: 0 };
+
+  // Agentic CI: workflows that hand a coding agent the repo's own event data.
+  // Always on — it reads only `.github/workflows/*.yml`, costs nothing when there
+  // are none, and a repo that ships one of these has a live injection path that
+  // no dependency scanner and no taint walk will report.
+  const agenticFindings = auditAgenticWorkflows(repo);
 
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
@@ -162,12 +182,12 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // without this second (idempotent) pass a scanner finding sitting exactly on a
   // taint/orphan-sink/hygiene node would ship as a duplicate instead of
   // corroborating the candidate.
-  const merged = correlate([...taintFindings, ...sinkCand.findings, ...hygieneCand.findings, ...tool.findings]);
+  const merged = correlate([...taintFindings, ...sinkCand.findings, ...hygieneCand.findings, ...agenticFindings, ...tool.findings]);
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
   const enrich = !(flagBool(args, "no-enrich") || offline);
-  const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich });
+  const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich, context: loadContextDoc(out) });
 
   // Provenance (opt-in `--blame`/`--provenance`): deterministic git-blame author/
   // date + CODEOWNERS owner per finding — a triage signal, never a suppression

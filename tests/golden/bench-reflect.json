@@ -1,0 +1,161 @@
+{
+  "findings": [
+    {
+      "id": "620cb2284c2e",
+      "category": "taint",
+      "cwe": "CWE-502",
+      "title": "Insecure deserialization: untrusted input reaches load()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.py",
+        "line": 7,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "routes.py",
+        "line": 8,
+        "kind": "deserialize",
+        "symbol": "handler"
+      },
+      "path": [
+        {
+          "file": "routes.py",
+          "line": 7,
+          "symbol": "handler",
+          "why": "untrusted input (http): request.args"
+        },
+        {
+          "file": "routes.py",
+          "line": 8,
+          "symbol": "handler",
+          "why": "deserialize sink: load()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "message": "Intra-file candidate: http input at routes.py:7 may reach the deserialize sink load() at routes.py:8 through 1 hop(s). Tainted data deserialized into objects. Use a safe loader (yaml.safe_load, JSON) and never unpickle untrusted input. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/502.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "7cacc5e7b8f2",
+      "category": "taint",
+      "cwe": "CWE-470",
+      "title": "Unsafe reflection: untrusted input reaches import_module()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "routes.py",
+        "line": 7,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.py",
+        "line": 6,
+        "kind": "reflect",
+        "symbol": "load"
+      },
+      "path": [
+        {
+          "file": "routes.py",
+          "line": 7,
+          "symbol": "handler",
+          "why": "untrusted input (http): request.args"
+        },
+        {
+          "file": "routes.py",
+          "line": 8,
+          "symbol": "handler",
+          "why": "calls load()"
+        },
+        {
+          "file": "sink.py",
+          "line": 6,
+          "symbol": "load",
+          "why": "reflect sink: import_module()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "message": "Cross-file candidate: http input at routes.py:7 may reach the reflect sink import_module() at sink.py:6 through 2 hop(s). Tainted data selecting a class, module, method or attribute by name. Map the input through an explicit allow-list of permitted targets instead of resolving it dynamically. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/470.html"
+      ],
+      "status": "open",
+      "risk": 30
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.py",
+      "safe.py",
+      "sink.py"
+    ],
+    "edges": [
+      {
+        "from": "routes.py",
+        "to": "sink.py",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handler",
+        "toSymbol": "load"
+      },
+      {
+        "from": "routes.py",
+        "to": "sink.py",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handler": [
+        "routes.py"
+      ],
+      "safe": [
+        "safe.py"
+      ],
+      "load": [
+        "sink.py"
+      ]
+    },
+    "callersBySymbol": {
+      "get": [
+        {
+          "file": "routes.py",
+          "line": 7,
+          "symbol": "handler"
+        },
+        {
+          "file": "safe.py",
+          "line": 7,
+          "symbol": "safe"
+        },
+        {
+          "file": "safe.py",
+          "line": 9,
+          "symbol": "safe"
+        }
+      ],
+      "import_module": [
+        {
+          "file": "sink.py",
+          "line": 6,
+          "symbol": "load"
+        }
+      ],
+      "load": [
+        {
+          "file": "routes.py",
+          "line": 8,
+          "symbol": "handler"
+        }
+      ]
+    }
+  }
+}

@@ -156,18 +156,14 @@ Two ways to get the scanners without installing them on the host:
   network-fetched state) — see the comment in `docker/Dockerfile` for the
   air-gapped warm-up commands.
 
-## Recommended additions (researched, not yet adapters)
+## Recommended additions
 
-Net-new coverage worth adding next (none overlap trivy), phase-2 candidates:
-
-- **GuardDog** (`ghcr.io/datadog/guarddog`) — malicious-package / typosquat
-  detection, a class no CVE scanner sees (opt-in network). Adapter sketch:
-  `category: "dep"`, `argv` runs `guarddog npm|pypi verify <lockfile> --output-format json`
-  per detected ecosystem (mirrors the pm-audit multi-ecosystem gate), `parse`
-  maps each flagged package into a Finding the same way package-checker does.
-- **TruffleHog** — *live* secret verification (verified/unverified) to feed the
-  `verified` field on secret-category findings; `category: "secret"`.
-- **cppcheck** — C/C++ memory-safety via SARIF (needs stderr capture).
+The three phase-2 candidates are now **built**: `guarddog` (malicious packages /
+typosquats — the class no CVE scanner sees), `trufflehog --only-verified` (live
+secret verification, feeding the `verified` field) and `cppcheck` (C/C++ memory
+safety). cppcheck is why `ToolAdapter` grew a `stderr` flag: it writes its
+diagnostics to fd 2, and parsing stdout would have reported a clean run on a
+codebase full of memory bugs.
 
 Brakeman and CodeQL were screened out (non-commercial / private-repo licence);
 **osv-scalibr** was screened out too — it's an inventory extractor already

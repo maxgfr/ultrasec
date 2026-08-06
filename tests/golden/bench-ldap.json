@@ -32,6 +32,8 @@
           "why": "ldap sink: search()"
         }
       ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
       "message": "Intra-file candidate: http input at vuln.js:2 may reach the ldap sink search() at vuln.js:3 through 1 hop(s). Tainted data concatenated into an LDAP filter/DN. Escape with the LDAP escaping API (ldap.escape / escapeFilter / escapeDN). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

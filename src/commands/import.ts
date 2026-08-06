@@ -8,6 +8,7 @@ import { addProvenance } from "../provenance.js";
 import { buildGraph } from "../graph.js";
 import { writeDossier, loadDossier, countBySeverity, type Dossier } from "../store.js";
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest } from "../types.js";
+import { loadContextDoc } from "../context.js";
 
 // `ultrasec import <findings.json> --run <dir> [--format deepsec-json]
 //   [--no-enrich/--offline] [--blame] [--json]`
@@ -65,7 +66,7 @@ export async function runImport(args: ParsedArgs): Promise<number> {
 
   const repo = prev?.manifest.repo ?? resolve(flagStr(args, "repo") ?? ".");
   const enrichOn = !(flagBool(args, "no-enrich") || flagBool(args, "offline"));
-  const { findings: enriched, note: riskNote } = await enrichFindings(correlated, { enabled: enrichOn });
+  const { findings: enriched, note: riskNote } = await enrichFindings(correlated, { enabled: enrichOn, context: loadContextDoc(run) });
 
   // Opt-in provenance (needs the repo on disk; offline-tolerant).
   const blameOn = flagBool(args, "blame") || flagBool(args, "provenance");

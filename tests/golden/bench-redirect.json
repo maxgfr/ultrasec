@@ -32,6 +32,8 @@
           "why": "redirect sink: redirect()"
         }
       ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
       "message": "Intra-file candidate: http input at vuln.js:2 may reach the redirect sink redirect() at vuln.js:3 through 1 hop(s). Tainted data used as a redirect target. Allow-list the destination or only permit relative paths. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

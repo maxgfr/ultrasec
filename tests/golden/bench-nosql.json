@@ -38,6 +38,8 @@
           "why": "nosql sink: find()"
         }
       ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
       "message": "Cross-file candidate: http input at routes.js:3 may reach the nosql sink find() at sink.js:3 through 2 hop(s). Tainted data shaped into a NoSQL query object/operator ($where, $ne, $gt …). Coerce types and reject operator keys (mongo-sanitize); never pass a raw request object as a filter. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

@@ -123,6 +123,36 @@ numerous and easy to flood a report with — turn it on when logging hygiene is
 actually in scope for the audit, and keep the same discipline as everywhere else:
 report what you can show reaches an untrusted value, not every log statement.
 
+## When there is no CVSS vector: likelihood × impact
+
+Authz, business-logic and privacy findings have no vector to compute. The OWASP Risk Rating
+factors keep two auditors within a band of each other — score each 0–9, average the two halves.
+
+**Likelihood** — skill required · motive · opportunity (what access is needed) · population size ·
+ease of discovery · ease of exploit · awareness (is it public knowledge?) · intrusion detection
+(would you notice it happening?).
+
+**Impact, technical** — loss of confidentiality · integrity · availability · accountability.
+**Impact, business** — financial damage · reputation · non-compliance · privacy violation.
+
+The business row is the one usually skipped and usually decisive. "An attacker reads any user's
+invoice" is a medium technical finding and a regulatory event; rate it as the latter — and **name
+the factor that drove the rating**, so a reader can disagree with the reasoning rather than with
+the number.
+
+## Reviewing a diff: risk follows blast radius, not size
+
+`scan --diff` reports how many files depend on what changed. Use it, and reject the size heuristic:
+
+- **"Small PR, low risk"** — Heartbleed was two lines.
+- **"Just a refactor"** — refactors break invariants; that is what they move.
+- **Validation or an authz check removed** — HIGH regardless of diff size, and regardless of tests
+  passing. Tests cover the paths someone thought of.
+- **Wide blast radius (50+ dependents) on a security-relevant change** — read it first.
+
+Removals deserve more attention than additions: a deleted guard looks like cleanup in a diff and
+like a vulnerability in production.
+
 ## Anti-patterns (what makes an audit useless)
 
 1. **Listing every OWASP deviation as a finding.** OWASP is a checklist, not a bug list.

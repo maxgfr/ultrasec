@@ -1,0 +1,39 @@
+name: AI triage
+on:
+  issues:
+    types: [opened]
+  pull_request_target:
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      # Vector A: the value never appears in the prompt, only its env name does.
+      - name: Summarize
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        uses: anthropics/claude-code-action@v1
+        id: summarize
+        with:
+          prompt: |
+            Summarize the following report for the maintainers.
+            $ISSUE_BODY
+
+      # Vector B: interpolated straight into the prompt.
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: "Label this issue titled ${{ github.event.issue.title }}"
+          claude_args: "--dangerously-skip-permissions"
+
+      # Vector G: the model's output is executed.
+      - run: eval "${{ steps.summarize.outputs.result }}"
+
+      # Vector I
+      - uses: anthropics/claude-code-action@v1
+        with:
+          allowed_non_write_users: "*"
+          prompt: "hello"

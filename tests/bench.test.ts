@@ -51,8 +51,8 @@ const classes = readdirSync(BENCH)
 const scorecard: { cwe: string; tpr: number; fpr: number; youden: number; cases: number }[] = [];
 
 describe("bench — per-CWE detection scorecard", () => {
-  it("covers all 16 catalog sink classes", () => {
-    expect(classes.length).toBe(16);
+  it("covers all 27 catalog sink classes", () => {
+    expect(classes.length).toBe(27);
   });
 
   for (const cls of classes) {

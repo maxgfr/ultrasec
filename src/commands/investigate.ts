@@ -1,4 +1,5 @@
-import { resolve } from "node:path";
+import { readFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
@@ -6,7 +7,8 @@ import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { scanRepo } from "../scan.js";
 import { buildAttackSurface } from "../map.js";
-import { buildInvestigateWorklist, renderInvestigateMd, ingestDiscoveries, parseDiscoveries } from "../investigate.js";
+import { buildInvestigateWorklist, renderInvestigateMd, ingestDiscoveries, parseDiscoveries, LENSES } from "../investigate.js";
+import { LEADS_FILE } from "../assumptions.js";
 
 // `ultrasec investigate --run <dir> [--repo <dir>]`             → emit region worklist
 // `ultrasec investigate --apply <file|dir|a,b,c> --run <dir>`   → ingest discoveries
@@ -70,9 +72,29 @@ export function runInvestigate(args: ParsedArgs): number {
     maxFiles: numFlag(args, "max-files"),
     gitignore: flagBool(args, "gitignore"),
   };
+  // Leads from `assumptions`, when that stage ran: places the code trusts
+  // something nothing verifies. Best-effort — a missing or malformed file simply
+  // means no leads, never a failed emit.
+  let leads: { at: string; claim: string }[] = [];
+  try {
+    leads = JSON.parse(readFileSync(join(run, LEADS_FILE), "utf8")) as typeof leads;
+    if (!Array.isArray(leads)) leads = [];
+  } catch {
+    leads = [];
+  }
+
+  // A lens changes the QUESTION, not the scope. Fail closed on an unknown name:
+  // silently hunting with the default frame when a specific one was asked for is
+  // how "no findings" comes to mean "not looked for".
+  const lens = flagStr(args, "lens");
+  if (lens !== undefined && !Object.hasOwn(LENSES, lens)) {
+    eprintln(`ultrasec: unknown --lens '${lens}' (expected ${Object.keys(LENSES).join("|")}).`);
+    return 2;
+  }
+
   let regions: ReturnType<typeof buildInvestigateWorklist>;
   try {
-    regions = buildInvestigateWorklist(buildAttackSurface(scanRepo(repo, scanOpts)), dossier.graph);
+    regions = buildInvestigateWorklist(buildAttackSurface(scanRepo(repo, scanOpts)), dossier.graph, leads, lens);
   } catch (e) {
     eprintln(`ultrasec investigate: ${(e as Error).message}`);
     return 2;

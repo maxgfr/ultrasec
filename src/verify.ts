@@ -1,5 +1,5 @@
 import type { Dossier } from "./store.js";
-import { VERDICTS, type Finding, type Status, type Verdict } from "./types.js";
+import { BROCARDS, VERDICTS, type Brocard, type Finding, type Status, type Verdict } from "./types.js";
 import { byStr } from "./util.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 
@@ -35,6 +35,8 @@ export interface VerdictInput {
   verdict: Verdict;
   note?: string;
   exploitPath?: string;
+  /** Named ground for a refutation (see BROCARDS). Ignored on other verdicts. */
+  brocard?: Brocard;
 }
 
 /** Findings still needing adjudication (open or previously needs-human). */
@@ -81,10 +83,16 @@ export function renderWorklistMd(items: VerifyItem[], context?: string): string 
   L.push(`the flow is **real and exploitable**, and set a verdict:`);
   L.push(`\`supported\` · \`partial\` · \`unsupported\` · \`refuted\` (+ a short note, and an`);
   L.push(`\`exploitPath\` when supported). Save as verdicts.json (array of`);
-  L.push(`{id, verdict, note, exploitPath}) and run \`ultrasec verify --apply verdicts.json\`.`);
+  L.push(`{id, verdict, note, exploitPath, brocard}) and run \`ultrasec verify --apply verdicts.json\`.`);
   L.push("");
   L.push(`> Be skeptical, but do NOT dismiss a high/critical finding unless you can`);
   L.push(`> positively **refute** it. Uncertain ⇒ leave it for a human.`);
+  L.push("");
+  L.push(`On \`refuted\`, name the ground in \`brocard\` — one of:`);
+  L.push(BROCARDS.map((b) => `\`${b}\``).join(" · "));
+  L.push("");
+  L.push(`Not proving something is not disproving it: a refutation you cannot name a ground for`);
+  L.push(`is \`unsupported\`. See references/dismissal-brocards.md.`);
   L.push("");
   // Project context (presence-gated): the agent-authored CONTEXT.md frames every
   // judgment below. Absent CONTEXT.md ⇒ omitted (output byte-identical to today).
@@ -170,6 +178,8 @@ export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): Apply
       confidence: v.verdict === "supported" ? "high" : v.verdict === "partial" ? "medium" : f.confidence,
     };
     if (v.exploitPath) next.exploitPath = v.exploitPath;
+    // Only meaningful on a refutation: it names the ground the dismissal stands on.
+    if (v.brocard && v.verdict === "refuted") next.brocard = v.brocard;
     if (v.note) next.message = `${f.message}\n\nVerdict (${v.verdict}): ${v.note}`;
     return next;
   });
@@ -193,6 +203,9 @@ export function parseVerdicts(raw: string): ParseResult<VerdictInput> {
       verdict: verdict as Verdict,
       note: v.note as string | undefined,
       exploitPath: v.exploitPath as string | undefined,
+      // Unrecognized names are dropped rather than rejected: a mistyped ground
+      // must not cost the whole fold, and the missing-ground report will show it.
+      brocard: (BROCARDS as readonly string[]).includes(v.brocard as string) ? (v.brocard as Brocard) : undefined,
     }),
   });
 }

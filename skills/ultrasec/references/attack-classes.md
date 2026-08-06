@@ -146,6 +146,30 @@ is lower — reason about what a forged token actually gets.
 blocks). Predictable randomness: generate N tokens and show the correlation or the seed. Timing:
 usually reason-only — say so.
 
+### Timing side channels
+
+A secret compared with `==`, `equals()`, `strcmp` or `===` leaks its prefix: the comparison returns
+early on the first differing byte, and the difference is measurable across a network for tokens,
+HMACs and password hashes.
+
+`rg -n "==\s*(token|secret|hmac|signature|digest|apiKey)|\.equals\(.*(token|secret|mac)"`
+
+Use `crypto.timingSafeEqual`, `hmac.compare_digest`, `subtle.ConstantTimeCompare`,
+`MessageDigest.isEqual`. The finding is the comparison, not the algorithm — and it is real whenever
+the attacker can retry.
+
+### Secrets that outlive their use
+
+Key material in a plain buffer is still in memory after use, and reaches core dumps, swap, crash
+reports and `/proc`. Rust has `Zeroize`; Go and C need an explicit wipe the compiler will not
+optimize away; in JS and Python a `String` cannot be wiped at all, which is itself the finding when
+the value is a long-lived key.
+
+`rg -n "Vec<u8>|\[\]byte|Buffer\.from|bytearray" -g '*key*' -g '*secret*' -g '*crypto*'`
+
+Report it when the value is a long-lived key or password and the process is exposed to a dump —
+not for a request-scoped token, where the exposure window does not justify the churn.
+
 ## Deserialization
 
 **Where it hides.** The sinks are catalogued (CWE-502); what the catalog can't tell you is

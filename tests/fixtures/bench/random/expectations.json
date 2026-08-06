@@ -1,0 +1,7 @@
+{
+  "cwe": "CWE-330",
+  "cases": [
+    { "name": "vuln", "file": "sink.js", "vulnerable": true, "crossFile": true },
+    { "name": "safe", "file": "safe.js", "vulnerable": false }
+  ]
+}

@@ -1,0 +1,151 @@
+{
+  "findings": [
+    {
+      "id": "7115a59b2ed5",
+      "category": "taint",
+      "cwe": "CWE-501",
+      "title": "Trust boundary violation: untrusted input reaches setAttribute()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "routes.java",
+        "line": 5,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.java",
+        "line": 7,
+        "kind": "trustboundary",
+        "symbol": "keep"
+      },
+      "path": [
+        {
+          "file": "routes.java",
+          "line": 5,
+          "symbol": "handle",
+          "why": "untrusted input (http): .getParameter("
+        },
+        {
+          "file": "routes.java",
+          "line": 6,
+          "symbol": "handle",
+          "why": "calls keep()"
+        },
+        {
+          "file": "sink.java",
+          "line": 7,
+          "symbol": "keep",
+          "why": "trustboundary sink: setAttribute()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "message": "Cross-file candidate: http input at routes.java:5 may reach the trustboundary sink setAttribute() at sink.java:7 through 2 hop(s). Untrusted request data stored in session/servlet-context state. Everything downstream reads it as trusted. Validate and normalize BEFORE it crosses, and store a parsed value (an id, an enum) rather than the raw string. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/501.html"
+      ],
+      "status": "open",
+      "risk": 30
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.java",
+      "safe.java",
+      "sink.java"
+    ],
+    "edges": [
+      {
+        "from": "routes.java",
+        "to": "sink.java",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "Store"
+      },
+      {
+        "from": "routes.java",
+        "to": "sink.java",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handle",
+        "toSymbol": "keep"
+      }
+    ],
+    "symbolDefs": {
+      "Routes": [
+        "routes.java"
+      ],
+      "handle": [
+        "routes.java",
+        "safe.java"
+      ],
+      "Safe": [
+        "safe.java"
+      ],
+      "Store": [
+        "sink.java"
+      ],
+      "keep": [
+        "sink.java"
+      ]
+    },
+    "callersBySymbol": {
+      "Store": [
+        {
+          "file": "routes.java",
+          "line": 6,
+          "symbol": "handle"
+        }
+      ],
+      "getParameter": [
+        {
+          "file": "routes.java",
+          "line": 5,
+          "symbol": "handle"
+        },
+        {
+          "file": "safe.java",
+          "line": 6,
+          "symbol": "handle"
+        }
+      ],
+      "getSession": [
+        {
+          "file": "sink.java",
+          "line": 7,
+          "symbol": "keep"
+        }
+      ],
+      "keep": [
+        {
+          "file": "routes.java",
+          "line": 6,
+          "symbol": "handle"
+        }
+      ],
+      "length": [
+        {
+          "file": "safe.java",
+          "line": 7,
+          "symbol": "handle"
+        }
+      ],
+      "setAttribute": [
+        {
+          "file": "sink.java",
+          "line": 7,
+          "symbol": "keep"
+        }
+      ],
+      "store": [
+        {
+          "file": "safe.java",
+          "line": 8,
+          "symbol": "handle"
+        }
+      ]
+    }
+  }
+}

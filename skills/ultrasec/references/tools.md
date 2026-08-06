@@ -55,9 +55,9 @@ are bucketed via the CVSS v3 base-score calculator in `src/tools/cvss.ts`.
 npm-audit/pnpm-audit/yarn-audit each gate on their own root lockfile
 (`package-lock.json`/`npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`) and
 audit it via the package manager's real registry query — no local vuln DB, so
-they're `network: true` and skipped under `--offline`. **v1 limitation**: only
-the root lockfile is audited, not per-workspace sub-lockfiles in a monorepo;
-trivy/osv-scanner already walk the tree recursively and cover that gap.
+they're `network: true` and skipped under `--offline`. In a monorepo each
+per-workspace sub-lockfile is audited too, not just the root one; trivy and
+osv-scanner walk the tree recursively and corroborate.
 
 When `syft` is installed, `scan` generates a CycloneDX SBOM (`sbom.cdx.json`) before running the
 adapters — a dossier deliverable in its own right, and faster input for grype (`sbom:` mode) and
@@ -129,6 +129,14 @@ same `[file:line]` gate and the same conservative verify policy. Two rules to st
   Go, which is why its findings carry more weight than a plain lockfile match.
 
 Corroboration (`sources[]` longer than one) is a confidence prior for verify, never a verdict.
+
+## Three that cover what the others cannot
+
+| tool | the gap it fills |
+|---|---|
+| **trufflehog** (`--only-verified`) | whether a secret is still LIVE. Sets `verified` on the finding — the difference between an incident and a hygiene note. Network-dependent, so `--offline` skips it. |
+| **guarddog** | malicious packages and typosquats: a package hostile from its first publish has no advisory and never will. Heuristic, so findings arrive at low confidence for you to confirm. |
+| **cppcheck** | C/C++ memory safety — use-after-free, out-of-bounds, uninitialized reads, leaks. The catalog's `buffer` rule is a best-effort scaffold; this is the real analysis. Reads its diagnostics from **stderr**, which the runner now captures. |
 
 ## What the belt does not cover
 

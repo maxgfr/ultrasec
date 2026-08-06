@@ -1,6 +1,6 @@
 # Powered mode (opt-in autonomy)
 
-`run` sequences the seven AI stages — `context → triage → investigate → verify → revalidate →
+`run` sequences the nine AI stages — `context → assumptions → triage → investigate → verify → revalidate → variants →
 narrative → implement` — and then always runs `check` + `render`. By default it is **keyless and
 network-free**: it scans deterministically, emits every worklist, and prints a TODO
 list — **zero external calls**. Powered mode is a thin automation layer that drives

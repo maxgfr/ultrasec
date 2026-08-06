@@ -1,0 +1,7 @@
+{
+  "cwe": "CWE-614",
+  "cases": [
+    { "name": "vuln", "file": "sink.java", "vulnerable": true, "crossFile": true },
+    { "name": "safe", "file": "safe.java", "vulnerable": false }
+  ]
+}

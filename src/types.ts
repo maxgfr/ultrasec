@@ -13,7 +13,12 @@ export const VERSION = "1.21.0";
 // of a cross-version-merged advisory); manifest gained optional `toolStatus`
 // (per-tool ran/empty/skipped/failed). Additive + optional (back-compat).
 // 6: manifest gained optional `sbom` (CycloneDX deliverable); additive, back-compat.
-export const SCHEMA_VERSION = 6;
+// 7: taint findings gained optional `sourceScope` (is the source in the same
+// function as the frame it closed?) and `dataflow` (does the bound value still
+// reach the entry line?) — ranking signals, not filters, so older dossiers rank
+// exactly as before; plus optional `brocard`, the named ground for a refutation.
+// All three additive + optional (back-compat).
+export const SCHEMA_VERSION = 7;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -47,6 +52,38 @@ export type Status = (typeof STATUSES)[number];
 export const VERDICTS = ["supported", "partial", "unsupported", "refuted"] as const;
 export type Verdict = (typeof VERDICTS)[number];
 
+/**
+ * The named grounds on which a candidate may be refuted — adapted from William
+ * Woodruff's brocards for vulnerability triage.
+ *
+ * "Only dismiss what you can positively refute" is the right rule and, on its
+ * own, an unfalsifiable one: it never says what a refutation may consist of. A
+ * brocard does. Each is a test a reviewer can disagree with, which is the whole
+ * point — a dismissal that names one is auditable, a dismissal that names none
+ * is an abandonment wearing a verdict's clothes.
+ */
+export const BROCARDS = [
+  "no-threat-model",
+  "exploit-from-the-heavens",
+  "outside-usage",
+  "standard-behavior",
+  "documented-behavior",
+  "cure-worse-than-disease",
+  "report-not-dispositive",
+] as const;
+export type Brocard = (typeof BROCARDS)[number];
+
+/** One-line gloss per brocard, rendered next to a dismissal in the report. */
+export const BROCARD_SUMMARY: Record<Brocard, string> = {
+  "no-threat-model": "no coherent attacker: the claim cannot complete “an attacker with X can Y to obtain Z”",
+  "exploit-from-the-heavens": "the capability required already equals or exceeds what the exploit grants",
+  "outside-usage": "the path is not reached in any real deployment",
+  "standard-behavior": "the behaviour is the specification working as written",
+  "documented-behavior": "the behaviour is documented, security implications included",
+  "cure-worse-than-disease": "remediation would cause more harm than the issue does",
+  "report-not-dispositive": "the report's authority (a CVE id, a scanner's severity) is not evidence either way",
+};
+
 export interface CodeLoc {
   /** Repo-relative POSIX path. */
   file: string;
@@ -63,6 +100,26 @@ export interface PathStep extends CodeLoc {
   /** Why taint is believed to propagate through this hop. */
   why: string;
 }
+
+// ── Intra-procedural signals (schema 7) ─────────────────────────────────────
+// Both sharpen a summary-based candidate WITHOUT filtering it. The BFS answers
+// "can control reach this sink from a file that reads untrusted input?"; these
+// answer "and does the value plausibly travel with it?". Reachability is not
+// taint: keep the two vocabularies apart in anything user-facing.
+
+/**
+ * Where a taint source sits relative to the frame it closed.
+ * `symbol` same enclosing function · `module` file scope (middleware, top-level
+ * registration — legitimate) · `file` a DIFFERENT function of the same file,
+ * i.e. co-location and nothing else.
+ */
+export const SOURCE_SCOPES = ["symbol", "module", "file"] as const;
+export type SourceScope = (typeof SOURCE_SCOPES)[number];
+
+/** Whether a def-use walk could still see the source's bound value at the entry
+ *  line. Absent (undefined) means undecidable, never "no". */
+export const DATAFLOWS = ["linked", "unlinked"] as const;
+export type Dataflow = (typeof DATAFLOWS)[number];
 
 /**
  * Deterministic committer/ownership provenance for a finding's primary line —
@@ -113,6 +170,19 @@ export interface Finding {
   sink?: CodeLoc & { kind?: string };
   /** The cross-file/function chain from source to sink. */
   path?: PathStep[];
+  /**
+   * Where the source sits relative to the frame it closed: `symbol` (same
+   * function), `module` (file scope), `file` (a DIFFERENT function of the same
+   * file — co-location only). Ranking signal for taint candidates; absent on
+   * non-taint findings and on dossiers written before schema 7.
+   */
+  sourceScope?: SourceScope;
+  /**
+   * Whether an intra-procedural def-use walk could still see the source's bound
+   * value at the frame's entry line. Absent means the shape was outside what a
+   * line-based walk decides — NOT that the value fails to arrive.
+   */
+  dataflow?: Dataflow;
   message: string;
   /** Producer: "ultrasec" for engine-enumerated, else the external tool name. */
   tool: string;
@@ -153,6 +223,14 @@ export interface Finding {
   verified?: boolean;
   /** Adversarial-verification outcome, once adjudicated. */
   verdict?: Verdict;
+  /**
+   * The named ground for a `refuted` verdict. Optional, and deliberately not
+   * enforced: a dismissal without one still applies (the conservative policy
+   * already refuses to auto-dismiss high/critical on anything short of an
+   * explicit refutation), but `check --semantic` reports it so a reviewer can
+   * see which dismissals were argued and which were merely asserted.
+   */
+  brocard?: Brocard;
   /** Concrete trigger path / proof-of-exploit sketch, once reasoned. */
   exploitPath?: string;
   /** Deterministic git-blame / CODEOWNERS provenance (opt-in `--blame`). Evidence only. */

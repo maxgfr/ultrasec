@@ -239,6 +239,32 @@ export const TOOLS: ToolSpec[] = [
     install: { brew: "brew install kingfisher", docker: "ghcr.io/mongodb/kingfisher", url: "https://github.com/mongodb/kingfisher" },
     runHint: "kingfisher scan <repo> --format sarif --no-validate",
   },
+  {
+    name: "trufflehog",
+    category: "secret",
+    description: "Secret scanner that VERIFIES against the provider — answers whether the credential still works, which is what decides the response.",
+    languages: ["*"],
+    install: { brew: "brew install trufflehog", docker: "trufflesecurity/trufflehog", url: "https://github.com/trufflesecurity/trufflehog" },
+    runHint: "trufflehog filesystem <repo> --json --only-verified",
+  },
+  {
+    name: "guarddog",
+    category: "dep",
+    description:
+      "Malicious-package and typosquat detection — the class no CVE scanner sees, because a package hostile from its first publish never gets an advisory.",
+    languages: ["javascript", "python", "go"],
+    install: { pip: "pipx install guarddog", url: "https://github.com/DataDog/guarddog" },
+    runHint: "guarddog npm verify <lockfile> --output-format json",
+  },
+  {
+    name: "cppcheck",
+    category: "sast",
+    description:
+      "C/C++ static analysis: use-after-free, out-of-bounds, uninitialized reads, leaks — the memory-safety work the taint catalog's best-effort buffer rule cannot do.",
+    languages: ["c_cpp"],
+    install: { brew: "brew install cppcheck", url: "https://cppcheck.sourceforge.io/" },
+    runHint: "cppcheck --quiet --enable=warning,portability <repo>",
+  },
 ];
 
 export interface ToolStatus extends ToolSpec {

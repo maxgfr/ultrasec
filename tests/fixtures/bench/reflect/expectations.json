@@ -1,0 +1,7 @@
+{
+  "cwe": "CWE-470",
+  "cases": [
+    { "name": "vuln", "file": "sink.py", "vulnerable": true, "crossFile": true },
+    { "name": "safe", "file": "safe.py", "vulnerable": false }
+  ]
+}

@@ -282,6 +282,8 @@ For EACH of your regions:
 4. Every citation must resolve: the ingest REJECTS a Discovery whose \`[file:line]\` doesn't exist, and a Discovery at an existing finding's location folds into its \`sources\` (no duplicate). Discoveries land as \`ultrasec-ai\` **open** candidates and are adjudicated like any other — an uncertain high-severity one stays needs-human downstream, never dropped — so ground every claim, then don't fear reporting it.
 
 Return (structured output): \`{ "discoveries": [{ "title", "category", "severity", "cwe", "message", "file", "line", "path" }] }\` — your ITEMS' regions only.
+
+> **Merge before you fold (orchestrator).** Regions overlap, so two hunters routinely report ONE bug from two angles — the same missing check cited at the guard and at the call it fails to protect. The mechanical dedup on ingest only collapses an EXACT \`category + cwe/title + file:line\` match, so a same-bug-different-line pair survives as two findings and the report reads as twice the problem. Merge near-duplicates into one Discovery (keep the most precise citation, put the others in \`path\`) BEFORE running \`--apply\`, and do it before any false-positive pass: a de-duplication that runs after adjudication has already inflated the count it was meant to fix.
 ${footer}`,
   };
 }

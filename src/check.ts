@@ -2,6 +2,7 @@ import { existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type { Dossier } from "./store.js";
 import { SEVERITIES, type CodeLoc, type Finding, type Severity } from "./types.js";
+import { byStr } from "./util.js";
 
 // The exit gate. Grounding (default): every cited [file:line] must resolve in the
 // repo — a hallucinated or stale location fails the audit (the same
@@ -24,6 +25,8 @@ export interface CheckResult {
   dismissed: number;
   needsHuman: number;
   gated: number; // findings considered after --min-severity
+  /** High/critical dismissals that name no ground for the refutation (see BROCARDS). */
+  unarguedDismissals: string[];
   messages: string[];
 }
 
@@ -176,6 +179,11 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
   // status-less or unknown-status finding through as "adjudicated" (fail-open).
   const ADJUDICATED = new Set<string>(["confirmed", "dismissed", "needs-human"]);
   const unadjudicated = findings.filter((f) => !ADJUDICATED.has(f.status as string)).length;
+  // High/critical findings dropped without naming the ground for the refutation.
+  const unargued = findings
+    .filter((f) => f.status === "dismissed" && (f.severity === "critical" || f.severity === "high") && !f.brocard)
+    .map((f) => f.id)
+    .sort(byStr);
 
   const messages: string[] = [];
   let ok = true;
@@ -190,9 +198,18 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
       messages.push(`${unadjudicated} candidate(s) still unadjudicated — run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
     }
     if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human — review required (not auto-failing).`);
+    // "Only dismiss what you can positively refute" never said what a refutation
+    // may consist of. A brocard names the ground, which makes the dismissal
+    // something a reviewer can disagree with. REPORTED, never auto-failing: the
+    // gate's job is grounding and adjudication, and turning an unargued dismissal
+    // into a hard failure would push adjudicators to pick a ground to get green.
+    if (unargued.length > 0)
+      messages.push(
+        `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", …" : ""}) — set \`brocard\` so the refutation can be reviewed: references/dismissal-brocards.md.`,
+      );
   }
   if (ok)
     messages.push(`grounding OK${opts.semantic ? " · audit adjudicated" : ""} — ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
 
-  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, messages };
+  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, unarguedDismissals: unargued, messages };
 }

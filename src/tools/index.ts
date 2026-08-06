@@ -10,6 +10,9 @@ import { gosec } from "./gosec.js";
 import { checkov } from "./checkov.js";
 import { hadolint } from "./hadolint.js";
 import { kingfisher } from "./kingfisher.js";
+import { trufflehog } from "./trufflehog.js";
+import { guarddog } from "./guarddog.js";
+import { cppcheck } from "./cppcheck.js";
 import { grype } from "./grype.js";
 import { pipAudit } from "./pip-audit.js";
 import { npmAudit, pnpmAudit, yarnAudit } from "./pm-audit.js";
@@ -36,6 +39,9 @@ export const ADAPTERS: ToolAdapter[] = [
   checkov,
   hadolint,
   kingfisher,
+  trufflehog,
+  guarddog,
+  cppcheck,
 ];
 
 export const adapterByName = (name: string): ToolAdapter | undefined => ADAPTERS.find((a) => a.name === name);

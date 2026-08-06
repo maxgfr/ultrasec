@@ -6,6 +6,7 @@ import { neighbors } from "./neighbors.js";
 import { makeToolFinding } from "./tools/normalize.js";
 import { insideRepo, lineCount } from "./check.js";
 import { byStr } from "./util.js";
+import { leadsForRegion } from "./assumptions.js";
 import { badField, coerceRows, notInVocabulary, requireUsable, type DroppedRow, type ParseResult } from "./apply-parse.js";
 
 // The agentic-discovery stage (Phase 5). The deterministic engine can't enumerate
@@ -38,10 +39,36 @@ export interface InvestigateRegion {
   neighbors: string[];
   /** What to hunt for here — the things the deterministic pass can't. */
   prompt: string;
+  /**
+   * Unenforced assumptions recorded by `assumptions` that fall in this region.
+   * A place where the code trusts something nothing verifies is the best hunting
+   * lead an audit produces — it names the gap instead of asking you to find it.
+   * Absent unless that stage has run.
+   */
+  leads?: string[];
 }
 
+/**
+ * Extra hunting frames the caller can request. A lens does not change what is
+ * scanned — it changes the question asked of it, which is the only thing that
+ * separates "no findings" from "no findings of the kind I was looking for".
+ */
+export const LENSES: Record<string, string> = {
+  "sharp-edges":
+    "Ask a DIFFERENT question here: not 'is this code vulnerable' but 'does this API make the insecure use easier than the secure one'. Six shapes: an algorithm/mode the caller picks; an insecure default or an ambiguous zero; raw bytes where a semantic type belongs; a config cliff that fails open; a verification that returns instead of throwing; permissions as strings. Model three users — the attacker, the copy-paster, the confused reader. Rate by how EASY the mistake is. See references/sharp-edges.md.",
+  crypto:
+    "Crypto-specific: secrets compared with == or equals() rather than a constant-time helper; key material in a plain buffer never zeroed; a nonce or IV reused or derived from a counter the attacker sees; an algorithm read from attacker-supplied data. See references/attack-classes.md §Cryptography.",
+  privacy:
+    "Personal data: where it goes (a third-party processor, a log, an analytics beacon), how long it stays, and whether a control named 'anonymisation' actually prevents re-identification. See references/privacy-and-data-protection.md.",
+};
+
 /** Build the investigation worklist, grouped by attack-surface region. */
-export function buildInvestigateWorklist(surface: AttackSurface, graph: Graph): InvestigateRegion[] {
+export function buildInvestigateWorklist(
+  surface: AttackSurface,
+  graph: Graph,
+  assumptionLeads: { at: string; claim: string }[] = [],
+  lens?: string,
+): InvestigateRegion[] {
   const filesByRegion = new Map<string, Set<string>>();
   const add = (region: string, file: string) => (filesByRegion.get(region) ?? filesByRegion.set(region, new Set()).get(region)!).add(file);
   for (const g of surface.entryPoints) for (const s of g.samples) add(topDir(s.file), s.file);
@@ -56,6 +83,7 @@ export function buildInvestigateWorklist(surface: AttackSurface, graph: Graph): 
       for (const l of neighbors(graph, f, 1).links) nb.add(l.node);
     }
     for (const f of files) nb.delete(f);
+    const leads = leadsForRegion(assumptionLeads, t.scope, files);
     regions.push({
       region: t.scope,
       score: t.score,
@@ -67,7 +95,9 @@ export function buildInvestigateWorklist(surface: AttackSurface, graph: Graph): 
         "What the deterministic pass can't see: missing/incorrect authorization & IDOR, " +
         "business-logic flaws, multi-hop taint that crosses these files, and personal-data " +
         "handling (data leaving to a third-party processor, a control narrower than its name, " +
-        "reversible pseudonymisation, absent retention). Cite resolvable [file:line].",
+        "reversible pseudonymisation, absent retention). Cite resolvable [file:line]." +
+        (lens && LENSES[lens] ? `\n\nLENS — ${lens}: ${LENSES[lens]}` : ""),
+      ...(leads.length ? { leads } : {}),
     });
   }
   return regions;
@@ -98,6 +128,10 @@ export function renderInvestigateMd(regions: InvestigateRegion[], context?: stri
     if (r.files.length) L.push(`- files: ${r.files.map((f) => `\`${f}\``).join(", ")}`);
     if (r.neighbors.length) L.push(`- neighbours: ${r.neighbors.map((f) => `\`${f}\``).join(", ")}`);
     L.push(`- hunt: ${r.prompt}`);
+    if (r.leads?.length) {
+      L.push(`- **trusted but never enforced here** (from \`assumptions\`) — start with these:`);
+      for (const l of r.leads) L.push(`  - ${l}`);
+    }
     L.push("");
   }
   return L.join("\n") + "\n";

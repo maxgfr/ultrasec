@@ -4,10 +4,16 @@ For each item: open the cited code (`ultrasec dossier <id>`), decide whether
 the flow is **real and exploitable**, and set a verdict:
 `supported` · `partial` · `unsupported` · `refuted` (+ a short note, and an
 `exploitPath` when supported). Save as verdicts.json (array of
-{id, verdict, note, exploitPath}) and run `ultrasec verify --apply verdicts.json`.
+{id, verdict, note, exploitPath, brocard}) and run `ultrasec verify --apply verdicts.json`.
 
 > Be skeptical, but do NOT dismiss a high/critical finding unless you can
 > positively **refute** it. Uncertain ⇒ leave it for a human.
+
+On `refuted`, name the ground in `brocard` — one of:
+`no-threat-model` · `exploit-from-the-heavens` · `outside-usage` · `standard-behavior` · `documented-behavior` · `cure-worse-than-disease` · `report-not-dispositive`
+
+Not proving something is not disproving it: a refutation you cannot name a ground for
+is `unsupported`. See references/dismissal-brocards.md.
 
 ## Project context
 _From `CONTEXT.md` — the project's trust model; background, never a verdict._

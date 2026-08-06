@@ -250,6 +250,16 @@ export function renderContextScaffoldMd(repo: string, run: string, s: ContextSca
   L.push(`3. **Trust boundaries** — where untrusted data enters; what is trusted.`);
   L.push(`4. **Framework protections already in place** — ORM parameterization, template auto-escaping, CSRF tokens, etc.`);
   L.push(`5. **Known-safe sinks / accepted risks** — so later stages don't re-litigate them.`);
+  L.push(`6. **Exposure** — one of \`internet-facing\` · \`internal\` · \`build-time\`, and`);
+  L.push(`   **asset criticality** — \`crown-jewel\` · \`standard\` · \`peripheral\`. Write them as a line`);
+  L.push(`   \`Exposure: internet-facing\` / \`Criticality: crown-jewel\`; the risk score reads them and`);
+  L.push(`   ranks accordingly. Absent, ranking is unchanged.`);
+  L.push(`7. **Threat model (STRIDE)** — per trust boundary, which of Spoofing / Tampering /`);
+  L.push(`   Repudiation / Information disclosure / Denial of service / Elevation of privilege you`);
+  L.push(`   actually care about, and which you have accepted. For personal data add LINDDUN`);
+  L.push(`   (Linking, Identifying, Non-repudiation, Detecting, Data disclosure, Unawareness,`);
+  L.push(`   Non-compliance). See references/threat-modeling.md — this is what stops the hunt`);
+  L.push(`   being a checklist walk.`);
   L.push("");
   return L.join("\n") + "\n";
 }

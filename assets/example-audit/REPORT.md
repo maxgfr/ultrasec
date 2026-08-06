@@ -134,5 +134,58 @@ _Defense-in-depth suggestions — **not** findings (the attack is already preven
 - Neither route validates the shape of its input before use (an integer id, a report name from a known set). Type/shape validation at the boundary is defense in depth once the two fixes above land — it is not what makes them exploitable today.
 - res.send() at server.js:20 returns command output with the default text/html content type. Once the command injection is fixed the attacker no longer controls that body, but setting an explicit content type (or res.json) removes the reflected-content question entirely.
 
+## Coverage (OWASP ASVS)
+
+What this audit looked at, and what it did not. A category marked **not examined** is not
+a clean bill of health — it is a gap in the audit, and it belongs in the report.
+
+| | category | state | findings |
+|---|---|---|---|
+| V1 | Architecture & threat modelling | ⬜ **not examined** | — |
+| V2 | Authentication | ⬜ **not examined** | — |
+| V3 | Session management | ⬜ **not examined** | — |
+| V4 | Access control | ⬜ **not examined** | — |
+| V5 | Validation, sanitization & encoding | ✅ examined | 3 |
+| V6 | Stored cryptography | ⬜ **not examined** | — |
+| V7 | Error handling & logging | ⬜ **not examined** | — |
+| V8 | Data protection & privacy | ⬜ **not examined** | — |
+| V9 | Communications | ⬜ **not examined** | — |
+| V11 | Business logic | ⬜ **not examined** | — |
+| V12 | Files & resources | ⬜ **not examined** | — |
+| V13 | API & web service | ⬜ **not examined** | — |
+| V14 | Configuration & supply chain | ⬜ **not examined** | — |
+
+### Not examined (12)
+
+- **V1 Architecture & threat modelling** — Did CONTEXT.md establish a trust model and a threat model, or was severity rated in the abstract?
+- **V2 Authentication** — Password/OTP/session-establishment paths read? Credential comparison constant-time?
+- **V3 Session management** — Token lifetime, rotation on privilege change, invalidation on logout.
+- **V4 Access control** — The highest-yield class, and never enumerable: every route's guard vs. the object it returns (IDOR).
+- **V6 Stored cryptography** — Weak-hash detection is mechanical; key management, IV reuse and constant-time comparison are not.
+- **V7 Error handling & logging** — Needs `scan --log-hygiene` to be enumerated at all (CWE-117/532).
+- **V8 Data protection & privacy** — Where personal data goes, how long it stays, whether pseudonymisation is reversible.
+- **V9 Communications** — TLS verification disabled anywhere? Certificate pinning claims that do not hold?
+- **V11 Business logic** — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance.
+- **V12 Files & resources** — Traversal and zip-slip are enumerated; upload type/size/AV policy is not.
+- **V13 API & web service** — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.
+- **V14 Configuration & supply chain** — Dependencies, secrets, IaC, CI — including workflows that hand an agent the repo.
+
+### Answer these explicitly (9)
+
+No deterministic signal can establish coverage here. For each, write either a finding or
+one line saying **why it does not apply to this repo** — "not applicable" without a
+reason is how coverage silently shrinks between audits.
+
+- **V1 Architecture & threat modelling** — Did CONTEXT.md establish a trust model and a threat model, or was severity rated in the abstract?
+- **V2 Authentication** — Password/OTP/session-establishment paths read? Credential comparison constant-time?
+- **V3 Session management** — Token lifetime, rotation on privilege change, invalidation on logout.
+- **V4 Access control** — The highest-yield class, and never enumerable: every route's guard vs. the object it returns (IDOR).
+- **V6 Stored cryptography** — Weak-hash detection is mechanical; key management, IV reuse and constant-time comparison are not.
+- **V8 Data protection & privacy** — Where personal data goes, how long it stays, whether pseudonymisation is reversible.
+- **V9 Communications** — TLS verification disabled anywhere? Certificate pinning claims that do not hold?
+- **V11 Business logic** — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance.
+- **V13 API & web service** — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.
+
+
 ---
 Engine: ultrasec 0.0.0-development. Taint candidates are deterministic; external-tool results depend on installed scanners.
