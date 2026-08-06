@@ -1,0 +1,138 @@
+{
+  "findings": [
+    {
+      "id": "9fc43cf06086",
+      "category": "taint",
+      "cwe": "CWE-643",
+      "title": "XPath injection: untrusted input reaches selectNodes()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 5,
+        "kind": "xpath",
+        "symbol": "lookup"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handler",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler",
+          "why": "calls lookup()"
+        },
+        {
+          "file": "sink.js",
+          "line": 5,
+          "symbol": "lookup",
+          "why": "xpath sink: selectNodes()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the xpath sink selectNodes() at sink.js:5 through 2 hop(s). Tainted data concatenated into an XPath expression. Use variable binding (XPathVariableResolver / parameterised XPath); escaping quotes by hand is not sufficient. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/643.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handler",
+        "toSymbol": "lookup"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handler": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "lookup": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "String": [
+        {
+          "file": "safe.js",
+          "line": 4,
+          "symbol": "safe"
+        }
+      ],
+      "json": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler"
+        }
+      ],
+      "lookup": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler"
+        }
+      ],
+      "record": [
+        {
+          "file": "safe.js",
+          "line": 4,
+          "symbol": "safe"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        },
+        {
+          "file": "safe.js",
+          "line": 4,
+          "symbol": "safe"
+        },
+        {
+          "file": "sink.js",
+          "line": 1
+        }
+      ],
+      "selectNodes": [
+        {
+          "file": "sink.js",
+          "line": 5,
+          "symbol": "lookup"
+        }
+      ]
+    }
+  }
+}

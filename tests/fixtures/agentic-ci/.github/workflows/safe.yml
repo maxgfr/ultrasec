@@ -1,0 +1,14 @@
+name: AI docs
+on:
+  workflow_dispatch:
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Constant prompt, no event data, sandbox left on.
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: "Regenerate the API reference from src/ and open a PR."
+          allowed_tools: "Read,Write,Bash(pnpm build)"

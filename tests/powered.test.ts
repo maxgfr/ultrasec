@@ -97,7 +97,19 @@ class MockRunner implements AgentRunner {
     else if (stage === "investigate") writeFileSync(task.outPath, "[]");
     else if (stage === "narrative") writeFileSync(task.outPath, "{}");
     else if (stage === "implement") writeFileSync(task.outPath, "# Remediation PRD\n");
-    else if (stage === "verify") {
+    else if (stage === "assumptions") {
+      const items = JSON.parse(readFileSync(join(task.run, "ASSUMPTIONS.todo.json"), "utf8")) as { at: string }[];
+      writeFileSync(
+        task.outPath,
+        JSON.stringify(items.slice(0, 1).map((i) => ({ at: i.at, assumptions: [{ claim: "caller checked ownership", enforcedAt: "nothing-found" }] }))),
+      );
+    } else if (stage === "variants") {
+      const items = JSON.parse(readFileSync(join(task.run, "VARIANTS.todo.json"), "utf8")) as { seedId: string }[];
+      writeFileSync(
+        task.outPath,
+        JSON.stringify(items.map((i) => ({ seedId: i.seedId, rootCause: "shared helper", variants: [], regressionRule: "- id: x" }))),
+      );
+    } else if (stage === "verify") {
       const items = JSON.parse(readFileSync(join(task.run, "VERIFY.todo.json"), "utf8")) as { id: string }[];
       writeFileSync(task.outPath, JSON.stringify(items.map((i) => ({ id: i.id, verdict: this.verifyVerdict }))));
     } else if (stage === "revalidate") {
@@ -139,6 +151,11 @@ describe("runPipeline — powered", () => {
       "scan",
       "emit:context",
       "fill:context",
+      // `assumptions` writes a map and leads, never findings — so it has a
+      // `write:` step and no `apply:`.
+      "emit:assumptions",
+      "fill:assumptions",
+      "write:assumptions",
       "emit:triage",
       "fill:triage",
       "apply:triage",
@@ -151,6 +168,12 @@ describe("runPipeline — powered", () => {
       "emit:revalidate",
       "fill:revalidate",
       "apply:revalidate",
+      // `variants` does both: it writes the regression rules AND folds the
+      // discovered variants in through the citation gate.
+      "emit:variants",
+      "fill:variants",
+      "write:variants",
+      "apply:variants",
       "emit:narrative",
       "fill:narrative",
       "emit:implement",
@@ -159,7 +182,7 @@ describe("runPipeline — powered", () => {
       "render",
     ]);
     expect(mock.calls).toContain("verify");
-    expect(res.externalCalls).toBe(7); // one per stage
+    expect(res.externalCalls).toBe(9); // one per stage
   });
 
   it("cross-check: a high/critical disagreement on verify escalates to needs-human", () => {

@@ -66,13 +66,37 @@ cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 **Budget** `--budget quick|standard|thorough` · `--max-depth` · `--max-candidates`
 **Incremental** `--diff <ref>` / `--since <commit>` · `--merge` · `--resume`
 **Recall & provenance** `--sinks` · `--log-hygiene` · `--blame` (alias `--provenance`) ·
-`--no-env-sources`
+`--no-env-sources` · `--strict-scope`
 
 `--no-env-sources` drops candidates whose SOURCE is an environment read (`process.env`,
 `os.getenv`). Those model configuration injection, which is real, but presume the operator of the
 deployment is an attacker — on a repo whose trust model says otherwise they can dominate the
 dossier. Opt-in: without it, enumeration is unchanged, and the source kind is on the finding
 either way (`env input at …` in the dossier), so batch-refuting them stays equally available.
+
+`--strict-scope` drops candidates whose source sits in a **different function of the same file**
+(`sourceScope: "file"`). The BFS closes a path on any source at-or-above the frame's entry line in
+that file, which is positional, not structural: on a router with twenty handlers, a `req.query` in
+one and an `exec()` in another pair up although nothing connects them. Opt-in for the same reason
+as above — a value *can* travel between two functions through module state — and every candidate
+carries its `sourceScope` regardless, so you can triage the tail without re-scanning.
+
+### The two intra-procedural signals on a taint candidate
+
+Both sharpen a candidate without filtering it. **Reachability is not taint**: keep the vocabularies
+apart when you write the finding.
+
+| field | values | means |
+|---|---|---|
+| `sourceScope` | `symbol` | source and sink share one function — the flow a human would draw |
+| | `module` | source is at file scope (middleware, top-level registration); legitimate |
+| | `file` | source is in a *different* function of the same file — co-location only |
+| `dataflow` | `linked` | a def-use walk still sees the source's bound value at the sink |
+| | `unlinked` | it looked and the binding is never mentioned again |
+| | *absent* | undecidable (used inline, threaded through an object or a template) — **not** "no" |
+
+Ranking is severity → scope → `unlinked` last → proximity → cross-file. A `file`-scoped or
+`unlinked` candidate is worth less of your attention, not zero: read the dossier before dropping it.
 
 Writes `manifest.json`, `findings.json`, `graph.json`, `DOSSIER.md`; plus `sbom.cdx.json` when
 `syft` is installed, and `cache/scan-cache.json` under `--resume`.

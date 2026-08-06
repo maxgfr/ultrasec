@@ -1,8 +1,9 @@
 import { locationsLine, toolStatusLines, type Dossier } from "../store.js";
-import { SEVERITIES, type Finding, type Narrative, type Remediation, type Severity } from "../types.js";
+import { BROCARD_SUMMARY, SEVERITIES, type Finding, type Narrative, type Remediation, type Severity } from "../types.js";
 import { pathMermaid } from "./mermaid.js";
 import { byStr } from "../util.js";
 import { executiveSummaryMd, positivePatternsMd, suggestedFixMd, attackChainsMd, rootCausesMd, hardeningNotesMd, remediationMap } from "../narrative.js";
+import { buildCoverage, renderCoverageMd } from "../coverage.js";
 
 // The tiered Markdown report: SUMMARY (TL;DR) and REPORT — the complete audit,
 // every finding grouped by status (incl. dismissed), with the reasoning trail.
@@ -72,7 +73,10 @@ function header(d: Dossier): string {
 
 function statusTag(f: Finding): string {
   const v = f.verdict ? ` · verdict ${f.verdict}` : "";
-  return `status **${f.status}**${v} · confidence ${f.confidence}`;
+  // The named ground for a dismissal, so a reader can disagree with the
+  // refutation instead of just noticing that one happened.
+  const b = f.brocard ? ` · ground: **${f.brocard}** (${BROCARD_SUMMARY[f.brocard]})` : "";
+  return `status **${f.status}**${v}${b} · confidence ${f.confidence}`;
 }
 
 export function renderSummary(d: Dossier, narrative?: Narrative): string {
@@ -178,6 +182,10 @@ export function renderReport(d: Dossier, narrative?: Narrative): string {
     }
   }
   L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
+  // What the audit did NOT look at, stated in the report itself. Without it a
+  // short report is indistinguishable from a thorough one that found little.
+  const enumerated = [...new Set(d.findings.flatMap((f) => [f.category, f.sink?.kind].filter((x): x is string => Boolean(x))))];
+  L.push(renderCoverageMd(buildCoverage(d, enumerated)));
   L.push(`---`);
   L.push(`Engine: ultrasec ${d.manifest.version}. ${d.manifest.generatedNote}`);
   return L.join("\n") + "\n";

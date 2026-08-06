@@ -91,9 +91,17 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
   //                 rule 4 + the References index (the method itself is a reference,
   //                 not body), and three cheat-sheet lines for --report/--no-journal,
   //                 --strict and --no-env-sources. Routing, which is what the body is for.
+  //   2470 -> 2760: four new judgment stages landed at once — `variants` (hunt the other
+  //                 instances of a confirmed root cause), `assumptions` (what each function
+  //                 trusts that nothing enforces), `coverage` (the ASVS map, so a short
+  //                 report cannot read as "nothing there"), plus the agentic-CI and
+  //                 sharp-edges lenses and the named grounds for a dismissal. A stage the
+  //                 body never mentions is a stage nobody runs, so each bought exactly a
+  //                 cheat-sheet line, a workflow step and a References entry — ~60 words
+  //                 apiece. Every method stayed in references/. Do not spend the rest on prose.
   it("keeps the SKILL.md body within its word budget", () => {
     const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
-    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2470);
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2760);
   });
 
   // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits

@@ -1,0 +1,145 @@
+{
+  "findings": [
+    {
+      "id": "4680a53bcd7a",
+      "category": "taint",
+      "cwe": "CWE-330",
+      "title": "Predictable value from a non-cryptographic RNG: untrusted input reaches random()",
+      "severity": "low",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 3,
+        "kind": "random",
+        "symbol": "mintToken"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handler",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler",
+          "why": "calls mintToken()"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "mintToken",
+          "why": "random sink: random()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the random sink random() at sink.js:3 through 2 hop(s). Only a finding when the value becomes a token, key, session id, password-reset link or nonce — for a shuffle or a jitter it is nothing. Read what it is used for, then require a CSPRNG (crypto.randomBytes / secrets / SecureRandom). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/330.html"
+      ],
+      "status": "open",
+      "risk": 15
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handler",
+        "toSymbol": "mintToken"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handler": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "mintToken": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "json": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler"
+        }
+      ],
+      "mintToken": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler"
+        }
+      ],
+      "random": [
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "mintToken"
+        }
+      ],
+      "randomBytes": [
+        {
+          "file": "safe.js",
+          "line": 5,
+          "symbol": "safe"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        },
+        {
+          "file": "safe.js",
+          "line": 1
+        }
+      ],
+      "slice": [
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "mintToken"
+        }
+      ],
+      "toString": [
+        {
+          "file": "safe.js",
+          "line": 5,
+          "symbol": "safe"
+        },
+        {
+          "file": "sink.js",
+          "line": 3,
+          "symbol": "mintToken"
+        }
+      ]
+    }
+  }
+}

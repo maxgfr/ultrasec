@@ -1,0 +1,125 @@
+{
+  "findings": [
+    {
+      "id": "5e7051035787",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "title": "DOM XSS (HTML sink): untrusted input reaches innerHTML",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "dom"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 4,
+        "kind": "domxss",
+        "symbol": "render"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "boot",
+          "why": "untrusted input (dom): location.hash"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "boot",
+          "why": "calls render()"
+        },
+        {
+          "file": "sink.js",
+          "line": 4,
+          "symbol": "render",
+          "why": "domxss sink: innerHTML"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "message": "Cross-file candidate: dom input at routes.js:3 may reach the domxss sink innerHTML at sink.js:4 through 2 hop(s). Tainted data assigned to innerHTML/outerHTML executes any markup it contains. Assign via textContent, or sanitize with DOMPurify and a Trusted Types policy. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/79.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "boot",
+        "toSymbol": "render"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "boot": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "render": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "String": [
+        {
+          "file": "safe.js",
+          "line": 4,
+          "symbol": "safe"
+        }
+      ],
+      "render": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "boot"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        }
+      ],
+      "slice": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "boot"
+        },
+        {
+          "file": "safe.js",
+          "line": 2,
+          "symbol": "safe"
+        },
+        {
+          "file": "safe.js",
+          "line": 4,
+          "symbol": "safe"
+        }
+      ]
+    }
+  }
+}

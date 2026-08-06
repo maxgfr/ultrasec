@@ -60,6 +60,35 @@ finding whose `locations[]` keeps each `{file, line, version}`. Fix the whole cl
 that every location moves — a monorepo that bumps one workspace and not the other looks fixed and
 isn't.
 
+### The question a CVE scanner cannot answer
+
+Every adapter above answers *does this package have a known advisory?*. That misses the attack that
+actually happens now: a package that was never vulnerable because it was **hostile from its first
+publish**. There is no CVE for it and there never will be — the class is found by behaviour, not by
+disclosure. `guarddog` covers the mechanical half (install-time code execution, typosquat distance,
+fetch-at-install). The other half is a judgment about the *project*:
+
+| signal | why it matters |
+|---|---|
+| Single or anonymous maintainer | one account compromise is the whole supply chain |
+| Unmaintained or archived | no one will ship the fix; check issues for an unanswered security report |
+| Low popularity relative to its peers | fewer eyes have read what you are installing |
+| High-risk features — FFI, deserialization, executing third-party code | the blast radius if it *is* taken over |
+| A CVE history out of proportion to its size | a pattern, not an accident |
+| No `SECURITY.md` or contact | nobody can report the next one responsibly |
+
+None of these is a finding on its own. Several together, on a package that runs at install time or
+handles untrusted input, is a **hardening note with a name** — and occasionally the most useful
+paragraph in the report.
+
+### Secret findings: verified beats plausible
+
+`gitleaks` and `kingfisher` answer "does this look like a credential?". `trufflehog --only-verified`
+calls the provider and answers whether it still works. Rate them apart: a **verified** key is an
+incident with a clock on it (rotate first, then find how it got committed — history, CI logs,
+images); the same string already rotated is a hygiene note. Filing both as `high` is how a rotation
+backlog buries a live breach.
+
 ## Secrets
 
 The most time-sensitive class in the report. A secret finding is not a backlog item; it is an

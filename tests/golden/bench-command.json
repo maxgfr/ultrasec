@@ -38,6 +38,8 @@
           "why": "command sink: execSync()"
         }
       ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
       "message": "Cross-file candidate: http input at routes.js:3 may reach the command sink execSync() at sink.js:3 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [
@@ -81,13 +83,6 @@
       ]
     },
     "callersBySymbol": {
-      "execFile": [
-        {
-          "file": "safe.js",
-          "line": 3,
-          "symbol": "safe"
-        }
-      ],
       "execSync": [
         {
           "file": "sink.js",
@@ -102,7 +97,7 @@
         },
         {
           "file": "safe.js",
-          "line": 3,
+          "line": 7,
           "symbol": "safe"
         },
         {
@@ -115,6 +110,13 @@
           "file": "routes.js",
           "line": 4,
           "symbol": "handle"
+        }
+      ],
+      "title": [
+        {
+          "file": "safe.js",
+          "line": 7,
+          "symbol": "safe"
         }
       ]
     }

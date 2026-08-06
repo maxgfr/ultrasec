@@ -4,9 +4,10 @@ import type { RepoScan } from "./scan.js";
 import { enclosingSymbolName } from "./scan.js";
 import type { Graph } from "./graph.js";
 import { langForFile } from "./lang.js";
-import { findSinks, findSources, findSanitizers, cweUrl, LOG_SINKS, type SinkHit, type SourceHit } from "./catalog.js";
+import { findSinks, findSources, findTextSinks, cweUrl, LOG_SINKS, type SinkHit, type SourceHit } from "./catalog.js";
+import { buildUnitMap, classifySourceScope, sanitizersAlongPath, scopeRank, traceDefUse, type UnitMap } from "./dataflow.js";
 import { shortHash, byStr } from "./util.js";
-import { SEVERITIES, type Finding, type PathStep, type Severity } from "./types.js";
+import { SEVERITIES, type Finding, type PathStep, type Severity, type SourceScope } from "./types.js";
 
 const DEFAULT_MAX_DEPTH = 6; // call-graph hops walked back from a sink
 const DEFAULT_MAX_CANDIDATES = 1000;
@@ -33,6 +34,18 @@ export interface TaintOptions {
    * operator is trusted.
    */
   excludeEnvSources?: boolean;
+  /**
+   * Drop candidates whose source sits in a DIFFERENT function of the same file
+   * (`sourceScope: "file"`). Opt-in, default false ⇒ enumeration unchanged.
+   *
+   * Those pairs share a file and nothing else: a `req.query` in one handler and
+   * an `exec()` in another are connected only by co-location, and on a router
+   * with twenty handlers the count grows quadratically. They are still emitted by
+   * default — a value can travel between two functions through module state, and
+   * recall comes first — but an auditor working a large web app can trade that
+   * tail for a shorter queue.
+   */
+  strictScope?: boolean;
 }
 
 export interface TaintResult {
@@ -51,6 +64,20 @@ function truncate(s: string, n = 60): string {
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }
 
+/** Assignment sinks (`el.innerHTML = …`) are not calls, so they must not be
+ *  rendered with call parentheses. */
+function calleeLabel(sink: SinkHit): string {
+  return sink.kind === "domxss" ? sink.callee : `${sink.callee}()`;
+}
+
+/** Said plainly in the source step, because "same file" and "same function" are
+ *  very different claims and the dossier reader must not have to guess which. */
+const SCOPE_WHY: Record<SourceScope, string> = {
+  symbol: "",
+  module: " — at file scope",
+  file: " — in a DIFFERENT function of this file; co-location only, verify the value actually travels",
+};
+
 /**
  * Enumerate candidate cross-file source→sink taint paths. Summary-based and
  * recall-oriented: for each dangerous sink, walk the call-graph backwards to any
@@ -66,6 +93,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
   const contentCache = new Map<string, string>();
   const sourceCache = new Map<string, SourceHit[]>();
   const lineCache = new Map<string, string[]>();
+  const unitCache = new Map<string, UnitMap>();
 
   const content = (rel: string): string => {
     let c = contentCache.get(rel);
@@ -86,13 +114,55 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     }
     return s;
   };
+  const unitsOf = (rel: string): UnitMap => {
+    let u = unitCache.get(rel);
+    if (!u) {
+      const lang = langForFile(rel);
+      unitCache.set(rel, (u = buildUnitMap(lines(rel), lang?.id ?? "")));
+    }
+    return u;
+  };
+
+  // file → files it links to (imports / resolved calls), for the ambiguity gate.
+  const linkedTo = new Map<string, Set<string>>();
+  for (const e of graph.edges) {
+    let set = linkedTo.get(e.from);
+    if (!set) linkedTo.set(e.from, (set = new Set()));
+    set.add(e.to);
+  }
+
+  /**
+   * Does `from` actually reference `to`? An import or a resolved call edge. A
+   * caller with NO imports recorded stays permissive — absent data means "could
+   * not see", not "none", the same rule `requireModule` follows.
+   *
+   * A looser variant that also accepted the target's class name appearing in the
+   * caller's text (for Java's fully-qualified style) was tried and reverted: it
+   * recovered nothing on OWASP Benchmark and added 47 candidates to this repo's
+   * own scan, because short basenames like `util` or `types` appear everywhere.
+   */
+  const linksTo = (from: string, to: string): boolean => linkedTo.get(from)?.has(to) === true || (byRel.get(from)?.imports.length ?? 0) === 0;
 
   const findings: Finding[] = [];
   const emitted = new Set<string>();
 
-  const emit = (sink: SinkHit, sinkFile: string, sinkSym: string | undefined, srcHit: SourceHit, srcFile: string, hops: PathStep[]): void => {
+  const emit = (
+    sink: SinkHit,
+    sinkFile: string,
+    sinkSym: string | undefined,
+    srcHit: SourceHit,
+    srcFile: string,
+    hops: PathStep[],
+    frameEntryLine: number,
+  ): void => {
     // Opt-in: treat deployment configuration as trusted (see excludeEnvSources).
     if (opts.excludeEnvSources && srcHit.kind === "env") return;
+
+    const srcSymbols = byRel.get(srcFile)!.symbols;
+    const sourceScope = classifySourceScope(srcSymbols, srcHit.line, frameEntryLine, unitsOf(srcFile));
+    // Opt-in: co-location in a file is not a data path (see strictScope).
+    if (opts.strictScope && sourceScope === "file") return;
+
     const id = shortHash(`${srcFile}:${srcHit.line}->${sinkFile}:${sink.line}:${sink.kind}`);
     if (emitted.has(id)) return;
     emitted.add(id);
@@ -100,33 +170,45 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     const srcStep: PathStep = {
       file: srcFile,
       line: srcHit.line,
-      symbol: enclosingSymbolName(byRel.get(srcFile)!.symbols, srcHit.line),
-      why: `untrusted input (${srcHit.kind}): ${truncate(srcHit.match)}`,
+      symbol: enclosingSymbolName(srcSymbols, srcHit.line),
+      why: `untrusted input (${srcHit.kind}): ${truncate(srcHit.match)}${SCOPE_WHY[sourceScope]}`,
     };
     const path = [srcStep, ...hops];
 
-    const sinkLine = lines(sinkFile)[sink.line - 1] ?? "";
-    const lang = langForFile(sinkFile)!;
-    const sanitizers = findSanitizers(lang, sinkLine, sink.kind);
+    // Does the bound value still reach the line that closed this frame? For the
+    // seed frame that line IS the sink; for a caller frame it is the call that
+    // leads to it — the same question one hop out.
+    const dataflow = traceDefUse(lines(srcFile), srcHit.line, srcHit.match, frameEntryLine);
+
+    // Every hop, not just the sink line: defensive code is normally written on
+    // the line before the dangerous call, or at an intermediate hop entirely.
+    const sanitizers = sanitizersAlongPath(path, sink.kind, (f, l) => lines(f)[l - 1] ?? "");
     const crossFile = new Set(path.map((p) => p.file)).size > 1;
 
-    const confidence = sanitizers.length ? "low" : "low"; // candidates are always low until verified
-    const note = sanitizers.length ? ` Possible sanitizer on the sink line (${sanitizers.join("; ")}) — confirm it actually neutralizes this flow.` : "";
+    const note = sanitizers.length
+      ? ` Possible sanitizer along the path — ${sanitizers.map((s) => `${s.file}:${s.line} (${s.note})`).join("; ")} — confirm it actually neutralizes this flow.`
+      : "";
+    const flowNote =
+      dataflow === "unlinked"
+        ? " The value bound at the source is not mentioned again at the sink — it may travel through state this walk cannot see, or not at all."
+        : "";
 
     findings.push({
       id,
       category: "taint",
       cwe: sink.cwe,
-      title: `${sink.title}: untrusted input reaches ${sink.callee}()`,
+      title: `${sink.title}: untrusted input reaches ${calleeLabel(sink)}`,
       severity: sink.severity,
-      confidence,
+      confidence: "low", // candidates are always low until verified
       source: { file: srcStep.file, line: srcStep.line, kind: srcHit.kind },
       sink: { file: sinkFile, line: sink.line, kind: sink.kind, symbol: sinkSym },
       path,
+      sourceScope,
+      ...(dataflow ? { dataflow } : {}),
       message:
         `${crossFile ? "Cross-file" : "Intra-file"} candidate: ${srcHit.kind} input at ${srcStep.file}:${srcStep.line} ` +
-        `may reach the ${sink.kind} sink ${sink.callee}() at ${sinkFile}:${sink.line} through ${path.length - 1} hop(s). ` +
-        `${sink.note}${note} Heuristic — verify the data actually reaches the sink unsanitized before trusting it.`,
+        `may reach the ${sink.kind} sink ${calleeLabel(sink)} at ${sinkFile}:${sink.line} through ${path.length - 1} hop(s). ` +
+        `${sink.note}${note}${flowNote} Heuristic — verify the data actually reaches the sink unsanitized before trusting it.`,
       tool: "ultrasec",
       references: [cweUrl(sink.cwe)],
       status: "open",
@@ -137,13 +219,18 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     const lang = langForFile(file.rel);
     if (!lang) continue;
 
-    for (const sink of findSinks(lang, file.calls, extraSinks, file.imports)) {
+    // Call sinks plus ASSIGNMENT sinks. `el.innerHTML = x` is the commonest DOM
+    // XSS shape in the wild and is not a call at all, so a call-only catalog
+    // could never see it.
+    const sinkHits = [...findSinks(lang, file.calls, extraSinks, file.imports), ...findTextSinks(lang, content(file.rel))];
+
+    for (const sink of sinkHits) {
       const sinkSym = enclosingSymbolName(file.symbols, sink.line);
       const sinkStep: PathStep = {
         file: file.rel,
         line: sink.line,
         symbol: sinkSym,
-        why: `${sink.kind} sink: ${sink.callee}()`,
+        why: `${sink.kind} sink: ${calleeLabel(sink)}`,
       };
 
       type Frame = { file: string; sym?: string; entryLine: number; hops: PathStep[]; depth: number };
@@ -155,10 +242,12 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
         const fr = queue.shift()!;
 
         // A source at/above the entry line in this frame's file closes a path.
+        // The nearest one wins; `emit` records how it is scoped relative to the
+        // frame, since "same file" and "same function" are very different claims.
         const above = sourcesOf(fr.file).filter((s) => s.line <= fr.entryLine);
         if (above.length) {
           const nearest = above.reduce((a, b) => (b.line > a.line ? b : a));
-          emit(sink, file.rel, sinkSym, nearest, fr.file, fr.hops);
+          emit(sink, file.rel, sinkSym, nearest, fr.file, fr.hops, fr.entryLine);
         }
 
         if (fr.depth >= MAX_DEPTH || !fr.sym) continue;
@@ -176,9 +265,24 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
         // Step back to callers via the precomputed reverse index — O(callers),
         // not O(files) per frame. The index is pre-sorted by (file, line), so the
         // BFS visits callers in exactly the order the old double loop did.
+        //
+        // AMBIGUOUS NAMES: the index is keyed by raw callee name, so a symbol
+        // defined in many files (`handle`, `process`, `doSomething`) links every
+        // caller of ANY of them to every one of them. Measured on OWASP Benchmark,
+        // `doSomething` is defined in 881 files and produced cross-file paths
+        // between wholly unrelated ones. When the name is ambiguous, require a
+        // real link (an import or a resolved call edge) from the caller's file to
+        // this one. The gate is skipped for a caller file with NO imports
+        // recorded at all — absent data means "could not see", not "none", the
+        // same rule `requireModule` follows. Keying on recorded imports rather
+        // than on in-repo edges matters: a file importing only framework
+        // packages has zero in-repo edges, and that is evidence the hop is a
+        // guess, not evidence that we failed to look.
+        const ambiguous = Array.isArray(defs) && defs.length > 1;
         const callerList = graph.callersBySymbol?.[fr.sym];
         for (const caller of Array.isArray(callerList) ? callerList : []) {
           if (caller.file === fr.file) continue;
+          if (ambiguous && !linksTo(caller.file, fr.file)) continue;
           const key = `${caller.file}#${caller.symbol ?? caller.line}`;
           if (visited.has(key)) continue;
           visited.add(key);
@@ -190,12 +294,21 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
   }
 
   // Rank, THEN cap — so the kept candidates are the important ones (not whatever
-  // happened to be enumerated first in alphabetical file order). Proximity = path
-  // length: fewer source→sink hops is closer to the attack surface, hence riskier.
+  // happened to be enumerated first in alphabetical file order). Scope outranks
+  // proximity: a two-hop chain whose source is in the same function beats a
+  // one-hop pairing that shares only a file. Proximity = path length: fewer
+  // source→sink hops is closer to the attack surface, hence riskier.
   const crossFile = (f: Finding): number => (f.path && new Set(f.path.map((p) => p.file)).size > 1 ? 1 : 0);
   const proximity = (f: Finding): number => (f.path ? f.path.length : Number.MAX_SAFE_INTEGER);
+  const unlinked = (f: Finding): number => (f.dataflow === "unlinked" ? 1 : 0);
   findings.sort(
-    (a, b) => severityRank(a.severity) - severityRank(b.severity) || proximity(a) - proximity(b) || crossFile(b) - crossFile(a) || byStr(a.id, b.id),
+    (a, b) =>
+      severityRank(a.severity) - severityRank(b.severity) ||
+      scopeRank(a.sourceScope) - scopeRank(b.sourceScope) ||
+      unlinked(a) - unlinked(b) ||
+      proximity(a) - proximity(b) ||
+      crossFile(b) - crossFile(a) ||
+      byStr(a.id, b.id),
   );
 
   const total = findings.length;

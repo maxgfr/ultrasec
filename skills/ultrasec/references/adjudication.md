@@ -6,8 +6,37 @@ into a report is the whole job. This file is the method: the false-positive shap
 actually meet, how to refute each one, how to write the proof when it *is* real, and two worked
 examples end to end.
 
-Order of work per candidate: **read the packet → answer the four questions → name the FP shape
-or write the exploit → record the verdict.** Never skip to the verdict.
+Order of work per candidate: **restate the claim → read the packet → answer the four questions →
+name the FP shape or write the exploit → record the verdict.** Never skip to the verdict.
+
+## Step 0 — restate the claim before you analyse it
+
+Half of false positives collapse the moment the claim is stated precisely, because most of them are
+not wrong analyses — they are *vague* ones. Before opening a file, write the candidate back in your
+own words:
+
+- **Class** — what kind of bug is this claimed to be?
+- **Trigger** — what does the attacker send, and to which entry point?
+- **Impact** — what do they get that they did not already have?
+- **Threat model** — who are they, and what do they already hold? (`CONTEXT.md`)
+- **Preconditions** — what must be true of the caller, the config, the deployment?
+
+If you cannot fill in the trigger, the candidate is not yet a claim and the honest verdict is
+`unsupported`. If you cannot fill in the impact, check brocard 2 before going further: an exploit
+that requires what it grants is not an exploit.
+
+## Route: standard or deep
+
+Not every candidate deserves the same spend. Decide once, at step 0.
+
+| | Standard verification | Deep verification |
+|---|---|---|
+| **When** | one component, a known class, a direct flow | ambiguous claim, several components, concurrency, or logic with no written spec |
+| **Work** | read the path, answer the four questions, verdict | reconstruct the invariant the code assumes, look for the caller that breaks it, consider interleavings, and have a second pass try to refute your own conclusion |
+| **Escalate** | when the four questions do not settle it | — |
+
+Treating every candidate as deep exhausts the budget before the interesting ones; treating every
+candidate as standard is how a race condition gets marked `unsupported`.
 
 ## The four questions
 
@@ -137,6 +166,35 @@ recognize without opening a file.
   makes serious. Cheap to keep; expensive to lose a real bug.
 
 If deciding needs the code, it isn't triage — leave it `keep` and adjudicate properly.
+
+## Rationalizations that end an audit early
+
+Each of these is a thought that feels like a conclusion and is actually a shortcut. Catching one
+means stopping and doing the step it replaced.
+
+| Thought | Why it's wrong | Do instead |
+|---|---|---|
+| "This pattern is dangerous, so it's a bug" | The pattern is the hypothesis, not the finding | Trace the flow end to end |
+| "The same code was vulnerable in that other repo" | Each context has its own callers and guards | Adjudicate this one on its own evidence |
+| "It's obviously critical, no need to be rigorous" | Severity raises the cost of being wrong, not the licence to skip | Apply the same four questions, then try to refute yourself |
+| "The scanner rated it high" | A tool's severity is a prior with no knowledge of your app | Brocard 7 — judge the code |
+| "I can't find the caller, so it's unreachable" | Dynamic dispatch, DI and framework routing are invisible to the graph | `unsupported`, not `refuted` (brocard 3) |
+| "There's a validator on the line, so it's fine" | A validator that checks the wrong property protects nothing | Read what it actually rejects |
+| "It's behind auth, so it's low" | An authenticated user is an attacker in most threat models | Brocard 2 — check what the precondition really costs |
+| "Too many candidates to read them all" | The count is a budgeting problem, not an evidence problem | `triage`, `--strict-scope`, `--min-severity` — then read what's left |
+
+## After the batch: look for chains
+
+Findings are adjudicated one at a time; attackers do not use them one at a time. Once a batch is
+done, re-read the `unsupported` and low-severity pile together and ask what **composes**:
+
+- an information leak that supplies the id another finding needs;
+- an open redirect plus a token in a URL;
+- a path traversal limited to reads, next to a config file the app re-loads;
+- a rate-limit gap that turns a 1-in-10⁴ race into a reliable one.
+
+A chain is reported as **one finding** at the severity of the outcome, citing every link. This is
+where the genuinely critical results usually come from — no single link looked like much.
 
 ## Worked example 1 — a confirmed 3-file SQLi
 

@@ -1,0 +1,191 @@
+{
+  "findings": [
+    {
+      "id": "7e2316b4b749",
+      "category": "taint",
+      "cwe": "CWE-78",
+      "title": "OS command injection: untrusted input reaches run()",
+      "severity": "critical",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "routes.js",
+        "line": 4,
+        "kind": "command",
+        "symbol": "handler"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handler",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler",
+          "why": "command sink: run()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "message": "Intra-file candidate: http input at routes.js:3 may reach the command sink run() at routes.js:4 through 1 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/78.html"
+      ],
+      "status": "open",
+      "risk": 60
+    },
+    {
+      "id": "c92481946489",
+      "category": "sast",
+      "cwe": "CWE-88",
+      "title": "Argument injection: execFile() sink (no source path found)",
+      "severity": "high",
+      "confidence": "low",
+      "sink": {
+        "file": "safe.js",
+        "line": 4,
+        "kind": "argv",
+        "symbol": "safe"
+      },
+      "message": "Dangerous argv sink execFile() at safe.js:4 that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). Tainted data used as an ARGUMENT to a program. An argv array stops shell metacharacters, not option injection: verify the value cannot start with '-' and is not a path/URL the callee will act on. Confirm whether attacker-controlled data can reach it before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/88.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "efe5bcbafd7b",
+      "category": "taint",
+      "cwe": "CWE-88",
+      "title": "Argument injection: untrusted input reaches execFile()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.js",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.js",
+        "line": 6,
+        "kind": "argv",
+        "symbol": "run"
+      },
+      "path": [
+        {
+          "file": "routes.js",
+          "line": 3,
+          "symbol": "handler",
+          "why": "untrusted input (http): req.query"
+        },
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler",
+          "why": "calls run()"
+        },
+        {
+          "file": "sink.js",
+          "line": 6,
+          "symbol": "run",
+          "why": "argv sink: execFile()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the argv sink execFile() at sink.js:6 through 2 hop(s). Tainted data used as an ARGUMENT to a program. An argv array stops shell metacharacters, not option injection: verify the value cannot start with '-' and is not a path/URL the callee will act on. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/88.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.js",
+      "safe.js",
+      "sink.js"
+    ],
+    "edges": [
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handler",
+        "toSymbol": "run"
+      },
+      {
+        "from": "routes.js",
+        "to": "sink.js",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handler": [
+        "routes.js"
+      ],
+      "safe": [
+        "safe.js"
+      ],
+      "run": [
+        "sink.js"
+      ]
+    },
+    "callersBySymbol": {
+      "execFile": [
+        {
+          "file": "safe.js",
+          "line": 4,
+          "symbol": "safe"
+        },
+        {
+          "file": "sink.js",
+          "line": 6,
+          "symbol": "run"
+        }
+      ],
+      "json": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler"
+        }
+      ],
+      "require": [
+        {
+          "file": "routes.js",
+          "line": 1
+        },
+        {
+          "file": "safe.js",
+          "line": 1
+        },
+        {
+          "file": "sink.js",
+          "line": 4
+        }
+      ],
+      "run": [
+        {
+          "file": "routes.js",
+          "line": 4,
+          "symbol": "handler"
+        }
+      ]
+    }
+  }
+}

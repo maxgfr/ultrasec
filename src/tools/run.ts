@@ -1,4 +1,4 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { join, relative } from "node:path";
 import type { Category, Finding, PathStep, CodeLoc } from "../types.js";
 import { detect } from "./registry.js";
@@ -72,6 +72,14 @@ export interface ToolAdapter {
   /** Needs the network on every run (registry-query audits) → skipped under
    *  --offline. A function answers per-run ("only if feeds not cached"). */
   network?: boolean | (() => boolean);
+  /**
+   * Read diagnostics from STDERR instead of stdout. cppcheck (and several other
+   * C/C++ tools) write their report there by convention and keep stdout for
+   * progress, so ignoring stderr means parsing an empty string and reporting a
+   * clean run — a silent false negative, which is the one failure mode this belt
+   * must not have.
+   */
+  stderr?: boolean;
 }
 
 export interface ToolRunResult {
@@ -107,15 +115,16 @@ export const TIMEOUT_MS = 300_000;
 export const MAX_BUFFER = 64 * 1024 * 1024;
 const MOUNT = "/work";
 
-function exec(name: string, args: string[], cwd: string): { stdout: string; failed: boolean; err?: string } {
+function exec(name: string, args: string[], cwd: string, useStderr = false): { stdout: string; failed: boolean; err?: string } {
+  const capture = { cwd, encoding: "utf8" as const, timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER };
   try {
-    const stdout = execFileSync(name, args, {
-      cwd,
-      encoding: "utf8",
-      timeout: TIMEOUT_MS,
-      maxBuffer: MAX_BUFFER,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
+    if (useStderr) {
+      // Capture both; the diagnostics live on fd 2 for these tools.
+      const res = spawnSync(name, args, { ...capture, stdio: ["ignore", "pipe", "pipe"] });
+      if (res.error) return { stdout: "", failed: true, err: res.error.message };
+      return { stdout: String(res.stderr ?? ""), failed: false };
+    }
+    const stdout = execFileSync(name, args, { ...capture, stdio: ["ignore", "pipe", "ignore"] });
     return { stdout, failed: false };
   } catch (e: unknown) {
     // execFileSync throws on non-zero exit — but scanners exit non-zero WHEN they
@@ -195,7 +204,7 @@ function runNative(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
   const dirs = adapter.workspaces?.(repo) ?? [];
   if (dirs.length) return runEachWorkspace(adapter, repo, cmd, argv, dirs, ctx);
 
-  const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], repo);
+  const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], repo, adapter.stderr);
   return finish(adapter, repo, stdout, failed, err, false, ctx);
 }
 
@@ -213,7 +222,7 @@ function runEachWorkspace(adapter: ToolAdapter, repo: string, cmd: string[], arg
   const failures: string[] = [];
   for (const dir of dirs) {
     const rel = relative(repo, dir);
-    const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], dir);
+    const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], dir, adapter.stderr);
     // Relativize against the REPO, and tell the adapter which workspace it is in,
     // so the path it records — and therefore the finding id — is repo-relative
     // from the start.
@@ -244,7 +253,7 @@ function runDocker(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
   const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
   const args = ["run", "--rm", "--pull", "always", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
-  const { stdout, failed, err } = exec("docker", args, repo);
+  const { stdout, failed, err } = exec("docker", args, repo, adapter.stderr);
   return finish(adapter, repo, stdout, failed, err, true);
 }
 

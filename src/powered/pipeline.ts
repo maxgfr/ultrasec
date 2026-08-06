@@ -17,6 +17,8 @@ import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from ".
 import { buildInvestigateWorklist, renderInvestigateMd, ingestDiscoveries, parseDiscoveries } from "../investigate.js";
 import { buildWorklist, renderWorklistMd, applyVerdicts, parseVerdicts } from "../verify.js";
 import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../revalidate.js";
+import { buildAssumptionWorklist, renderAssumptionsMd, parseAssumptionResults, renderAssumptionMap, unenforced, LEADS_FILE } from "../assumptions.js";
+import { buildVariantWorklist, renderVariantsMd, parseVariantResults, renderRegressionRules } from "../variants.js";
 import { buildNarrativeWorklist, renderNarrativeWorklistMd, parseNarrative, mergeNarrative, hasNarrativeContent } from "../narrative.js";
 import { buildImplementWorklist, renderImplementMd, loadNarrative } from "../implement.js";
 import type { AgentRunner } from "./agent.js";
@@ -28,7 +30,10 @@ import { eprintln } from "../util.js";
 // the configured agent CLI per worklist, applying each through the SAME apply
 // functions the manual path uses — there is no duplicated stage logic here.
 
-export const ALL_STAGES = ["context", "triage", "investigate", "verify", "revalidate", "narrative", "implement"] as const;
+// Canonical order. `assumptions` runs BEFORE the hunt (its leads feed
+// `investigate`) and `variants` AFTER adjudication (its seeds are confirmed
+// findings), so neither can be slotted in arbitrarily.
+export const ALL_STAGES = ["context", "assumptions", "triage", "investigate", "verify", "revalidate", "variants", "narrative", "implement"] as const;
 export type StageName = (typeof ALL_STAGES)[number];
 
 interface StageDef {
@@ -38,6 +43,9 @@ interface StageDef {
   applyPure?(repo: string, run: string, dossier: Dossier, raw: string): Finding[];
   /** Whether a `--cross-check` second agent reconciles this stage. */
   crossCheckable: boolean;
+  /** Side artifacts a stage writes from the raw agent output (a map, a rule
+   *  file) that are not findings and so cannot travel through `applyPure`. */
+  afterApply?(run: string, raw: string): void;
   /** The instruction (prompt) given to the agent CLI for this stage. */
   instruction(repo: string, run: string, worklist: string, outPath: string): string;
 }
@@ -70,6 +78,26 @@ const STAGES: Record<StageName, StageDef> = {
     },
     instruction: (repo, run, worklist, outPath) =>
       `Security audit of ${repo}. Read the project-context scaffold at ${worklist} and author a concise CONTEXT.md (purpose, trust model, auth/authorization scheme, framework protections) at ${outPath}. ${UNTRUSTED}`,
+  },
+  assumptions: {
+    crossCheckable: false,
+    emit(repo, run) {
+      const items = buildAssumptionWorklist(scanRepo(repo));
+      const f = stageFiles("ASSUMPTIONS");
+      emitWorklist(run, f, items, renderAssumptionsMd(items, loadContextDoc(run)));
+      return { worklist: join(run, f.md), outName: "ASSUMPTIONS.json" };
+    },
+    // Deliberately no `applyPure`: this stage produces UNDERSTANDING, not
+    // findings. Its output is the map plus the leads that `investigate` picks up
+    // — turning "nothing enforces this" into a finding would be the padding the
+    // severity rubric exists to prevent.
+    afterApply(run, raw) {
+      const rows = rowsOf("assumptions", parseAssumptionResults(raw));
+      writeFileSync(join(run, "ASSUMPTIONS.md"), renderAssumptionMap(rows));
+      writeFileSync(join(run, LEADS_FILE), JSON.stringify(unenforced(rows), null, 2));
+    },
+    instruction: (repo, run, worklist, outPath) =>
+      `Read the assumption worklist at ${worklist}. Per unit record what it GUARANTEES (each with the line that establishes it) and what it ASSUMES without verifying — set enforcedAt to the file:line that enforces it, or to the literal "nothing-found" when nothing does. Write a JSON array of {at, guarantees, assumptions, calls, openQuestions} to ${outPath}. No severities, no findings: this stage builds understanding. ${UNTRUSTED}`,
   },
   triage: {
     crossCheckable: false,
@@ -119,6 +147,27 @@ const STAGES: Record<StageName, StageDef> = {
       applyRevalidations(dossier, rowsOf("revalidate", parseRevalidations(raw)), revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo))).findings,
     instruction: (repo, run, worklist, outPath) =>
       `Read the revalidation worklist at ${worklist}. Using the git facts, decide still-valid|fixed|false-positive|uncertain per finding and write a JSON array of {id, verdict, fixedIn?, note?} to ${outPath}. ${UNTRUSTED}`,
+  },
+  variants: {
+    crossCheckable: false,
+    emit(repo, run, dossier) {
+      const items = buildVariantWorklist(dossier);
+      const f = stageFiles("VARIANTS");
+      emitWorklist(run, f, items, renderVariantsMd(items, loadContextDoc(run)));
+      return { worklist: join(run, f.md), outName: "VARIANTS.json" };
+    },
+    applyPure: (repo, _run, dossier, raw) =>
+      ingestDiscoveries(
+        dossier,
+        rowsOf("variants", parseVariantResults(raw)).flatMap((r) => r.variants ?? []),
+        repo,
+      ).findings,
+    afterApply(run, raw) {
+      const rules = renderRegressionRules(rowsOf("variants", parseVariantResults(raw)));
+      if (rules) writeFileSync(join(run, "ultrasec-variants.yaml"), rules);
+    },
+    instruction: (repo, run, worklist, outPath) =>
+      `Read the variant worklist at ${worklist}. For each CONFIRMED seed, state the root cause (the why, not the what), build an EXACT match that finds the known instance — zero results means you have misunderstood the bug — then generalize ONE dimension at a time, stopping when over half the matches are false. Write a JSON array of {seedId, rootCause, patterns, variants: Discovery[], regressionRule} to ${outPath}. Cite resolvable [file:line]. ${UNTRUSTED}`,
   },
   narrative: {
     crossCheckable: false,
@@ -233,7 +282,17 @@ export function runPipeline(opts: PipelineOptions): PipelineResult {
       errors.push(`${name}: ${r.stderr ?? "agent failed"}`);
       continue;
     }
-    if (!stage.applyPure) continue; // context / narrative: consumed later, no apply
+    // Side artifacts (the assumption map, the regression rules) are written even
+    // when a stage has no `applyPure` — they are the stage's whole output.
+    if (stage.afterApply) {
+      try {
+        stage.afterApply(opts.run, readFileSync(outPath, "utf8"));
+        actions.push(`write:${name}`);
+      } catch (e) {
+        errors.push(`${name}: ${(e as Error).message}`);
+      }
+    }
+    if (!stage.applyPure) continue; // context / narrative / assumptions: no findings to fold
 
     const after = loadDossier(opts.run);
     const primary = stage.applyPure(opts.repo, opts.run, after, readFileSync(outPath, "utf8"));

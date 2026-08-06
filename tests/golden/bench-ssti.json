@@ -32,6 +32,8 @@
           "why": "ssti sink: renderString()"
         }
       ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
       "message": "Intra-file candidate: http input at vuln.js:3 may reach the ssti sink renderString() at vuln.js:4 through 1 hop(s). Tainted data compiled into a template. Render data as context VALUES, never concatenate into the template source; enable autoescaping. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

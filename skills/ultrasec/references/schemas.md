@@ -148,15 +148,27 @@ the `.md` brief always describes the full worklist.
     "verdict": null, "note": "", "priorSignal": "deepsec: true-positive (signal, not a verdict)" } ]
 ```
 
-You write an array of `{id, verdict, note?, exploitPath?}`:
+You write an array of `{id, verdict, note?, exploitPath?, brocard?}`:
 
 ```json
 [ { "id": "7e51071c4783", "verdict": "supported",
     "note": "req.query.id concatenated at service.js:5, reaches conn.query() unparameterized.",
     "exploitPath": "GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`" },
-  { "id": "8104ef108b3e", "verdict": "refuted",
+  { "id": "8104ef108b3e", "verdict": "refuted", "brocard": "outside-usage",
     "note": "FP-9: scratch/ is gitignored developer debris, in no shipped artifact." } ]
 ```
+
+`brocard` names the **ground** for a refutation — one of `no-threat-model` ·
+`exploit-from-the-heavens` · `outside-usage` · `standard-behavior` · `documented-behavior` ·
+`cure-worse-than-disease` · `report-not-dispositive`. It is ignored on any other verdict, and an
+unrecognized name is dropped rather than failing the fold (a typo must not cost the batch).
+
+It is optional and never blocks: `check --semantic` simply **lists** the high/critical dismissals
+that name no ground, so a reviewer can see which refutations were argued. Making it a hard gate
+would only teach adjudicators to pick a ground to get green — and the rule above it (never
+auto-dismiss what you merely cannot confirm) already carries the weight.
+[dismissal-brocards.md](dismissal-brocards.md) says when each one applies, and — more usefully —
+when it does not.
 
 `verify --apply` takes a file, a comma-list, or a **directory** — from a directory it picks up
 every `*verdict*.json`, sorted, so fan-out fragments reassemble deterministically. Name your

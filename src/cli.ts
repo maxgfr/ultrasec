@@ -37,6 +37,8 @@ COMMANDS
              Flags: --tools auto|none|a,b · --docker · --no-enrich/--offline ·
              --sinks (orphan-sink recall) · --log-hygiene (opt-in CWE-117/CWE-532
              logging-hygiene checks) · --blame (git-blame/CODEOWNERS provenance) ·
+             --strict-scope (drop candidates whose source is in a DIFFERENT
+             function of the same file) · --no-env-sources (drop env-rooted flows) ·
              --scope/--include/--exclude/--max-files/--gitignore (focus) ·
              --budget quick|standard|thorough · --max-candidates · --max-depth ·
              --diff <ref>/--since <commit> · --merge · --resume (incremental) · --json.
@@ -81,7 +83,11 @@ COMMANDS
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]
              as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
-             existing findings' sources). Flags: --run · --repo · --apply ·
+             existing findings' sources). --lens sharp-edges|crypto|privacy asks a
+             DIFFERENT question of the same regions (sharp-edges: does this API
+             make the insecure use easier than the secure one?). Unenforced
+             assumptions from 'assumptions' are folded into the region prompts.
+             Flags: --run · --repo · --apply · --lens ·
              --scope/--include/--exclude/--max-files/--gitignore · --json.
   revalidate Git-history false-positive cut: emit compact git facts (does the
              cited line still exist? when did it last change?) for confirmed /
@@ -89,6 +95,22 @@ COMMANDS
              false-positive/uncertain (fixed → dismissed + fixed-in commit;
              high-sev false-positive → needs-human), and fails closed if every
              fragment is stale. Flags: --run · --repo · --apply · --json.
+  assumptions
+             Build the assumption map BEFORE hunting: per unit, what it
+             guarantees (cited) and what it depends on that nothing enforces.
+             An assumption marked 'nothing-found' is a place the code trusts
+             something nobody wrote down — the highest-value lead an audit
+             produces, and one no taint walk can reach. --apply writes
+             ASSUMPTIONS.md and hands the leads to the next 'investigate' emit.
+             Flags: --run · --repo · --apply · --strict ·
+             --scope/--include/--exclude/--max-files/--gitignore · --json.
+  variants   Hunt other instances of a CONFIRMED bug's root cause: emit one seed
+             per confirmed finding with its mechanical neighbours (same sink
+             callee / file / CWE), you state the root cause and generalize a
+             search one dimension at a time; --apply folds the variants in
+             through the same citation gate as 'investigate' and writes the
+             regression rules you authored to ultrasec-variants.yaml.
+             Flags: --run · --repo · --apply · --strict · --json.
   narrative  Emit the report-narrative worklist (reportable findings + a Narrative
              scaffold); you author NARRATIVE.json, folded in via 'render --narrative'.
              Flags: --run · --json.
@@ -100,6 +122,12 @@ COMMANDS
   render     Render SUMMARY/REPORT.md + a self-contained index.html.
              --narrative <file> folds in AI-authored sections (exec summary, fixes,
              attack chains, root causes), clearly marked + grounding-checked.
+  coverage   The honest complement to 'only report what you can exploit': an
+             OWASP-ASVS matrix of what this audit looked at and what it did NOT.
+             A short report reads as "nothing there" when it means "nothing
+             there, in what I looked at" — this separates the two, and names the
+             categories no deterministic signal can cover so you answer them
+             explicitly. Read-only. Flags: --run · --write (COVERAGE.md) · --json.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
              READ-ONLY — it writes nothing and changes no status; --semantic ALSO
              fails when a candidate is still unadjudicated. Exit 0 ok · 1 gate
@@ -113,8 +141,9 @@ COMMANDS
              LOGSTATS.json, NARRATIVE.json, IMPLEMENT.md and orchestration/ count as
              intermediates; a run that was never rendered is removed whole.
              Flags: --run · --all · --keep-output · --docker · --dry-run · --json.
-  run        Orchestrate the AI stages (context → triage → investigate → verify →
-             revalidate → narrative → implement), then ALWAYS check + render. DEFAULT
+  run        Orchestrate the AI stages (context → assumptions → triage →
+             investigate → verify → revalidate → variants → narrative →
+             implement), then ALWAYS check + render. DEFAULT
              makes ZERO external calls: scans + emits every worklist + prints the agent
              TODO. --powered drives an agent CLI per worklist (keys live in that CLI,
              not ultrasec); --cross-check <cli> escalates high/critical verify/

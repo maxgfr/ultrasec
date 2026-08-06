@@ -185,9 +185,48 @@ Each carries the thesis the engine rests on: **it finds candidates, you decide**
 — and the reason it matters, which is that a report a maintainer stops trusting
 gets the real finding dismissed along with the noise.
 
+## Detection, measured
+
+`tests/fixtures/bench/` scores 27 CWE classes at TPR 1.0 / FPR 0.0 in CI — a regression gate
+written by the same people who wrote the rules, so it proves the rules did not change, not that
+they are good.
+
+`pnpm bench:public` scores the engine against **third-party labelled corpora** instead, and writes
+[docs/BENCHMARK.md](docs/BENCHMARK.md). On OWASP Benchmark v1.2 (2740 labelled Java cases, fetched
+at run time — GPL-2.0, never vendored):
+
+| CWE | | before | after |
+|---|---|---:|---:|
+| CWE-614 | cookie without protective attributes | 0% | **100.0%** |
+| CWE-78 | command injection | 0% | **91.3%** |
+| CWE-22 | path traversal | 0% | **88.7%** |
+| CWE-501 | trust boundary violation | 0% | **86.7%** |
+| CWE-330 | predictable RNG | 0% | **81.2%** |
+| CWE-79 | XSS | 0% | **79.3%** |
+| CWE-327 | broken cipher | 0% | **77.7%** |
+| CWE-328 | weak hash | 0% | **76.0%** |
+| CWE-89 | SQL injection | 15.8% | **67.3%** |
+| CWE-643 | XPath injection | 0% | **46.7%** |
+| CWE-90 | LDAP injection | 0% | **40.7%** |
+
+*(“before” = the first run against this corpus, on the catalog as it stood.)*
+
+Read TPR as the headline and FPR (35–100%) with care: ultrasec enumerates *candidates* for a human
+to adjudicate — a sanitizer lowers confidence and annotates, it never auto-dismisses — so every
+sanitized-but-reported case counts against FPR here although surfacing it is the intended
+behaviour. A tool that auto-suppressed them would score better on that table and lose real bugs.
+
+**Running this is what produced most of the engine's recent accuracy work.** The self-written
+fixtures all scored 100% and hid: a Java catalog with no `prepareStatement`, no `ProcessBuilder`,
+no servlet writers and no `new File(...)`; 664 of 2740 cases (24%) whose only source is
+`request.getCookies()`, which the catalog could not see at all; a `String[] args` rule that treated
+every local array named `args` as a CLI source; and a call-graph hop that linked unrelated files
+through any ambiguous symbol name — `doSomething` is defined in 881 of those files. That last fix
+alone cut this repo's own candidate count by 23% with no loss of recall.
+
 ### Resources — the skill's own documentation
 
-`SKILL.md` and all 21 `references/*.md` are served under `skill://`, read off
+`SKILL.md` and every `references/*.md` are served under `skill://`, read off
 disk at request time — so a documentation fix reaches every client without a
 rebuild.
 

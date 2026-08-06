@@ -1,0 +1,128 @@
+{
+  "findings": [
+    {
+      "id": "4276ed2609e4",
+      "category": "taint",
+      "cwe": "CWE-1236",
+      "title": "CSV formula injection: untrusted input reaches writerows()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "routes.py",
+        "line": 7,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.py",
+        "line": 7,
+        "kind": "csv",
+        "symbol": "export"
+      },
+      "path": [
+        {
+          "file": "routes.py",
+          "line": 7,
+          "symbol": "handler",
+          "why": "untrusted input (http): request.args"
+        },
+        {
+          "file": "routes.py",
+          "line": 8,
+          "symbol": "handler",
+          "why": "calls export()"
+        },
+        {
+          "file": "sink.py",
+          "line": 7,
+          "symbol": "export",
+          "why": "csv sink: writerows()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "message": "Cross-file candidate: http input at routes.py:7 may reach the csv sink writerows() at sink.py:7 through 2 hop(s). Tainted data written into a spreadsheet cell. A value starting with = + - @ TAB or CR executes when opened in Excel/Sheets. Prefix such values with an apostrophe or reject them. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/1236.html"
+      ],
+      "status": "open",
+      "risk": 30
+    }
+  ],
+  "graph": {
+    "files": [
+      "routes.py",
+      "safe.py",
+      "sink.py"
+    ],
+    "edges": [
+      {
+        "from": "routes.py",
+        "to": "sink.py",
+        "kind": "call",
+        "weight": 1,
+        "fromSymbol": "handler",
+        "toSymbol": "export"
+      },
+      {
+        "from": "routes.py",
+        "to": "sink.py",
+        "kind": "import",
+        "weight": 1
+      }
+    ],
+    "symbolDefs": {
+      "handler": [
+        "routes.py"
+      ],
+      "safe": [
+        "safe.py"
+      ],
+      "export": [
+        "sink.py"
+      ]
+    },
+    "callersBySymbol": {
+      "export": [
+        {
+          "file": "routes.py",
+          "line": 8,
+          "symbol": "handler"
+        }
+      ],
+      "get": [
+        {
+          "file": "routes.py",
+          "line": 7,
+          "symbol": "handler"
+        },
+        {
+          "file": "safe.py",
+          "line": 5,
+          "symbol": "safe"
+        }
+      ],
+      "str": [
+        {
+          "file": "safe.py",
+          "line": 7,
+          "symbol": "safe"
+        }
+      ],
+      "writer": [
+        {
+          "file": "sink.py",
+          "line": 5,
+          "symbol": "export"
+        }
+      ],
+      "writerows": [
+        {
+          "file": "sink.py",
+          "line": 7,
+          "symbol": "export"
+        }
+      ]
+    }
+  }
+}

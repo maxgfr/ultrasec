@@ -1,6 +1,6 @@
 ---
 name: ultrasec
-description: "Use when the user wants a SECURITY AUDIT of a codebase — find real, exploitable bugs by tracing how untrusted data flows ACROSS functions and files, not file-by-file. A deterministic zero-dep engine (no keys, no install) builds a cross-file link-graph, enumerates source→sink paths (SQLi, command/code injection, path traversal, SSRF, XSS, SSTI, XXE, prototype pollution), runs scanners (Trivy, Semgrep, gitleaks…), correlates them, ranks by EPSS/KEV/CVSS; YOU read the code along each path and judge reachability/exploitability — authz/IDOR, business logic, auth/JWT/crypto, races, CI/supply-chain, prompt injection — then adversarially verify each into a cited report. Every finding cites resolvable [file:line] (`check` fails otherwise); an uncertain high-severity one stays needs-human. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review', 'is this vulnerable to SQL injection/XSS/SSRF', 'taint analysis', 'check dependencies for CVEs', 'scan for secrets'."
+description: "Use when the user wants a SECURITY AUDIT of a codebase — find real, exploitable bugs by tracing how untrusted data flows ACROSS functions and files, not file-by-file. A deterministic zero-dep engine (no keys/install) builds a cross-file link-graph, enumerates source→sink paths (SQLi, command/argument/code injection, path traversal, SSRF, XSS incl. DOM, SSTI, XXE, prototype pollution, prompt injection), runs scanners (Trivy, Semgrep, gitleaks…), correlates them, ranks by EPSS/KEV/CVSS; YOU read the code along each path and judge reachability/exploitability — authz/IDOR, business logic, auth/JWT/crypto, races, CI/supply-chain — then adversarially verify each into a cited report. Every finding cites resolvable [file:line] (`check` fails otherwise); an uncertain high-severity one stays needs-human. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review', 'is this vulnerable to SQLi/XSS/SSRF', 'taint analysis', 'check dependencies for CVEs', 'scan for secrets'."
 license: MIT
 metadata:
   version: 1.21.0
@@ -23,7 +23,8 @@ flows are real and exploitable, find the subtle bugs the tools miss, and verify.
 >    recall-oriented — many are false positives by design. Confirm reachability + exploitability
 >    before calling something a bug: [references/adjudication.md](references/adjudication.md).
 > 3. **Be conservative.** Only `dismiss` a high/critical finding if you can positively **refute**
->    it. Uncertain ⇒ leave it `needs-human`. Aggressive auto-suppression discards real bugs.
+>    it, *naming the ground*: [references/dismissal-brocards.md](references/dismissal-brocards.md).
+>    Uncertain ⇒ `needs-human`. Aggressive auto-suppression discards real bugs.
 > 4. **Use the tools, then go beyond them.** Run the installed scanners (`tools`), triage their
 >    output, and add what only semantic reasoning finds — authz/IDOR, business logic, auth,
 >    crypto, races: [references/attack-classes.md](references/attack-classes.md). Personal data
@@ -62,17 +63,20 @@ ultrasec scan    --repo . --out .ultrasec       # graph + cross-file taint + too
   # budget: --budget quick|standard|thorough  --max-candidates N  --max-depth N
   # again:  --diff origin/main --merge --resume        # incremental, folds into one run
   # recall: --sinks (orphan sinks)  --log-hygiene (CWE-117/532)  --blame (git provenance)
-  #         --no-env-sources (drop process.env/os.getenv-rooted flows — opt-in)
+  #         --no-env-sources (drop env-rooted flows)  --strict-scope (drop cross-function-in-file)
   # net:    --offline / --no-enrich (no EPSS/KEV)      --docker (scanners without installing)
 ultrasec paths   --run .ultrasec                # the candidate chains  (--kind sql --severity high)
 ultrasec dossier <id> --run .ultrasec           # ONE finding's real code + path (id may be a prefix)
 ultrasec graph   <file|symbol> --run .ultrasec  # cross-file links into/out of a node
+ultrasec assumptions --run .ultrasec            # what each unit trusts that NOTHING enforces (--apply)
 ultrasec triage  --run .ultrasec                # cheap noise|keep fast-lane  (--apply TRIAGE.json)
 ultrasec investigate --run .ultrasec            # hunt authz/logic  (--apply INVESTIGATE.json)
 ultrasec verify  --run .ultrasec                # adversarial worklist → write verdicts.json
 ultrasec verify  --apply verdicts.json --run .ultrasec       # a file, comma-list, DIRECTORY, or -
   # any --apply: refused rows are listed with their reason; --strict exits 1 on any
 ultrasec revalidate --run .ultrasec             # git-history FP cut  (--apply REVALIDATE.json)
+ultrasec variants   --run .ultrasec             # where ELSE this root cause appears (--apply)
+ultrasec coverage --run .ultrasec               # ASVS matrix: what was NOT looked at (--write)
 ultrasec check   --run .ultrasec --semantic     # THE GATE: grounded + adjudicated (--min-severity)
 ultrasec narrative --run .ultrasec              # → you author NARRATIVE.json
 ultrasec render  --run .ultrasec --narrative NARRATIVE.json  # SUMMARY/REPORT.md + index.html
@@ -104,7 +108,12 @@ ultrasec clean   --run .ultrasec                # keeps REPORT/SUMMARY/index.htm
    [references/hunting-heuristics.md](references/hunting-heuristics.md).
 6. **"Check my dependencies / secrets / CI"** — triage ladder, secret response, GitHub Actions,
    IaC: [references/supply-chain.md](references/supply-chain.md); the scanner belt:
-   [references/tools.md](references/tools.md).
+   [references/tools.md](references/tools.md). A workflow that hands a coding agent your repo's
+   own event data is its own class, audited by `scan`:
+   [references/agentic-ci.md](references/agentic-ci.md).
+6b. **"Audit this library / SDK / API"** — the question changes: not *is this vulnerable* but
+   *does this design make the insecure use easier than the secure one*.
+   `investigate --lens sharp-edges` · [references/sharp-edges.md](references/sharp-edges.md).
 7. **"How bad is this?"** — severity rubric with worked calibration pairs:
    [references/severity-and-discipline.md](references/severity-and-discipline.md).
 8. **"Analyze my access/auth logs" / "did anyone attack us"** — blue team, read-only, own
@@ -121,8 +130,10 @@ each: [references/schemas.md](references/schemas.md).
 
 1. **Prime the context** *(highest leverage)*. `context --repo <dir> --out <run>`, then author
    `<run>/CONTEXT.md` — purpose, trust model, auth scheme, framework protections, and a
-   comparable app to calibrate severity against. Every later stage reasons with it (evidence
-   only; it never gates a verdict).
+   comparable app to calibrate severity against. Add `Exposure:` and `Criticality:` (the risk
+   score reads them) and a STRIDE/LINDDUN pass per trust boundary — that is what decides *what
+   you hunt* instead of letting the tooling decide:
+   [references/threat-modeling.md](references/threat-modeling.md).
    [references/context-playbook.md](references/context-playbook.md).
 
 2. **Scan.** `scan --repo <dir> --out <run>`. Run `tools` first for richer coverage (Trivy is
@@ -149,6 +160,12 @@ each: [references/schemas.md](references/schemas.md).
    that arrives — can you write the PoC?
    [references/adjudication.md](references/adjudication.md).
 
+6b. **Map the assumptions** *(before hunting)*. `assumptions --run <run>` — per unit, what it
+   guarantees (cited) and what it depends on that nothing enforces. A `nothing-found` marks code
+   trusting something nobody wrote down: no dangerous call, nothing wrong on any single screen,
+   invisible to the engine. `--apply` feeds the leads to `investigate`.
+   [references/assumptions-playbook.md](references/assumptions-playbook.md).
+
 7. **Hunt what the engine can't enumerate.** `investigate --run <run>` groups the attack surface
    by region; find broken access control/IDOR, business logic, auth/session/JWT, crypto, races,
    feature abuse, chained attacks, and emit grounded `Discovery[]` — citations are checked before
@@ -163,7 +180,16 @@ each: [references/schemas.md](references/schemas.md).
    so earlier the worklist is empty): decide `still-valid|fixed|false-positive|uncertain`.
    [references/revalidate-playbook.md](references/revalidate-playbook.md).
 
+9b. **Hunt the variants.** `variants --run <run>` — a root cause almost never produced exactly one
+   instance. State the *why*, build an exact match that finds the known bug, generalize one
+   dimension at a time, and emit a Semgrep rule so the family cannot come back:
+   [references/variant-analysis.md](references/variant-analysis.md).
+
 10. **Gate.** `check --run <run> --semantic`. Fix any dangling citation; adjudicate anything left.
+
+10b. **State the coverage.** `coverage --run <run>` — an ASVS matrix of what this audit looked at
+   and what it did not. A short report reads as "nothing there" when it means "nothing there, in
+   what I looked at"; the matrix separates the two, and it is folded into REPORT.md automatically.
 
 11. **Narrate & render.** `narrative --run <run>`, author `NARRATIVE.json` (executive summary,
     `positivePatterns`, fixes, attack chains, root causes, `hardeningNotes`), then `render --run
@@ -255,6 +281,8 @@ whoever adjudicated it. Re-run `orchestrate` whenever a worklist changes (emissi
 - **What it does not do:** no DAST, no fuzzing, no authenticated crawling, no runtime testing.
   Every class in [references/attack-classes.md](references/attack-classes.md) is manual, and one
   pass reads only the paths you dug into — recommend a `--merge` re-run.
+- **Measured, not asserted.** Per-CWE scores on OWASP Benchmark: `docs/BENCHMARK.md`, gaps
+  included — strong on injection, **zero** on what is not a source→sink shape. `coverage` says which.
 - **Not a substitute for judgement.** ultrasec narrows a huge repo to a handful of evidence-backed
   candidates and proves the boring half mechanically; the security call is yours.
 

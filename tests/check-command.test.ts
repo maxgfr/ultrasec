@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { runCheck } from "../src/commands/check.js";
 import { writeDossier, type Dossier } from "../src/store.js";
 import { parseArgs } from "../src/util.js";
-import type { Finding, Status } from "../src/types.js";
+import { SEVERITIES, type Finding, type Status } from "../src/types.js";
 
 // Eval closer for the family P0-1/P0-2 proof gap: the semantic gate's NEGATIVE
 // arm (grounded-but-unadjudicated → exit 1) is exercised end-to-end THROUGH
@@ -85,6 +85,26 @@ describe("runCheck — semantic gate arms", () => {
     const empty = mkdtempSync(join(tmpdir(), "ultrasec-check-empty-"));
     const restore = silence();
     expect(runCheck(parseArgs(["check", "--run", empty, "--repo", REPO, "--semantic"]))).toBe(2);
+    restore();
+  });
+
+  // A typo used to become `undefined`, which gates on EVERYTHING — i.e. a wider
+  // gate than asked for. Widening is the safe direction for a filter and the
+  // unsafe one for a flag whose whole job is to narrow: the run passes or fails
+  // for a reason the operator never chose. Fail closed like --budget does.
+  it("exit 2 on an unrecognized --min-severity instead of silently gating on all", () => {
+    const run = seed("open");
+    const restore = silence();
+    expect(runCheck(parseArgs(["check", "--run", run, "--repo", REPO, "--min-severity", "hgih"]))).toBe(2);
+    restore();
+  });
+
+  it("accepts every documented severity name", () => {
+    const run = seed("confirmed");
+    const restore = silence();
+    for (const s of SEVERITIES) {
+      expect(runCheck(parseArgs(["check", "--run", run, "--repo", REPO, "--min-severity", s]))).toBe(0);
+    }
     restore();
   });
 });

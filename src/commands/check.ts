@@ -11,8 +11,17 @@ export function runCheck(args: ParsedArgs): number {
   const run = resolve(flagStr(args, "run") ?? ".ultrasec");
   const repo = flagStr(args, "repo");
   const semantic = flagBool(args, "semantic");
+  // An unrecognized name is an ERROR, not a silent fall-back to "gate on
+  // everything" — asking for `--min-severity hgih` and quietly getting a WIDER
+  // gate than you asked for inverts the flag's meaning, and a gate that passes
+  // for the wrong reason is worse than one that fails. `--budget` fails closed
+  // for the same reason (src/commands/scan.ts).
   const minSevRaw = flagStr(args, "min-severity");
-  const minSeverity = minSevRaw && (SEVERITIES as readonly string[]).includes(minSevRaw) ? (minSevRaw as Severity) : undefined;
+  if (minSevRaw !== undefined && !(SEVERITIES as readonly string[]).includes(minSevRaw)) {
+    eprintln(`ultrasec: unknown --min-severity '${minSevRaw}' (expected ${SEVERITIES.join("|")}).`);
+    return 2;
+  }
+  const minSeverity = minSevRaw as Severity | undefined;
 
   let dossier: ReturnType<typeof loadDossier>;
   try {
