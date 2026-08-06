@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.22.0](https://github.com/maxgfr/ultrasec/compare/v1.21.0...v1.22.0) (2026-08-06)
+
+
+### Features
+
+* **engine:** measure detection on a public corpus, then fix what it exposed ([#7](https://github.com/maxgfr/ultrasec/issues/7)) ([c33ad7c](https://github.com/maxgfr/ultrasec/commit/c33ad7c2b2b73647343ea589c67e2c60f33744b5))
+
 # [1.21.0](https://github.com/maxgfr/ultrasec/compare/v1.20.0...v1.21.0) (2026-08-03)
 
 
