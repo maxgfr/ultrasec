@@ -84,6 +84,17 @@ jobs:
         if: steps.detect.outputs.stale == 'true'
         run: pnpm run build
 
+      # The committed example audit is ENGINE OUTPUT: a new codeindex version
+      # legitimately changes the graph it walks. Without regenerating it here,
+      # `check:build`'s `build-example-audit --check` reports "stale: graph.json"
+      # and every automatic re-pin fails — which is how this job came to be red on
+      # a schedule while the vendored engine quietly stopped being updated. The
+      # regenerated artifacts must be in the SAME commit as the bundle, since the
+      # gate below diffs against HEAD.
+      - name: Regenerate the example audit (engine output changes with the engine)
+        if: steps.detect.outputs.stale == 'true'
+        run: pnpm run build:example
+
       # check:build's own git-diff gate compares the rebuilt bundle against
       # HEAD, so the rebuilt bundle has to be committed first (this repo's
       # local/CI flow: build, then commit, then check:build). On red gates
@@ -93,7 +104,7 @@ jobs:
         env:
           LATEST: ${{ steps.detect.outputs.latest }}
         run: |
-          git add src/vendor/engine.meta.json src/vendor/codeindex-engine.mjs src/vendor/codeindex-engine.d.mts scripts/ultrasec.mjs skills/ultrasec/scripts/ultrasec.mjs
+          git add src/vendor/engine.meta.json src/vendor/codeindex-engine.mjs src/vendor/codeindex-engine.d.mts scripts/ultrasec.mjs skills/ultrasec/scripts/ultrasec.mjs assets/example-audit
           git commit -m "feat(engine): re-pin codeindex $LATEST" -m "Automated re-pin. Gates run next; this commit is the adjudication material regardless of outcome."
 
       - name: Build is reproducible (committed bundle up to date)
