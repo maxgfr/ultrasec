@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.26.1](https://github.com/maxgfr/ultrasec/compare/v1.26.0...v1.26.1) (2026-08-10)
+
+
+### Bug Fixes
+
+* **build:** keep the example audit reproducible when the fixture has node_modules ([01b7fe8](https://github.com/maxgfr/ultrasec/commit/01b7fe85356c20b3c2da6efc8be8fd065f556baf))
+* **deps:** patch the five open Dependabot advisories ([470a8ed](https://github.com/maxgfr/ultrasec/commit/470a8edf5e277ef4979bd9287ac5711738011943))
+
 # [1.26.0](https://github.com/maxgfr/ultrasec/compare/v1.25.1...v1.26.0) (2026-08-10)
 
 
