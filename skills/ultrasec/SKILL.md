@@ -3,7 +3,7 @@ name: ultrasec
 description: "Use when the user wants a SECURITY AUDIT of a codebase — find real, exploitable bugs by tracing how untrusted data flows ACROSS functions and files, not file-by-file. A deterministic zero-dep engine (no keys/install) builds a cross-file link-graph, enumerates source→sink paths (SQLi, command/argument/code injection, path traversal, SSRF, XSS incl. DOM, SSTI, XXE, prototype pollution, prompt injection), runs scanners (Trivy, Semgrep, gitleaks…), correlates them, ranks by EPSS/KEV/CVSS; YOU read the code along each path and judge reachability/exploitability — authz/IDOR, business logic, auth/JWT/crypto, races, CI/supply-chain — then adversarially verify each into a cited report. Every finding cites resolvable [file:line] (`check` fails otherwise); an uncertain high-severity one stays needs-human. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review', 'is this vulnerable to SQLi/XSS/SSRF', 'taint analysis', 'check dependencies for CVEs', 'scan for secrets'."
 license: MIT
 metadata:
-  version: 1.22.1
+  version: 1.23.0
 ---
 
 # ultrasec — cross-file security audit, grounded not guessed
