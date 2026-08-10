@@ -15,7 +15,7 @@
 // Pure Node, no deps, no network (`--tools none --offline`).
 import { execFileSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
@@ -66,7 +66,16 @@ const ultrasec = (...args) => execFileSync(process.execPath, [engine, ...args], 
 
 try {
   mkdirSync(dirname(repo), { recursive: true });
-  cpSync(fixture, repo, { recursive: true });
+  // Copy the SOURCE of the fixture only. The fixture carries a package.json, so a
+  // recursive pnpm operation at the repo root treats it as a second workspace
+  // project and drops a `node_modules/.modules.yaml` in it. That directory is
+  // gitignored here but NOT in the throwaway repo below, where `git add -A` would
+  // sweep it into the tree — changing the commit sha, and with it the `commit`
+  // field `revalidate` records. The result: `--check` reports REVALIDATE.* stale
+  // for a reason that has nothing to do with the engine, on whichever machine
+  // happened to run an install. Filtering here keeps the promise the comment below
+  // makes — identical output on every machine and every run.
+  cpSync(fixture, repo, { recursive: true, filter: (src) => !src.split(sep).includes("node_modules") });
 
   // `revalidate` reads git history. A fixed author and date keep the emitted facts
   // (commit sha, author, date) identical on every machine and every run.
