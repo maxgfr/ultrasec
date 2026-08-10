@@ -8,39 +8,32 @@ name: Update package-checker
 # latest-with-fallback resolution" comment) — so the vendored copy is the
 # offline/failure path, not the only path, but it still needs to stay
 # reasonably fresh. This workflow checks daily for a newer upstream release
-# and opens a PR re-pinning it (regenerated bundles included, gated by the
-# full repo gate below) — it never pushes to main directly, and is
-# idempotent: re-running it while a PR for the same tag is already open is a
-# no-op.
+# and re-pins it (regenerated bundles included). All gates green -> pushed
+# straight to main; any gate red -> nothing is pushed, the run fails, and the
+# next daily cron retries. Same shape as engine-repin.yml, deliberately.
 #
-# GITHUB_TOKEN and ci.yml — read this before assuming the opened PR is fully
-# checked: GitHub's anti-recursion rule means a push/PR authenticated by the
-# default `GITHUB_TOKEN` never triggers OTHER `on: pull_request`/`on: push`
-# workflows (here, that's .github/workflows/ci.yml). Left uncompensated, the
-# PR this job opens would either sit unmergeable behind ci.yml's required
-# checks forever, or auto-merge would go through having only run this job's
-# own gate. Two things compensate:
-#   1. The "Full repo gate" step below runs the SAME commands ci.yml/
-#      check:build run — typecheck, test, lint, check:build — against the
-#      bumped (staged) state before the PR is opened, so the change is fully
-#      vetted regardless of which mode below applies.
-#   2. checkout and gh both authenticate with `secrets.PACKAGE_CHECKER_BUMP_TOKEN`
-#      when that secret is set, falling back to the default `github.token`
-#      otherwise (missing secrets evaluate to `''` in Actions expressions, so
-#      `secrets.X || github.token` is a safe, documented fallback — not an
-#      error — when the secret is unset). Add a PAT (repo-scoped, from a
-#      bot/machine account with write access) under the secret name
-#      `PACKAGE_CHECKER_BUMP_TOKEN` to restore normal CI-triggering with zero
-#      further workflow edits:
-#        - WITH the PAT: the push/PR is authenticated as that account, so
-#          ci.yml runs on the PR like any other, and `gh pr merge --auto`
-#          waits for it (and any other required checks) before merging.
-#        - WITHOUT the PAT (default GITHUB_TOKEN, the out-of-the-box state):
-#          ci.yml does NOT run on the PR; the full gate in this job is the
-#          only verification the change gets. `gh pr merge --auto` still
-#          completes immediately if the branch has no required checks
-#          configured — otherwise the PR needs a manual merge (or someone
-#          manually re-running the blocked checks).
+# This job used to open a PR instead. That never worked on this repo: opening a
+# PR from Actions requires the "Allow GitHub Actions to create and approve pull
+# requests" setting, which is off, so from v1.11.4 to v1.11.38 every nightly run
+# pushed its branch, failed on `gh pr create`, and left an orphan behind — 18 of
+# them, while the pin silently rotted 34 releases behind. Pushing needs only
+# `contents: write`, which this job already has, so the direct push is both the
+# simpler and the less-privileged path: the alternative was granting Actions the
+# right to create AND approve pull requests on a security tool's repo.
+#
+# What the push does NOT lose: the "Full repo gate" step below runs the SAME
+# commands ci.yml runs — typecheck, test, lint, check:build — against the bumped
+# state before anything leaves the runner. A PR would have added a review step
+# nobody performs and a ci.yml run GITHUB_TOKEN cannot trigger anyway (GitHub's
+# anti-recursion rule: a push authenticated by the default token starts no other
+# workflow). That last point is why release.yml and ci.yml are dispatched
+# explicitly at the end of the job.
+#
+# `secrets.PACKAGE_CHECKER_BUMP_TOKEN` is still honoured for checkout/gh when set
+# (missing secrets evaluate to '' in Actions expressions, so `secrets.X ||
+# github.token` is a documented fallback, not an error). With that PAT the push is
+# authenticated as that account and ci.yml runs on it natively; without it the
+# explicit dispatch below covers the same ground.
 on:
   schedule:
     - cron: "17 5 * * *"
@@ -48,7 +41,7 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
+  actions: write # to kick off release.yml / ci.yml after the push (see the end of the job)
 
 env:
   # See the GITHUB_TOKEN note above: falls back to the default token when
@@ -61,12 +54,15 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # See the GITHUB_TOKEN note above: this is what actually
-          # authenticates the later `git push`, so it's what determines
-          # whether the anti-recursion rule applies to the opened PR.
+          # Full history: the push step rebases onto origin/main before pushing,
+          # which a shallow clone cannot do (engine-repin.yml does the same).
+          fetch-depth: 0
+          # See the GITHUB_TOKEN note above: this is what actually authenticates
+          # the later `git push`, so it also decides whether the anti-recursion
+          # rule applies to it.
           token: ${{ secrets.PACKAGE_CHECKER_BUMP_TOKEN || github.token }}
 
-      - name: Decide whether a re-pin is needed (and not already in flight)
+      - name: Decide whether a re-pin is needed
         id: decide
         run: |
           set -euo pipefail
@@ -81,15 +77,7 @@ jobs:
             exit 0
           fi
 
-          BRANCH="chore/package-checker-${LATEST}"
-          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
-          OPEN="$(gh pr list --head "$BRANCH" --state open --json number --jq 'length')"
-          if [ "$OPEN" != "0" ]; then
-            echo "a PR re-pinning package-checker at $LATEST is already open on $BRANCH — nothing to do."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
+          echo "re-pin needed: $CURRENT -> $LATEST"
           echo "proceed=true" >> "$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@v6
@@ -115,19 +103,12 @@ jobs:
 
       - name: Stage the bumped state for commit
         if: steps.decide.outputs.proceed == 'true'
-        env:
-          BRANCH: ${{ steps.decide.outputs.branch }}
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # Belt-and-suspenders idempotency: the "already open" check above covers
-          # a re-run while a PR is in flight; this covers a STALE branch left over
-          # from an earlier run whose PR was closed without merging (rare, but
-          # would otherwise reject this push as a non-fast-forward). We fully own
-          # chore/package-checker-* branches, so deleting-then-recreating is safe.
-          git push origin --delete "$BRANCH" 2>/dev/null || true
-          git checkout -b "$BRANCH"
+          # No branch to create: the commit is made on the checked-out main and
+          # pushed there once the gate below is green (see the header).
           # Staged BEFORE the full gate below runs, so check:build's own
           # `git diff --exit-code` over the two bundle paths compares its fresh
           # rebuild against this staged (bumped) content rather than against
@@ -136,38 +117,41 @@ jobs:
           git add src/vendor/package-checker.sh src/vendor/package-checker-script.ts src/vendor/package-checker.meta.json \
             scripts/ultrasec.mjs skills/ultrasec/scripts/ultrasec.mjs
 
-      - name: Full repo gate (mirrors ci.yml — ci.yml itself won't run on this PR without a PAT; see header)
+      - name: Full repo gate (mirrors ci.yml — nothing is pushed unless this is green; see header)
         if: steps.decide.outputs.proceed == 'true'
         run: pnpm typecheck && pnpm test && pnpm run lint && pnpm run check:build
 
-      - name: Commit and open the PR
+      # Pushed straight to main, like engine-repin.yml, and for the same reason:
+      # the full repo gate above already ran the exact commands ci.yml runs
+      # (typecheck, test, lint, check:build) against the bumped state, so a PR
+      # would add a review step nobody performs and a CI run that GITHUB_TOKEN
+      # cannot trigger anyway.
+      #
+      # It also removes a hard blocker. Opening a PR needs "Allow GitHub Actions
+      # to create and approve pull requests", which is off on this repo — so from
+      # v1.11.4 to v1.11.38 every nightly run pushed its branch, failed on
+      # `gh pr create`, and left an orphan behind (18 of them). Pushing needs only
+      # `contents: write`, which the job already has. On a red gate nothing is
+      # pushed: the commit never leaves the runner and the next cron retries.
+      - name: All gates green — push to main
         if: steps.decide.outputs.proceed == 'true'
         env:
           LATEST: ${{ steps.decide.outputs.latest }}
-          BRANCH: ${{ steps.decide.outputs.branch }}
         run: |
           set -euo pipefail
           SHA_SH="$(jq -r '.sha256["package-checker.sh"]' src/vendor/package-checker.meta.json)"
-          SHA_TS="$(jq -r '.sha256["package-checker-script.ts"]' src/vendor/package-checker.meta.json)"
 
-          git commit -m "feat(deps): re-pin package-checker at ${LATEST}"
-          git push -u origin "$BRANCH"
+          git commit -m "feat(deps): re-pin package-checker at ${LATEST}" \
+            -m "Automated re-pin, all gates green (typecheck, lint, test, check:build). package-checker.sh sha256: ${SHA_SH}."
+          git pull --rebase origin main
+          git push origin HEAD:main
 
-          gh pr create \
-            --title "feat(deps): re-pin package-checker at ${LATEST}" \
-            --body "$(cat <<EOF
-          Re-pins the vendored, sha256-pinned \`package-checker.sh\` (the offline/failure fallback for the \`package-checker\` adapter — see \`src/tools/package-checker.ts\`) at upstream's latest release.
-
-          - tag: \`${LATEST}\`
-          - package-checker.sh sha256: \`${SHA_SH}\`
-          - package-checker-script.ts sha256: \`${SHA_TS}\`
-
-          Both bundles (\`scripts/ultrasec.mjs\`, \`skills/ultrasec/scripts/ultrasec.mjs\`) were regenerated so \`check:build\`'s byte-identity gate stays green. The full repo gate (typecheck, test, lint, check:build) already ran in-job before this PR was opened — see the workflow's header comment for why (GITHUB_TOKEN does not trigger ci.yml on this PR unless \`PACKAGE_CHECKER_BUMP_TOKEN\` is configured). Opened automatically by \`.github/workflows/update-package-checker.yml\`.
-          EOF
-          )"
-
-      - name: Enable auto-merge (only takes effect if the repo has it enabled; never fails the workflow)
+      # A GITHUB_TOKEN push triggers no workflows, so release.yml/ci.yml are kicked
+      # off explicitly — same as engine-repin.yml.
+      - name: Trigger release workflow
         if: steps.decide.outputs.proceed == 'true'
-        env:
-          BRANCH: ${{ steps.decide.outputs.branch }}
-        run: gh pr merge "$BRANCH" --auto --squash || true
+        run: gh workflow run release.yml --ref main
+
+      - name: Trigger CI workflow
+        if: steps.decide.outputs.proceed == 'true'
+        run: gh workflow run ci.yml --ref main
