@@ -284,21 +284,19 @@ they are good.
 [docs/BENCHMARK.md](docs/BENCHMARK.md). On OWASP Benchmark v1.2 (2740 labelled Java cases, fetched
 at run time — GPL-2.0, never vendored):
 
-| CWE | | before | after |
-|---|---|---:|---:|
-| CWE-614 | cookie without protective attributes | 0% | **100.0%** |
-| CWE-78 | command injection | 0% | **91.3%** |
-| CWE-22 | path traversal | 0% | **88.7%** |
-| CWE-501 | trust boundary violation | 0% | **86.7%** |
-| CWE-330 | predictable RNG | 0% | **81.2%** |
-| CWE-79 | XSS | 0% | **79.3%** |
-| CWE-327 | broken cipher | 0% | **77.7%** |
-| CWE-328 | weak hash | 0% | **76.0%** |
-| CWE-89 | SQL injection | 15.8% | **67.3%** |
-| CWE-643 | XPath injection | 0% | **46.7%** |
-| CWE-90 | LDAP injection | 0% | **40.7%** |
-
-*(“before” = the first run against this corpus, on the catalog as it stood.)*
+| CWE | | TPR |
+|---|---|---:|
+| CWE-614 | cookie without protective attributes | **100.0%** |
+| CWE-78 | command injection | **91.3%** |
+| CWE-22 | path traversal | **88.7%** |
+| CWE-501 | trust boundary violation | **86.7%** |
+| CWE-330 | predictable RNG | **81.2%** |
+| CWE-79 | XSS | **79.3%** |
+| CWE-327 | broken cipher | **77.7%** |
+| CWE-328 | weak hash | **76.0%** |
+| CWE-89 | SQL injection | **67.3%** |
+| CWE-643 | XPath injection | **46.7%** |
+| CWE-90 | LDAP injection | **40.7%** |
 
 Read TPR as the headline and FPR (35–100%) with care: ultrasec enumerates *candidates* for a human
 to adjudicate — a sanitizer lowers confidence and annotates, it never auto-dismisses — so every
