@@ -123,9 +123,9 @@ jobs:
       # guards, so the counts are compared against the committed set: enrichment and
       # ADDED findings pass, a fixture that LOSES findings fails the run and nothing
       # is pushed. Recall loss stays a human decision.
-      - name: Guard — the regenerated goldens lost no findings
+      - name: Guard — the regenerated artifacts lost nothing
         if: steps.detect.outputs.repin == 'true'
-        run: node scripts/check-golden-recall.mjs
+        run: node scripts/check-artifact-recall.mjs
 
       # check:build's own git-diff gate compares the rebuilt bundle against
       # HEAD, so the rebuilt bundle has to be committed first (this repo's
