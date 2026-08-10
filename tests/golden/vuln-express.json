@@ -22,11 +22,13 @@
         {
           "file": "src/server.js",
           "line": 18,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/server.js",
           "line": 19,
+          "symbol": "app",
           "why": "calls runReport()"
         },
         {
@@ -68,11 +70,13 @@
         {
           "file": "src/server.js",
           "line": 10,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/server.js",
           "line": 11,
+          "symbol": "app",
           "why": "calls getUser()"
         },
         {
@@ -107,17 +111,20 @@
       "sink": {
         "file": "src/server.js",
         "line": 20,
-        "kind": "xss"
+        "kind": "xss",
+        "symbol": "app"
       },
       "path": [
         {
           "file": "src/server.js",
           "line": 18,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/server.js",
           "line": 20,
+          "symbol": "app",
           "why": "xss sink: send()"
         }
       ],
@@ -180,6 +187,7 @@
         "to": "src/db.js",
         "kind": "call",
         "weight": 1,
+        "fromSymbol": "app",
         "toSymbol": "getUser"
       },
       {
@@ -193,6 +201,7 @@
         "to": "src/report.js",
         "kind": "call",
         "weight": 1,
+        "fromSymbol": "app",
         "toSymbol": "runReport"
       },
       {
@@ -227,35 +236,41 @@
       "express": [
         {
           "file": "src/server.js",
-          "line": 5
+          "line": 5,
+          "symbol": "app"
         }
       ],
       "get": [
         {
           "file": "src/server.js",
-          "line": 9
+          "line": 9,
+          "symbol": "app"
         },
         {
           "file": "src/server.js",
-          "line": 17
+          "line": 17,
+          "symbol": "app"
         }
       ],
       "getUser": [
         {
           "file": "src/server.js",
-          "line": 11
+          "line": 11,
+          "symbol": "app"
         }
       ],
       "json": [
         {
           "file": "src/server.js",
-          "line": 12
+          "line": 12,
+          "symbol": "app"
         }
       ],
       "listen": [
         {
           "file": "src/server.js",
-          "line": 23
+          "line": 23,
+          "symbol": "app"
         }
       ],
       "query": [
@@ -273,7 +288,8 @@
       "require": [
         {
           "file": "src/db.js",
-          "line": 1
+          "line": 1,
+          "symbol": "sqlite"
         },
         {
           "file": "src/report.js",
@@ -281,27 +297,32 @@
         },
         {
           "file": "src/server.js",
-          "line": 1
+          "line": 1,
+          "symbol": "express"
         },
         {
           "file": "src/server.js",
-          "line": 2
+          "line": 2,
+          "symbol": "express"
         },
         {
           "file": "src/server.js",
-          "line": 3
+          "line": 3,
+          "symbol": "express"
         }
       ],
       "runReport": [
         {
           "file": "src/server.js",
-          "line": 19
+          "line": 19,
+          "symbol": "app"
         }
       ],
       "send": [
         {
           "file": "src/server.js",
-          "line": 20
+          "line": 20,
+          "symbol": "app"
         }
       ],
       "toString": [

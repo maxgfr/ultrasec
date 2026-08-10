@@ -130,11 +130,13 @@
         },
         {
           "file": "safe.js",
-          "line": 1
+          "line": 1,
+          "symbol": "fs"
         },
         {
           "file": "sink.js",
-          "line": 1
+          "line": 1,
+          "symbol": "fs"
         }
       ]
     }

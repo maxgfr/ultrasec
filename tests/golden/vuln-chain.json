@@ -22,11 +22,13 @@
         {
           "file": "src/routes.js",
           "line": 19,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/routes.js",
           "line": 20,
+          "symbol": "app",
           "why": "calls buildReport()"
         },
         {
@@ -61,17 +63,20 @@
       "sink": {
         "file": "src/routes.js",
         "line": 26,
-        "kind": "xss"
+        "kind": "xss",
+        "symbol": "app"
       },
       "path": [
         {
           "file": "src/routes.js",
           "line": 25,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/routes.js",
           "line": 26,
+          "symbol": "app",
           "why": "xss sink: send()"
         }
       ],
@@ -107,11 +112,13 @@
         {
           "file": "src/routes.js",
           "line": 25,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/routes.js",
           "line": 26,
+          "symbol": "app",
           "why": "calls readDoc()"
         },
         {
@@ -153,11 +160,13 @@
         {
           "file": "src/routes.js",
           "line": 32,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/routes.js",
           "line": 33,
+          "symbol": "app",
           "why": "calls fetchUrl()"
         },
         {
@@ -199,11 +208,13 @@
         {
           "file": "src/routes.js",
           "line": 12,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/routes.js",
           "line": 13,
+          "symbol": "app",
           "why": "calls lookupUser()"
         },
         {
@@ -244,17 +255,20 @@
       "sink": {
         "file": "scratch/leftover.js",
         "line": 4,
-        "kind": "code"
+        "kind": "code",
+        "symbol": "arg"
       },
       "path": [
         {
           "file": "scratch/leftover.js",
           "line": 3,
+          "symbol": "arg",
           "why": "untrusted input (cli): process.argv — at file scope"
         },
         {
           "file": "scratch/leftover.js",
           "line": 4,
+          "symbol": "arg",
           "why": "code sink: eval()"
         }
       ],
@@ -283,17 +297,20 @@
       "sink": {
         "file": "src/routes.js",
         "line": 20,
-        "kind": "xss"
+        "kind": "xss",
+        "symbol": "app"
       },
       "path": [
         {
           "file": "src/routes.js",
           "line": 19,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/routes.js",
           "line": 20,
+          "symbol": "app",
           "why": "xss sink: send()"
         }
       ],
@@ -322,17 +339,20 @@
       "sink": {
         "file": "src/routes.js",
         "line": 33,
-        "kind": "xss"
+        "kind": "xss",
+        "symbol": "app"
       },
       "path": [
         {
           "file": "src/routes.js",
           "line": 32,
+          "symbol": "app",
           "why": "untrusted input (http): req.query"
         },
         {
           "file": "src/routes.js",
           "line": 33,
+          "symbol": "app",
           "why": "xss sink: send()"
         }
       ],
@@ -363,6 +383,7 @@
         "to": "src/fetcher.js",
         "kind": "call",
         "weight": 1,
+        "fromSymbol": "app",
         "toSymbol": "fetchUrl"
       },
       {
@@ -370,6 +391,7 @@
         "to": "src/fetcher.js",
         "kind": "call",
         "weight": 4,
+        "fromSymbol": "app",
         "toSymbol": "get"
       },
       {
@@ -383,6 +405,7 @@
         "to": "src/files.js",
         "kind": "call",
         "weight": 1,
+        "fromSymbol": "app",
         "toSymbol": "readDoc"
       },
       {
@@ -396,6 +419,7 @@
         "to": "src/report.js",
         "kind": "call",
         "weight": 1,
+        "fromSymbol": "app",
         "toSymbol": "buildReport"
       },
       {
@@ -409,6 +433,7 @@
         "to": "src/service.js",
         "kind": "call",
         "weight": 1,
+        "fromSymbol": "app",
         "toSymbol": "lookupUser"
       },
       {
@@ -456,31 +481,36 @@
       "Map": [
         {
           "file": "src/fetcher.js",
-          "line": 2
+          "line": 2,
+          "symbol": "cache"
         }
       ],
       "async": [
         {
           "file": "src/routes.js",
-          "line": 31
+          "line": 31,
+          "symbol": "app"
         }
       ],
       "buildReport": [
         {
           "file": "src/routes.js",
-          "line": 20
+          "line": 20,
+          "symbol": "app"
         }
       ],
       "createConnection": [
         {
           "file": "src/db.js",
-          "line": 3
+          "line": 3,
+          "symbol": "conn"
         }
       ],
       "eval": [
         {
           "file": "scratch/leftover.js",
-          "line": 4
+          "line": 4,
+          "symbol": "arg"
         }
       ],
       "execSync": [
@@ -493,13 +523,15 @@
       "express": [
         {
           "file": "src/routes.js",
-          "line": 7
+          "line": 7,
+          "symbol": "app"
         }
       ],
       "fetchUrl": [
         {
           "file": "src/routes.js",
-          "line": 33
+          "line": 33,
+          "symbol": "app"
         }
       ],
       "get": [
@@ -515,37 +547,44 @@
         },
         {
           "file": "src/routes.js",
-          "line": 11
+          "line": 11,
+          "symbol": "app"
         },
         {
           "file": "src/routes.js",
-          "line": 18
+          "line": 18,
+          "symbol": "app"
         },
         {
           "file": "src/routes.js",
-          "line": 24
+          "line": 24,
+          "symbol": "app"
         },
         {
           "file": "src/routes.js",
-          "line": 31
+          "line": 31,
+          "symbol": "app"
         }
       ],
       "json": [
         {
           "file": "src/routes.js",
-          "line": 14
+          "line": 14,
+          "symbol": "app"
         }
       ],
       "listen": [
         {
           "file": "src/routes.js",
-          "line": 36
+          "line": 36,
+          "symbol": "app"
         }
       ],
       "lookupUser": [
         {
           "file": "src/routes.js",
-          "line": 13
+          "line": 13,
+          "symbol": "app"
         }
       ],
       "query": [
@@ -558,7 +597,8 @@
       "readDoc": [
         {
           "file": "src/routes.js",
-          "line": 26
+          "line": 26,
+          "symbol": "app"
         }
       ],
       "readFileSync": [
@@ -571,11 +611,13 @@
       "require": [
         {
           "file": "src/db.js",
-          "line": 1
+          "line": 1,
+          "symbol": "mysql"
         },
         {
           "file": "src/fetcher.js",
-          "line": 1
+          "line": 1,
+          "symbol": "axios"
         },
         {
           "file": "src/files.js",
@@ -587,23 +629,28 @@
         },
         {
           "file": "src/routes.js",
-          "line": 1
+          "line": 1,
+          "symbol": "express"
         },
         {
           "file": "src/routes.js",
-          "line": 2
+          "line": 2,
+          "symbol": "express"
         },
         {
           "file": "src/routes.js",
-          "line": 3
+          "line": 3,
+          "symbol": "express"
         },
         {
           "file": "src/routes.js",
-          "line": 4
+          "line": 4,
+          "symbol": "express"
         },
         {
           "file": "src/routes.js",
-          "line": 5
+          "line": 5,
+          "symbol": "express"
         },
         {
           "file": "src/service.js",
@@ -620,15 +667,18 @@
       "send": [
         {
           "file": "src/routes.js",
-          "line": 20
+          "line": 20,
+          "symbol": "app"
         },
         {
           "file": "src/routes.js",
-          "line": 26
+          "line": 26,
+          "symbol": "app"
         },
         {
           "file": "src/routes.js",
-          "line": 33
+          "line": 33,
+          "symbol": "app"
         }
       ],
       "toString": [

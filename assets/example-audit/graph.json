@@ -125,7 +125,7 @@
       {
         "file": "src/report.js",
         "line": 1,
-        "symbol": "{ execSync }"
+        "symbol": "execSync"
       },
       {
         "file": "src/server.js",
@@ -135,12 +135,12 @@
       {
         "file": "src/server.js",
         "line": 2,
-        "symbol": "{ getUser }"
+        "symbol": "getUser"
       },
       {
         "file": "src/server.js",
         "line": 3,
-        "symbol": "{ runReport }"
+        "symbol": "runReport"
       }
     ],
     "runReport": [
