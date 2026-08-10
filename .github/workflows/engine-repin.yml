@@ -95,6 +95,23 @@ jobs:
         if: steps.detect.outputs.stale == 'true'
         run: pnpm run build:example
 
+      # tests/golden/*.json is engine output for the SAME reason assets/example-audit
+      # is: the walk records what the engine can see, and a newer codeindex sees more
+      # (v2.20.1 -> v2.27.1 added the enclosing `symbol` to every path step). Without
+      # this, `pnpm test` fails on 12 golden mismatches and every automatic re-pin dies
+      # there — which is exactly how the engine came to sit 7 releases behind.
+      - name: Regenerate the goldens (engine output changes with the engine)
+        if: steps.detect.outputs.stale == 'true'
+        run: UPDATE_GOLDEN=1 pnpm test golden-findings
+
+      # …but regenerating a regression gate on autopilot would destroy the thing it
+      # guards, so the counts are compared against the committed set: enrichment and
+      # ADDED findings pass, a fixture that LOSES findings fails the run and nothing
+      # is pushed. Recall loss stays a human decision.
+      - name: Guard — the regenerated goldens lost no findings
+        if: steps.detect.outputs.stale == 'true'
+        run: node scripts/check-golden-recall.mjs
+
       # check:build's own git-diff gate compares the rebuilt bundle against
       # HEAD, so the rebuilt bundle has to be committed first (this repo's
       # local/CI flow: build, then commit, then check:build). On red gates
@@ -104,7 +121,7 @@ jobs:
         env:
           LATEST: ${{ steps.detect.outputs.latest }}
         run: |
-          git add src/vendor/engine.meta.json src/vendor/codeindex-engine.mjs src/vendor/codeindex-engine.d.mts scripts/ultrasec.mjs skills/ultrasec/scripts/ultrasec.mjs assets/example-audit
+          git add src/vendor/engine.meta.json src/vendor/codeindex-engine.mjs src/vendor/codeindex-engine.d.mts scripts/ultrasec.mjs skills/ultrasec/scripts/ultrasec.mjs assets/example-audit tests/golden
           git commit -m "feat(engine): re-pin codeindex $LATEST" -m "Automated re-pin. Gates run next; this commit is the adjudication material regardless of outcome."
 
       - name: Build is reproducible (committed bundle up to date)
