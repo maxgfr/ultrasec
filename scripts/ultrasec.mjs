@@ -752,9 +752,9 @@ var init_hash = __esm({
 });
 function scan(rel, content, lang, rules) {
   const out2 = [];
-  const lines2 = content.split(/\r?\n/);
-  for (let i2 = 0; i2 < lines2.length; i2++) {
-    const line = lines2[i2];
+  const lines5 = content.split(/\r?\n/);
+  for (let i2 = 0; i2 < lines5.length; i2++) {
+    const line = lines5[i2];
     if (!line.trim()) continue;
     for (const rule of rules) {
       const m = rule.re.exec(line);
@@ -985,9 +985,9 @@ var init_js_ts = __esm({
       extract(rel, content) {
         const lang = rel.match(/\.(ts|tsx|mts|cts)$/) ? "typescript" : "javascript";
         const symbols = scan(rel, content, lang, RULES);
-        const lines2 = content.split(/\r?\n/);
-        for (let i2 = 0; i2 < lines2.length; i2++) {
-          const line = lines2[i2];
+        const lines5 = content.split(/\r?\n/);
+        for (let i2 = 0; i2 < lines5.length; i2++) {
+          const line = lines5[i2];
           if (ANON_DEFAULT_RE.test(line) && !NAMED_DEFAULT_RE.test(line)) {
             symbols.push({
               name: stemOf(rel),
@@ -1514,10 +1514,10 @@ var init_sort = __esm({
   }
 });
 function stripFences(content) {
-  const lines2 = content.split(/\r?\n/);
+  const lines5 = content.split(/\r?\n/);
   const out2 = [];
   let fence = null;
-  for (const line of lines2) {
+  for (const line of lines5) {
     const m = /^\s*(```+|~~~+)/.exec(line);
     if (fence) {
       if (m && line.trim().startsWith(fence[0][0].repeat(3).slice(0, 3))) fence = null;
@@ -1558,12 +1558,12 @@ function extractMarkdown(content) {
     body2 = body2.slice(fm[0].length);
   }
   const scan2 = stripFences(body2);
-  const lines2 = scan2.split(/\r?\n/);
+  const lines5 = scan2.split(/\r?\n/);
   const headings = [];
   let title = frontTitle;
   let summary;
   let summaryClosed = false;
-  for (const line of lines2) {
+  for (const line of lines5) {
     const h = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
     if (h) {
       const text = cleanProse(h[2]);
@@ -1812,13 +1812,13 @@ async function Module2(moduleArg = {}) {
       }
       readAsync = /* @__PURE__ */ __name(async (url) => {
         if (isFileURI(url)) {
-          return new Promise((resolve32, reject) => {
+          return new Promise((resolve34, reject) => {
             var xhr = new XMLHttpRequest();
             xhr.open("GET", url, true);
             xhr.responseType = "arraybuffer";
             xhr.onload = () => {
               if (xhr.status == 200 || xhr.status == 0 && xhr.response) {
-                resolve32(xhr.response);
+                resolve34(xhr.response);
                 return;
               }
               reject(xhr.status);
@@ -2014,9 +2014,9 @@ async function Module2(moduleArg = {}) {
     __name(receiveInstantiationResult, "receiveInstantiationResult");
     var info2 = getWasmImports();
     if (Module["instantiateWasm"]) {
-      return new Promise((resolve32, reject) => {
+      return new Promise((resolve34, reject) => {
         Module["instantiateWasm"](info2, (mod, inst) => {
-          resolve32(receiveInstance(mod, inst));
+          resolve34(receiveInstance(mod, inst));
         });
       });
     }
@@ -3347,8 +3347,8 @@ async function Module2(moduleArg = {}) {
   if (runtimeInitialized) {
     moduleRtn = Module;
   } else {
-    moduleRtn = new Promise((resolve32, reject) => {
-      readyPromiseResolve = resolve32;
+    moduleRtn = new Promise((resolve34, reject) => {
+      readyPromiseResolve = resolve34;
       readyPromiseReject = reject;
     });
   }
@@ -6328,11 +6328,11 @@ function isBanner(line) {
   return BANNER_RE.test(line.trim());
 }
 function topDocComment(content) {
-  const lines2 = content.split(/\r?\n/);
+  const lines5 = content.split(/\r?\n/);
   const collected = [];
   let inBlock = null;
-  for (let i2 = 0; i2 < Math.min(lines2.length, 40); i2++) {
-    const raw = lines2[i2];
+  for (let i2 = 0; i2 < Math.min(lines5.length, 40); i2++) {
+    const raw = lines5[i2];
     const line = raw.trim();
     if (inBlock === "c") {
       collected.push(line.replace(/\*+\/\s*$/, "").replace(/^\*+/, "").trim());
@@ -6418,7 +6418,7 @@ function expandUseGroups(path, out2 = []) {
 }
 function extractImports(ext, content) {
   const specs = /* @__PURE__ */ new Set();
-  const lines2 = content.split(/\r?\n/);
+  const lines5 = content.split(/\r?\n/);
   if (JS_TS.has(ext)) {
     let m;
     const from = /(?:^|[^\w$.])(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]/g;
@@ -6430,7 +6430,7 @@ function extractImports(ext, content) {
     const dyn = /\bimport\(\s*['"]([^'"]+)['"]\s*\)/g;
     while (m = dyn.exec(content)) specs.add(m[1]);
   } else if (PY.has(ext)) {
-    for (const line of lines2) {
+    for (const line of lines5) {
       const from = /^\s*from\s+(\.*[\w.]*)\s+import\b/.exec(line);
       if (from) {
         specs.add(from[1]);
@@ -6446,7 +6446,7 @@ function extractImports(ext, content) {
     }
   } else if (ext === ".go") {
     let inBlock = false;
-    for (const line of lines2) {
+    for (const line of lines5) {
       const t = line.trim();
       if (inBlock) {
         if (t === ")") {
@@ -6502,10 +6502,10 @@ function extractImports(ext, content) {
 function collectCallsRegex(content, symbols = [], maxCalls = 512) {
   const out2 = /* @__PURE__ */ new Map();
   const ownDefLines = new Set(symbols.map((s) => `${s.name} ${s.line}`));
-  const lines2 = content.split("\n");
+  const lines5 = content.split("\n");
   const CALL_RE = /(?:\bnew\s+)?(?:([A-Za-z_$][\w$]*)\s*\.\s*)?([A-Za-z_$][\w$]*)\s*\(/g;
-  for (let i2 = 0; i2 < lines2.length && out2.size < maxCalls; i2++) {
-    const line = lines2[i2];
+  for (let i2 = 0; i2 < lines5.length && out2.size < maxCalls; i2++) {
+    const line = lines5[i2];
     const trimmed = line.trimStart();
     if (trimmed.startsWith("//") || trimmed.startsWith("#") || trimmed.startsWith("*")) continue;
     CALL_RE.lastIndex = 0;
@@ -7196,7 +7196,7 @@ function resolveDocLink(fromRel, spec, ctx) {
   const base = fromRel.includes("/") ? posix.dirname(fromRel) : "";
   const p = norm(posix.join(base, target));
   if (p.startsWith("..")) return { kind: "dangling", reason: "escapes-repo-root" };
-  const hit2 = firstExisting(ctx, [
+  const hit5 = firstExisting(ctx, [
     p,
     p + ".md",
     p + ".mdx",
@@ -7205,15 +7205,15 @@ function resolveDocLink(fromRel, spec, ctx) {
     posix.join(p, "index.md"),
     posix.join(p, "index.mdx")
   ]);
-  if (hit2) return { kind: "resolved", target: hit2 };
+  if (hit5) return { kind: "resolved", target: hit5 };
   if (ctx.dirSet.has(p)) return { kind: "external" };
   return { kind: "dangling", reason: "missing-target" };
 }
 function resolveJs(fromRel, spec, ctx) {
   const probe = (p) => firstExisting(ctx, [...JS_EXT_PROBES.map((e) => p + e), ...JS_INDEX.map((i2) => posix.join(p, i2))]);
   const tryResolve = (p) => {
-    const hit2 = probe(p);
-    if (hit2) return hit2;
+    const hit5 = probe(p);
+    if (hit5) return hit5;
     const noJs = p.replace(/\.(js|jsx|mjs|cjs)$/, "");
     return noJs !== p ? probe(noJs) : void 0;
   };
@@ -7221,8 +7221,8 @@ function resolveJs(fromRel, spec, ctx) {
     const base = fromRel.includes("/") ? posix.dirname(fromRel) : "";
     const p = norm(posix.join(base, spec));
     if (p.startsWith("..")) return { kind: "dangling", reason: "escapes-repo-root" };
-    const hit2 = tryResolve(p);
-    return hit2 ? { kind: "resolved", target: hit2 } : { kind: "dangling", reason: "missing-module" };
+    const hit5 = tryResolve(p);
+    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
   }
   let aliasFallback;
   for (const cfg of ctx.tsConfigs) {
@@ -7236,8 +7236,8 @@ function resolveJs(fromRel, spec, ctx) {
       for (const t of tp.targets) {
         const resolved = tp.star ? t.replace(/\*/, suffix) : t;
         const p = norm(posix.join(cfg.baseUrl, resolved));
-        const hit2 = tryResolve(p);
-        if (hit2) return { kind: "resolved", target: hit2 };
+        const hit5 = tryResolve(p);
+        if (hit5) return { kind: "resolved", target: hit5 };
         const tdir = p.includes("/") ? posix.dirname(p) : "";
         if (ctx.dirSet.has(tdir) || ctx.fileSet.has(p)) targetTreeExists = true;
       }
@@ -7251,8 +7251,8 @@ function resolveJs(fromRel, spec, ctx) {
     const sub = spec.slice(pkg.name.length).replace(/^\//, "");
     const probeEntry = (entry) => {
       for (const cand of [entry, ...distToSrcCandidates(entry)]) {
-        const hit2 = tryResolve(norm(posix.join(pkg.dir, cand)));
-        if (hit2) return hit2;
+        const hit5 = tryResolve(norm(posix.join(pkg.dir, cand)));
+        if (hit5) return hit5;
       }
       return void 0;
     };
@@ -7267,21 +7267,21 @@ function resolveJs(fromRel, spec, ctx) {
         fill = subKey.slice(pre.length, subKey.length - post.length);
       } else if (entry.key !== subKey) continue;
       for (const t of entry.targets) {
-        const hit2 = probeEntry(fill === void 0 ? t : t.replace(/\*/g, fill));
-        if (hit2) return { kind: "resolved", target: hit2 };
+        const hit5 = probeEntry(fill === void 0 ? t : t.replace(/\*/g, fill));
+        if (hit5) return { kind: "resolved", target: hit5 };
       }
       break;
     }
     if (!sub) {
       for (const m of pkg.mainCandidates) {
-        const hit2 = probeEntry(m);
-        if (hit2) return { kind: "resolved", target: hit2 };
+        const hit5 = probeEntry(m);
+        if (hit5) return { kind: "resolved", target: hit5 };
       }
     }
     const bases = sub ? [posix.join(pkg.dir, "src", sub), posix.join(pkg.dir, sub)] : [posix.join(pkg.dir, "src", "index"), posix.join(pkg.dir, "index"), posix.join(pkg.dir, "src")];
     for (const b of bases) {
-      const hit2 = tryResolve(norm(b));
-      if (hit2) return { kind: "resolved", target: hit2 };
+      const hit5 = tryResolve(norm(b));
+      if (hit5) return { kind: "resolved", target: hit5 };
     }
     return { kind: "external" };
   }
@@ -7299,12 +7299,12 @@ function resolvePython(fromRel, spec, ctx) {
     const base = fromRel.includes("/") ? posix.dirname(fromRel) : "";
     let dir = base;
     for (let i2 = 1; i2 < dots; i2++) dir = dir.includes("/") ? posix.dirname(dir) : "";
-    const hit2 = rest ? probeModule(dir, rest) : firstExisting(ctx, [posix.join(norm(dir), "__init__.py")]);
-    return hit2 ? { kind: "resolved", target: hit2 } : { kind: "dangling", reason: "missing-module" };
+    const hit5 = rest ? probeModule(dir, rest) : firstExisting(ctx, [posix.join(norm(dir), "__init__.py")]);
+    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
   }
   for (const root of ctx.pyRoots) {
-    const hit2 = probeModule(root, spec);
-    if (hit2) return { kind: "resolved", target: hit2 };
+    const hit5 = probeModule(root, spec);
+    if (hit5) return { kind: "resolved", target: hit5 };
   }
   return { kind: "external" };
 }
@@ -7382,8 +7382,8 @@ function resolveRust(fromRel, spec, ctx) {
     return { kind: "external" };
   }
   if (!rest.length) return { kind: "external" };
-  const hit2 = walkPath(baseDir, rest);
-  if (hit2) return { kind: "resolved", target: hit2 };
+  const hit5 = walkPath(baseDir, rest);
+  if (hit5) return { kind: "resolved", target: hit5 };
   if (home && baseDir === home.srcDir && home.rootFile) return { kind: "resolved", target: home.rootFile };
   const ownerDir = baseDir.includes("/") ? posix.dirname(baseDir) : "";
   const ownerName = baseDir.slice(baseDir.lastIndexOf("/") + 1);
@@ -7407,30 +7407,30 @@ function resolveJava(spec, ctx) {
     return void 0;
   };
   const path = spec.replace(/\./g, "/");
-  let hit2 = probe(path);
-  if (!hit2 && !spec.endsWith(".*")) {
+  let hit5 = probe(path);
+  if (!hit5 && !spec.endsWith(".*")) {
     const segs = path.split("/");
-    for (let n = segs.length - 1; n >= 2 && !hit2; n--) {
-      hit2 = probe(segs.slice(0, n).join("/"));
+    for (let n = segs.length - 1; n >= 2 && !hit5; n--) {
+      hit5 = probe(segs.slice(0, n).join("/"));
     }
   }
-  return hit2 ? { kind: "resolved", target: hit2 } : { kind: "external" };
+  return hit5 ? { kind: "resolved", target: hit5 } : { kind: "external" };
 }
 function resolveC(fromRel, spec, ctx) {
   const fromDir = fromRel.includes("/") ? posix.dirname(fromRel) : "";
-  const hit2 = firstExisting(ctx, [posix.join(fromDir, spec), ...ctx.cIncludeRoots.map((r) => posix.join(r, spec))]);
-  return hit2 ? { kind: "resolved", target: hit2 } : { kind: "dangling", reason: "missing-include" };
+  const hit5 = firstExisting(ctx, [posix.join(fromDir, spec), ...ctx.cIncludeRoots.map((r) => posix.join(r, spec))]);
+  return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-include" };
 }
 function resolveRuby(fromRel, spec, ctx) {
   if (spec.startsWith(".")) {
     const fromDir = fromRel.includes("/") ? posix.dirname(fromRel) : "";
     const base = norm(posix.join(fromDir, spec));
-    const hit2 = firstExisting(ctx, [base + ".rb", posix.join(base, "index.rb")]);
-    return hit2 ? { kind: "resolved", target: hit2 } : { kind: "dangling", reason: "missing-module" };
+    const hit5 = firstExisting(ctx, [base + ".rb", posix.join(base, "index.rb")]);
+    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
   }
   for (const root of ctx.rubyLibRoots) {
-    const hit2 = firstExisting(ctx, [posix.join(root, spec + ".rb")]);
-    if (hit2) return { kind: "resolved", target: hit2 };
+    const hit5 = firstExisting(ctx, [posix.join(root, spec + ".rb")]);
+    if (hit5) return { kind: "resolved", target: hit5 };
   }
   return { kind: "external" };
 }
@@ -7438,15 +7438,15 @@ function resolvePhp(fromRel, spec, ctx) {
   if (spec.startsWith(".")) {
     const fromDir = fromRel.includes("/") ? posix.dirname(fromRel) : "";
     const base = norm(posix.join(fromDir, spec));
-    const hit2 = firstExisting(ctx, [base, base + ".php"]);
-    return hit2 ? { kind: "resolved", target: hit2 } : { kind: "dangling", reason: "missing-module" };
+    const hit5 = firstExisting(ctx, [base, base + ".php"]);
+    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
   }
   const ns = spec.replace(/^\\+/, "");
   for (const { prefix, dir } of ctx.phpPsr4) {
     if (prefix && ns !== prefix && !ns.startsWith(prefix + "\\")) continue;
     const rest = prefix ? ns.slice(prefix.length).replace(/^\\+/, "") : ns;
-    const hit2 = firstExisting(ctx, [posix.join(dir, rest.replace(/\\/g, "/")) + ".php"]);
-    if (hit2) return { kind: "resolved", target: hit2 };
+    const hit5 = firstExisting(ctx, [posix.join(dir, rest.replace(/\\/g, "/")) + ".php"]);
+    if (hit5) return { kind: "resolved", target: hit5 };
   }
   return { kind: "external" };
 }
@@ -7725,7 +7725,7 @@ function computeSymbolRefs(scan2) {
   const unique = uniqueDefsFor(scan2);
   const refs = /* @__PURE__ */ new Map();
   if (!unique.size) return refs;
-  const add2 = (name2, file) => {
+  const add3 = (name2, file) => {
     let set = refs.get(name2);
     if (!set) refs.set(name2, set = /* @__PURE__ */ new Set());
     set.add(file);
@@ -7734,14 +7734,14 @@ function computeSymbolRefs(scan2) {
     if (f.kind === "code" && f.idents) {
       for (const id of f.idents) {
         const target = unique.get(id);
-        if (target && target !== f.rel) add2(id, f.rel);
+        if (target && target !== f.rel) add3(id, f.rel);
       }
     } else if (f.kind === "doc") {
       const content = scan2.docText.get(f.rel);
       if (!content) continue;
       for (const tok of content.split(/[^A-Za-z0-9_]+/)) {
         const target = unique.get(tok);
-        if (target && target !== f.rel) add2(tok, f.rel);
+        if (target && target !== f.rel) add3(tok, f.rel);
       }
     }
   }
@@ -8090,11 +8090,11 @@ function symbolComplexity(scan2, rel, top = 50) {
     if (f.kind !== "code") continue;
     if (rel && f.rel !== rel) continue;
     if (!f.symbols.length) continue;
-    const lines2 = readText(join7(scan2.root, f.rel)).split("\n");
+    const lines5 = readText(join7(scan2.root, f.rel)).split("\n");
     for (const s of f.symbols) {
       if (s.kind === "reexport" || s.kind === "reexport-all") continue;
       const end = s.endLine ?? s.line;
-      const body2 = lines2.slice(s.line - 1, end).join("\n");
+      const body2 = lines5.slice(s.line - 1, end).join("\n");
       const entry = { file: f.rel, name: s.name, line: s.line, complexity: complexityOfSource(body2) };
       if (s.endLine !== void 0) entry.endLine = s.endLine;
       out2.push(entry);
@@ -8479,23 +8479,23 @@ function replaceSymbolBody(scan2, namePath, body2, file) {
   const sym = resolveUniqueSymbol(scan2, namePath, file);
   const end = sym.endLine ?? sym.line;
   const abs = join11(scan2.root, sym.file);
-  const lines2 = readLines(abs);
+  const lines5 = readLines(abs);
   const newLines = body2.replace(/^\n+|\n+$/g, "").split("\n");
-  lines2.splice(sym.line - 1, end - sym.line + 1, ...newLines);
-  writeFileSync2(abs, lines2.join("\n"));
+  lines5.splice(sym.line - 1, end - sym.line + 1, ...newLines);
+  writeFileSync2(abs, lines5.join("\n"));
   return { file: sym.file, startLine: sym.line, endLine: sym.line + newLines.length - 1, lines: newLines.length };
 }
 function insertAt(scan2, sym, body2, index, blankBefore, blankAfter) {
   const abs = join11(scan2.root, sym.file);
-  const lines2 = readLines(abs);
+  const lines5 = readLines(abs);
   const minGap = SEPARATED_KINDS.has(sym.kind) ? 1 : 0;
   const newLines = body2.replace(/^\n+|\n+$/g, "").split("\n");
   const block = [];
-  if (blankBefore && minGap && lines2[index - 1]?.trim() !== "") block.push("");
+  if (blankBefore && minGap && lines5[index - 1]?.trim() !== "") block.push("");
   block.push(...newLines);
-  if (blankAfter && minGap && lines2[index]?.trim() !== "") block.push("");
-  lines2.splice(index, 0, ...block);
-  writeFileSync2(abs, lines2.join("\n"));
+  if (blankAfter && minGap && lines5[index]?.trim() !== "") block.push("");
+  lines5.splice(index, 0, ...block);
+  writeFileSync2(abs, lines5.join("\n"));
   return { file: sym.file, startLine: index + 1, endLine: index + block.length, lines: block.length };
 }
 function insertAfterSymbol(scan2, namePath, body2, file) {
@@ -9726,9 +9726,9 @@ function jsBackend(root, re, opts) {
     if (filter && !filter(f.rel)) continue;
     const content = readText(f.abs);
     if (!content) continue;
-    const lines2 = content.split("\n");
-    for (let i2 = 0; i2 < lines2.length; i2++) {
-      if (re.test(lines2[i2])) hits.push({ file: f.rel, line: i2 + 1, text: lines2[i2] });
+    const lines5 = content.split("\n");
+    for (let i2 = 0; i2 < lines5.length; i2++) {
+      if (re.test(lines5[i2])) hits.push({ file: f.rel, line: i2 + 1, text: lines5[i2] });
     }
   }
   return hits;
@@ -10447,17 +10447,17 @@ function renderMermaid(graph, opts = {}) {
     shown.add(e.to);
   }
   if (opts.module) shown.add(opts.module);
-  const lines2 = ["graph LR"];
+  const lines5 = ["graph LR"];
   for (const m of [...graph.modules].sort((a, b) => byStr(a.slug, b.slug))) {
     if (!shown.has(m.slug)) continue;
-    lines2.push(`  ${sanitizeId(m.slug)}["${m.slug}${m.tier === 0 ? " (core)" : ""}"]`);
+    lines5.push(`  ${sanitizeId(m.slug)}["${m.slug}${m.tier === 0 ? " (core)" : ""}"]`);
   }
   for (const e of edges) {
     const label = e.kind === "import" ? "" : `|${e.kind}|`;
-    lines2.push(`  ${sanitizeId(e.from)} -->${label} ${sanitizeId(e.to)}`);
+    lines5.push(`  ${sanitizeId(e.from)} -->${label} ${sanitizeId(e.to)}`);
   }
-  if (dropped) lines2.push(`  %% ${dropped} lighter edges omitted (maxEdges=${maxEdges})`);
-  return lines2.join("\n") + "\n";
+  if (dropped) lines5.push(`  %% ${dropped} lighter edges omitted (maxEdges=${maxEdges})`);
+  return lines5.join("\n") + "\n";
 }
 function clusterNodeId(slug) {
   return "m_" + slug.replace(/[^A-Za-z0-9_]/g, "_");
@@ -10469,27 +10469,27 @@ function renderMermaidClustered(graph, opts = {}) {
   const shown = ranked.slice(0, maxModules);
   const shownSet = new Set(shown.map((m) => m.slug));
   const edges = graph.moduleEdges.filter((e) => shownSet.has(e.from) && shownSet.has(e.to)).sort((a, b) => b.weight - a.weight || byStr(a.from, b.from) || byStr(a.to, b.to)).slice(0, maxEdges);
-  const lines2 = [];
-  lines2.push(
+  const lines5 = [];
+  lines5.push(
     `%% ${opts.title ?? "module graph"} \u2014 ${shown.length} of ${graph.modules.length} modules, ${edges.length} of ${graph.moduleEdges.length} edges`
   );
   if (shown.length < graph.modules.length || edges.length < graph.moduleEdges.length) {
-    lines2.push("%% truncated to the most-connected modules/edges; see graph.json for the full graph");
+    lines5.push("%% truncated to the most-connected modules/edges; see graph.json for the full graph");
   }
-  lines2.push("flowchart LR");
+  lines5.push("flowchart LR");
   for (const tier of [0, 1, 2]) {
     const inTier = shown.filter((m) => m.tier === tier);
     if (!inTier.length) continue;
-    lines2.push(`  subgraph ${TIER_LABEL[tier]}`);
-    for (const m of inTier) lines2.push(`    ${clusterNodeId(m.slug)}["${m.path.replace(/"/g, "'")}"]`);
-    lines2.push("  end");
+    lines5.push(`  subgraph ${TIER_LABEL[tier]}`);
+    for (const m of inTier) lines5.push(`    ${clusterNodeId(m.slug)}["${m.path.replace(/"/g, "'")}"]`);
+    lines5.push("  end");
   }
   for (const e of edges) {
     const label = e.weight > 1 ? `|${e.weight}| ` : "";
-    lines2.push(`  ${clusterNodeId(e.from)} -->${label ? " " + label : " "}${clusterNodeId(e.to)}`);
+    lines5.push(`  ${clusterNodeId(e.from)} -->${label ? " " + label : " "}${clusterNodeId(e.to)}`);
   }
   return {
-    content: "```mermaid\n" + lines2.join("\n") + "\n```\n",
+    content: "```mermaid\n" + lines5.join("\n") + "\n```\n",
     shownModules: shown.length,
     totalModules: graph.modules.length,
     shownEdges: edges.length,
@@ -11130,13 +11130,13 @@ function sessionKey(repo, opts) {
 }
 function getScan(repo, opts = {}, walked) {
   const key = sessionKey(repo, opts);
-  const hit2 = sessionGet(key);
-  if (hit2) {
-    const fresh2 = scanRepo(repo, { ...opts, cache: hit2.cacheMap, precomputedWalk: walked });
+  const hit5 = sessionGet(key);
+  if (hit5) {
+    const fresh2 = scanRepo(repo, { ...opts, cache: hit5.cacheMap, precomputedWalk: walked });
     if (fresh2.contentUnchanged) {
-      if (fresh2.cacheDirty) hit2.cacheMap = toCacheMap(fresh2);
-      if (hit2.scan.commit !== fresh2.commit) hit2.scan.commit = fresh2.commit;
-      return hit2.scan;
+      if (fresh2.cacheDirty) hit5.cacheMap = toCacheMap(fresh2);
+      if (hit5.scan.commit !== fresh2.commit) hit5.scan.commit = fresh2.commit;
+      return hit5.scan;
     }
     sessionPut({ key, scan: fresh2, cacheMap: toCacheMap(fresh2) });
     return fresh2;
@@ -11255,19 +11255,19 @@ async function callTool(name2, args2, defaultRepo) {
   }
   if (name2 === "symbols") {
     const { symbols } = getArtifacts(repo, scanOpts, walked);
-    const lookup = str(args2.name);
-    if (lookup) {
-      return JSON.stringify({ name: lookup, defs: symbols.defs[lookup] ?? [], refs: symbols.refs[lookup] ?? [] }, null, 2);
+    const lookup2 = str(args2.name);
+    if (lookup2) {
+      return JSON.stringify({ name: lookup2, defs: symbols.defs[lookup2] ?? [], refs: symbols.refs[lookup2] ?? [] }, null, 2);
     }
     return JSON.stringify(symbols, null, 2);
   }
   if (name2 === "callers") {
     const scan2 = getScan(repo, scanOpts, walked);
     const index = args2.recall === true ? buildCallerIndex(scan2, void 0, { recall: true }) : callerIndexFor(scan2);
-    const lookup = str(args2.name);
-    if (lookup) {
-      const entry = index.get(lookup);
-      return JSON.stringify(entry ?? { error: `no tracked callers for "${lookup}"` }, null, 2);
+    const lookup2 = str(args2.name);
+    if (lookup2) {
+      const entry = index.get(lookup2);
+      return JSON.stringify(entry ?? { error: `no tracked callers for "${lookup2}"` }, null, 2);
     }
     const obj = {};
     for (const [k, v] of index) obj[k] = v;
@@ -11763,7 +11763,7 @@ runExtractWorker(workerData.input, (o) => parentPort.postMessage(o)).catch((e) =
   try {
     const outputs = await Promise.all(
       shards.map(
-        (jobsForShard) => new Promise((resolve32, reject) => {
+        (jobsForShard) => new Promise((resolve34, reject) => {
           const w = new Worker(bootstrap, {
             eval: true,
             workerData: { input: { jobs: jobsForShard, grammarKeys: wanted, maxCallsPerFile: opts.maxCallsPerFile } }
@@ -11777,7 +11777,7 @@ runExtractWorker(workerData.input, (o) => parentPort.postMessage(o)).catch((e) =
             fn();
           };
           w.once("message", (m) => {
-            settle(() => resolve32(m));
+            settle(() => resolve34(m));
             void w.terminate();
           });
           w.once("error", (e) => settle(() => reject(e)));
@@ -12373,9 +12373,9 @@ function renderScip(scan2, opts = {}) {
   const documents = [];
   for (const f of docs) {
     const text = readText(join14(scan2.root, f.rel));
-    const lines2 = text.split("\n").map((l) => l.endsWith("\r") ? l.slice(0, -1) : l);
+    const lines5 = text.split("\n").map((l) => l.endsWith("\r") ? l.slice(0, -1) : l);
     const locate = (lineNo, name2) => {
-      const line = lines2[lineNo - 1];
+      const line = lines5[lineNo - 1];
       if (line === void 0) return [lineNo - 1, 0, 0];
       const r = findWord(line, name2);
       return r ? [lineNo - 1, r[0], r[1]] : [lineNo - 1, 0, line.length];
@@ -12816,21 +12816,21 @@ function formatDeltaPanel(res) {
 `;
   }
   const changedCount = res.changes.length + res.unindexed.length;
-  const lines2 = [
+  const lines5 = [
     `codeindex: delta vs ${vs} (merge-base ${mb}) \u2014 ${changedCount} changed file(s), ${res.modules.length} module(s)${res.indexCommit ? `, index @ ${res.indexCommit}` : ""}`
   ];
-  for (const n of res.notes) lines2.push(`  note: ${n}`);
+  for (const n of res.notes) lines5.push(`  note: ${n}`);
   for (const m of res.modules) {
-    lines2.push(`  ${m.bucket.padEnd(6)} ${m.slug}  score ${m.score}${m.reasons.length ? ` \u2014 ${m.reasons.join("; ")}` : ""}`);
+    lines5.push(`  ${m.bucket.padEnd(6)} ${m.slug}  score ${m.score}${m.reasons.length ? ` \u2014 ${m.reasons.join("; ")}` : ""}`);
     const tests = m.tests.status === "gap" ? "GAP" : m.tests.status === "covered" ? `covered (${m.tests.files.length})` : "n/a";
-    lines2.push(`         open: ${m.open.join(", ") || "\u2014"} \xB7 tests: ${tests}`);
+    lines5.push(`         open: ${m.open.join(", ") || "\u2014"} \xB7 tests: ${tests}`);
   }
   if (res.dangling.length) {
-    lines2.push(`  dangling:  ${res.dangling.map((d) => `${d.spec} (from ${d.from})`).join(" \xB7 ")}`);
+    lines5.push(`  dangling:  ${res.dangling.map((d) => `${d.spec} (from ${d.from})`).join(" \xB7 ")}`);
   }
-  if (res.deleted.length) lines2.push(`  deleted:   ${res.deleted.join(", ")}`);
-  if (res.unindexed.length) lines2.push(`  unindexed: ${res.unindexed.join(", ")}`);
-  return lines2.join("\n") + "\n";
+  if (res.deleted.length) lines5.push(`  deleted:   ${res.deleted.join(", ")}`);
+  if (res.unindexed.length) lines5.push(`  unindexed: ${res.unindexed.join(", ")}`);
+  return lines5.join("\n") + "\n";
 }
 init_mcp();
 init_rewrite();
@@ -13598,9 +13598,15 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "no-env-sources",
   "strict-scope",
   "write",
+  "sigma",
   // `mcp` only.
   "allow-remote",
-  "allow-write"
+  "allow-write",
+  // `probe` only.
+  "i-own-this",
+  "allow-private",
+  "deep",
+  "graphql"
 ]);
 var SHORT_FLAGS = { h: "help", v: "version" };
 function parseArgs(argv) {
@@ -13766,8 +13772,8 @@ ${t.stderr}` : ""}`;
   writeFileSync5(path, body2);
 }
 function headline(t) {
-  const lines2 = [...t.stdout.split("\n"), ...t.stderr.split("\n")].map((l) => l.trim()).filter(Boolean);
-  const meat = lines2.find((l) => !l.startsWith("ultrasec ")) ?? lines2[0];
+  const lines5 = [...t.stdout.split("\n"), ...t.stderr.split("\n")].map((l) => l.trim()).filter(Boolean);
+  const meat = lines5.find((l) => !l.startsWith("ultrasec ")) ?? lines5[0];
   return meat ?? "(no output)";
 }
 var JOURNAL_FILE = "JOURNAL.md";
@@ -15004,10 +15010,10 @@ function buildGraph2(scan2) {
   const symbolDefs = {};
   for (const [name2, files] of defs) symbolDefs[name2] = [...files].sort(byStr2);
   const edgeMap = /* @__PURE__ */ new Map();
-  const resolve32 = buildFileResolver(scan2);
+  const resolve34 = buildFileResolver(scan2);
   for (const f of scan2.files) {
     for (const imp of f.imports) {
-      const to = resolve32(f.rel, imp.spec);
+      const to = resolve34(f.rel, imp.spec);
       if (to && to !== f.rel) add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
     }
     for (const c2 of f.calls) {
@@ -15843,9 +15849,9 @@ var TEXT_SINKS = [
 ];
 function findTextSinks(lang, content) {
   const out2 = [];
-  const lines2 = content.split(/\r?\n/);
-  for (let i2 = 0; i2 < lines2.length; i2++) {
-    const line = lines2[i2];
+  const lines5 = content.split(/\r?\n/);
+  for (let i2 = 0; i2 < lines5.length; i2++) {
+    const line = lines5[i2];
     for (const rule of TEXT_SINKS) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (!rule.re.test(line)) continue;
@@ -16093,9 +16099,9 @@ var SOURCES = [
 ];
 function findSources(lang, content) {
   const out2 = [];
-  const lines2 = content.split(/\r?\n/);
-  for (let i2 = 0; i2 < lines2.length; i2++) {
-    const line = lines2[i2];
+  const lines5 = content.split(/\r?\n/);
+  for (let i2 = 0; i2 < lines5.length; i2++) {
+    const line = lines5[i2];
     for (const rule of SOURCES) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       const m = rule.re.exec(line);
@@ -16395,8 +16401,8 @@ function stripNoise(text, inBlockComment, hashComments) {
 }
 var BRACE_LANGS = /* @__PURE__ */ new Set(["javascript", "java", "go", "rust", "c_cpp", "csharp", "kotlin", "swift", "scala", "php"]);
 var UNKNOWN_UNITS = { ok: false, at: () => 0 };
-function braceUnits(lines2, hashComments) {
-  const units = new Array(lines2.length + 1).fill(0);
+function braceUnits(lines5, hashComments) {
+  const units = new Array(lines5.length + 1).fill(0);
   const stack = [];
   let block = false;
   let depth = 0;
@@ -16404,8 +16410,8 @@ function braceUnits(lines2, hashComments) {
     for (let i2 = stack.length - 1; i2 >= 0; i2--) if (stack[i2].isFn) return stack[i2].start;
     return 0;
   };
-  for (let i2 = 0; i2 < lines2.length; i2++) {
-    const raw = lines2[i2];
+  for (let i2 = 0; i2 < lines5.length; i2++) {
+    const raw = lines5[i2];
     const { clean, inBlockComment } = stripNoise(raw, block, hashComments);
     block = inBlockComment;
     const before = innermostFn();
@@ -16427,11 +16433,11 @@ function braceUnits(lines2, hashComments) {
   return { ok: true, at: (l) => units[l] ?? 0 };
 }
 var PY_DEF = /^(\s*)(?:async\s+)?def\s/;
-function pythonUnits(lines2) {
-  const units = new Array(lines2.length + 1).fill(0);
+function pythonUnits(lines5) {
+  const units = new Array(lines5.length + 1).fill(0);
   const stack = [];
-  for (let i2 = 0; i2 < lines2.length; i2++) {
-    const raw = lines2[i2];
+  for (let i2 = 0; i2 < lines5.length; i2++) {
+    const raw = lines5[i2];
     if (raw.trim() === "" || /^\s*#/.test(raw)) {
       units[i2 + 1] = stack.length ? stack[stack.length - 1].start : 0;
       continue;
@@ -16444,9 +16450,9 @@ function pythonUnits(lines2) {
   }
   return { ok: true, at: (l) => units[l] ?? 0 };
 }
-function buildUnitMap(lines2, langId) {
-  if (langId === "python") return pythonUnits(lines2);
-  if (BRACE_LANGS.has(langId)) return braceUnits(lines2, langId === "php");
+function buildUnitMap(lines5, langId) {
+  if (langId === "python") return pythonUnits(lines5);
+  if (BRACE_LANGS.has(langId)) return braceUnits(lines5, langId === "php");
   return UNKNOWN_UNITS;
 }
 function scopeRank(s) {
@@ -16533,9 +16539,9 @@ function boundNames(lhs) {
 function mentions(line, name2) {
   return new RegExp(`(?<![A-Za-z0-9_$])${name2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_$])`).test(line);
 }
-function traceDefUse(lines2, sourceLine, sourceMatch, entryLine) {
+function traceDefUse(lines5, sourceLine, sourceMatch, entryLine) {
   if (sourceLine > entryLine) return void 0;
-  const srcText = lines2[sourceLine - 1] ?? "";
+  const srcText = lines5[sourceLine - 1] ?? "";
   if (sourceLine === entryLine) return "linked";
   const at = srcText.indexOf(sourceMatch);
   const op = bindingOperatorBefore(srcText, at < 0 ? srcText.length : at);
@@ -16543,13 +16549,13 @@ function traceDefUse(lines2, sourceLine, sourceMatch, entryLine) {
   const tainted = new Set(boundNames(srcText.slice(0, op)));
   if (!tainted.size) return void 0;
   for (let l = sourceLine + 1; l < entryLine; l++) {
-    const text = lines2[l - 1] ?? "";
+    const text = lines5[l - 1] ?? "";
     if (![...tainted].some((n) => mentions(text, n))) continue;
     const assign = bindingOperatorBefore(text, text.length);
     if (assign < 0) continue;
     for (const n of boundNames(text.slice(0, assign))) tainted.add(n);
   }
-  const target = lines2[entryLine - 1] ?? "";
+  const target = lines5[entryLine - 1] ?? "";
   return [...tainted].some((n) => mentions(target, n)) ? "linked" : "unlinked";
 }
 
@@ -16584,7 +16590,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
     if (c2 === void 0) contentCache.set(rel, c2 = readText2(join28(scan2.repo, rel)));
     return c2;
   };
-  const lines2 = (rel) => {
+  const lines5 = (rel) => {
     let l = lineCache.get(rel);
     if (!l) lineCache.set(rel, l = content(rel).split(/\r?\n/));
     return l;
@@ -16602,7 +16608,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
     let u = unitCache.get(rel);
     if (!u) {
       const lang = langForFile(rel);
-      unitCache.set(rel, u = buildUnitMap(lines2(rel), lang?.id ?? ""));
+      unitCache.set(rel, u = buildUnitMap(lines5(rel), lang?.id ?? ""));
     }
     return u;
   };
@@ -16630,8 +16636,8 @@ function enumerateTaint(scan2, graph, opts = {}) {
       why: `untrusted input (${srcHit.kind}): ${truncate(srcHit.match)}${SCOPE_WHY[sourceScope]}`
     };
     const path = [srcStep, ...hops];
-    const dataflow = traceDefUse(lines2(srcFile), srcHit.line, srcHit.match, frameEntryLine);
-    const sanitizers = sanitizersAlongPath(path, sink.kind, (f, l) => lines2(f)[l - 1] ?? "");
+    const dataflow = traceDefUse(lines5(srcFile), srcHit.line, srcHit.match, frameEntryLine);
+    const sanitizers = sanitizersAlongPath(path, sink.kind, (f, l) => lines5(f)[l - 1] ?? "");
     const crossFile2 = new Set(path.map((p) => p.file)).size > 1;
     const note = sanitizers.length ? ` Possible sanitizer along the path \u2014 ${sanitizers.map((s) => `${s.file}:${s.line} (${s.note})`).join("; ")} \u2014 confirm it actually neutralizes this flow.` : "";
     const flowNote = dataflow === "unlinked" ? " The value bound at the source is not mentioned again at the sink \u2014 it may travel through state this walk cannot see, or not at all." : "";
@@ -16715,7 +16721,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
   const taken = /* @__PURE__ */ new Set();
   for (const f of covered) if (f.sink) taken.add(`${f.sink.file}:${f.sink.line}:${f.sink.kind ?? ""}`);
   const lineCache = /* @__PURE__ */ new Map();
-  const lines2 = (rel) => {
+  const lines5 = (rel) => {
     let l = lineCache.get(rel);
     if (!l) lineCache.set(rel, l = readText2(join29(scan2.repo, rel)).split(/\r?\n/));
     return l;
@@ -16728,7 +16734,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
       const key = `${file.rel}:${sink.line}:${sink.kind}`;
       if (taken.has(key)) continue;
       taken.add(key);
-      const sinkLine = lines2(file.rel)[sink.line - 1] ?? "";
+      const sinkLine = lines5(file.rel)[sink.line - 1] ?? "";
       const sanitizers = findSanitizers(lang, sinkLine, sink.kind);
       const note = sanitizers.length ? ` A possible sanitizer is present on the line (${sanitizers.join("; ")}) \u2014 confirm it neutralizes any untrusted input.` : "";
       findings.push({
@@ -16831,7 +16837,7 @@ function enclosingSymbol2(file, line) {
 function enumerateSensitiveLogCandidates(scan2, opts = {}) {
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES3;
   const lineCache = /* @__PURE__ */ new Map();
-  const lines2 = (rel) => {
+  const lines5 = (rel) => {
     let l = lineCache.get(rel);
     if (!l) lineCache.set(rel, l = readText2(join30(scan2.repo, rel)).split(/\r?\n/));
     return l;
@@ -16842,7 +16848,7 @@ function enumerateSensitiveLogCandidates(scan2, opts = {}) {
     if (!lang) continue;
     for (const sink of findSinks(lang, file.calls, LOG_SINKS, file.imports)) {
       if (sink.kind !== "log") continue;
-      const raw = lines2(file.rel)[sink.line - 1] ?? "";
+      const raw = lines5(file.rel)[sink.line - 1] ?? "";
       const nameHit = SENSITIVE_NAME_RE.test(raw);
       const { redacted, hits: secretHits } = redact(raw);
       if (!nameHit && secretHits.length === 0) continue;
@@ -17043,6 +17049,659 @@ function auditAgenticWorkflows(repo) {
   return findings;
 }
 
+// src/webconfig.ts
+var WEBCONFIG_SHAPES = {
+  "cors-reflect": {
+    id: "cors-reflect",
+    title: "CORS reflects the request Origin",
+    severity: "high",
+    cwe: "CWE-942",
+    note: "Access-Control-Allow-Origin echoes the caller's Origin (or `origin: true`). Any site can read authenticated responses cross-origin \u2014 reflection is a wildcard that also passes the credentialed-request check."
+  },
+  "cors-wildcard-credentials": {
+    id: "cors-wildcard-credentials",
+    title: "Wildcard CORS with credentials",
+    severity: "high",
+    cwe: "CWE-942",
+    note: "Access-Control-Allow-Origin `*` together with Allow-Credentials `true`. Browsers block this combination, so shipping it means either it is ineffective or an origin is reflected elsewhere \u2014 check which."
+  },
+  "cors-wildcard": {
+    id: "cors-wildcard",
+    title: "Wildcard CORS origin",
+    severity: "medium",
+    cwe: "CWE-942",
+    note: "Access-Control-Allow-Origin `*` exposes responses to every origin. Safe only if the endpoint returns nothing per-user and carries no credentials."
+  },
+  "cookie-httponly": {
+    id: "cookie-httponly",
+    title: "Cookie set without HttpOnly",
+    severity: "medium",
+    cwe: "CWE-1004",
+    note: "A session/auth cookie readable from JavaScript is stealable by any XSS. Set HttpOnly unless the client genuinely must read it."
+  },
+  "cookie-secure": {
+    id: "cookie-secure",
+    title: "Cookie set without Secure",
+    severity: "medium",
+    cwe: "CWE-614",
+    note: "Without Secure the cookie is sent over plain HTTP and can be captured on the wire. Set Secure for anything session-bearing."
+  },
+  "cookie-samesite": {
+    id: "cookie-samesite",
+    title: "Cookie set without SameSite",
+    severity: "low",
+    cwe: "CWE-1275",
+    note: "No SameSite leaves the cookie attached to cross-site requests \u2014 the CSRF precondition. Set SameSite=Lax or Strict."
+  },
+  "cookie-samesite-none-insecure": {
+    id: "cookie-samesite-none-insecure",
+    title: "SameSite=None cookie without Secure",
+    severity: "high",
+    cwe: "CWE-1275",
+    note: "SameSite=None opts the cookie INTO cross-site sending; without Secure it also travels over plain HTTP. Browsers reject this pair, so it is both a CSRF and a transport exposure."
+  },
+  "tls-verify": {
+    id: "tls-verify",
+    title: "TLS certificate verification disabled",
+    severity: "high",
+    cwe: "CWE-295",
+    note: "Certificate/hostname verification turned off makes every outbound TLS call trivially machine-in-the-middle-able. This is almost never right outside a test."
+  },
+  debug: {
+    id: "debug",
+    title: "Debug / verbose-error mode enabled",
+    severity: "medium",
+    cwe: "CWE-489",
+    note: "Framework debug mode leaks stack traces, config and (Flask/Werkzeug, Rails) an interactive console or source. It must be off in production."
+  },
+  "header-csp": {
+    id: "header-csp",
+    title: "Content-Security-Policy weakened",
+    severity: "medium",
+    cwe: "CWE-693",
+    note: "`unsafe-inline` / `unsafe-eval` / a `*` source in the CSP re-opens the XSS class the header exists to close."
+  },
+  "header-xfo": {
+    id: "header-xfo",
+    title: "X-Frame-Options allows framing",
+    severity: "medium",
+    cwe: "CWE-1021",
+    note: "`ALLOWALL` (or the deprecated `ALLOW-FROM`) leaves the page framable \u2014 the clickjacking precondition. Use DENY/SAMEORIGIN or a CSP frame-ancestors."
+  },
+  "header-hsts": {
+    id: "header-hsts",
+    title: "HSTS disabled (max-age=0)",
+    severity: "medium",
+    cwe: "CWE-319",
+    note: "`max-age=0` turns Strict-Transport-Security off, so a first/again request can be downgraded to HTTP."
+  },
+  "header-referrer": {
+    id: "header-referrer",
+    title: "Referrer-Policy leaks full URL",
+    severity: "low",
+    cwe: "CWE-200",
+    note: "`unsafe-url` sends the full referring URL (path + query, possibly a token) cross-origin."
+  },
+  "dir-listing": {
+    id: "dir-listing",
+    title: "Directory listing enabled",
+    severity: "medium",
+    cwe: "CWE-548",
+    note: "Autoindex / serve-index exposes the file tree, turning any forgotten file into a disclosure."
+  },
+  "csrf-disabled": {
+    id: "csrf-disabled",
+    title: "CSRF protection disabled",
+    severity: "high",
+    cwe: "CWE-352",
+    note: "The framework's CSRF guard is switched off (commented out, skipped, or exempted). Any state-changing route it covered can now be driven from an attacker's page using the victim's cookies."
+  },
+  "graphql-introspection": {
+    id: "graphql-introspection",
+    title: "GraphQL introspection / dev UI enabled",
+    severity: "medium",
+    cwe: "CWE-200",
+    note: "Introspection (or GraphiQL/Playground) hands an attacker the whole schema. Disable it in production."
+  }
+};
+function lines2(content) {
+  return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
+}
+function extOf2(rel) {
+  const i2 = rel.lastIndexOf(".");
+  return i2 === -1 ? "" : rel.slice(i2 + 1).toLowerCase();
+}
+var JS = /* @__PURE__ */ new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"]);
+var CODE = /* @__PURE__ */ new Set([...JS, "py", "go", "java", "kt", "scala", "php", "rb", "cs"]);
+var SCAN = /* @__PURE__ */ new Set([...CODE, "conf", "nginx", "yaml", "yml"]);
+function hit2(rel, line, shape, evidence) {
+  return makeToolFinding({
+    tool: "ultrasec",
+    category: "config",
+    ident: `webconfig:${shape.id}:${rel}:${line}`,
+    title: `Web misconfig \u2014 ${shape.title}`,
+    severity: shape.severity,
+    message: `${shape.note}
+
+Evidence: \`${evidence.trim().slice(0, 160)}\``,
+    file: rel,
+    line,
+    cwe: shape.cwe
+  });
+}
+function balanced(hay, open) {
+  let depth = 0;
+  for (let i2 = open; i2 < hay.length; i2++) {
+    const c2 = hay[i2];
+    if (c2 === "(") depth++;
+    else if (c2 === ")") {
+      depth--;
+      if (depth === 0) return hay.slice(open + 1, i2);
+    }
+  }
+  return null;
+}
+function lineOf(content, index) {
+  let n = 1;
+  for (let i2 = 0; i2 < index && i2 < content.length; i2++) if (content[i2] === "\n") n++;
+  return n;
+}
+var TLS_RULES = [
+  { langs: JS, re: /rejectUnauthorized\s*:\s*false/ },
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /\bverify\s*=\s*False\b/ },
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /_create_unverified_context|ssl\.\s*CERT_NONE/ },
+  { langs: /* @__PURE__ */ new Set(["go"]), re: /InsecureSkipVerify\s*:\s*true/ },
+  { langs: /* @__PURE__ */ new Set(["php"]), re: /CURLOPT_SSL_VERIFY(?:PEER|HOST)\s*,\s*(?:0|false)\b/i },
+  { langs: /* @__PURE__ */ new Set(["java", "kt", "scala"]), re: /ALLOW_ALL_HOSTNAME_VERIFIER|NoopHostnameVerifier|TrustAllCerts|trustAllCerts/ }
+];
+var CSRF_RULES = [
+  { langs: /* @__PURE__ */ new Set(["rb"]), re: /^\s*#\s*protect_from_forgery\b/ },
+  { langs: /* @__PURE__ */ new Set(["rb"]), re: /\bskip_before_action\s+:verify_authenticity_token\b/ },
+  { langs: /* @__PURE__ */ new Set(["rb"]), re: /\bprotect_from_forgery\s+with:\s*:null_session\b/ },
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /^\s*@csrf_exempt\b/ },
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /^\s*#\s*['"]django\.middleware\.csrf\.CsrfViewMiddleware['"]/ },
+  { langs: JS, re: /\bcsrf(?:Prevention)?\s*:\s*false\b/ },
+  { langs: /* @__PURE__ */ new Set(["php"]), re: /['"]csrf(?:_protection)?['"]\s*=>\s*false/i }
+];
+var DEBUG_RULES = [
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /\.run\([^)]*\bdebug\s*=\s*True/ },
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /^\s*DEBUG\s*=\s*True\b/ },
+  { langs: /* @__PURE__ */ new Set(["rb"]), re: /consider_all_requests_local\s*=\s*true/ },
+  { langs: /* @__PURE__ */ new Set(["php"]), re: /['"]debug['"]\s*=>\s*true/ }
+];
+function scanCors(rel, content, out2) {
+  const credentials = /Access-Control-Allow-Credentials['"]?\s*[:,]\s*['"]?\s*true/i.test(content) || /\bcredentials\s*:\s*true/.test(content);
+  const reflectRe = /Access-Control-Allow-Origin['"]?\s*[:,]\s*[^,\n)]*\b(?:req|request|ctx|headers?)\b[^,\n)]*origin|(?:^|[^\w.])origin\s*:\s*true\b/gi;
+  const wildcardRe = /Access-Control-Allow-Origin\s*:\s*\*|Access-Control-Allow-Origin['"]?\s*[:,]\s*['"]\*['"]|(?:^|[^\w.])origin\s*:\s*['"]\*['"]/gi;
+  const seen = /* @__PURE__ */ new Set();
+  for (const m of content.matchAll(reflectRe)) {
+    const ln = lineOf(content, m.index ?? 0);
+    seen.add(ln);
+    out2.push(hit2(rel, ln, WEBCONFIG_SHAPES["cors-reflect"], m[0]));
+  }
+  for (const m of content.matchAll(wildcardRe)) {
+    const ln = lineOf(content, m.index ?? 0);
+    if (seen.has(ln)) continue;
+    out2.push(hit2(rel, ln, WEBCONFIG_SHAPES[credentials ? "cors-wildcard-credentials" : "cors-wildcard"], m[0]));
+  }
+}
+var COOKIE_CALL = /\b(?:res(?:ponse)?\.cookie|reply\.setCookie|ctx\.cookies\.set|cookies\.set|setcookie)\s*\(/gi;
+function scanCookies(rel, content, out2) {
+  for (const m of content.matchAll(COOKIE_CALL)) {
+    if (/clearCookie/i.test(m[0])) continue;
+    const open = (m.index ?? 0) + m[0].length - 1;
+    const args2 = balanced(content, open);
+    if (args2 === null) continue;
+    const ln = lineOf(content, m.index ?? 0);
+    const hasOptions = /\{/.test(args2) || /setcookie/i.test(m[0]);
+    if (!hasOptions) {
+      out2.push(hit2(rel, ln, WEBCONFIG_SHAPES["cookie-httponly"], `${m[0]}\u2026`));
+      out2.push(hit2(rel, ln, WEBCONFIG_SHAPES["cookie-secure"], `${m[0]}\u2026`));
+      continue;
+    }
+    const hasHttpOnly = /httponly\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]httponly['"]\s*=>\s*true/i.test(args2);
+    const hasSecure = /\bsecure\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]secure['"]\s*=>\s*true/i.test(args2);
+    const sameSite = /samesite\s*[:=]?\s*['"]?(strict|lax|none)/i.exec(args2) || /['"]samesite['"]\s*=>\s*['"]?(strict|lax|none)/i.exec(args2);
+    if (!hasHttpOnly) out2.push(hit2(rel, ln, WEBCONFIG_SHAPES["cookie-httponly"], m[0]));
+    if (!hasSecure) out2.push(hit2(rel, ln, WEBCONFIG_SHAPES["cookie-secure"], m[0]));
+    if (!sameSite) out2.push(hit2(rel, ln, WEBCONFIG_SHAPES["cookie-samesite"], m[0]));
+    else if (sameSite[1]?.toLowerCase() === "none" && !hasSecure) out2.push(hit2(rel, ln, WEBCONFIG_SHAPES["cookie-samesite-none-insecure"], m[0]));
+  }
+}
+function auditWebConfig(repo) {
+  const out2 = [];
+  for (const wf of walk2(repo)) {
+    const ext = extOf2(wf.rel);
+    if (!SCAN.has(ext)) continue;
+    const content = readText2(wf.abs);
+    if (!content) continue;
+    const rel = wf.rel;
+    const ls = lines2(content);
+    for (const l of ls) {
+      for (const r of TLS_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES["tls-verify"], l.text));
+      if (/NODE_TLS_REJECT_UNAUTHORIZED\s*[:=]\s*['"]?0\b/.test(l.text)) out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES["tls-verify"], l.text));
+      for (const r of DEBUG_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES.debug, l.text));
+      if (/Content-Security-Policy/i.test(l.text) && /unsafe-inline|unsafe-eval|(?:default|script|object)-src[^;'"]*\*/i.test(l.text))
+        out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES["header-csp"], l.text));
+      if (/X-Frame-Options['"]?\s*[:,]\s*['"]?\s*(?:ALLOWALL|ALLOW-FROM)/i.test(l.text)) out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES["header-xfo"], l.text));
+      if (/Strict-Transport-Security[^\n]*max-age\s*=\s*0\b/i.test(l.text)) out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES["header-hsts"], l.text));
+      if (/Referrer-Policy['"]?\s*[:,]\s*['"]?\s*unsafe-url/i.test(l.text)) out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES["header-referrer"], l.text));
+      if (/^\s*autoindex\s+on\b/i.test(l.text) || /\bserve-index\s*\(/.test(l.text)) out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES["dir-listing"], l.text));
+      if (/\b(?:introspection|graphiql|playground)\s*:\s*true\b/.test(l.text)) out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES["graphql-introspection"], l.text));
+      for (const r of CSRF_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel, l.n, WEBCONFIG_SHAPES["csrf-disabled"], l.text));
+    }
+    scanCors(rel, content, out2);
+    scanCookies(rel, content, out2);
+  }
+  return out2;
+}
+
+// src/authtokens.ts
+var AUTH_SHAPES = {
+  "jwt-alg-none": {
+    id: "jwt-alg-none",
+    title: "JWT accepts the `none` algorithm",
+    severity: "critical",
+    cwe: "CWE-347",
+    category: "crypto",
+    note: "`alg: none` / `algorithms: ['none']` (or Go's `SigningMethodNone`) lets an attacker strip the signature and forge any token. Never allow it on the verify side."
+  },
+  "jwt-no-verify-alg": {
+    id: "jwt-no-verify-alg",
+    title: "JWT verified without pinning the algorithm",
+    severity: "high",
+    cwe: "CWE-347",
+    note: "`jwt.verify(token, key)` with no `algorithms` option accepts whatever the token's header claims \u2014 the RS256\u2192HS256 key-confusion attack, where the RSA public key is used as an HMAC secret. Pin `algorithms` explicitly.",
+    category: "crypto"
+  },
+  "jwt-decode": {
+    id: "jwt-decode",
+    title: "JWT decoded without verifying the signature",
+    severity: "high",
+    cwe: "CWE-347",
+    category: "crypto",
+    note: "`jwt.decode()` (vs. `verify`), or `verify_signature: False` / `verify=False`, reads the claims WITHOUT checking the signature \u2014 the token is attacker-authored. Only ever decode-without-verify a token you already verified."
+  },
+  "jwt-expiry": {
+    id: "jwt-expiry",
+    title: "JWT expiration not enforced",
+    severity: "medium",
+    cwe: "CWE-613",
+    category: "authz",
+    note: "`ignoreExpiration: true` / `verify_exp: False` accepts a token forever \u2014 a stolen or leaked token never stops working. Enforce `exp`."
+  },
+  "jwt-secret-hardcoded": {
+    id: "jwt-secret-hardcoded",
+    title: "JWT signed/verified with a hardcoded secret",
+    severity: "high",
+    cwe: "CWE-798",
+    category: "crypto",
+    note: "A string-literal HMAC secret in source is readable by anyone with the code and cannot be rotated without a deploy \u2014 with it an attacker mints valid tokens. Load it from config/secret storage."
+  },
+  "jwt-weak-secret": {
+    id: "jwt-weak-secret",
+    title: "JWT signed/verified with a weak/default secret",
+    severity: "high",
+    cwe: "CWE-521",
+    category: "crypto",
+    note: "A guessable secret (`secret`, `changeme`, `password`\u2026) is brute-forceable offline from a single captured token, after which an attacker forges any token. Use a long random secret from secret storage."
+  },
+  "oauth-implicit": {
+    id: "oauth-implicit",
+    title: "OAuth implicit flow (response_type=token)",
+    severity: "medium",
+    cwe: "CWE-757",
+    category: "authz",
+    note: "The implicit flow returns the access token in the URL fragment \u2014 logged, cached, and leak-prone. Use the authorization-code flow with PKCE."
+  },
+  "oauth-redirect-uri": {
+    id: "oauth-redirect-uri",
+    title: "Loose redirect_uri validation",
+    severity: "high",
+    cwe: "CWE-1385",
+    category: "authz",
+    note: "Validating redirect_uri with startsWith / prefix / substring lets `https://good.com.evil.com` (or `?next=`) pass and steals the code/token. Match the full registered URI exactly."
+  },
+  "oauth-state-pkce": {
+    id: "oauth-state-pkce",
+    title: "Authorization-code request without state / PKCE",
+    severity: "medium",
+    cwe: "CWE-352",
+    category: "authz",
+    note: "An authorize request (`response_type=code`) with no `state` and no `code_challenge` is open to CSRF / code-injection on the callback. Send and verify `state`, and use PKCE."
+  },
+  "saml-signature": {
+    id: "saml-signature",
+    title: "SAML signature validation disabled",
+    severity: "critical",
+    cwe: "CWE-347",
+    category: "authz",
+    note: "`wantAssertionsSigned: false` / `checkResponseSignature: false` / `validateSignature: false` accepts an unsigned (forgeable) assertion \u2014 full authentication bypass."
+  },
+  "password-hash": {
+    id: "password-hash",
+    title: "Weak password hashing",
+    severity: "high",
+    cwe: "CWE-916",
+    category: "crypto",
+    note: "MD5/SHA-1 (or a bcrypt cost < 10) for passwords is brute-forceable at scale. Use bcrypt/scrypt/argon2 with a sound work factor."
+  }
+};
+function lines3(content) {
+  return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
+}
+function extOf3(rel) {
+  const i2 = rel.lastIndexOf(".");
+  return i2 === -1 ? "" : rel.slice(i2 + 1).toLowerCase();
+}
+var JS2 = /* @__PURE__ */ new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"]);
+var CODE2 = /* @__PURE__ */ new Set([...JS2, "py", "go", "java", "kt", "scala", "php", "rb", "cs"]);
+var WEAK_SECRETS = /* @__PURE__ */ new Set([
+  "secret",
+  "secretkey",
+  "secret_key",
+  "changeme",
+  "change-me",
+  "password",
+  "passwd",
+  "pass",
+  "test",
+  "testing",
+  "jwt",
+  "jwtsecret",
+  "key",
+  "mysecret",
+  "supersecret",
+  "123456",
+  "admin",
+  "default"
+]);
+function hit3(rel, line, shape, evidence) {
+  return makeToolFinding({
+    tool: "ultrasec",
+    category: shape.category,
+    ident: `authtokens:${shape.id}:${rel}:${line}`,
+    title: `Auth token \u2014 ${shape.title}`,
+    severity: shape.severity,
+    message: `${shape.note}
+
+Evidence: \`${evidence.trim().slice(0, 160)}\``,
+    file: rel,
+    line,
+    cwe: shape.cwe
+  });
+}
+function balanced2(hay, open) {
+  let depth = 0;
+  for (let i2 = open; i2 < hay.length; i2++) {
+    const c2 = hay[i2];
+    if (c2 === "(") depth++;
+    else if (c2 === ")") {
+      depth--;
+      if (depth === 0) return hay.slice(open + 1, i2);
+    }
+  }
+  return null;
+}
+function lineOf2(content, index) {
+  let n = 1;
+  for (let i2 = 0; i2 < index && i2 < content.length; i2++) if (content[i2] === "\n") n++;
+  return n;
+}
+var LINE_RULES = [
+  // alg: none across ecosystems.
+  { langs: null, re: /alg(?:orithm)?s?\s*[:=]\s*\[?\s*['"]none['"]/i, shape: "jwt-alg-none" },
+  { langs: null, re: /['"]alg['"]\s*=>\s*['"]none['"]/i, shape: "jwt-alg-none" },
+  { langs: /* @__PURE__ */ new Set(["go"]), re: /SigningMethodNone|UnsafeAllowNoneSignatureType/, shape: "jwt-alg-none" },
+  // decode-without-verify.
+  { langs: JS2, re: /\bjwt\.decode\s*\(/, shape: "jwt-decode" },
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /verify_signature['"]?\s*:\s*False|\bverify\s*=\s*False\b/, shape: "jwt-decode" },
+  // expiry not enforced.
+  { langs: JS2, re: /ignoreExpiration\s*:\s*true/, shape: "jwt-expiry" },
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /verify_exp['"]?\s*:\s*False/, shape: "jwt-expiry" },
+  // implicit flow.
+  { langs: null, re: /response_type\s*[=:]\s*['"]?token\b/i, shape: "oauth-implicit" },
+  // SAML signature off.
+  {
+    langs: null,
+    re: /want(?:Assertions|Message)Signed\s*[:=]\s*false|checkResponseSignature\s*[:=]\s*false|validateSignature\s*[:=]\s*false|want(?:Assertions|Message)Signed["']?\s*=>\s*false/i,
+    shape: "saml-signature"
+  },
+  // loose redirect_uri validation.
+  { langs: null, re: /(?:redirect_uri|redirecturi|redirect_url|redirecturl)[^\n]*\.(?:startsWith|indexOf|includes|search)\s*\(/i, shape: "oauth-redirect-uri" }
+];
+var PWHASH_RULES = [
+  { langs: JS2, re: /createHash\(\s*['"](?:md5|sha1)['"]\s*\)[^\n]*(?:pass|pwd)/i },
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /hashlib\.(?:md5|sha1)\(\s*[^)]*(?:pass|pwd)/i },
+  { langs: /* @__PURE__ */ new Set(["php"]), re: /\b(?:md5|sha1)\(\s*\$?(?:pass|pwd)/i }
+];
+function scanJwtCalls(rel, content, ext, out2) {
+  if (!JS2.has(ext) && ext !== "py" && ext !== "php") return;
+  const secretRe = /(?:jwt\.(?:sign|verify|encode|decode)|JWT::(?:encode|decode))\s*\(\s*[^,]+,\s*(['"])([^'"]{1,64})\1/g;
+  for (const m of content.matchAll(secretRe)) {
+    const ln = lineOf2(content, m.index ?? 0);
+    const literal = (m[2] ?? "").trim().toLowerCase();
+    const shape = WEAK_SECRETS.has(literal) ? "jwt-weak-secret" : "jwt-secret-hardcoded";
+    out2.push(hit3(rel, ln, AUTH_SHAPES[shape], m[0]));
+  }
+  if (JS2.has(ext)) {
+    for (const m of content.matchAll(/\bjwt\.verify\s*\(/g)) {
+      const open = (m.index ?? 0) + m[0].length - 1;
+      const args2 = balanced2(content, open);
+      if (args2 === null) continue;
+      if (!/algorithms/.test(args2)) out2.push(hit3(rel, lineOf2(content, m.index ?? 0), AUTH_SHAPES["jwt-no-verify-alg"], m[0]));
+    }
+  }
+}
+function scanOAuthStatePkce(rel, content, out2) {
+  const m = /response_type\s*[=:]\s*['"]?code\b/i.exec(content);
+  if (!m) return;
+  const hasState = /[?&]state=|['"]state['"]\s*[:=]/.test(content);
+  const hasPkce = /code_challenge/i.test(content);
+  if (hasState && hasPkce) return;
+  const f = hit3(rel, lineOf2(content, m.index ?? 0), AUTH_SHAPES["oauth-state-pkce"], m[0]);
+  f.confidence = "low";
+  out2.push(f);
+}
+function auditAuthTokens(repo) {
+  const out2 = [];
+  for (const wf of walk2(repo)) {
+    const ext = extOf3(wf.rel);
+    if (!CODE2.has(ext)) continue;
+    const content = readText2(wf.abs);
+    if (!content) continue;
+    const rel = wf.rel;
+    for (const l of lines3(content)) {
+      for (const r of LINE_RULES) if ((r.langs === null || r.langs.has(ext)) && r.re.test(l.text)) out2.push(hit3(rel, l.n, AUTH_SHAPES[r.shape], l.text));
+      for (const r of PWHASH_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit3(rel, l.n, AUTH_SHAPES["password-hash"], l.text));
+      const cost = /(?:genSalt(?:Sync)?|bcrypt\.hash(?:Sync)?)\s*\([^)]*?(?:^|,)\s*(\d{1,2})\s*[,)]/.exec(l.text);
+      if (cost && Number(cost[1]) < 10) out2.push(hit3(rel, l.n, AUTH_SHAPES["password-hash"], l.text));
+    }
+    scanJwtCalls(rel, content, ext, out2);
+    scanOAuthStatePkce(rel, content, out2);
+  }
+  return out2;
+}
+
+// src/cloud.ts
+var CLOUD_SHAPES = {
+  "k8s-privileged": {
+    id: "k8s-privileged",
+    title: "Privileged container",
+    severity: "high",
+    cwe: "CWE-250",
+    note: "`privileged: true` gives the container ~root on the node \u2014 a container escape becomes a host takeover. Drop it and grant only the specific capabilities needed."
+  },
+  "k8s-host-namespace": {
+    id: "k8s-host-namespace",
+    title: "Container shares a host namespace / path",
+    severity: "high",
+    cwe: "CWE-250",
+    note: "`hostNetwork`/`hostPID`/`hostIPC: true` or a `hostPath` mount breaks the container boundary \u2014 the pod can reach the node's network, processes or filesystem."
+  },
+  "k8s-privesc": {
+    id: "k8s-privesc",
+    title: "Privilege escalation allowed / runs as root",
+    severity: "medium",
+    cwe: "CWE-269",
+    note: "`allowPrivilegeEscalation: true` (or `runAsNonRoot: false`) lets a process gain more privileges than its parent. Set `allowPrivilegeEscalation: false` and `runAsNonRoot: true`."
+  },
+  "iam-wildcard": {
+    id: "iam-wildcard",
+    title: "IAM policy allows Action:* on Resource:*",
+    severity: "high",
+    cwe: "CWE-732",
+    note: "An Allow with `Action: *` and `Resource: *` is full administrative access \u2014 the opposite of least privilege. Scope both to what the principal actually needs."
+  },
+  "iam-public-principal": {
+    id: "iam-public-principal",
+    title: "Resource policy grants access to everyone (Principal:*)",
+    severity: "high",
+    cwe: "CWE-732",
+    note: '`"Effect": "Allow"` with `"Principal": "*"` exposes the resource to any AWS account / the public. Restrict the principal.'
+  },
+  "open-ingress": {
+    id: "open-ingress",
+    title: "Ingress open to the whole internet (0.0.0.0/0)",
+    severity: "medium",
+    cwe: "CWE-284",
+    note: "A security-group / firewall ingress from `0.0.0.0/0` (or `::/0`) exposes the port to everyone. Restrict the CIDR, especially for admin ports (22/3389/db)."
+  },
+  "public-storage": {
+    id: "public-storage",
+    title: "Object storage made public",
+    severity: "high",
+    cwe: "CWE-732",
+    note: "A `public-read`/`public-read-write` ACL (or a public bucket setting) exposes stored objects to anyone. Keep buckets private and front them with signed URLs."
+  },
+  "iac-unencrypted": {
+    id: "iac-unencrypted",
+    title: "Storage / database encryption disabled",
+    severity: "high",
+    cwe: "CWE-311",
+    note: "`encrypted = false` / `storage_encrypted = false` leaves the volume, bucket or database unencrypted at rest \u2014 anyone who reaches the underlying storage (a snapshot, a stolen disk, a misdelegated role) reads it in the clear."
+  },
+  "iac-public-instance": {
+    id: "iac-public-instance",
+    title: "Database / instance publicly accessible",
+    severity: "high",
+    cwe: "CWE-284",
+    note: "`publicly_accessible = true` gives the instance a public endpoint. Combined with a weak password or an open security group it is directly reachable from the internet."
+  },
+  "iac-hardcoded-secret": {
+    id: "iac-hardcoded-secret",
+    title: "Credential hardcoded in infrastructure code",
+    severity: "high",
+    cwe: "CWE-798",
+    note: "A password/secret/token written as a literal in IaC lands in git history and in every plan/state file. Use a variable bound to a secret manager (vault, SSM, Key Vault) instead."
+  },
+  "cloud-metadata": {
+    id: "cloud-metadata",
+    title: "Cloud instance-metadata endpoint referenced in code",
+    severity: "low",
+    cwe: "CWE-918",
+    note: "A hardcoded link-local metadata endpoint (169.254.169.254 / metadata.google.internal). Legitimate for SDKs, but it is also the SSRF prize \u2014 confirm no user-controlled URL can reach it (see `investigate --lens cloud`)."
+  }
+};
+function lines4(content) {
+  return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
+}
+function extOf4(rel) {
+  const i2 = rel.lastIndexOf(".");
+  return i2 === -1 ? "" : rel.slice(i2 + 1).toLowerCase();
+}
+var CODE3 = /* @__PURE__ */ new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "py", "go", "java", "kt", "scala", "php", "rb", "cs"]);
+var IAC_EXTS = /* @__PURE__ */ new Set(["yaml", "yml", "json", "tf", "tfvars", "hcl", "template"]);
+var SCAN2 = /* @__PURE__ */ new Set([...IAC_EXTS, ...CODE3]);
+function hit4(rel, line, shape, evidence) {
+  return makeToolFinding({
+    tool: "ultrasec",
+    category: "config",
+    ident: `cloud:${shape.id}:${rel}:${line}`,
+    title: `Cloud/IaC \u2014 ${shape.title}`,
+    severity: shape.severity,
+    message: `${shape.note}
+
+Evidence: \`${evidence.trim().slice(0, 160)}\``,
+    file: rel,
+    line,
+    cwe: shape.cwe
+  });
+}
+function lineOf3(content, index) {
+  let n = 1;
+  for (let i2 = 0; i2 < index && i2 < content.length; i2++) if (content[i2] === "\n") n++;
+  return n;
+}
+var METADATA_RE = /169\.254\.169\.254|metadata\.google\.internal|169\.254\.170\.2/;
+var EGRESS_MARK = /\btype\s*=\s*["']egress["']|\bdirection\s*=\s*["']EGRESS["']|(?:^|\s)egress\s*(?:\{|=)/i;
+var INGRESS_MARK = /\btype\s*=\s*["']ingress["']|\bdirection\s*=\s*["']INGRESS["']|(?:^|\s)ingress\s*(?:\{|=)/i;
+var DIRECTION_LOOKBACK = 25;
+var IAC_SECRET_RE = /\b(?:\w*password|\w*secret|\w*token|access_key|secret_key|api_key|private_key|passwd|credential)\w*\s*=\s*/i;
+var INTERPOLATED = /^["']?\$\{|(?:^|=\s*)(?:var|local|data|module|each|jsondecode|file)\b/i;
+function isLiteralSecret(text) {
+  const m = /=\s*(.+?)\s*$/.exec(text);
+  const rhs = (m?.[1] ?? "").trim();
+  if (!rhs || INTERPOLATED.test(rhs)) return false;
+  const lit = /^["']([^"']*)["']/.exec(rhs);
+  if (!lit) return false;
+  const value = lit[1] ?? "";
+  return value.length >= 3 && !value.includes("${");
+}
+function isEgressRule(ls, line) {
+  for (let i2 = line - 1; i2 >= Math.max(0, line - 1 - DIRECTION_LOOKBACK); i2--) {
+    const t = ls[i2]?.text ?? "";
+    if (EGRESS_MARK.test(t)) return true;
+    if (INGRESS_MARK.test(t)) return false;
+  }
+  return false;
+}
+function auditCloud(repo) {
+  const out2 = [];
+  for (const wf of walk2(repo)) {
+    const ext = extOf4(wf.rel);
+    if (!SCAN2.has(ext)) continue;
+    const content = readText2(wf.abs);
+    if (!content) continue;
+    const rel = wf.rel;
+    const ls = lines4(content);
+    for (const l of ls) if (METADATA_RE.test(l.text)) out2.push(hit4(rel, l.n, CLOUD_SHAPES["cloud-metadata"], l.text));
+    if (!IAC_EXTS.has(ext)) continue;
+    const isK8s = /(^|\n)\s*apiVersion:/.test(content) && /(^|\n)\s*kind:/.test(content);
+    if (isK8s) {
+      for (const l of ls) {
+        if (/^\s*privileged:\s*true\b/i.test(l.text)) out2.push(hit4(rel, l.n, CLOUD_SHAPES["k8s-privileged"], l.text));
+        if (/^\s*host(?:Network|PID|IPC):\s*true\b/i.test(l.text) || /^\s*hostPath:/i.test(l.text))
+          out2.push(hit4(rel, l.n, CLOUD_SHAPES["k8s-host-namespace"], l.text));
+        if (/^\s*allowPrivilegeEscalation:\s*true\b/i.test(l.text) || /^\s*runAsNonRoot:\s*false\b/i.test(l.text))
+          out2.push(hit4(rel, l.n, CLOUD_SHAPES["k8s-privesc"], l.text));
+      }
+    }
+    const hasActionStar = /"Action"\s*:\s*(?:"\*"|\[\s*"\*"\s*\])/.test(content);
+    const hasResourceStar = /"Resource"\s*:\s*(?:"\*"|\[\s*"\*"\s*\])/.test(content);
+    if (hasActionStar && hasResourceStar) {
+      const m = /"Action"\s*:\s*(?:"\*"|\[\s*"\*"\s*\])/.exec(content);
+      if (m) out2.push(hit4(rel, lineOf3(content, m.index), CLOUD_SHAPES["iam-wildcard"], m[0]));
+    }
+    const allowPublic = /"Effect"\s*:\s*"Allow"/.test(content) && /"Principal"\s*:\s*(?:"\*"|\{\s*"AWS"\s*:\s*"\*"\s*\})/.test(content);
+    if (allowPublic) {
+      const m = /"Principal"\s*:\s*(?:"\*"|\{\s*"AWS"\s*:\s*"\*"\s*\})/.exec(content);
+      if (m) out2.push(hit4(rel, lineOf3(content, m.index), CLOUD_SHAPES["iam-public-principal"], m[0]));
+    }
+    for (const l of ls) {
+      if ((/(?:cidr_blocks|cidr_ip|source_ranges|CidrIp)\b[^\n]*(?:0\.0\.0\.0\/0|::\/0)/i.test(l.text) || /^\s*-?\s*["']?(?:0\.0\.0\.0\/0|::\/0)["']?\s*$/.test(l.text)) && !isEgressRule(ls, l.n))
+        out2.push(hit4(rel, l.n, CLOUD_SHAPES["open-ingress"], l.text));
+      if (/\bacl\b[^\n]*["']public-read(?:-write)?["']|["']public-read(?:-write)?["']/i.test(l.text) && /\bacl\b/i.test(l.text))
+        out2.push(hit4(rel, l.n, CLOUD_SHAPES["public-storage"], l.text));
+      if (/\b(?:storage_encrypted|encrypted|encryption_enabled|encrypt_at_rest)\s*=\s*false\b/i.test(l.text))
+        out2.push(hit4(rel, l.n, CLOUD_SHAPES["iac-unencrypted"], l.text));
+      if (/\bpublicly_accessible\s*=\s*true\b/i.test(l.text)) out2.push(hit4(rel, l.n, CLOUD_SHAPES["iac-public-instance"], l.text));
+      if (IAC_SECRET_RE.test(l.text) && isLiteralSecret(l.text)) out2.push(hit4(rel, l.n, CLOUD_SHAPES["iac-hardcoded-secret"], l.text));
+    }
+  }
+  return out2;
+}
+
 // src/git.ts
 import { execFileSync as execFileSync5 } from "child_process";
 function git(repo, args2) {
@@ -17078,11 +17737,11 @@ function changedFiles(repo, ref) {
 }
 function parseBlamePorcelain(raw) {
   if (!raw) return null;
-  const lines2 = raw.split(/\r?\n/);
-  const m = /^([0-9a-f]{40})\b/.exec((lines2[0] ?? "").trim());
+  const lines5 = raw.split(/\r?\n/);
+  const m = /^([0-9a-f]{40})\b/.exec((lines5[0] ?? "").trim());
   if (!m) return null;
   const info2 = { commit: m[1].slice(0, 10) };
-  for (const line of lines2) {
+  for (const line of lines5) {
     if (line.startsWith("author ")) info2.author = line.slice(7).trim();
     else if (line.startsWith("author-time ")) {
       const t = Number(line.slice(12).trim());
@@ -17113,8 +17772,8 @@ function lineContentAtHead(repo, file, line) {
   if (!Number.isInteger(line) || line < 1) return null;
   const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
   if (blob === null) return null;
-  const lines2 = blob.split(/\r?\n/);
-  return line <= lines2.length ? lines2[line - 1] : null;
+  const lines5 = blob.split(/\r?\n/);
+  return line <= lines5.length ? lines5[line - 1] : null;
 }
 function logSince(repo, file, sinceRef) {
   if (git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) === null) return null;
@@ -18457,9 +19116,9 @@ var yarnAudit = {
   parse(raw, _repo, ctx) {
     try {
       const lockfile = lockfileIn(ctx, "yarn.lock");
-      const lines2 = raw ? parseJsonStream(raw) : [];
+      const lines5 = raw ? parseJsonStream(raw) : [];
       const out2 = [];
-      for (const m of lines2) {
+      for (const m of lines5) {
         if (!m || typeof m !== "object") continue;
         if (m.type === "auditAdvisory" && m.data?.advisory) {
           const a = m.data.advisory;
@@ -18806,9 +19465,9 @@ function buildContextScaffold(repo, scan2, surface) {
   for (const fileScan of scan2.files) {
     const spec = langForFile(fileScan.rel);
     if (!spec) continue;
-    const lines2 = readText2(join41(repo, fileScan.rel)).split(/\r?\n/);
-    for (let i2 = 0; i2 < lines2.length; i2++) {
-      const line = lines2[i2];
+    const lines5 = readText2(join41(repo, fileScan.rel)).split(/\r?\n/);
+    for (let i2 = 0; i2 < lines5.length; i2++) {
+      const line = lines5[i2];
       const am = AUTH_RE.exec(line);
       if (am) authMiddleware.push({ file: fileScan.rel, line: i2 + 1, hint: am[0] });
       for (const rule of SANITIZERS) {
@@ -18961,6 +19620,9 @@ async function runScan(args2) {
   const sinkCand = sinksOn ? enumerateSinkCandidates(scan2, taintFindings, { maxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan2, { maxCandidates: explicitMaxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const agenticFindings = auditAgenticWorkflows(repo);
+  const webConfigFindings = auditWebConfig(repo);
+  const authTokenFindings = auditAuthTokens(repo);
+  const cloudFindings = auditCloud(repo);
   const scopedScan = !!(effectiveScope && effectiveScope.length || include?.length || exclude?.length || diffRef);
   const toolsFlag = flagStr(args2, "tools");
   const toolsAutoSkipped = scopedScan && toolsFlag === void 0 && !flagBool(args2, "no-tools");
@@ -18970,7 +19632,16 @@ async function runScan(args2) {
   const offline = flagBool(args2, "offline");
   const sbomResult = skipTools ? void 0 : generateSbom(repo, out2);
   const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path });
-  const merged = correlate([...taintFindings, ...sinkCand.findings, ...hygieneCand.findings, ...agenticFindings, ...tool.findings]);
+  const merged = correlate([
+    ...taintFindings,
+    ...sinkCand.findings,
+    ...hygieneCand.findings,
+    ...agenticFindings,
+    ...webConfigFindings,
+    ...authTokenFindings,
+    ...cloudFindings,
+    ...tool.findings
+  ]);
   const enrich = !(flagBool(args2, "no-enrich") || offline);
   const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich, context: loadContextDoc(out2) });
   const blameOn = flagBool(args2, "blame") || flagBool(args2, "provenance");
@@ -19271,14 +19942,14 @@ var SYSLOG_RFC5424_RE = /^<\d+>\d?\s/;
 var SSHD_FROM_IP_RE = /\bfrom\s+(\d{1,3}(?:\.\d{1,3}){3})\b/;
 var MAX_VOTE_SAMPLE = 50;
 function detectFormat(sampleLines) {
-  const lines2 = sampleLines.filter((l) => l.trim().length > 0).slice(0, MAX_VOTE_SAMPLE);
-  if (!lines2.length) return "raw";
+  const lines5 = sampleLines.filter((l) => l.trim().length > 0).slice(0, MAX_VOTE_SAMPLE);
+  if (!lines5.length) return "raw";
   let combined = 0;
   let common = 0;
   let json = 0;
   let syslog = 0;
   let generic = 0;
-  for (const line of lines2) {
+  for (const line of lines5) {
     const m = ACCESS_RE.exec(line);
     if (m) {
       if (m[8] !== void 0) combined++;
@@ -19304,7 +19975,7 @@ function detectFormat(sampleLines) {
       generic++;
     }
   }
-  const total = lines2.length;
+  const total = lines5.length;
   const tally = [
     ["nginx-combined", combined],
     ["common", common],
@@ -20067,6 +20738,87 @@ async function analyzeLogs(paths, opts) {
   return { findings: state.findings, stats, truncation: state.truncation };
 }
 
+// src/logs/sigma.ts
+import { createHash as createHash6 } from "crypto";
+var LEVEL2 = { critical: "critical", high: "high", medium: "medium", low: "low", info: "informational" };
+function sigmaId(seed) {
+  const h = createHash6("sha1").update(`ultrasec-sigma:${seed}`).digest("hex");
+  const c2 = h.slice(0, 32).split("");
+  c2[12] = "5";
+  c2[16] = ["8", "9", "a", "b"][Number.parseInt(h[16] ?? "0", 16) % 4];
+  const s = c2.join("");
+  return `${s.slice(0, 8)}-${s.slice(8, 12)}-${s.slice(12, 16)}-${s.slice(16, 20)}-${s.slice(20, 32)}`;
+}
+function reSource(re) {
+  return re.ignoreCase ? `(?i)${re.source}` : re.source;
+}
+function yq(s) {
+  return `'${s.replaceAll("'", "''")}'`;
+}
+var CWE_TAG_FROM_FAMILY = (fam) => {
+  const cwe = FAMILY_CWE[fam];
+  return cwe ? `cwe.${cwe.replace(/^CWE-/i, "")}` : void 0;
+};
+function renderRule(r) {
+  const L = ["---"];
+  L.push(`title: ${yq(r.title)}`);
+  L.push(`id: ${sigmaId(r.seed)}`);
+  L.push("status: experimental");
+  L.push(`description: ${yq(r.description)}`);
+  L.push("author: ultrasec");
+  L.push("logsource:");
+  for (const [k, v] of Object.entries(r.logsource)) L.push(`  ${k}: ${v}`);
+  L.push("detection:");
+  L.push(...r.detection.map((line) => `  ${line}`));
+  L.push("falsepositives:");
+  for (const fp of r.falsepositives) L.push(`  - ${yq(fp)}`);
+  L.push(`level: ${r.level}`);
+  if (r.tags.length) {
+    L.push("tags:");
+    for (const t of r.tags) L.push(`  - ${t}`);
+  }
+  return L.join("\n");
+}
+function renderSigmaRules() {
+  const rules = [];
+  for (const sig of ATTACK_SIGNATURES) {
+    const cweTag = CWE_TAG_FROM_FAMILY(sig.family);
+    rules.push({
+      title: `Web attack \u2014 ${sig.title}`,
+      seed: `attack:${sig.id}`,
+      description: sig.note,
+      level: LEVEL2[sig.severity],
+      logsource: { category: "webserver" },
+      detection: ["sel:", `  c-uri|re: ${yq(reSource(sig.re))}`, "condition: sel"],
+      tags: ["attack.t1190", ...cweTag ? [cweTag] : []],
+      falsepositives: ["Legitimate traffic that resembles the payload \u2014 triage the hit in context, it is a candidate not a verdict."]
+    });
+  }
+  rules.push({
+    title: "Security scanner / attack-tool user-agent",
+    seed: "scanner-ua",
+    description: `A request whose User-Agent identifies a known scanner or attack tool (${SCANNER_UAS.map((u) => u.name).join(", ")}).`,
+    level: "medium",
+    logsource: { category: "webserver" },
+    detection: ["sel:", "  c-useragent|re:", ...SCANNER_UAS.map((u) => `    - ${yq(reSource(u.re))}`), "condition: sel"],
+    tags: ["attack.t1595"],
+    falsepositives: ["An authorized scan (your own pentest / monitoring) \u2014 correlate with the scan window."]
+  });
+  const failPatterns = AUTH_EVENTS.filter((e) => e.kind === "auth-fail").map((e) => reSource(e.re));
+  rules.push({
+    title: "Repeated authentication failures (brute force)",
+    seed: "auth-brute-force",
+    description: "Authentication-failure lines. Threshold by source over a window in your SIEM (e.g. >= 10 in 10m by src_ip) \u2014 a single failure is not a finding; the burst is. Pair with the success rule to catch a compromise (fails then a success from the same source).",
+    level: "medium",
+    logsource: { category: "authentication" },
+    detection: ["keywords:", ...failPatterns.map((p) => `  - ${yq(p)}`), "condition: keywords"],
+    tags: ["attack.t1110"],
+    falsepositives: ["A user fat-fingering a password a few times \u2014 the threshold, not the single line, is the signal."]
+  });
+  return rules.length ? `${rules.map(renderRule).join("\n")}
+` : "";
+}
+
 // src/commands/logs.ts
 async function runLogs(args2) {
   const inputs = args2._.slice(1);
@@ -20139,8 +20891,17 @@ async function runLogs(args2) {
   writeDossier(out2, { manifest, findings, graph });
   mkdirSync12(out2, { recursive: true });
   writeFileSync13(join45(out2, "LOGSTATS.json"), JSON.stringify(stats, null, 2));
+  const sigmaOn = flagBool(args2, "sigma");
+  let sigmaPath;
+  if (sigmaOn) {
+    const rules = renderSigmaRules();
+    if (rules) {
+      sigmaPath = join45(out2, "ultrasec-logs.sigma.yml");
+      writeFileSync13(sigmaPath, rules);
+    }
+  }
   if (flagBool(args2, "json")) {
-    println(JSON.stringify({ out: out2, base, files: stats.files, findings: findings.length, stats, truncation }, null, 2));
+    println(JSON.stringify({ out: out2, base, files: stats.files, findings: findings.length, stats, truncation, sigma: sigmaPath }, null, 2));
     return 0;
   }
   const byFamily = /* @__PURE__ */ new Map();
@@ -20177,6 +20938,7 @@ async function runLogs(args2) {
     for (const t of truncation.slice(0, 10)) println(`    - ${t}`);
     if (truncation.length > 10) println(`    - \u2026and ${truncation.length - 10} more`);
   }
+  if (sigmaPath) println(`  sigma rules \u2192 ${sigmaPath}  (import into your SIEM; thresholds/correlation are the SIEM's job)`);
   println(`  next: read ${join45(out2, "DOSSIER.md")}; triage with the log-forensics playbook; verify with \`ultrasec verify --run ${out2}\`.`);
   return 0;
 }
@@ -20252,13 +21014,13 @@ import { resolve as resolve12 } from "path";
 // src/dossier.ts
 import { join as join46 } from "path";
 function excerpt(repo, step, ctx = 3) {
-  const lines2 = readText2(join46(repo, step.file)).split(/\r?\n/);
+  const lines5 = readText2(join46(repo, step.file)).split(/\r?\n/);
   const lo = Math.max(1, step.line - ctx);
-  const hi = Math.min(lines2.length, step.line + ctx);
+  const hi = Math.min(lines5.length, step.line + ctx);
   const out2 = [];
   for (let n = lo; n <= hi; n++) {
     const marker = n === step.line ? ">>" : "  ";
-    out2.push(`${marker} ${String(n).padStart(4)} | ${lines2[n - 1] ?? ""}`);
+    out2.push(`${marker} ${String(n).padStart(4)} | ${lines5[n - 1] ?? ""}`);
   }
   return out2.join("\n");
 }
@@ -21008,16 +21770,20 @@ function topDir2(rel) {
   const i2 = rel.indexOf("/");
   return i2 === -1 ? "." : rel.slice(0, i2);
 }
+var ACCESS_CONTROL_LENS = "Access control \u2014 the highest-yield class, never enumerable by taint. For every route/handler in these files ask two questions. (1) Is there ANY authorization check before the object is read or written? A missing one is BFLA (broken function-level authz) \u2014 the classic shape is an admin/privileged action reachable by a normal role, or a method/version downgrade (GET\u2192PUT, /v2\u2192/v1) that skips the guard. (2) Does the check bind the CALLER to the SPECIFIC object in the request? Compare the guard to the object returned: an owner_id/tenant_id taken from the SESSION/token vs. an id taken from the URL/body/query. When they are not compared, an attacker swaps the id and reads another principal's data \u2014 IDOR/BOLA. Hunt horizontal escalation (user A reaching user B via a predictable/sequential/enumerable id), vertical escalation (a normal user reaching an admin object), and tenant-boundary crossing in multi-tenant code. Mass-assignment onto role/isAdmin/tenant/permissions is access control too \u2014 a body field that overwrites who you are. Cite resolvable [file:line] for the guard that is missing or the comparison that is absent. See references/access-control.md.";
 var LENSES = {
   "sharp-edges": "Ask a DIFFERENT question here: not 'is this code vulnerable' but 'does this API make the insecure use easier than the secure one'. Six shapes: an algorithm/mode the caller picks; an insecure default or an ambiguous zero; raw bytes where a semantic type belongs; a config cliff that fails open; a verification that returns instead of throwing; permissions as strings. Model three users \u2014 the attacker, the copy-paster, the confused reader. Rate by how EASY the mistake is. See references/sharp-edges.md.",
+  "access-control": ACCESS_CONTROL_LENS,
+  idor: ACCESS_CONTROL_LENS,
   crypto: "Crypto-specific: secrets compared with == or equals() rather than a constant-time helper; key material in a plain buffer never zeroed; a nonce or IV reused or derived from a counter the attacker sees; an algorithm read from attacker-supplied data. See references/attack-classes.md \xA7Cryptography.",
-  privacy: "Personal data: where it goes (a third-party processor, a log, an analytics beacon), how long it stays, and whether a control named 'anonymisation' actually prevents re-identification. See references/privacy-and-data-protection.md."
+  privacy: "Personal data: where it goes (a third-party processor, a log, an analytics beacon), how long it stays, and whether a control named 'anonymisation' actually prevents re-identification. See references/privacy-and-data-protection.md.",
+  cloud: "Cloud / container reachability, the half the IaC scan can't decide: can any user-controlled URL reach the instance-metadata endpoint (169.254.169.254 / metadata.google.internal) \u2014 SSRF to short-lived credentials? Is a wildcard/over-broad IAM role actually assumed on this path? Are instance/CI secrets read from env or a mounted file that a compromised container can exfiltrate? Does a container escape (privileged/hostPath/hostNetwork) turn a bug into node takeover? See references/frameworks.md \xA7Cloud."
 };
 function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens) {
   const filesByRegion = /* @__PURE__ */ new Map();
-  const add2 = (region, file) => (filesByRegion.get(region) ?? filesByRegion.set(region, /* @__PURE__ */ new Set()).get(region)).add(file);
-  for (const g of surface.entryPoints) for (const s of g.samples) add2(topDir2(s.file), s.file);
-  for (const k of surface.sinks) for (const s of k.samples) add2(topDir2(s.file), s.file);
+  const add3 = (region, file) => (filesByRegion.get(region) ?? filesByRegion.set(region, /* @__PURE__ */ new Set()).get(region)).add(file);
+  for (const g of surface.entryPoints) for (const s of g.samples) add3(topDir2(s.file), s.file);
+  for (const k of surface.sinks) for (const s of k.samples) add3(topDir2(s.file), s.file);
   const regions = [];
   for (const t of surface.suggestedTargets) {
     const files = [...filesByRegion.get(t.scope) ?? []].sort(byStr2).slice(0, MAX_FILES_PER_REGION);
@@ -21633,7 +22399,7 @@ function buildVariantWorklist(dossier) {
     const op = operationOf(f);
     const neighbours = [];
     const seen = /* @__PURE__ */ new Set();
-    const add2 = (n) => {
+    const add3 = (n) => {
       const key = `${n.file}:${n.line}:${n.axis}`;
       if (seen.has(key) || sink && n.file === sink.file && n.line === sink.line) return;
       seen.add(key);
@@ -21643,9 +22409,9 @@ function buildVariantWorklist(dossier) {
       if (o.id === f.id) continue;
       const os = sinkOf(o);
       if (!os) continue;
-      if (operationOf(o) === op) add2({ file: os.file, line: os.line, axis: "same-sink-callee", id: o.id, what: o.title });
-      else if (sink && os.file === sink.file) add2({ file: os.file, line: os.line, axis: "same-file", id: o.id, what: o.title });
-      else if (o.cwe && o.cwe === f.cwe) add2({ file: os.file, line: os.line, axis: "same-cwe", id: o.id, what: o.title });
+      if (operationOf(o) === op) add3({ file: os.file, line: os.line, axis: "same-sink-callee", id: o.id, what: o.title });
+      else if (sink && os.file === sink.file) add3({ file: os.file, line: os.line, axis: "same-file", id: o.id, what: o.title });
+      else if (o.cwe && o.cwe === f.cwe) add3({ file: os.file, line: os.line, axis: "same-cwe", id: o.id, what: o.title });
     }
     return {
       seedId: f.id,
@@ -21897,7 +22663,7 @@ import { writeFileSync as writeFileSync17 } from "fs";
 import { join as join54, resolve as resolve22 } from "path";
 
 // src/coverage.ts
-var ASVS = [
+var ASVS_CATEGORIES = [
   {
     id: "V1",
     title: "Architecture & threat modelling",
@@ -21951,12 +22717,259 @@ var ASVS = [
     hint: "Dependencies, secrets, IaC, CI \u2014 including workflows that hand an agent the repo."
   }
 ];
+var OWASP_TOP10_2021 = [
+  {
+    id: "A01",
+    title: "Broken access control",
+    kinds: ["authz", "redirect", "CWE-352", "CWE-601", "CWE-1385"],
+    judgment: true,
+    hint: "Per-route guards vs. the object returned (IDOR/BOLA), CSRF, open redirect, path traversal on protected files."
+  },
+  {
+    id: "A02",
+    title: "Cryptographic failures",
+    kinds: ["crypto", "random", "CWE-295", "CWE-327", "CWE-328", "CWE-330", "CWE-614", "CWE-798", "CWE-521", "CWE-916"],
+    judgment: true,
+    hint: "Weak hashes/ciphers, TLS verification disabled, hardcoded/weak secrets, insecure randomness, cleartext transport."
+  },
+  {
+    id: "A03",
+    title: "Injection",
+    kinds: ["sql", "nosql", "command", "argv", "code", "ldap", "xpath", "ssti", "xxe", "xss", "domxss", "crlf", "csv"],
+    hint: "The taint catalog's core \u2014 SQL/NoSQL/command/code/LDAP/XPath/template/XSS."
+  },
+  {
+    id: "A04",
+    title: "Insecure design",
+    judgment: true,
+    hint: "Missing rate limiting, no threat model, business-logic abuse \u2014 read CONTEXT.md and the investigate leads."
+  },
+  {
+    id: "A05",
+    title: "Security misconfiguration",
+    kinds: ["config", "CWE-16", "CWE-200", "CWE-489", "CWE-942", "CWE-1004", "CWE-1275", "xxe"],
+    hint: "CORS, security headers, cookie flags, debug/verbose errors, directory listing, GraphQL introspection, IaC."
+  },
+  {
+    id: "A06",
+    title: "Vulnerable & outdated components",
+    kinds: ["dep"],
+    hint: "Dependency CVEs (Trivy/OSV/grype\u2026) enumerated; EOL runtimes and unpatched frameworks are judgment."
+  },
+  {
+    id: "A07",
+    title: "Identification & authentication failures",
+    // CWE-916 (weak password hash) is mapped to A07 by OWASP, not only to A02 —
+    // measured on DVWA, whose 17 md5-password findings otherwise left A07 reading
+    // "not examined" while the audit had in fact looked straight at it.
+    kinds: ["authz", "CWE-287", "CWE-347", "CWE-384", "CWE-521", "CWE-613", "CWE-798", "CWE-916"],
+    judgment: true,
+    hint: "JWT verification, session rotation/expiry, credential strength, brute-force protection."
+  },
+  {
+    id: "A08",
+    title: "Software & data integrity failures",
+    kinds: ["deserialize", "CWE-502", "config", "CWE-1427"],
+    judgment: true,
+    hint: "Insecure deserialization, unsigned updates, and CI/CD that hands an agent the repo (agentic-CI)."
+  },
+  {
+    id: "A09",
+    title: "Security logging & monitoring failures",
+    kinds: ["logs"],
+    judgment: true,
+    hint: "Needs `scan --log-hygiene`; monitoring/alerting is out of a source audit's reach."
+  },
+  { id: "A10", title: "Server-side request forgery (SSRF)", kinds: ["ssrf"], hint: "SSRF sinks are enumerated by the taint walk." }
+];
+var OWASP_API_TOP10_2023 = [
+  {
+    id: "API1",
+    title: "Broken object level authorization (BOLA)",
+    kinds: ["authz"],
+    judgment: true,
+    hint: "Every endpoint that takes an id: is the returned object scoped to the caller?"
+  },
+  {
+    id: "API2",
+    title: "Broken authentication",
+    kinds: ["authz", "CWE-287", "CWE-347", "CWE-613", "CWE-521", "CWE-798"],
+    judgment: true,
+    hint: "JWT verification/alg/expiry, weak or hardcoded secrets, credential handling."
+  },
+  {
+    id: "API3",
+    title: "Broken object property level authorization",
+    kinds: ["massassign", "CWE-915"],
+    judgment: true,
+    hint: "Mass assignment onto privileged fields; over-disclosure of object properties."
+  },
+  {
+    id: "API4",
+    title: "Unrestricted resource consumption",
+    judgment: true,
+    hint: "Rate limiting, pagination caps, GraphQL query cost/depth \u2014 not statically enumerable."
+  },
+  {
+    id: "API5",
+    title: "Broken function level authorization (BFLA)",
+    kinds: ["authz"],
+    judgment: true,
+    hint: "Admin/privileged functions reachable by a normal role; method or version downgrade."
+  },
+  {
+    id: "API6",
+    title: "Unrestricted access to sensitive business flows",
+    judgment: true,
+    hint: "Automatable flows (checkout, signup) without abuse controls."
+  },
+  { id: "API7", title: "Server-side request forgery", kinds: ["ssrf"], hint: "SSRF sinks (webhooks, imports, avatars) enumerated by the taint walk." },
+  {
+    id: "API8",
+    title: "Security misconfiguration",
+    kinds: ["config", "CWE-200", "CWE-489", "CWE-942", "CWE-1004", "CWE-1275"],
+    hint: "CORS, security headers, cookie flags, debug, GraphQL introspection."
+  },
+  {
+    id: "API9",
+    title: "Improper inventory management",
+    judgment: true,
+    hint: "Undocumented/legacy/versioned endpoints, non-prod hosts \u2014 inventory, not code."
+  },
+  {
+    id: "API10",
+    title: "Unsafe consumption of APIs",
+    kinds: ["ssrf", "deserialize", "CWE-295"],
+    judgment: true,
+    hint: "Trusting upstream API data: TLS verification off, unsafe deserialization of responses."
+  }
+];
+var MASVS = [
+  {
+    id: "STORAGE",
+    title: "Data storage & privacy",
+    kinds: ["secret", "privacy", "CWE-798"],
+    judgment: true,
+    hint: "Secrets/PII in code or insecure local storage; logs leaking sensitive data."
+  },
+  {
+    id: "CRYPTO",
+    title: "Cryptography",
+    kinds: ["crypto", "random", "CWE-327", "CWE-328", "CWE-330", "CWE-798", "CWE-521"],
+    judgment: true,
+    hint: "Weak algorithms, hardcoded/weak keys, predictable IV/nonce, insecure randomness."
+  },
+  {
+    id: "AUTH",
+    title: "Authentication & authorization",
+    kinds: ["authz", "CWE-287", "CWE-347", "CWE-613"],
+    judgment: true,
+    hint: "Token verification/expiry, local vs. server-side authorization."
+  },
+  {
+    id: "NETWORK",
+    title: "Network communication",
+    kinds: ["CWE-295"],
+    judgment: true,
+    hint: "TLS verification disabled, hostname checks off, missing certificate pinning."
+  },
+  {
+    id: "PLATFORM",
+    title: "Platform interaction",
+    kinds: ["xss", "domxss", "config", "trustboundary", "CWE-942"],
+    judgment: true,
+    hint: "WebView JS bridges, exported components/IPC, insecure deep links."
+  },
+  {
+    id: "CODE",
+    title: "Code quality",
+    kinds: ["dep", "buffer", "command", "code", "deserialize"],
+    judgment: true,
+    hint: "Injection, memory safety, unsafe deserialization, outdated dependencies."
+  },
+  {
+    id: "RESILIENCE",
+    title: "Resilience against reverse engineering",
+    judgment: true,
+    hint: "Anti-tampering, obfuscation, root/jailbreak detection \u2014 not a source-audit concern."
+  },
+  { id: "PRIVACY", title: "Privacy", kinds: ["privacy"], judgment: true, hint: "Data minimisation, consent, third-party SDK data flows." }
+];
+var CWE_TOP25_2023 = [
+  { id: "1", title: "CWE-787 Out-of-bounds write", kinds: ["buffer", "CWE-787"], judgment: true, hint: "C/C++ buffer writes \u2014 `cppcheck`/manual review." },
+  { id: "2", title: "CWE-79 Cross-site scripting", kinds: ["xss", "domxss", "CWE-79"], hint: "Reflected/stored/DOM XSS sinks enumerated." },
+  { id: "3", title: "CWE-89 SQL injection", kinds: ["sql", "CWE-89"], hint: "SQL sinks enumerated by the taint walk." },
+  { id: "4", title: "CWE-416 Use after free", kinds: ["CWE-416"], judgment: true, hint: "Memory lifetime \u2014 not enumerated; C/C++ review." },
+  { id: "5", title: "CWE-78 OS command injection", kinds: ["command", "CWE-78"], hint: "Command sinks enumerated." },
+  {
+    id: "6",
+    title: "CWE-20 Improper input validation",
+    kinds: ["CWE-20"],
+    judgment: true,
+    hint: "Broad class \u2014 the whole taint catalog is a subset; judge per entry point."
+  },
+  { id: "7", title: "CWE-125 Out-of-bounds read", kinds: ["buffer", "CWE-125"], judgment: true, hint: "C/C++ buffer reads \u2014 review." },
+  { id: "8", title: "CWE-22 Path traversal", kinds: ["path", "CWE-22"], hint: "Path traversal / zip-slip sinks enumerated." },
+  { id: "9", title: "CWE-352 Cross-site request forgery", kinds: ["CWE-352"], judgment: true, hint: "Missing CSRF token/state on state-changing routes." },
+  {
+    id: "10",
+    title: "CWE-434 Unrestricted upload",
+    kinds: ["path", "CWE-434"],
+    judgment: true,
+    hint: "Upload type/size/AV policy \u2014 partly path, mostly judgment."
+  },
+  { id: "11", title: "CWE-862 Missing authorization", kinds: ["authz", "CWE-862"], judgment: true, hint: "Routes with no guard \u2014 investigate lens." },
+  { id: "12", title: "CWE-476 NULL pointer dereference", kinds: ["CWE-476"], judgment: true, hint: "Not enumerated." },
+  { id: "13", title: "CWE-287 Improper authentication", kinds: ["authz", "CWE-287", "CWE-347"], judgment: true, hint: "JWT/session verification correctness." },
+  { id: "14", title: "CWE-190 Integer overflow", kinds: ["CWE-190"], judgment: true, hint: "Not enumerated." },
+  { id: "15", title: "CWE-502 Deserialization of untrusted data", kinds: ["deserialize", "CWE-502"], hint: "Unsafe deserialization sinks enumerated." },
+  { id: "16", title: "CWE-77 Command injection", kinds: ["command", "argv", "CWE-77"], hint: "Command/argument injection sinks enumerated." },
+  { id: "17", title: "CWE-119 Improper restriction of memory buffer", kinds: ["buffer", "CWE-119"], judgment: true, hint: "C/C++ memory bounds." },
+  { id: "18", title: "CWE-798 Use of hard-coded credentials", kinds: ["secret", "CWE-798"], hint: "Secret scanners + auth-token detector." },
+  { id: "19", title: "CWE-918 Server-side request forgery", kinds: ["ssrf", "CWE-918"], hint: "SSRF sinks enumerated." },
+  {
+    id: "20",
+    title: "CWE-306 Missing authentication for critical function",
+    kinds: ["authz", "CWE-306"],
+    judgment: true,
+    hint: "Sensitive endpoints with no auth \u2014 investigate."
+  },
+  { id: "21", title: "CWE-362 Race condition", kinds: ["CWE-362"], judgment: true, hint: "TOCTOU/balance races \u2014 not enumerated; investigate lens." },
+  { id: "22", title: "CWE-269 Improper privilege management", kinds: ["authz", "CWE-269"], judgment: true, hint: "Privilege escalation paths \u2014 investigate." },
+  { id: "23", title: "CWE-94 Code injection", kinds: ["code", "CWE-94"], hint: "Code-eval sinks enumerated." },
+  {
+    id: "24",
+    title: "CWE-863 Incorrect authorization",
+    kinds: ["authz", "CWE-863"],
+    judgment: true,
+    hint: "Wrong (not missing) authz decision \u2014 investigate."
+  },
+  {
+    id: "25",
+    title: "CWE-276 Incorrect default permissions",
+    kinds: ["config", "CWE-276"],
+    judgment: true,
+    hint: "World-readable files, permissive defaults \u2014 config/IaC."
+  }
+];
+var STANDARDS = {
+  asvs: { id: "asvs", title: "OWASP ASVS", categories: ASVS_CATEGORIES },
+  "owasp-top10": { id: "owasp-top10", title: "OWASP Top 10 (2021)", categories: OWASP_TOP10_2021 },
+  "owasp-api-top10": { id: "owasp-api-top10", title: "OWASP API Security Top 10 (2023)", categories: OWASP_API_TOP10_2023 },
+  masvs: { id: "masvs", title: "OWASP MASVS (mobile)", categories: MASVS },
+  "cwe-top25": { id: "cwe-top25", title: "CWE Top 25 (2023)", categories: CWE_TOP25_2023 }
+};
+var DEFAULT_STANDARD = "asvs";
 function kindsOf(f) {
-  return [f.category, f.sink?.kind].filter((x) => Boolean(x));
+  return [f.category, f.sink?.kind, f.cwe].filter((x) => Boolean(x));
 }
-function buildCoverage(dossier, enumeratedKinds = []) {
+function enumeratedKindsOf(findings) {
+  return [...new Set(findings.flatMap(kindsOf))];
+}
+function buildCoverage(dossier, enumeratedKinds = [], standardId = DEFAULT_STANDARD) {
+  const pack = STANDARDS[standardId] ?? STANDARDS[DEFAULT_STANDARD];
   const enumerated = new Set(enumeratedKinds);
-  return ASVS.map((c2) => {
+  return pack.categories.map((c2) => {
     const hits = dossier.findings.filter((f) => (c2.kinds ?? []).some((k) => kindsOf(f).includes(k))).length;
     const engineCovers = (c2.kinds ?? []).some((k) => enumerated.has(k));
     const state = hits > 0 ? "examined" : engineCovers ? "engine" : "unexamined";
@@ -21968,10 +22981,10 @@ var MARK = {
   examined: "\u2705 examined",
   unexamined: "\u2B1C **not examined**"
 };
-function renderCoverageMd(rows) {
+function renderCoverageMd(rows, standardTitle = "OWASP ASVS") {
   const unexamined = rows.filter((r) => r.state === "unexamined");
   const judgment = rows.filter((r) => r.judgment && r.state !== "examined");
-  const L = [`## Coverage (OWASP ASVS)`, ""];
+  const L = [`## Coverage (${standardTitle})`, ""];
   L.push(`What this audit looked at, and what it did not. A category marked **not examined** is not`);
   L.push(`a clean bill of health \u2014 it is a gap in the audit, and it belongs in the report.`);
   L.push("");
@@ -22001,6 +23014,11 @@ function renderCoverageMd(rows) {
 // src/commands/coverage.ts
 function runCoverage(args2) {
   const run2 = resolve22(flagStr(args2, "run") ?? ".ultrasec");
+  const standardId = flagStr(args2, "standard") ?? DEFAULT_STANDARD;
+  if (!own(STANDARDS, standardId)) {
+    eprintln(`ultrasec coverage: unknown --standard '${standardId}' (expected ${Object.keys(STANDARDS).join("|")}).`);
+    return 2;
+  }
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -22008,9 +23026,9 @@ function runCoverage(args2) {
     eprintln(`ultrasec coverage: ${e.message}`);
     return 2;
   }
-  const enumerated = [...new Set(dossier.findings.flatMap((f) => [f.category, f.sink?.kind].filter((x) => Boolean(x))))];
-  const rows = buildCoverage(dossier, enumerated);
-  const md = renderCoverageMd(rows);
+  const enumerated = enumeratedKindsOf(dossier.findings);
+  const rows = buildCoverage(dossier, enumerated, standardId);
+  const md = renderCoverageMd(rows, STANDARDS[standardId].title);
   if (flagBool(args2, "json")) {
     println(JSON.stringify(rows, null, 2));
     return 0;
@@ -22515,14 +23533,14 @@ function header(d) {
   const c2 = d.manifest.counts.bySeverity;
   const kev = d.findings.filter((f) => f.kev).length;
   const ranked = d.findings.some((f) => typeof f.risk === "number");
-  const lines2 = [
+  const lines5 = [
     `repo \`${d.manifest.repo}\` \xB7 ultrasec ${d.manifest.version}`,
     `findings: **${d.manifest.counts.findings}** \u2014 ${SEVERITIES2.map((s) => `${BADGE[s]} ${c2[s]}`).join(" \xB7 ")}${kev ? ` \xB7 \u{1F6A8} ${kev} in CISA KEV` : ""}`,
     `tools: ${d.manifest.toolsRun.join(", ") || "none (graph + taint only)"}`
   ];
-  if (d.manifest.toolStatus?.length) lines2.push(`tool status: ${toolStatusLines(d.manifest.toolStatus).join(" \xB7 ")}`);
-  if (ranked) lines2.push(`_ranked by composite risk (severity \u2295 EPSS \u2295 KEV)_`);
-  return lines2.join("  \n");
+  if (d.manifest.toolStatus?.length) lines5.push(`tool status: ${toolStatusLines(d.manifest.toolStatus).join(" \xB7 ")}`);
+  if (ranked) lines5.push(`_ranked by composite risk (severity \u2295 EPSS \u2295 KEV)_`);
+  return lines5.join("  \n");
 }
 function statusTag(f) {
   const v = f.verdict ? ` \xB7 verdict ${f.verdict}` : "";
@@ -23730,6 +24748,717 @@ function runOrchestrate(args2) {
   return 0;
 }
 
+// src/commands/probe.ts
+import { mkdirSync as mkdirSync15, writeFileSync as writeFileSync21 } from "fs";
+import { join as join63, resolve as resolve30 } from "path";
+import { request as httpsRequest } from "https";
+import { request as httpRequest } from "http";
+import { lookup } from "dns/promises";
+var UA = "ultrasec-probe (authorized security check)";
+function isPrivateHost(ip) {
+  if (ip === "::1" || ip === "::" || ip === "0.0.0.0") return true;
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip);
+  if (m) {
+    const a = Number(m[1]);
+    const b = Number(m[2]);
+    if (a === 10 || a === 127) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    return false;
+  }
+  const lc = ip.toLowerCase();
+  if (lc.startsWith("::ffff:")) return isPrivateHost(lc.slice(7));
+  return lc.startsWith("fc") || lc.startsWith("fd") || lc.startsWith("fe80");
+}
+async function resolveIp(hostname) {
+  try {
+    return (await lookup(hostname)).address;
+  } catch {
+    return null;
+  }
+}
+function doRequest(u, opts) {
+  return new Promise((resolveP, reject) => {
+    const isHttps = u.protocol === "https:";
+    const options = {
+      protocol: u.protocol,
+      hostname: u.hostname,
+      port: u.port || (isHttps ? 443 : 80),
+      path: `${u.pathname}${u.search}`,
+      method: opts.method ?? "GET",
+      headers: { "user-agent": UA, accept: "*/*", ...opts.headers ?? {} },
+      // Observe & REPORT certificate problems rather than aborting on them —
+      // this is a diagnostic probe, not a client that must stay safe.
+      rejectUnauthorized: false,
+      servername: u.hostname
+    };
+    const onRes = (res) => {
+      const chunks = [];
+      let size = 0;
+      const MAX = 262144;
+      res.on("data", (c2) => {
+        size += c2.length;
+        if (size <= MAX) chunks.push(c2);
+        else res.destroy();
+      });
+      res.on("end", () => {
+        const sock = res.socket;
+        const out2 = { status: res.statusCode ?? 0, headers: res.headers, body: Buffer.concat(chunks).toString("utf8") };
+        if (isHttps && typeof sock?.getProtocol === "function") {
+          out2.tlsProtocol = sock.getProtocol() ?? void 0;
+          try {
+            out2.cert = sock.getPeerCertificate();
+          } catch {
+          }
+          out2.authorized = sock.authorized;
+          const ae = sock.authorizationError;
+          if (ae) out2.authError = String(ae);
+        }
+        resolveP(out2);
+      });
+      res.on("error", reject);
+    };
+    const req = isHttps ? httpsRequest(options, onRes) : httpRequest(options, onRes);
+    req.on("error", reject);
+    req.setTimeout(opts.timeout, () => req.destroy(new Error("request timed out")));
+    if (opts.body) req.write(opts.body);
+    req.end();
+  });
+}
+function add2(ctx, area, title, severity, grounding, message, cwe) {
+  ctx.findings.push({ id: shortHash2(`probe:${area}:${grounding}:${title}`), area, title, severity, grounding, message, ...cwe ? { cwe } : {} });
+}
+async function fetchWithin(ctx, u, opts) {
+  if (ctx.made >= ctx.cap) {
+    ctx.truncated = true;
+    return null;
+  }
+  ctx.made++;
+  try {
+    return await doRequest(u, { ...opts, timeout: ctx.timeout });
+  } catch {
+    return null;
+  }
+}
+function headerStr(h, name2) {
+  const v = h[name2.toLowerCase()];
+  return Array.isArray(v) ? v.join(", ") : v;
+}
+function checkHeaders(ctx, u, res) {
+  const g = (n) => `[response-header:${n}]`;
+  const csp = headerStr(res.headers, "content-security-policy");
+  if (!csp)
+    add2(ctx, "headers", "No Content-Security-Policy", "medium", g("Content-Security-Policy"), "No CSP \u2014 the last-line XSS mitigation is absent.", "CWE-693");
+  else if (/unsafe-inline|unsafe-eval|(?:default|script|object)-src[^;]*\*/i.test(csp))
+    add2(
+      ctx,
+      "headers",
+      "Weak Content-Security-Policy",
+      "medium",
+      g("Content-Security-Policy"),
+      `CSP allows unsafe-inline/eval or a wildcard source: ${csp.slice(0, 120)}`,
+      "CWE-693"
+    );
+  if (u.protocol === "https:") {
+    const hsts = headerStr(res.headers, "strict-transport-security");
+    if (!hsts)
+      add2(
+        ctx,
+        "headers",
+        "No HSTS",
+        "medium",
+        g("Strict-Transport-Security"),
+        "No Strict-Transport-Security \u2014 a request can be downgraded to HTTP.",
+        "CWE-319"
+      );
+    else {
+      const age = /max-age\s*=\s*(\d+)/i.exec(hsts);
+      if (age && Number(age[1]) === 0) add2(ctx, "headers", "HSTS disabled (max-age=0)", "medium", g("Strict-Transport-Security"), hsts, "CWE-319");
+      else if (age && Number(age[1]) < 15552e3) add2(ctx, "headers", "HSTS max-age below 180 days", "low", g("Strict-Transport-Security"), hsts, "CWE-319");
+    }
+  }
+  const xfo = headerStr(res.headers, "x-frame-options");
+  const frameAncestors = csp ? /frame-ancestors/i.test(csp) : false;
+  if (!xfo && !frameAncestors)
+    add2(
+      ctx,
+      "headers",
+      "No clickjacking protection",
+      "medium",
+      g("X-Frame-Options"),
+      "Neither X-Frame-Options nor CSP frame-ancestors \u2014 the page is framable.",
+      "CWE-1021"
+    );
+  else if (xfo && /allowall|allow-from/i.test(xfo)) add2(ctx, "headers", "X-Frame-Options allows framing", "medium", g("X-Frame-Options"), xfo, "CWE-1021");
+  const xcto = headerStr(res.headers, "x-content-type-options");
+  if (!xcto)
+    add2(
+      ctx,
+      "headers",
+      "No X-Content-Type-Options",
+      "low",
+      g("X-Content-Type-Options"),
+      "Missing `nosniff` \u2014 the browser may MIME-sniff responses.",
+      "CWE-693"
+    );
+  else if (!/nosniff/i.test(xcto)) add2(ctx, "headers", "X-Content-Type-Options not nosniff", "low", g("X-Content-Type-Options"), xcto, "CWE-693");
+  const ref = headerStr(res.headers, "referrer-policy");
+  if (ref && /unsafe-url/i.test(ref)) add2(ctx, "headers", "Referrer-Policy leaks full URL", "low", g("Referrer-Policy"), ref, "CWE-200");
+  for (const name2 of ["server", "x-powered-by"]) {
+    const v = headerStr(res.headers, name2);
+    if (v && /\d/.test(v)) add2(ctx, "info", `Version disclosed in ${name2}`, "low", g(name2), v, "CWE-200");
+  }
+}
+function checkCookies(ctx, res) {
+  const raw = res.headers["set-cookie"];
+  if (!raw) return;
+  for (const c2 of raw) {
+    const name2 = /^([^=]+)=/.exec(c2)?.[1]?.trim() ?? "cookie";
+    const g = `[cookie:${name2}]`;
+    const httpOnly = /;\s*httponly/i.test(c2);
+    const secure = /;\s*secure/i.test(c2);
+    const sameSite = /;\s*samesite\s*=\s*(strict|lax|none)/i.exec(c2);
+    if (!httpOnly) add2(ctx, "cookie", `Cookie ${name2} without HttpOnly`, "medium", g, c2.slice(0, 120), "CWE-1004");
+    if (!secure) add2(ctx, "cookie", `Cookie ${name2} without Secure`, "medium", g, c2.slice(0, 120), "CWE-614");
+    if (!sameSite) add2(ctx, "cookie", `Cookie ${name2} without SameSite`, "low", g, c2.slice(0, 120), "CWE-1275");
+    else if (sameSite[1]?.toLowerCase() === "none" && !secure)
+      add2(ctx, "cookie", `Cookie ${name2} SameSite=None without Secure`, "high", g, c2.slice(0, 120), "CWE-1275");
+    if (name2.startsWith("__Host-") && (!secure || /;\s*domain=/i.test(c2)))
+      add2(ctx, "cookie", `__Host- cookie ${name2} violates its prefix rules`, "medium", g, c2.slice(0, 120), "CWE-614");
+    if (name2.startsWith("__Secure-") && !secure) add2(ctx, "cookie", `__Secure- cookie ${name2} without Secure`, "medium", g, c2.slice(0, 120), "CWE-614");
+  }
+}
+function checkTls(ctx, u, res) {
+  if (u.protocol !== "https:") return;
+  if (res.tlsProtocol && /TLSv1(\.[01])?$/.test(res.tlsProtocol))
+    add2(ctx, "tls", `Weak TLS protocol ${res.tlsProtocol}`, "high", "[tls]", `The server negotiated ${res.tlsProtocol}; TLS 1.2+ is required.`, "CWE-327");
+  if (res.authorized === false)
+    add2(
+      ctx,
+      "tls",
+      "Certificate not trusted",
+      "high",
+      "[tls]",
+      `Certificate did not validate: ${res.authError ?? "unknown reason"} (self-signed, expired, or hostname mismatch).`,
+      "CWE-295"
+    );
+  const to = res.cert?.valid_to;
+  if (to) {
+    const exp = Date.parse(to);
+    if (!Number.isNaN(exp)) {
+      const days = Math.floor((exp - Date.now()) / 864e5);
+      if (days < 0) add2(ctx, "tls", "Certificate expired", "high", "[tls]", `Certificate expired ${-days} day(s) ago (valid_to ${to}).`, "CWE-295");
+      else if (days < 21) add2(ctx, "tls", "Certificate expiring soon", "medium", "[tls]", `Certificate expires in ${days} day(s) (valid_to ${to}).`, "CWE-295");
+    }
+  }
+}
+async function checkTransport(ctx, u) {
+  if (u.protocol === "http:") {
+    add2(
+      ctx,
+      "transport",
+      "Served over cleartext HTTP",
+      "high",
+      `[url:${u.origin}]`,
+      "The target is reachable over plain HTTP \u2014 traffic can be read and modified on the wire.",
+      "CWE-319"
+    );
+    return;
+  }
+  const httpUrl = new URL(u.toString());
+  httpUrl.protocol = "http:";
+  httpUrl.port = "";
+  const res = await fetchWithin(ctx, httpUrl, { method: "GET" });
+  if (!res) return;
+  const loc = headerStr(res.headers, "location");
+  const redirects = res.status >= 300 && res.status < 400 && !!loc && /^https:/i.test(loc);
+  if (!redirects && res.status < 500)
+    add2(
+      ctx,
+      "transport",
+      "HTTP not redirected to HTTPS",
+      "medium",
+      `[url:${httpUrl.origin}]`,
+      `Plain HTTP returned ${res.status} without a redirect to HTTPS.`,
+      "CWE-319"
+    );
+}
+async function checkCors(ctx, u) {
+  const evil = "https://ultrasec-probe.example";
+  const res = await fetchWithin(ctx, u, { method: "OPTIONS", headers: { origin: evil, "access-control-request-method": "GET" } });
+  if (!res) return;
+  const acao = headerStr(res.headers, "access-control-allow-origin");
+  const acac = headerStr(res.headers, "access-control-allow-credentials");
+  if (!acao) return;
+  const g = "[response-header:Access-Control-Allow-Origin]";
+  if (acao === evil)
+    add2(
+      ctx,
+      "cors",
+      "CORS reflects an arbitrary Origin",
+      "high",
+      g,
+      `The server echoed our test Origin (${evil}) \u2014 any site can read authenticated responses.`,
+      "CWE-942"
+    );
+  else if (acao === "*" && /true/i.test(acac ?? ""))
+    add2(ctx, "cors", "Wildcard CORS with credentials", "high", g, "Access-Control-Allow-Origin `*` with Allow-Credentials true.", "CWE-942");
+  else if (acao === "*") add2(ctx, "cors", "Wildcard CORS origin", "low", g, "Access-Control-Allow-Origin `*`.", "CWE-942");
+}
+async function checkSecurityTxt(ctx, u) {
+  const st = new URL("/.well-known/security.txt", u.origin);
+  const res = await fetchWithin(ctx, st, { method: "GET" });
+  if (!res) return;
+  if (res.status !== 200)
+    add2(
+      ctx,
+      "info",
+      "No security.txt",
+      "low",
+      `[url:${st.toString()}]`,
+      "No /.well-known/security.txt (RFC 9116) \u2014 no documented way to report a vulnerability.",
+      "CWE-200"
+    );
+}
+async function checkGraphql(ctx, u) {
+  const body2 = JSON.stringify({ query: "{__schema{queryType{name}}}" });
+  const res = await fetchWithin(ctx, u, { method: "POST", headers: { "content-type": "application/json" }, body: body2 });
+  if (!res) return;
+  if (/"__schema"|"queryType"/.test(res.body))
+    add2(
+      ctx,
+      "graphql",
+      "GraphQL introspection enabled",
+      "medium",
+      `[url:${u.toString()}]`,
+      "Introspection returned the schema \u2014 an attacker can enumerate every type, query and mutation.",
+      "CWE-200"
+    );
+}
+var DEEP_PATHS = [
+  { path: "/.env", needle: /^[A-Z0-9_]+=/m, title: "Exposed .env file" },
+  { path: "/.git/config", needle: /\[core\]|\[remote/i, title: "Exposed .git/config" },
+  { path: "/.git/HEAD", needle: /^ref:\s/i, title: "Exposed .git directory" },
+  { path: "/server-status", needle: /Apache Server Status|Server uptime/i, title: "Exposed server-status" }
+];
+async function checkDeep(ctx, u) {
+  for (const d of DEEP_PATHS) {
+    if (ctx.made >= ctx.cap) {
+      ctx.truncated = true;
+      return;
+    }
+    const target = new URL(d.path, u.origin);
+    const res = await fetchWithin(ctx, target, { method: "GET" });
+    if (!res) continue;
+    if (res.status === 200 && d.needle.test(res.body))
+      add2(ctx, "exposure", d.title, "high", `[url:${target.toString()}]`, `${target.pathname} is served and its content matches a sensitive file.`, "CWE-538");
+  }
+}
+function renderProbeMd(r) {
+  const L = [`# ultrasec probe \u2014 ${r.target}`, ""];
+  L.push(
+    `> Live-site posture check. Findings are grounded on the WIRE (\`[response-header:\u2026]\`, \`[cookie:\u2026]\`, \`[tls]\`, \`[url:\u2026]\`), NOT on source \u2014 they live here, never in findings.json, and the \`check\` gate never sees them.`
+  );
+  L.push("");
+  L.push(
+    `- resolved IP: ${r.resolvedIp ?? "\u2014"}  \xB7  status: ${r.observed.status ?? "\u2014"}  \xB7  TLS: ${r.observed.tlsProtocol ?? "\u2014"}  \xB7  requests: ${r.requestsMade}`
+  );
+  if (r.note) L.push(`- note: ${r.note}`);
+  L.push("");
+  if (!r.findings.length) {
+    L.push(`No posture issues observed in what was checked. This is not a clean bill of health \u2014 it is a light, unauthenticated, read-only probe.`);
+    return `${L.join("\n")}
+`;
+  }
+  const order = ["critical", "high", "medium", "low", "info"];
+  const bySev = [...r.findings].sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity));
+  L.push(`| severity | area | finding | grounding | cwe |`);
+  L.push(`|---|---|---|---|---|`);
+  for (const f of bySev) L.push(`| ${f.severity} | ${f.area} | ${f.title} | \`${f.grounding}\` | ${f.cwe ?? "\u2014"} |`);
+  L.push("");
+  for (const f of bySev) {
+    L.push(`### ${f.severity.toUpperCase()} \u2014 ${f.title}`);
+    L.push(`- grounding: \`${f.grounding}\`${f.cwe ? ` \xB7 ${f.cwe}` : ""}`);
+    L.push(`- ${f.message}`);
+    L.push("");
+  }
+  return `${L.join("\n")}
+`;
+}
+async function runProbe(args2) {
+  const raw = args2._[1];
+  if (!raw) {
+    eprintln("usage: ultrasec probe <url> --i-own-this [--deep] [--graphql] [--allow-private] [--timeout ms] [--out dir]");
+    return 2;
+  }
+  if (!flagBool(args2, "i-own-this")) {
+    eprintln("ultrasec probe: refusing without --i-own-this. Only probe a target you own or are explicitly authorized to test.");
+    return 2;
+  }
+  let url;
+  try {
+    url = new URL(raw.includes("://") ? raw : `https://${raw}`);
+  } catch {
+    eprintln(`ultrasec probe: '${raw}' is not a valid URL.`);
+    return 2;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    eprintln(`ultrasec probe: only http/https targets are supported (got ${url.protocol}).`);
+    return 2;
+  }
+  const allowPrivate = flagBool(args2, "allow-private");
+  const resolvedIp = await resolveIp(url.hostname);
+  if (resolvedIp && isPrivateHost(resolvedIp) && !allowPrivate) {
+    eprintln(
+      `ultrasec probe: ${url.hostname} resolves to a private/loopback/metadata address (${resolvedIp}). Pass --allow-private for a local target you own.`
+    );
+    return 2;
+  }
+  const deep = flagBool(args2, "deep");
+  const graphql = flagBool(args2, "graphql");
+  const timeout = numFlag(args2, "timeout") ?? 1e4;
+  const out2 = resolve30(flagStr(args2, "out") ?? ".ultrasec");
+  const ctx = { cap: deep ? 24 : 12, made: 0, timeout, findings: [], truncated: false };
+  const main2 = await fetchWithin(ctx, url, { method: "GET" });
+  if (!main2) {
+    eprintln(`ultrasec probe: could not reach ${url.toString()} (connection failed or timed out).`);
+    return 1;
+  }
+  checkHeaders(ctx, url, main2);
+  checkCookies(ctx, main2);
+  checkTls(ctx, url, main2);
+  await checkTransport(ctx, url);
+  await checkCors(ctx, url);
+  await checkSecurityTxt(ctx, url);
+  if (graphql) await checkGraphql(ctx, url);
+  if (deep) await checkDeep(ctx, url);
+  const report = {
+    target: url.toString(),
+    resolvedIp,
+    note: ctx.truncated ? `request cap (${ctx.cap}) reached \u2014 some optional checks were skipped.` : "",
+    requestsMade: ctx.made,
+    observed: {
+      status: main2.status,
+      tlsProtocol: main2.tlsProtocol,
+      server: headerStr(main2.headers, "server"),
+      setCookies: Array.isArray(main2.headers["set-cookie"]) ? main2.headers["set-cookie"].length : 0
+    },
+    findings: ctx.findings
+  };
+  mkdirSync15(out2, { recursive: true });
+  writeFileSync21(join63(out2, "PROBE.json"), `${JSON.stringify(report, null, 2)}
+`);
+  writeFileSync21(join63(out2, "PROBE.md"), renderProbeMd(report));
+  const counts = {};
+  for (const f of report.findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
+  if (flagBool(args2, "json")) {
+    println(JSON.stringify(report, null, 2));
+  } else {
+    println(`ultrasec probe \u2192 ${join63(out2, "PROBE.md")} (+ PROBE.json)`);
+    println(`  target: ${report.target}  \xB7  status ${main2.status}  \xB7  TLS ${main2.tlsProtocol ?? "\u2014"}  \xB7  ${ctx.made} request(s)`);
+    println(
+      `  posture findings: ${report.findings.length}  (crit ${counts.critical ?? 0} \xB7 high ${counts.high ?? 0} \xB7 med ${counts.medium ?? 0} \xB7 low ${counts.low ?? 0})`
+    );
+    println(`  NOTE: probe findings live in PROBE.json only \u2014 they never enter the static dossier or the check gate.`);
+    if (ctx.truncated) println(`  ${report.note}`);
+  }
+  const highOrWorse = report.findings.some((f) => f.severity === "critical" || f.severity === "high");
+  return flagBool(args2, "strict") && highOrWorse ? 1 : 0;
+}
+
+// src/commands/route.ts
+import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync22 } from "fs";
+import { join as join64, resolve as resolve31 } from "path";
+var ROUTE_TABLE = [
+  {
+    id: "android-apk",
+    title: "Android app (APK)",
+    exts: ["apk", "aab", "dex"],
+    methodology: "Unpack \u2192 read the manifest & smali/Java \u2192 find the interesting code (crypto, network, WebViews, exported components) \u2192 hook at runtime if needed.",
+    tools: [
+      { name: "jadx", why: "APK \u2192 readable Java", run: "jadx -d out app.apk", url: "https://github.com/skylot/jadx" },
+      { name: "apktool", why: "decode resources + smali, repackage", run: "apktool d app.apk", url: "https://apktool.org" },
+      { name: "MobSF", why: "automated static+dynamic mobile audit", run: "mobsf (docker)", url: "https://mobsf.github.io/docs/" },
+      { name: "frida / objection", why: "runtime hooking, SSL-pinning bypass", run: "objection -g <pkg> explore", url: "https://frida.re" }
+    ],
+    note: "Extracted Java/Kotlin/JS can then be audited statically with `ultrasec scan` on the decompiled tree."
+  },
+  {
+    id: "ios-ipa",
+    title: "iOS app (IPA / Mach-O)",
+    exts: ["ipa"],
+    methodology: "Unzip the IPA \u2192 inspect the Mach-O + Info.plist \u2192 class-dump the Objective-C/Swift metadata \u2192 hook with Frida on a jailbroken device.",
+    tools: [
+      { name: "MobSF", why: "iOS static analysis", run: "mobsf (docker)", url: "https://mobsf.github.io/docs/" },
+      { name: "class-dump / dsdump", why: "recover ObjC/Swift interfaces", run: "class-dump App", url: "https://github.com/nygard/class-dump" },
+      { name: "frida / objection", why: "runtime hooking, pinning bypass", run: "objection -g <app> explore", url: "https://frida.re" }
+    ]
+  },
+  {
+    id: "native-binary",
+    title: "Native binary (ELF / PE / Mach-O)",
+    exts: ["so", "elf", "exe", "bin", "o", "a", "dylib", "out", "ko"],
+    methodology: "Triage (file/strings/checksec) \u2192 disassemble/decompile \u2192 identify the vulnerable routine \u2192 debug dynamically. For a crash/exploit target, pivot to the pwn toolkit.",
+    tools: [
+      { name: "radare2 / rizin + cutter", why: "open-source disassembly & decompilation", run: "r2 -A ./bin", url: "https://rizin.re" },
+      { name: "Ghidra", why: "free decompiler (NSA)", run: "ghidraRun", url: "https://ghidra-sre.org" },
+      { name: "IDA Pro", why: "industry-standard decompiler", run: "ida64 ./bin", url: "https://hex-rays.com" },
+      { name: "gdb + pwndbg/gef", why: "dynamic analysis & exploit dev", run: "gdb ./bin", url: "https://github.com/pwndbg/pwndbg" }
+    ],
+    note: "A .dll/.exe may be managed .NET \u2014 if so use the .NET toolkit (dnSpy/ILSpy). A firmware blob \u2192 binwalk. An exploitation target \u2192 pwntools/ROPgadget."
+  },
+  {
+    id: "dotnet",
+    title: ".NET assembly (managed)",
+    exts: ["nupkg"],
+    methodology: "Decompile IL \u2192 C# \u2192 deobfuscate if packed (ConfuserEx/de4dot) \u2192 read the logic.",
+    tools: [
+      { name: "dnSpyEx", why: "decompile + debug .NET", run: "dnSpy app.dll", url: "https://github.com/dnSpyEx/dnSpy" },
+      { name: "ILSpy", why: "cross-platform .NET decompiler", run: "ilspycmd app.dll", url: "https://github.com/icsharpcode/ILSpy" },
+      { name: "de4dot", why: "unpack common .NET obfuscators", run: "de4dot app.dll", url: "https://github.com/de4dot/de4dot" }
+    ],
+    note: "Managed .dll/.exe share extensions with native ones \u2014 this is the managed toolkit; use `native-binary` for compiled code."
+  },
+  {
+    id: "firmware",
+    title: "Firmware image",
+    exts: ["img", "fw", "trx", "chk", "dlf", "rom"],
+    methodology: "Carve the filesystem \u2192 extract \u2192 enumerate binaries/creds/config \u2192 analyze the interesting binaries as native code.",
+    tools: [
+      { name: "binwalk", why: "carve & extract firmware filesystems", run: "binwalk -eM firmware.bin", url: "https://github.com/ReFirmLabs/binwalk" },
+      { name: "EMBA", why: "automated firmware security analyzer", run: "emba -f firmware.bin", url: "https://github.com/e-m-b-a/emba" },
+      { name: "ubi_reader / jefferson", why: "UBIFS/JFFS2 extraction", run: "ubireader_extract_files", url: "https://github.com/onekey-sec/ubi_reader" }
+    ],
+    note: "Once the rootfs is extracted, `ultrasec scan` the scripts/source and `ultrasec route` the extracted binaries."
+  },
+  {
+    id: "network-capture",
+    title: "Network capture (pcap)",
+    exts: ["pcap", "pcapng"],
+    methodology: "Open the capture \u2192 follow streams \u2192 extract objects/creds \u2192 build a timeline; automate with a network-analysis engine for large captures.",
+    tools: [
+      { name: "Wireshark / tshark", why: "packet inspection, stream follow", run: "tshark -r capture.pcap", url: "https://www.wireshark.org" },
+      { name: "Zeek", why: "protocol logs from a capture", run: "zeek -r capture.pcap", url: "https://zeek.org" },
+      { name: "NetworkMiner", why: "extract files/credentials", run: "NetworkMiner", url: "https://www.netresec.com/?page=NetworkMiner" }
+    ]
+  },
+  {
+    id: "wifi-capture",
+    title: "Wi-Fi handshake capture",
+    exts: ["cap", "hccapx", "22000", "pcapng-wifi"],
+    methodology: "Confirm the handshake \u2192 convert to the cracker's format \u2192 run a wordlist/mask attack (only on networks you own or are authorized to test).",
+    tools: [
+      { name: "aircrack-ng", why: "capture/verify/crack WPA handshakes", run: "aircrack-ng -w wordlist capture.cap", url: "https://www.aircrack-ng.org" },
+      { name: "hashcat", why: "GPU cracking of 22000/hccapx", run: "hashcat -m 22000 hash wordlist", url: "https://hashcat.net/hashcat/" }
+    ],
+    note: "A .cap can also be a generic pcap \u2014 if it isn't a Wi-Fi handshake, use the network-capture tools."
+  },
+  {
+    id: "browser-extension",
+    title: "Browser extension (CRX / XPI)",
+    exts: ["crx", "xpi"],
+    methodology: "Unzip \u2192 read the manifest (permissions, host_permissions, content scripts) \u2192 audit the JS (often the highest-risk surface).",
+    tools: [
+      { name: "unzip", why: "a CRX/XPI is a zip", run: "unzip ext.crx -d ext/", url: "https://linux.die.net/man/1/unzip" },
+      { name: "CRXViewer", why: "browse/download extension source", run: "web tool", url: "https://robwu.nl/crxviewer/" }
+    ],
+    note: "After unzip, `ultrasec scan --repo ext/` audits the extension's JavaScript directly (this part IS in scope)."
+  },
+  {
+    id: "jvm-archive",
+    title: "Java archive (JAR / WAR)",
+    exts: ["jar", "war", "ear", "class"],
+    methodology: "Decompile to Java \u2192 read the logic \u2192 then audit the recovered source statically.",
+    tools: [
+      { name: "CFR / procyon", why: "JAR \u2192 Java", run: "cfr app.jar --outputdir out", url: "https://www.benf.org/other/cfr/" },
+      { name: "jadx", why: "also decompiles JAR/class", run: "jadx -d out app.jar", url: "https://github.com/skylot/jadx" }
+    ],
+    note: "Decompiled sources \u2192 `ultrasec scan` on the output tree."
+  },
+  {
+    id: "malware-sample",
+    title: "Suspected malware sample",
+    exts: ["vir", "malware", "sample"],
+    methodology: "Handle in an isolated VM \u2192 static triage (hashes, YARA, capabilities) \u2192 detonate in a sandbox \u2192 extract IOCs. Never run it on a real host.",
+    tools: [
+      { name: "YARA", why: "signature matching / classification", run: "yara rules.yar sample", url: "https://virustotal.github.io/yara/" },
+      { name: "capa", why: "identify capabilities in an executable", run: "capa sample", url: "https://github.com/mandiant/capa" },
+      { name: "CAPE / Cuckoo", why: "sandbox detonation + IOCs", run: "cape (docker)", url: "https://github.com/kevoreilly/CAPEv2" }
+    ],
+    note: "For the executable's internals, also see `native-binary`."
+  }
+];
+var OUT_OF_SCOPE_NOTE = "ultrasec is a static SOURCE auditor \u2014 it does NOT run these tools, touch the network, or read the target. This is advisory triage; run the tools yourself, on assets you are authorized to test.";
+var SOURCE_EXTS = /* @__PURE__ */ new Set([
+  "js",
+  "jsx",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "mts",
+  "cts",
+  "py",
+  "pyi",
+  "go",
+  "java",
+  "rb",
+  "php",
+  "rs",
+  "c",
+  "h",
+  "cc",
+  "cpp",
+  "cxx",
+  "hpp",
+  "hh",
+  "hxx",
+  "cs",
+  "kt",
+  "kts",
+  "swift",
+  "scala",
+  "sc",
+  "sh",
+  "bash",
+  "zsh",
+  "lua",
+  "ex",
+  "exs",
+  // IaC / config / manifests: NOT a parsed "language", but the cloud, web-config
+  // and agentic-CI detectors read them under `scan` — so they are in scope, and
+  // routing them to an external toolkit would send the user away from the tool
+  // that actually covers them (measured on kubernetes-goat / terragoat).
+  "yaml",
+  "yml",
+  "tf",
+  "tfvars",
+  "hcl",
+  "json"
+]);
+var SOURCE_BASENAMES = /* @__PURE__ */ new Set(["dockerfile", "makefile", "jenkinsfile", "procfile"]);
+function extOf5(target) {
+  const base = target.split(/[\\/]/).pop() ?? target;
+  const i2 = base.lastIndexOf(".");
+  return i2 <= 0 ? "" : base.slice(i2 + 1).toLowerCase();
+}
+function baseNameOf(target) {
+  return (target.split(/[\\/]/).pop() ?? target).toLowerCase();
+}
+function classifyTarget(target) {
+  if (/^https?:\/\//i.test(target)) return { kind: "probe", url: target };
+  const ext = extOf5(target);
+  if (ext === "" || SOURCE_EXTS.has(ext) || SOURCE_BASENAMES.has(baseNameOf(target))) return { kind: "scan" };
+  const entry = ROUTE_TABLE.find((e) => e.exts.includes(ext));
+  if (entry) return { kind: "external", entry };
+  return { kind: "unknown", ext };
+}
+function buildResult(target, c2) {
+  if (c2.kind === "probe")
+    return {
+      target,
+      type: "Live host / running web app",
+      inScope: true,
+      recommendedCommand: `ultrasec probe ${target} --i-own-this`,
+      methodology: "Static posture (headers/TLS/cookies/CORS/GraphQL) with `ultrasec probe`; full dynamic testing needs a DAST toolkit.",
+      tools: [
+        { name: "ultrasec probe", why: "read-only posture on the wire (ours)", run: `ultrasec probe ${target} --i-own-this`, url: "" },
+        { name: "nmap", why: "port/service discovery", run: "nmap -sVC host", url: "https://nmap.org" },
+        { name: "nuclei", why: "templated vulnerability checks", run: "nuclei -u " + target, url: "https://github.com/projectdiscovery/nuclei" },
+        { name: "OWASP ZAP / Burp Suite", why: "intercepting proxy + active scan", run: "zaproxy", url: "https://www.zaproxy.org" },
+        { name: "sqlmap", why: "confirm/exploit SQL injection", run: "sqlmap -u " + target, url: "https://sqlmap.org" }
+      ],
+      note: "Only test hosts you own or are explicitly authorized to. ultrasec runs none of these except its own read-only probe."
+    };
+  if (c2.kind === "scan")
+    return {
+      target,
+      type: "Source code / repository",
+      inScope: true,
+      recommendedCommand: `ultrasec scan --repo ${target || "."}`,
+      methodology: "This IS ultrasec's job \u2014 cross-file taint + config/auth/cloud detectors + external scanners.",
+      note: "Run `ultrasec scan` on it directly; no external routing needed."
+    };
+  if (c2.kind === "external")
+    return {
+      target,
+      type: c2.entry.title,
+      inScope: false,
+      methodology: c2.entry.methodology,
+      tools: c2.entry.tools,
+      note: c2.entry.note ? `${c2.entry.note} ${OUT_OF_SCOPE_NOTE}` : OUT_OF_SCOPE_NOTE
+    };
+  return {
+    target,
+    type: `Unrecognized (.${c2.ext || "?"})`,
+    inScope: false,
+    note: `No routing rule matched. If it's source, run \`ultrasec scan\`; if it's a live host, pass an http(s):// URL. Otherwise pick the closest category below. ${OUT_OF_SCOPE_NOTE}`
+  };
+}
+function renderMd(r) {
+  const L = [`# ultrasec route \u2014 ${r.target}`, ""];
+  L.push(`- target type: **${r.type}** ${r.inScope ? "(in scope)" : "(out of scope \u2014 advisory)"}`);
+  if (r.recommendedCommand) L.push(`- recommended: \`${r.recommendedCommand}\``);
+  if (r.methodology) L.push(`- methodology: ${r.methodology}`);
+  L.push("");
+  if (r.tools?.length) {
+    L.push(`## Recommended tools`);
+    for (const t of r.tools) L.push(`- **${t.name}** \u2014 ${t.why}${t.run ? `  \xB7  run: \`${t.run}\`` : ""}${t.url ? `  \xB7  ${t.url}` : ""}`);
+    L.push("");
+  }
+  if (c_unknownGeneralGuide(r)) {
+    L.push(`## Target categories`);
+    for (const e of ROUTE_TABLE) L.push(`- **${e.title}** \u2014 .${e.exts.join(", .")}`);
+    L.push(`- **Live host** \u2014 an http(s):// URL \u2192 \`ultrasec probe\``);
+    L.push(`- **Source / repo** \u2014 a directory or source file \u2192 \`ultrasec scan\``);
+    L.push("");
+  }
+  L.push(`> ${r.note}`);
+  return `${L.join("\n")}
+`;
+}
+function c_unknownGeneralGuide(r) {
+  return r.type.startsWith("Unrecognized");
+}
+function runRoute(args2) {
+  const target = args2._[1];
+  if (!target) {
+    eprintln("usage: ultrasec route <target>   (a file path like app.apk / ./bin/x.so, or an http(s):// URL)");
+    return 2;
+  }
+  const c2 = classifyTarget(target);
+  const result = buildResult(target, c2);
+  if (flagStr(args2, "out") !== void 0 || flagBool(args2, "write")) {
+    const out2 = resolve31(flagStr(args2, "out") ?? ".");
+    mkdirSync16(out2, { recursive: true });
+    const p = join64(out2, "ROUTE.md");
+    writeFileSync22(p, renderMd(result));
+    if (!flagBool(args2, "json")) println(`ultrasec route \u2192 ${p}`);
+  }
+  if (flagBool(args2, "json")) {
+    println(JSON.stringify(result, null, 2));
+    return 0;
+  }
+  println(`ultrasec route: ${result.target}`);
+  println(`  type: ${result.type}  ${result.inScope ? "(in scope)" : "(out of scope \u2014 advisory)"}`);
+  if (result.recommendedCommand) println(`  \u2192 ${result.recommendedCommand}`);
+  if (result.methodology) println(`  methodology: ${result.methodology}`);
+  if (result.tools?.length) {
+    println(`  recommended tools:`);
+    for (const t of result.tools) println(`    - ${t.name} \u2014 ${t.why}${t.run ? `  (run: ${t.run})` : ""}`);
+  }
+  if (c2.kind === "unknown") {
+    println(`  target categories:`);
+    for (const e of ROUTE_TABLE) println(`    - ${e.title}: .${e.exts.join(", .")}`);
+    println(`    - Live host: http(s):// URL \u2192 ultrasec probe`);
+    println(`    - Source / repo: a directory or source file \u2192 ultrasec scan`);
+  }
+  println(`  note: ${result.note}`);
+  return 0;
+}
+
 // src/commands/registry.ts
 var COMMAND_HANDLERS = {
   tools: runTools,
@@ -23754,7 +25483,9 @@ var COMMAND_HANDLERS = {
   render: runRender,
   clean: runClean,
   run: runRun,
-  orchestrate: runOrchestrate
+  orchestrate: runOrchestrate,
+  probe: runProbe,
+  route: runRoute
 };
 
 // src/mcp/stdio.ts
@@ -23762,7 +25493,7 @@ import { createInterface as createInterface3 } from "readline";
 
 // src/mcp/handlers.ts
 import { existsSync as existsSync30, readFileSync as readFileSync25, realpathSync as realpathSync5, statSync as statSync13 } from "fs";
-import { isAbsolute as isAbsolute2, join as join63, resolve as resolve30, sep as sep7 } from "path";
+import { isAbsolute as isAbsolute2, join as join65, resolve as resolve32, sep as sep7 } from "path";
 
 // src/run-lock.ts
 var chains = /* @__PURE__ */ new Map();
@@ -23824,7 +25555,7 @@ function positive(v, key) {
 function requiredRepo(args2, defaults) {
   const repo = str2(args2.repo) ?? defaults.defaultRun;
   if (!repo) throw new ToolError("`repo` is required: an absolute path to the repository root.");
-  const abs = resolve30(repo);
+  const abs = resolve32(repo);
   if (!isScannableDir(abs)) {
     throw new ToolError(`\`repo\` is not a directory: ${abs}. Refusing to continue \u2014 an unscannable path must not report a clean audit.`);
   }
@@ -23834,12 +25565,12 @@ function resolveRun(args2, repo) {
   const explicit = str2(args2.run) ?? str2(args2.out);
   if (explicit) {
     if (!isAbsolute2(explicit)) throw new ToolError("`run` must be an absolute path.");
-    return resolve30(explicit);
+    return resolve32(explicit);
   }
-  return join63(repo, ".ultrasec");
+  return join65(repo, ".ultrasec");
 }
 function requireRun(run2) {
-  if (!existsSync30(join63(run2, "dossier.json")) && !existsSync30(join63(run2, "findings.json"))) {
+  if (!existsSync30(join65(run2, "dossier.json")) && !existsSync30(join65(run2, "findings.json"))) {
     throw new ToolError(`no audit run at ${run2} \u2014 scan the repo first with ultrasec_scan (it writes there). If the run lives elsewhere, pass \`run\`.`);
   }
 }
@@ -23972,17 +25703,17 @@ function outcome(name2, result) {
 function artifactFor(name2, flags2) {
   const run2 = typeof flags2.run === "string" ? flags2.run : typeof flags2.out === "string" ? flags2.out : void 0;
   if (!run2) return void 0;
-  if (name2 === "ultrasec_map") return join63(run2, "MAP.md");
-  if (name2 === "ultrasec_scan") return join63(run2, "findings.json");
-  if (name2 === "ultrasec_triage") return join63(run2, "TRIAGE.todo.json");
-  if (name2 === "ultrasec_verify") return join63(run2, "VERIFY.todo.json");
-  if (name2 === "ultrasec_investigate") return join63(run2, "INVESTIGATE.todo.json");
+  if (name2 === "ultrasec_map") return join65(run2, "MAP.md");
+  if (name2 === "ultrasec_scan") return join65(run2, "findings.json");
+  if (name2 === "ultrasec_triage") return join65(run2, "TRIAGE.todo.json");
+  if (name2 === "ultrasec_verify") return join65(run2, "VERIFY.todo.json");
+  if (name2 === "ultrasec_investigate") return join65(run2, "INVESTIGATE.todo.json");
   return void 0;
 }
 function handleRead(args2, repo, run2) {
   const raw = str2(args2.path);
   if (!raw) throw new ToolError("`path` is required \u2014 a repo-relative path, or an absolute path inside the repo or its run.");
-  const target = isAbsolute2(raw) ? raw : join63(repo, raw);
+  const target = isAbsolute2(raw) ? raw : join65(repo, raw);
   let real;
   try {
     real = realpathSync5(target);
@@ -23993,7 +25724,7 @@ function handleRead(args2, repo, run2) {
     try {
       return realpathSync5(d);
     } catch {
-      return resolve30(d);
+      return resolve32(d);
     }
   });
   if (!allowed.some((root) => real === root || real.startsWith(root + sep7))) {
@@ -24002,8 +25733,8 @@ function handleRead(args2, repo, run2) {
   const st = statSync13(real);
   if (!st.isFile()) throw new ToolError(`not a file: ${raw}`);
   if (st.size > MAX_READ_BYTES) throw new ToolError(`file is too large to read (${st.size} bytes): ${raw}`);
-  const lines2 = readFileSync25(real, "utf8").split("\n");
-  const total = lines2.length;
+  const lines5 = readFileSync25(real, "utf8").split("\n");
+  const total = lines5.length;
   const start2 = Math.max(1, Math.floor(num2(args2.start_line) ?? 1));
   if (start2 > total) throw new ToolError(`start_line ${start2} is past the end of the file (${total} lines).`);
   const requestedEnd = Math.floor(num2(args2.end_line) ?? total);
@@ -24014,7 +25745,7 @@ function handleRead(args2, repo, run2) {
     end_line: end,
     total_lines: total,
     truncated: end < Math.min(total, requestedEnd),
-    content: lines2.slice(start2 - 1, end).join("\n")
+    content: lines5.slice(start2 - 1, end).join("\n")
   };
 }
 
@@ -24475,24 +26206,24 @@ var DECLARED = new Set([...TOOLS3, ...WRITE_TOOLS].map((t) => t.name));
 
 // src/mcp/resources.ts
 import { existsSync as existsSync31, readdirSync as readdirSync9, readFileSync as readFileSync26, realpathSync as realpathSync6, statSync as statSync14 } from "fs";
-import { basename as basename4, dirname as dirname8, join as join64, resolve as resolve31, sep as sep8 } from "path";
+import { basename as basename4, dirname as dirname8, join as join66, resolve as resolve33, sep as sep8 } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 var SKILL_NAME = "ultrasec";
 var URI_SCHEME = "skill://";
 function resolveSkillRoot(moduleDir) {
   const here = moduleDir ?? dirname8(fileURLToPath4(import.meta.url));
-  const candidates = [resolve31(here, ".."), resolve31(here, "..", "skills", SKILL_NAME), resolve31(here, "..", "..", "skills", SKILL_NAME)];
-  return candidates.find((dir) => existsSync31(join64(dir, "SKILL.md")));
+  const candidates = [resolve33(here, ".."), resolve33(here, "..", "skills", SKILL_NAME), resolve33(here, "..", "..", "skills", SKILL_NAME)];
+  return candidates.find((dir) => existsSync31(join66(dir, "SKILL.md")));
 }
 function listResources(moduleDir) {
   const root = resolveSkillRoot(moduleDir);
   if (!root) return [];
   const out2 = [describe(root, "SKILL.md", `${SKILL_NAME}: the skill`)];
-  const refDir = join64(root, "references");
+  const refDir = join66(root, "references");
   if (!existsSync31(refDir)) return out2;
   for (const file of readdirSync9(refDir).sort()) {
     if (!file.endsWith(".md")) continue;
-    out2.push(describe(root, join64("references", file), `${SKILL_NAME} reference: ${basename4(file, ".md")}`));
+    out2.push(describe(root, join66("references", file), `${SKILL_NAME} reference: ${basename4(file, ".md")}`));
   }
   return out2;
 }
@@ -24504,7 +26235,7 @@ function readResource(uri, moduleDir) {
   if (!root) throw new ResourceError("no skill payload found next to this build \u2014 nothing to read");
   const rel = uri.slice(URI_SCHEME.length);
   if (!rel) throw new ResourceError("empty resource path");
-  const target = resolve31(root, rel);
+  const target = resolve33(root, rel);
   const rootReal = realpathSync6(root);
   let targetReal;
   try {
@@ -24527,7 +26258,7 @@ function describe(root, rel, fallbackTitle) {
     title: fallbackTitle,
     mimeType: "text/markdown"
   };
-  const summary = firstProse(join64(root, rel));
+  const summary = firstProse(join66(root, rel));
   if (summary) decl.description = summary;
   return decl;
 }
@@ -24785,14 +26516,14 @@ function startHttpServer(opts = {}) {
   server.requestTimeout = 0;
   server.headersTimeout = 6e4;
   server.keepAliveTimeout = 12e4;
-  return new Promise((resolve32, reject) => {
+  return new Promise((resolve34, reject) => {
     server.once("error", reject);
     server.listen(opts.port ?? 0, bind, () => {
       server.removeListener("error", reject);
       const addr2 = server.address();
       const port = typeof addr2 === "object" && addr2 ? addr2.port : opts.port ?? 0;
       const host = bind.includes(":") ? `[${bind}]` : bind;
-      resolve32({
+      resolve34({
         server,
         port,
         url: `http://${host}:${port}${MCP_PATH}`,
@@ -24901,7 +26632,7 @@ function sendJson(res, status, body2, origin, extra = {}) {
 }
 var DRAIN_LIMIT = MAX_BODY_BYTES * 8;
 function readBody(req) {
-  return new Promise((resolve32, reject) => {
+  return new Promise((resolve34, reject) => {
     const chunks = [];
     let size = 0;
     let over = false;
@@ -24925,7 +26656,7 @@ function readBody(req) {
     });
     req.on("end", () => {
       if (over) reject(new Error("too large"));
-      else resolve32(Buffer.concat(chunks).toString("utf8"));
+      else resolve34(Buffer.concat(chunks).toString("utf8"));
     });
     req.on("error", reject);
     req.on("aborted", () => reject(new Error("client aborted the request")));
@@ -24977,9 +26708,11 @@ COMMANDS
              aggregation (brute-force/credential-compromise, request bursts,
              scan/recon\u2192hit), and secret/PII-leak detection into its OWN
              dossier, findings citing [logfile:line]. Evidence is redacted by
-             default (secrets/PII never land in a finding message). Flags:
+             default (secrets/PII never land in a finding message). --sigma
+             emits a ready-to-deploy SIGMA detection pack (ultrasec-logs.sigma.yml)
+             for those classes \u2014 the blue-team analogue of 'variants'. Flags:
              --out \xB7 --format \xB7 --budget quick|standard|thorough \xB7
-             --max-lines \xB7 --window <sec> \xB7 --no-redact \xB7 --json.
+             --max-lines \xB7 --window <sec> \xB7 --no-redact \xB7 --sigma \xB7 --json.
   tools      List known external scanners, which are installed, and how to get
              them. --upgrade drives each INSTALLED native tool's own package
              manager (brew/pipx/go/cargo/corepack/npm, inferred from its binary
@@ -25006,9 +26739,11 @@ COMMANDS
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]
              as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
-             existing findings' sources). --lens sharp-edges|crypto|privacy asks a
-             DIFFERENT question of the same regions (sharp-edges: does this API
-             make the insecure use easier than the secure one?). Unenforced
+             existing findings' sources). --lens sharp-edges|access-control|idor|
+             crypto|privacy|cloud asks a DIFFERENT question of the same regions
+             (access-control: IDOR/BOLA/BFLA \u2014 the guard vs. the object returned;
+             cloud: SSRF-to-metadata, over-broad IAM, container escape).
+             Unenforced
              assumptions from 'assumptions' are folded into the region prompts.
              Flags: --run \xB7 --repo \xB7 --apply \xB7 --lens \xB7
              --scope/--include/--exclude/--max-files/--gitignore \xB7 --json.
@@ -25045,12 +26780,15 @@ COMMANDS
   render     Render SUMMARY/REPORT.md + a self-contained index.html.
              --narrative <file> folds in AI-authored sections (exec summary, fixes,
              attack chains, root causes), clearly marked + grounding-checked.
-  coverage   The honest complement to 'only report what you can exploit': an
-             OWASP-ASVS matrix of what this audit looked at and what it did NOT.
+  coverage   The honest complement to 'only report what you can exploit': a
+             standards matrix of what this audit looked at and what it did NOT.
              A short report reads as "nothing there" when it means "nothing
              there, in what I looked at" \u2014 this separates the two, and names the
              categories no deterministic signal can cover so you answer them
-             explicitly. Read-only. Flags: --run \xB7 --write (COVERAGE.md) \xB7 --json.
+             explicitly. --standard scores against ASVS (default), the OWASP
+             Top 10, the OWASP API Top 10, MASVS or the CWE Top 25. Read-only.
+             Flags: --run \xB7 --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25 \xB7
+             --write (COVERAGE.md) \xB7 --json.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
              READ-ONLY \u2014 it writes nothing and changes no status; --semantic ALSO
              fails when a candidate is still unadjudicated. Exit 0 ok \xB7 1 gate
@@ -25091,6 +26829,22 @@ COMMANDS
              default repo makes it optional on every tool) \xB7 --allow-write \xB7
              --port <n> \xB7 --bind <addr> \xB7 --allow-origin <o,...> \xB7 --allow-remote \xB7
              --max-response-bytes <n>.
+  probe      The ONE dynamic check, walled off from the static audit: observe a
+             RUNNING site's posture on the wire \u2014 security headers, cookie flags,
+             TLS, HTTP\u2192HTTPS redirect, banners, a single crafted CORS preflight,
+             optional GraphQL introspection. Read-only, single host, no crawl.
+             Findings cite [response-header:\u2026]/[cookie:\u2026]/[tls]/[url:\u2026] and go to
+             PROBE.json/PROBE.md ONLY \u2014 never findings.json, so 'check' never sees
+             them. Requires --i-own-this; refuses private/loopback targets unless
+             --allow-private. Flags: --i-own-this \xB7 --allow-private \xB7 --deep \xB7
+             --graphql \xB7 --timeout <ms> \xB7 --out \xB7 --strict \xB7 --json.
+  route      Triage a target that is OUTSIDE ultrasec's scope: given a file
+             (.apk/.ipa, .so/.exe/.dll, firmware, .pcap, .crx, .jar\u2026) or an
+             http(s):// URL, classify it and print the METHODOLOGY + recommended
+             external tools (jadx, radare2/Ghidra/IDA, frida, binwalk, wireshark,
+             nmap/nuclei/ZAP\u2026). Advisory ONLY \u2014 runs nothing, no network, reads
+             no target. In scope it routes back: a URL \u2192 'probe', source/a repo \u2192
+             'scan'. Flags: --json \xB7 --write (ROUTE.md) \xB7 --out <dir>.
 
 GLOBAL
   --help, -h     Show this help.

@@ -28,6 +28,14 @@ business-logic flaws; pure-LLM scanners hallucinate and are diff-scoped.
 plus **adversarial AI verification** — and stays whole-repo and anti-hallucinating
 (every finding must cite resolvable `[file:line]` hops).
 
+Around that core sit the classes taint can't express: [config, auth and
+cloud/IaC detectors](#beyond-taint-config-auth--cloud-detectors) (CORS, cookie flags, security
+headers, JWT/OAuth/SAML, K8s and Terraform misconfiguration) that run inside `scan`; a
+[coverage matrix](#coverage-against-a-standard-you-choose) against ASVS, the OWASP Top 10, the API
+Top 10, MASVS or the CWE Top 25; an isolated, consent-gated [live-site probe](#live-site-posture--probe);
+and [`route`](#out-of-scope-triage--route), which hands you the right external toolkit for the
+targets ultrasec deliberately does *not* handle.
+
 ## Install
 
 **As an agent skill** (Claude Code, Cursor, … via [skills.sh](https://skills.sh)):
@@ -70,6 +78,9 @@ node scripts/ultrasec.mjs check --run .ultrasec --semantic   # exit gate: ground
 node scripts/ultrasec.mjs narrative --run .ultrasec   # author NARRATIVE.json (exec summary, fixes, chains)
 node scripts/ultrasec.mjs render --run .ultrasec --narrative NARRATIVE.json   # SUMMARY/REPORT.md + index.html
 node scripts/ultrasec.mjs implement --run .ultrasec   # remediation-PRD draft (IMPLEMENT.md) → feed to the to-prd skill
+node scripts/ultrasec.mjs coverage --run .ultrasec --standard owasp-top10   # what was NOT looked at
+node scripts/ultrasec.mjs probe https://you-own-this --i-own-this   # live-site posture → PROBE.json (isolated)
+node scripts/ultrasec.mjs route app.apk                # out-of-scope target → methodology + tools (advisory)
 ```
 
 `context`, `triage`, `investigate`, `revalidate`, `narrative`, `implement` are additive — a quick
@@ -185,6 +196,84 @@ Each carries the thesis the engine rests on: **it finds candidates, you decide**
 — and the reason it matters, which is that a report a maintainer stops trusting
 gets the real finding dismissed along with the noise.
 
+## Beyond taint: config, auth & cloud detectors
+
+Taint answers *"can untrusted data reach a dangerous sink?"*. A whole class of real bugs has no
+flow at all — the value is simply wrong on its own line, or a check is switched off. Three
+line-oriented detectors run automatically inside `scan`, zero-dependency, each finding grounded on
+a resolvable `[file:line]` and correlated with the external scanners like any other:
+
+| detector | covers |
+|---|---|
+| **web config** (`src/webconfig.ts`) | permissive/reflected **CORS** (CWE-942) · **cookie flags** actually parsed — HttpOnly/Secure/SameSite, `SameSite=None` without `Secure` (CWE-1004/614/1275) · **security headers** set to unsafe values (CSP `unsafe-inline`/`unsafe-eval`, `X-Frame-Options: ALLOWALL`, HSTS `max-age=0`, `Referrer-Policy: unsafe-url`) · **TLS verification disabled** (CWE-295, Node/Python/Go/PHP/Java) · **debug mode** in prod (CWE-489) · directory listing (CWE-548) · GraphQL introspection (CWE-200) · **CSRF guard switched off** (CWE-352) |
+| **auth & tokens** (`src/authtokens.ts`) | JWT `alg:none`, verified **without pinning `algorithms`** (RS256→HS256 key confusion), decoded without verifying, expiry not enforced (CWE-347/613) · hardcoded or weak/default secrets (CWE-798/521) · OAuth **implicit flow**, loose `redirect_uri`, missing `state`+PKCE (CWE-757/1385/352) · SAML signature disabled · **weak password hashing** (CWE-916) |
+| **cloud / IaC** (`src/cloud.ts`) | K8s **privileged containers**, host namespaces/`hostPath`, `allowPrivilegeEscalation` (CWE-250/269) · wildcard **IAM** (`Action:*`+`Resource:*`), public `Principal:*` (CWE-732) · ingress from `0.0.0.0/0` (CWE-284) · public storage ACLs · **encryption disabled**, **publicly-accessible instances**, **credentials hardcoded in IaC** (CWE-311/284/798) · instance-**metadata endpoints** (CWE-918) |
+
+Every shape is measured the same way the taint catalog is — vuln/safe twins under
+`tests/fixtures/{webconfig,authtokens,cloud}/` at **TPR 1.0 / FPR 0.0** in CI. Two precision rules
+worth knowing, both learned from real repos: `0.0.0.0/0` on an **egress** rule is the normal
+"may reach the internet" case and is *not* reported (only ingress is), and the resource-shaped IaC
+rules run on **infrastructure files only** — a credential in application code is `gitleaks`' job,
+which has 221 tuned rules where this module has one regex.
+
+The half these can't decide stays with the AI, via `investigate --lens`:
+`access-control` (IDOR/BOLA/BFLA — the guard vs. the object returned), `cloud` (can a
+user-controlled URL actually reach the metadata endpoint?), plus `crypto`, `privacy`,
+`sharp-edges`.
+
+### Coverage against a standard you choose
+
+`coverage` accounts for **every** category in exactly one bucket — `engine` / `examined` /
+**`unexamined`** — so a short report can never read as a clean bill of health. Pick the frame:
+
+```bash
+node scripts/ultrasec.mjs coverage --run .ultrasec --standard asvs            # default (OWASP ASVS)
+node scripts/ultrasec.mjs coverage --run .ultrasec --standard owasp-top10     # 2021
+node scripts/ultrasec.mjs coverage --run .ultrasec --standard owasp-api-top10 # 2023
+node scripts/ultrasec.mjs coverage --run .ultrasec --standard masvs           # mobile
+node scripts/ultrasec.mjs coverage --run .ultrasec --standard cwe-top25       # 2023
+```
+
+Categories are matched on a finding's category, sink kind **and CWE**, so the config/auth/cloud
+detectors light up the right chapters without inventing taint sinks. An unknown `--standard`
+exits 2 rather than silently scoring ASVS.
+
+## Live-site posture — `probe`
+
+The **one** dynamic thing ultrasec does, deliberately walled off from the static audit. It observes
+a running site's posture on the wire — security headers (presence *and* value), `Set-Cookie` flags,
+TLS protocol/certificate, HTTP→HTTPS redirect, banner disclosure, a single crafted CORS preflight,
+optional GraphQL introspection, and (`--deep`) a fixed list of well-known exposed paths:
+
+```bash
+node scripts/ultrasec.mjs probe https://you-own-this --i-own-this [--deep] [--graphql]
+```
+
+Read-only, single host, no crawl, rate-limited, node built-ins only. It **requires**
+`--i-own-this` and refuses private/loopback/metadata targets unless you add `--allow-private`.
+Because its findings have no `[file:line]` — they cite `[response-header:…]`, `[cookie:…]`,
+`[tls]`, `[url:…]` — they go to their **own** artifact (`PROBE.json` / `PROBE.md`) and never enter
+`findings.json`, so the `check` gate never sees them.
+
+## Out-of-scope triage — `route`
+
+ultrasec is a static **source** auditor; it does not reverse binaries or run a pentest. But
+"out of scope" is a useless answer when you're handed an `.apk`. `route` classifies a target and
+prints the **methodology + the right external tools** — advisory only: it never executes anything,
+touches the network, or reads the target.
+
+```bash
+node scripts/ultrasec.mjs route app.apk            # → jadx / apktool / MobSF / frida
+node scripts/ultrasec.mjs route ./libs/native.so   # → radare2 / Ghidra / IDA / gdb-pwndbg
+node scripts/ultrasec.mjs route capture.pcap       # → Wireshark / Zeek / NetworkMiner
+node scripts/ultrasec.mjs route https://host       # → ultrasec probe (ours) + nmap/nuclei/ZAP
+node scripts/ultrasec.mjs route ./my-repo          # → ultrasec scan (this IS in scope)
+```
+
+It covers Android/iOS, native ELF/PE/Mach-O, .NET, firmware, pcap, Wi-Fi captures, browser
+extensions, JVM archives and malware samples, and routes IaC/Dockerfiles/source back to `scan`.
+`--write` emits `ROUTE.md` as a handoff.
+
 ## Detection, measured
 
 `tests/fixtures/bench/` scores 27 CWE classes at TPR 1.0 / FPR 0.0 in CI — a regression gate
@@ -284,7 +373,15 @@ behavior…) plus redacted secret/PII leak findings, into its own dossier:
 
 ```bash
 node scripts/ultrasec.mjs logs ./var/log --out .ultrasec-logs
+node scripts/ultrasec.mjs logs ./var/log --out .ultrasec-logs --sigma   # + a SIEM detection pack
 ```
+
+`--sigma` writes `ultrasec-logs.sigma.yml`: a ready-to-deploy **SIGMA** pack for the classes the
+forensics hunts — the blue-team analogue of `variants` (which emits a Semgrep rule for a confirmed
+code root cause). It is rendered from the *same* data-only catalogs the analysis uses, so hunt
+signatures and shipped detections can't drift, and it is deterministic (stable UUID per rule, no
+clock) so re-emitting it is a no-op diff. Thresholds and correlation are deliberately left to the
+SIEM — Sigma's job is the signature, the platform's job is the window.
 
 See [references/log-forensics-playbook.md](skills/ultrasec/references/log-forensics-playbook.md).
 
@@ -400,6 +497,28 @@ Reproduce:
 ```bash
 TARGET=/path/to/repo docker compose run --rm ultrasec scan --repo /work --out /work/.ultrasec
 ```
+
+### The config/auth/cloud detectors, on the same kind of corpus
+
+Run **engine-only** (`--no-tools --no-enrich`), so every number below is the zero-dependency core:
+
+| repo | total | from the new detectors |
+|---|---:|---|
+| [OWASP/NodeGoat](https://github.com/OWASP/NodeGoat) | 15 | web-config 2 — session cookie set with **no flags at all** |
+| [bridgecrewio/terragoat](https://github.com/bridgecrewio/terragoat) | 20 | cloud 20 — 13 hardcoded IaC credentials, 3 `storage_encrypted = false`, 2 `publicly_accessible = true`, a `public-read-write` bucket, an open ingress |
+| [madhuakula/kubernetes-goat](https://github.com/madhuakula/kubernetes-goat) | 63 | cloud 55 — privileged containers, `hostPath`/`hostNetwork`, privilege escalation · web-config 1 (Flask `debug=True`) |
+| [OWASP/railsgoat](https://github.com/OWASP/railsgoat) | 14 | web-config 5 — incl. the commented-out **`protect_from_forgery`** that opens every state-changing route |
+| [digininja/DVWA](https://github.com/digininja/DVWA) | 138 | web-config 24 (cookie flags, wildcard CORS, weakened CSP) · auth 17 (**md5 password hashing**) |
+
+**250 findings, 124 from the new detectors**, and `check` exits 0 on all five — every cited
+`[file:line]` resolves.
+
+Testing against these repos is what produced the last round of accuracy work, exactly as
+`bench:public` did for the taint catalog. It caught, in order: an **egress** rule reported as
+"ingress open to the internet" (TerraGoat), CWE-916 findings leaving OWASP **A07** reading
+"not examined" (DVWA), `route` treating a k8s manifest as out-of-scope, and — after the IaC rules
+were added — 20 `.php` files mislabelled as "infrastructure code". All four are now regression
+fixtures.
 
 ## How it works
 

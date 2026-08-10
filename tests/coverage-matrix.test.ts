@@ -1,6 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { buildCoverage, renderCoverageMd, ASVS } from "../src/coverage.js";
-import type { Dossier } from "../src/store.js";
+import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildCoverage, renderCoverageMd, enumeratedKindsOf, ASVS, STANDARDS, DEFAULT_STANDARD } from "../src/coverage.js";
+import { runCoverage } from "../src/commands/coverage.js";
+import { writeDossier, type Dossier } from "../src/store.js";
+import { parseArgs } from "../src/util.js";
 import type { Finding } from "../src/types.js";
 
 const dossier = (findings: Finding[]): Dossier => ({
@@ -67,5 +72,88 @@ describe("coverage matrix", () => {
     // Listing all 14 ASVS chapters would be exactly the coverage theatre this
     // file exists to avoid.
     expect(ASVS.map((c) => c.id)).not.toContain("V10");
+  });
+});
+
+describe("pluggable standards", () => {
+  it("ships the five packs and asvs is the default, unchanged", () => {
+    expect(Object.keys(STANDARDS).sort()).toEqual(["asvs", "cwe-top25", "masvs", "owasp-api-top10", "owasp-top10"]);
+    expect(DEFAULT_STANDARD).toBe("asvs");
+    // The default path and an explicit "asvs" produce byte-identical rows.
+    const d = dossier([f({ sink: { file: "a.js", line: 1, kind: "sql" } })]);
+    expect(buildCoverage(d, ["sql"])).toEqual(buildCoverage(d, ["sql"], "asvs"));
+    // asvs still maps 1:1 onto the ASVS chapter list.
+    expect(buildCoverage(dossier([])).map((r) => r.id)).toEqual(ASVS.map((c) => c.id));
+  });
+
+  it("every pack accounts for each category in exactly one valid state", () => {
+    for (const id of Object.keys(STANDARDS)) {
+      const rows = buildCoverage(dossier([]), [], id);
+      expect(rows).toHaveLength(STANDARDS[id]!.categories.length);
+      expect(rows.every((r) => ["engine", "examined", "unexamined"].includes(r.state))).toBe(true);
+    }
+  });
+
+  it("scores CWE-keyed items from a finding's cwe (config/auth detectors, no sink kind)", () => {
+    // A TLS-verify-disabled finding (CWE-295) carries no taint sink kind — it must
+    // still light up cryptographic-failure coverage via its CWE.
+    const d = dossier([f({ category: "config", cwe: "CWE-295" })]);
+    const top10 = buildCoverage(d, enumeratedKindsOf(d.findings), "owasp-top10");
+    expect(top10.find((r) => r.id === "A02")!.state).toBe("examined");
+    // And a debug-mode finding (CWE-489) lands under security misconfiguration.
+    const d2 = dossier([f({ category: "config", cwe: "CWE-489" })]);
+    const top10b = buildCoverage(d2, enumeratedKindsOf(d2.findings), "owasp-top10");
+    expect(top10b.find((r) => r.id === "A05")!.state).toBe("examined");
+  });
+
+  it("maps weak password hashing (CWE-916) to A07, per the OWASP mapping", () => {
+    // Measured on DVWA: 17 md5-password findings used to leave A07 reading
+    // "not examined" while the audit had looked straight at it.
+    const d = dossier([f({ category: "crypto", cwe: "CWE-916" })]);
+    const rows = buildCoverage(d, enumeratedKindsOf(d.findings), "owasp-top10");
+    expect(rows.find((r) => r.id === "A07")!.state).toBe("examined");
+  });
+
+  it("enumeratedKindsOf includes category, sink kind AND cwe", () => {
+    const kinds = enumeratedKindsOf([f({ category: "crypto", cwe: "CWE-347", sink: { file: "a.js", line: 1, kind: "crypto" } })]);
+    expect(kinds).toEqual(expect.arrayContaining(["crypto", "CWE-347"]));
+  });
+
+  it("renders the chosen standard's title in the header", () => {
+    const md = renderCoverageMd(buildCoverage(dossier([]), [], "owasp-api-top10"), STANDARDS["owasp-api-top10"]!.title);
+    expect(md).toMatch(/## Coverage \(OWASP API Security Top 10 \(2023\)\)/);
+  });
+});
+
+describe("runCoverage — standard selection", () => {
+  const silence = () => {
+    const o = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const e = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    return () => {
+      o.mockRestore();
+      e.mockRestore();
+    };
+  };
+
+  const seed = (): string => {
+    const run = mkdtempSync(join(tmpdir(), "ultrasec-cov-"));
+    writeDossier(run, dossier([f({ category: "config", cwe: "CWE-489" })]));
+    return run;
+  };
+
+  it("accepts every shipped standard", () => {
+    const run = seed();
+    const restore = silence();
+    for (const id of Object.keys(STANDARDS)) {
+      expect(runCoverage(parseArgs(["coverage", "--run", run, "--standard", id]))).toBe(0);
+    }
+    restore();
+  });
+
+  it("exit 2 on an unknown --standard instead of silently scoring ASVS", () => {
+    const run = seed();
+    const restore = silence();
+    expect(runCoverage(parseArgs(["coverage", "--run", run, "--standard", "owasp-top-10"]))).toBe(2);
+    restore();
   });
 });

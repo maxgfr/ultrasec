@@ -22,6 +22,8 @@ import { runRender } from "./render.js";
 import { runClean } from "./clean.js";
 import { runRun } from "./run.js";
 import { runOrchestrate } from "./orchestrate.js";
+import { runProbe } from "./probe.js";
+import { runRoute } from "./route.js";
 
 // The command table, in its own module so both front-ends can reach it.
 //
@@ -57,4 +59,6 @@ export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   clean: runClean,
   run: runRun,
   orchestrate: runOrchestrate,
+  probe: runProbe,
+  route: runRoute,
 };

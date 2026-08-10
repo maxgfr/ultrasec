@@ -13,6 +13,7 @@ import {
   type AnalyzeOptions,
 } from "../logs/analyze.js";
 import { LOG_FORMATS, type LogFormat } from "../logs/detect.js";
+import { renderSigmaRules } from "../logs/sigma.js";
 import { buildGraph } from "../graph.js";
 import { writeDossier, countBySeverity } from "../store.js";
 import { VERSION, SCHEMA_VERSION, type Manifest } from "../types.js";
@@ -132,8 +133,22 @@ export async function runLogs(args: ParsedArgs): Promise<number> {
   mkdirSync(out, { recursive: true });
   writeFileSync(join(out, "LOGSTATS.json"), JSON.stringify(stats, null, 2));
 
+  // Detection engineering (opt-in `--sigma`): emit a ready-to-deploy SIGMA pack
+  // for the attack classes ultrasec hunts — the blue-team analogue of `variants`
+  // (which emits Semgrep for a confirmed code root cause). Deterministic; a pack
+  // for a SIEM to import, independent of what fired in this sample.
+  const sigmaOn = flagBool(args, "sigma");
+  let sigmaPath: string | undefined;
+  if (sigmaOn) {
+    const rules = renderSigmaRules();
+    if (rules) {
+      sigmaPath = join(out, "ultrasec-logs.sigma.yml");
+      writeFileSync(sigmaPath, rules);
+    }
+  }
+
   if (flagBool(args, "json")) {
-    println(JSON.stringify({ out, base, files: stats.files, findings: findings.length, stats, truncation }, null, 2));
+    println(JSON.stringify({ out, base, files: stats.files, findings: findings.length, stats, truncation, sigma: sigmaPath }, null, 2));
     return 0;
   }
 
@@ -185,6 +200,7 @@ export async function runLogs(args: ParsedArgs): Promise<number> {
     for (const t of truncation.slice(0, 10)) println(`    - ${t}`);
     if (truncation.length > 10) println(`    - …and ${truncation.length - 10} more`);
   }
+  if (sigmaPath) println(`  sigma rules → ${sigmaPath}  (import into your SIEM; thresholds/correlation are the SIEM's job)`);
   println(`  next: read ${join(out, "DOSSIER.md")}; triage with the log-forensics playbook; verify with \`ultrasec verify --run ${out}\`.`);
   return 0;
 }

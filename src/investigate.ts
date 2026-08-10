@@ -53,13 +53,24 @@ export interface InvestigateRegion {
  * scanned — it changes the question asked of it, which is the only thing that
  * separates "no findings" from "no findings of the kind I was looking for".
  */
+// Access control is the highest-yield class an audit finds and the one taint can
+// never enumerate — the engine can point at the routes, only a human decides the
+// policy. Kept as one string, shared by the `access-control` name and its `idor`
+// alias, so the two can never drift.
+const ACCESS_CONTROL_LENS =
+  "Access control — the highest-yield class, never enumerable by taint. For every route/handler in these files ask two questions. (1) Is there ANY authorization check before the object is read or written? A missing one is BFLA (broken function-level authz) — the classic shape is an admin/privileged action reachable by a normal role, or a method/version downgrade (GET→PUT, /v2→/v1) that skips the guard. (2) Does the check bind the CALLER to the SPECIFIC object in the request? Compare the guard to the object returned: an owner_id/tenant_id taken from the SESSION/token vs. an id taken from the URL/body/query. When they are not compared, an attacker swaps the id and reads another principal's data — IDOR/BOLA. Hunt horizontal escalation (user A reaching user B via a predictable/sequential/enumerable id), vertical escalation (a normal user reaching an admin object), and tenant-boundary crossing in multi-tenant code. Mass-assignment onto role/isAdmin/tenant/permissions is access control too — a body field that overwrites who you are. Cite resolvable [file:line] for the guard that is missing or the comparison that is absent. See references/access-control.md.";
+
 export const LENSES: Record<string, string> = {
   "sharp-edges":
     "Ask a DIFFERENT question here: not 'is this code vulnerable' but 'does this API make the insecure use easier than the secure one'. Six shapes: an algorithm/mode the caller picks; an insecure default or an ambiguous zero; raw bytes where a semantic type belongs; a config cliff that fails open; a verification that returns instead of throwing; permissions as strings. Model three users — the attacker, the copy-paster, the confused reader. Rate by how EASY the mistake is. See references/sharp-edges.md.",
+  "access-control": ACCESS_CONTROL_LENS,
+  idor: ACCESS_CONTROL_LENS,
   crypto:
     "Crypto-specific: secrets compared with == or equals() rather than a constant-time helper; key material in a plain buffer never zeroed; a nonce or IV reused or derived from a counter the attacker sees; an algorithm read from attacker-supplied data. See references/attack-classes.md §Cryptography.",
   privacy:
     "Personal data: where it goes (a third-party processor, a log, an analytics beacon), how long it stays, and whether a control named 'anonymisation' actually prevents re-identification. See references/privacy-and-data-protection.md.",
+  cloud:
+    "Cloud / container reachability, the half the IaC scan can't decide: can any user-controlled URL reach the instance-metadata endpoint (169.254.169.254 / metadata.google.internal) — SSRF to short-lived credentials? Is a wildcard/over-broad IAM role actually assumed on this path? Are instance/CI secrets read from env or a mounted file that a compromised container can exfiltrate? Does a container escape (privileged/hostPath/hostNetwork) turn a bug into node takeover? See references/frameworks.md §Cloud.",
 };
 
 /** Build the investigation worklist, grouped by attack-surface region. */

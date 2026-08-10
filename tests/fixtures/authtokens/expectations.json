@@ -1,0 +1,43 @@
+{
+  "jwt/alg-none.js": [
+    "jwt-alg-none"
+  ],
+  "jwt/no-alg.js": [
+    "jwt-no-verify-alg"
+  ],
+  "jwt/decode.js": [
+    "jwt-decode"
+  ],
+  "jwt/expiry.js": [
+    "jwt-expiry"
+  ],
+  "jwt/secret-hardcoded.js": [
+    "jwt-secret-hardcoded"
+  ],
+  "jwt/weak-secret.py": [
+    "jwt-weak-secret"
+  ],
+  "oauth/implicit.js": [
+    "oauth-implicit"
+  ],
+  "oauth/redirect-uri.js": [
+    "oauth-redirect-uri"
+  ],
+  "oauth/state-pkce.js": [
+    "oauth-state-pkce"
+  ],
+  "saml/sig.js": [
+    "saml-signature"
+  ],
+  "pwhash/md5.js": [
+    "password-hash"
+  ],
+  "pwhash/bcrypt-rounds.js": [
+    "password-hash"
+  ],
+  "jwt/safe.js": [],
+  "jwt/safe.py": [],
+  "oauth/safe.js": [],
+  "saml/safe.js": [],
+  "pwhash/safe.js": []
+}

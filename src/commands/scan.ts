@@ -7,6 +7,9 @@ import { enumerateTaint } from "../taint.js";
 import { enumerateSinkCandidates } from "../sinks.js";
 import { enumerateSensitiveLogCandidates } from "../logs/hygiene.js";
 import { auditAgenticWorkflows } from "../actions.js";
+import { auditWebConfig } from "../webconfig.js";
+import { auditAuthTokens } from "../authtokens.js";
+import { auditCloud } from "../cloud.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
 import { loadScanCache, saveScanCache } from "../cache.js";
@@ -157,6 +160,25 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // no dependency scanner and no taint walk will report.
   const agenticFindings = auditAgenticWorkflows(repo);
 
+  // API/web misconfiguration (CORS, cookie flags, security headers, TLS
+  // verification disabled, debug mode, GraphQL introspection). Always on for the
+  // same reason as the agentic-CI pass: it reads the source already walked, costs
+  // nothing when the shapes are absent, and reports a live class no taint walk or
+  // dependency scanner will. Every finding is grounded [file:line], category `config`.
+  const webConfigFindings = auditWebConfig(repo);
+
+  // Authentication-token weaknesses (JWT alg/none, key confusion, decode-without-
+  // verify, unenforced expiry, hardcoded/weak secrets; OAuth implicit flow, loose
+  // redirect_uri, missing state/PKCE; SAML signature off; weak password hashing).
+  // Always on, grounded [file:line], category crypto/authz.
+  const authTokenFindings = auditAuthTokens(repo);
+
+  // Cloud / K8s / IaC misconfiguration (privileged containers, host namespaces,
+  // wildcard IAM, public principals/storage, open ingress, instance-metadata
+  // endpoints). Zero-dependency baseline that fires without checkov and folds
+  // into it via the correlator when present. Grounded [file:line], category config.
+  const cloudFindings = auditCloud(repo);
+
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
   // pass `--tools auto` to force them.
@@ -182,7 +204,16 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // without this second (idempotent) pass a scanner finding sitting exactly on a
   // taint/orphan-sink/hygiene node would ship as a duplicate instead of
   // corroborating the candidate.
-  const merged = correlate([...taintFindings, ...sinkCand.findings, ...hygieneCand.findings, ...agenticFindings, ...tool.findings]);
+  const merged = correlate([
+    ...taintFindings,
+    ...sinkCand.findings,
+    ...hygieneCand.findings,
+    ...agenticFindings,
+    ...webConfigFindings,
+    ...authTokenFindings,
+    ...cloudFindings,
+    ...tool.findings,
+  ]);
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.

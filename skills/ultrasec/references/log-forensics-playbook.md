@@ -210,3 +210,22 @@ fragment is silently skipped in any fan-out.
 [investigate-playbook.md](investigate-playbook.md) for the general shape of
 "engine emits candidates, you judge, apply folds verdicts back in" if this is
 your first time working an ultrasec worklist.
+
+## Detection engineering — `logs --sigma`
+
+`ultrasec logs --sigma` writes `ultrasec-logs.sigma.yml`: a ready-to-deploy
+**SIGMA** detection pack for the classes the forensics hunts — the blue-team
+analogue of `variants` (which emits a Semgrep rule for a confirmed code root
+cause). It is rendered from the SAME data-only catalogs the analysis uses
+(`ATTACK_SIGNATURES`, `SCANNER_UAS`, `AUTH_EVENTS`), so the hunt and the shipped
+detections can never drift, and it is deterministic (a stable UUID per rule, no
+clock) so re-emitting it is a no-op diff.
+
+It is a **pack for your SIEM**, not a per-run artifact: it contains every rule
+for the classes ultrasec covers (web-attack signatures matched on the request
+URI, a scanner/attack-tool user-agent rule, and an auth-failure rule for brute
+force), independent of what happened to fire in the sample. Thresholds and
+correlation (e.g. "≥10 failures in 10m by source", "failures then a success")
+are deliberately left to the SIEM — Sigma's job is the signature, the platform's
+job is the window. Import it, tune the false-positives block per your traffic,
+and pair the brute-force and success rules to catch a compromise.

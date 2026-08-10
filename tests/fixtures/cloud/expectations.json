@@ -1,0 +1,41 @@
+{
+  "k8s/privileged.yaml": [
+    "k8s-privileged"
+  ],
+  "k8s/host-namespace.yaml": [
+    "k8s-host-namespace"
+  ],
+  "k8s/privesc.yaml": [
+    "k8s-privesc"
+  ],
+  "k8s/safe.yaml": [],
+  "iam/wildcard.json": [
+    "iam-wildcard"
+  ],
+  "iam/public-principal.json": [
+    "iam-public-principal"
+  ],
+  "iam/safe.json": [],
+  "net/open-ingress.tf": [
+    "open-ingress"
+  ],
+  "net/safe.tf": [],
+  "storage/public.tf": [
+    "public-storage"
+  ],
+  "storage/safe.tf": [],
+  "meta/metadata.js": [
+    "cloud-metadata"
+  ],
+  "meta/safe.js": [],
+  "net/egress-safe.tf": [],
+  "net/ingress-rule.tf": [
+    "open-ingress"
+  ],
+  "iac/insecure-db.tf": [
+    "iac-unencrypted",
+    "iac-public-instance",
+    "iac-hardcoded-secret"
+  ],
+  "iac/safe-db.tf": []
+}

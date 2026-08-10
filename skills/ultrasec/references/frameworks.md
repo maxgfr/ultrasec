@@ -173,6 +173,44 @@ missing where the struct backs an authorization decision.
 
 ---
 
+## Cloud / Kubernetes / IaC
+
+The `cloud` detector (`scan`, always on) enumerates the statically-decidable
+misconfigurations — privileged containers, host namespaces/paths, wildcard IAM
+(`Action:*`+`Resource:*`), public principals/storage, ingress from `0.0.0.0/0`,
+encryption switched off (`storage_encrypted = false`), publicly-reachable
+instances (`publicly_accessible = true`), credentials hardcoded in IaC, and a
+hardcoded instance-metadata endpoint (`169.254.169.254` /
+`metadata.google.internal`). It is a zero-dependency baseline that fires without
+`checkov` and folds into it (via the correlator) when present.
+
+Two precision rules worth knowing, both measured on TerraGoat. **Direction
+matters**: `0.0.0.0/0` on an *egress* rule is the normal "may reach the internet"
+case and is not reported — only *ingress* from the world is. And the
+resource-shaped rules (encryption, public instance, hardcoded credential) run on
+**infrastructure files only** (`.tf/.tfvars/.hcl/.yaml/.yml/.json`): a credential
+in application code is `gitleaks`' job, which has 221 tuned rules where this
+module has one regex. A reference — `var.password`, `${var.x}`,
+`data.vault_generic_secret…` — is the *correct* pattern and is never flagged.
+
+The half it can't decide is reachability, and that is `investigate --lens cloud`:
+
+- **SSRF → metadata.** Can any user-controlled URL reach the metadata endpoint?
+  That turns a generic SSRF into short-lived cloud credentials — the highest-yield
+  cloud bug. The `cloud-metadata` finding marks where the endpoint is named; the
+  lens asks whether a source can steer a request there without an allow-list.
+- **Over-broad IAM in context.** A wildcard policy is a candidate; whether the
+  role is actually assumed on a reachable path (and what it can then touch) is the
+  judgment call.
+- **Secrets from env / mounted files.** Instance or CI secrets a compromised
+  container can read and exfiltrate — see also the `secret` category and `privacy`.
+- **Container escape.** `privileged`/`hostPath`/`hostNetwork` turn an app bug into
+  node takeover — rate the blast radius accordingly.
+
+For a target that is a live cloud account, a running cluster, or a binary/image
+(not source), use `ultrasec route` to get the right external toolkit (prowler,
+ScoutSuite, kube-hunter, trivy image…).
+
 ## When the stack isn't listed
 
 Ask the same four questions and answer them from the code: where are routes declared, where are

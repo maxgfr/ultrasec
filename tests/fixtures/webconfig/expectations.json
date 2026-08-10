@@ -1,0 +1,71 @@
+{
+  "cors/reflect.js": [
+    "cors-reflect"
+  ],
+  "cors/wildcard-credentials.js": [
+    "cors-wildcard-credentials"
+  ],
+  "cors/wildcard.js": [
+    "cors-wildcard"
+  ],
+  "cors/safe.js": [],
+  "cookie/no-options.js": [
+    "cookie-httponly",
+    "cookie-secure"
+  ],
+  "cookie/missing-all.js": [
+    "cookie-httponly",
+    "cookie-secure",
+    "cookie-samesite"
+  ],
+  "cookie/samesite-none.js": [
+    "cookie-secure",
+    "cookie-samesite-none-insecure"
+  ],
+  "cookie/safe.js": [],
+  "headers/weak.js": [
+    "header-csp",
+    "header-xfo",
+    "header-hsts",
+    "header-referrer"
+  ],
+  "headers/dir.conf": [
+    "dir-listing"
+  ],
+  "headers/safe.js": [],
+  "tls/node.js": [
+    "tls-verify"
+  ],
+  "tls/py.py": [
+    "tls-verify"
+  ],
+  "tls/go.go": [
+    "tls-verify"
+  ],
+  "tls/php.php": [
+    "tls-verify"
+  ],
+  "tls/safe.js": [],
+  "tls/safe.py": [],
+  "debug/flask.py": [
+    "debug"
+  ],
+  "debug/django.py": [
+    "debug"
+  ],
+  "debug/rails.rb": [
+    "debug"
+  ],
+  "debug/safe.py": [],
+  "graphql/vuln.js": [
+    "graphql-introspection"
+  ],
+  "graphql/safe.js": [],
+  "csrf/rails.rb": [
+    "csrf-disabled"
+  ],
+  "csrf/django.py": [
+    "csrf-disabled"
+  ],
+  "csrf/safe.rb": []
+}

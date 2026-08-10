@@ -76,7 +76,8 @@ ultrasec verify  --apply verdicts.json --run .ultrasec       # a file, comma-lis
   # any --apply: refused rows are listed with their reason; --strict exits 1 on any
 ultrasec revalidate --run .ultrasec             # git-history FP cut  (--apply REVALIDATE.json)
 ultrasec variants   --run .ultrasec             # where ELSE this root cause appears (--apply)
-ultrasec coverage --run .ultrasec               # ASVS matrix: what was NOT looked at (--write)
+ultrasec coverage --run .ultrasec               # standards matrix: what was NOT looked at (--write)
+  # standard: --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25   (default asvs)
 ultrasec check   --run .ultrasec --semantic     # THE GATE: grounded + adjudicated (--min-severity)
 ultrasec narrative --run .ultrasec              # → you author NARRATIVE.json
 ultrasec render  --run .ultrasec --narrative NARRATIVE.json  # SUMMARY/REPORT.md + index.html
@@ -84,9 +85,14 @@ ultrasec implement --run .ultrasec              # remediation-PRD draft → the 
 ultrasec run     --repo . --out .ultrasec       # sequence every stage (ZERO external calls)
 ultrasec orchestrate --run .ultrasec --phase verify   # emit the multi-agent fan-out
 ultrasec logs    ./var/log --out .ultrasec-logs # blue team: forensics over EXISTING log files
+  # detections: --sigma → ultrasec-logs.sigma.yml (SIEM pack, like variants→semgrep)
   # anywhere: --report out.md|html|json (archive this output)  --no-journal (skip JOURNAL.md)
 ultrasec import  findings.json --run .ultrasec  # ingest a deepsec export as candidates
 ultrasec clean   --run .ultrasec                # keeps REPORT/SUMMARY/index.html/findings/JOURNAL
+ultrasec probe   https://you-own-this --i-own-this   # DYNAMIC live-site posture → PROBE.json (isolated)
+  # probe: --allow-private (localhost)  --graphql  --deep (exposed files)  --timeout ms  --strict
+ultrasec route   app.apk | ./bin/x.so | https://host # OUT-OF-SCOPE triage → methodology + tools (advisory)
+  # route: URL → probe · source/dir → scan · else → jadx/radare2/wireshark/… (--write ROUTE.md)
 ```
 
 ## Route by situation
@@ -294,7 +300,8 @@ calibration pairs) · [citation-format.md](references/citation-format.md) (the g
 · [schemas.md](references/schemas.md) (every worklist JSON).
 
 **Security knowledge** — [attack-classes.md](references/attack-classes.md) (the classes taint
-can't reach) · [privacy-and-data-protection.md](references/privacy-and-data-protection.md) (transfers,
+can't reach) · [access-control.md](references/access-control.md) (IDOR/BOLA/BFLA, `--lens access-control`) ·
+[privacy-and-data-protection.md](references/privacy-and-data-protection.md) (transfers,
 retention, pseudonymisation) ·
 [frameworks.md](references/frameworks.md) (per-stack hiding places) ·
 [hunting-heuristics.md](references/hunting-heuristics.md) (attacker lenses + recon commands) ·
@@ -310,6 +317,8 @@ retention, pseudonymisation) ·
 [narrative-playbook.md](references/narrative-playbook.md) ·
 [implement-playbook.md](references/implement-playbook.md) ·
 [log-forensics-playbook.md](references/log-forensics-playbook.md) (blue team) ·
+[probe-playbook.md](references/probe-playbook.md) (dynamic live-site posture, isolated) ·
+[route-playbook.md](references/route-playbook.md) (triage out-of-scope targets → tools) ·
 [powered-mode.md](references/powered-mode.md) (autonomy).
 
 **Engine** — [commands.md](references/commands.md) (full CLI) ·

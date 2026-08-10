@@ -54,9 +54,11 @@ COMMANDS
              aggregation (brute-force/credential-compromise, request bursts,
              scan/recon→hit), and secret/PII-leak detection into its OWN
              dossier, findings citing [logfile:line]. Evidence is redacted by
-             default (secrets/PII never land in a finding message). Flags:
+             default (secrets/PII never land in a finding message). --sigma
+             emits a ready-to-deploy SIGMA detection pack (ultrasec-logs.sigma.yml)
+             for those classes — the blue-team analogue of 'variants'. Flags:
              --out · --format · --budget quick|standard|thorough ·
-             --max-lines · --window <sec> · --no-redact · --json.
+             --max-lines · --window <sec> · --no-redact · --sigma · --json.
   tools      List known external scanners, which are installed, and how to get
              them. --upgrade drives each INSTALLED native tool's own package
              manager (brew/pipx/go/cargo/corepack/npm, inferred from its binary
@@ -83,9 +85,11 @@ COMMANDS
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]
              as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
-             existing findings' sources). --lens sharp-edges|crypto|privacy asks a
-             DIFFERENT question of the same regions (sharp-edges: does this API
-             make the insecure use easier than the secure one?). Unenforced
+             existing findings' sources). --lens sharp-edges|access-control|idor|
+             crypto|privacy|cloud asks a DIFFERENT question of the same regions
+             (access-control: IDOR/BOLA/BFLA — the guard vs. the object returned;
+             cloud: SSRF-to-metadata, over-broad IAM, container escape).
+             Unenforced
              assumptions from 'assumptions' are folded into the region prompts.
              Flags: --run · --repo · --apply · --lens ·
              --scope/--include/--exclude/--max-files/--gitignore · --json.
@@ -122,12 +126,15 @@ COMMANDS
   render     Render SUMMARY/REPORT.md + a self-contained index.html.
              --narrative <file> folds in AI-authored sections (exec summary, fixes,
              attack chains, root causes), clearly marked + grounding-checked.
-  coverage   The honest complement to 'only report what you can exploit': an
-             OWASP-ASVS matrix of what this audit looked at and what it did NOT.
+  coverage   The honest complement to 'only report what you can exploit': a
+             standards matrix of what this audit looked at and what it did NOT.
              A short report reads as "nothing there" when it means "nothing
              there, in what I looked at" — this separates the two, and names the
              categories no deterministic signal can cover so you answer them
-             explicitly. Read-only. Flags: --run · --write (COVERAGE.md) · --json.
+             explicitly. --standard scores against ASVS (default), the OWASP
+             Top 10, the OWASP API Top 10, MASVS or the CWE Top 25. Read-only.
+             Flags: --run · --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25 ·
+             --write (COVERAGE.md) · --json.
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
              READ-ONLY — it writes nothing and changes no status; --semantic ALSO
              fails when a candidate is still unadjudicated. Exit 0 ok · 1 gate
@@ -168,6 +175,22 @@ COMMANDS
              default repo makes it optional on every tool) · --allow-write ·
              --port <n> · --bind <addr> · --allow-origin <o,...> · --allow-remote ·
              --max-response-bytes <n>.
+  probe      The ONE dynamic check, walled off from the static audit: observe a
+             RUNNING site's posture on the wire — security headers, cookie flags,
+             TLS, HTTP→HTTPS redirect, banners, a single crafted CORS preflight,
+             optional GraphQL introspection. Read-only, single host, no crawl.
+             Findings cite [response-header:…]/[cookie:…]/[tls]/[url:…] and go to
+             PROBE.json/PROBE.md ONLY — never findings.json, so 'check' never sees
+             them. Requires --i-own-this; refuses private/loopback targets unless
+             --allow-private. Flags: --i-own-this · --allow-private · --deep ·
+             --graphql · --timeout <ms> · --out · --strict · --json.
+  route      Triage a target that is OUTSIDE ultrasec's scope: given a file
+             (.apk/.ipa, .so/.exe/.dll, firmware, .pcap, .crx, .jar…) or an
+             http(s):// URL, classify it and print the METHODOLOGY + recommended
+             external tools (jadx, radare2/Ghidra/IDA, frida, binwalk, wireshark,
+             nmap/nuclei/ZAP…). Advisory ONLY — runs nothing, no network, reads
+             no target. In scope it routes back: a URL → 'probe', source/a repo →
+             'scan'. Flags: --json · --write (ROUTE.md) · --out <dir>.
 
 GLOBAL
   --help, -h     Show this help.

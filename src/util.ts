@@ -55,9 +55,15 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "no-env-sources",
   "strict-scope",
   "write",
+  "sigma",
   // `mcp` only.
   "allow-remote",
   "allow-write",
+  // `probe` only.
+  "i-own-this",
+  "allow-private",
+  "deep",
+  "graphql",
 ]);
 
 /** Single-dash short-flag aliases, as documented in the CLI's GLOBAL help. Each

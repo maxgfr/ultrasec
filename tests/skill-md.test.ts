@@ -99,9 +99,21 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
   //                 body never mentions is a stage nobody runs, so each bought exactly a
   //                 cheat-sheet line, a workflow step and a References entry — ~60 words
   //                 apiece. Every method stayed in references/. Do not spend the rest on prose.
+  //   2760 -> 2820: the web-security expansion — the `access-control` investigate lens
+  //                 (IDOR/BOLA/BFLA), pluggable `coverage --standard` packs (OWASP Top 10 /
+  //                 API Top 10 / MASVS / CWE Top 25), and the isolated dynamic `probe`
+  //                 command. A command the body never names is a command nobody runs, so
+  //                 each bought a cheat-sheet line + a References entry; the web-misconfig
+  //                 and auth-token detectors run under `scan` and are documented in
+  //                 references/catalog.md, not the body. Methods stayed in references/.
+  //   2820 -> 2860: closing the reverse-skill coverage gaps — the `route` command (triage
+  //                 out-of-scope targets → external toolkit) and `logs --sigma` (SIEM
+  //                 detection pack). Each bought a cheat-sheet line; `route` also a References
+  //                 entry (route-playbook.md). The cloud/K8s detector runs under `scan` and
+  //                 is documented in references/frameworks.md §Cloud, not the body.
   it("keeps the SKILL.md body within its word budget", () => {
     const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
-    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2760);
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2860);
   });
 
   // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits
