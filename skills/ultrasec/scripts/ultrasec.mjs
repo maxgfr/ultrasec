@@ -16944,7 +16944,7 @@ ${HELP}`);
 }
 
 // src/types.ts
-var VERSION = "1.30.0";
+var VERSION = "1.31.0";
 var SCHEMA_VERSION2 = 7;
 var SEVERITIES2 = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
