@@ -16949,6 +16949,102 @@ var SCHEMA_VERSION2 = 8;
 var SEVERITIES2 = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
 var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "privacy", "other"];
+var CATEGORY_ALIASES = {
+  // Untrusted input reaching a dangerous operation — the engine's `taint` shape.
+  xss: "taint",
+  "dom-xss": "taint",
+  "stored-xss": "taint",
+  "reflected-xss": "taint",
+  ssrf: "taint",
+  sqli: "taint",
+  "sql-injection": "taint",
+  "nosql-injection": "taint",
+  injection: "taint",
+  "command-injection": "taint",
+  "code-injection": "taint",
+  rce: "taint",
+  "path-traversal": "taint",
+  "directory-traversal": "taint",
+  lfi: "taint",
+  rfi: "taint",
+  ssti: "taint",
+  xxe: "taint",
+  "prototype-pollution": "taint",
+  "open-redirect": "taint",
+  "header-injection": "taint",
+  "crlf-injection": "taint",
+  "response-splitting": "taint",
+  "input-validation": "taint",
+  validation: "taint",
+  deserialization: "taint",
+  "insecure-deserialization": "taint",
+  "mass-assignment": "taint",
+  "ldap-injection": "taint",
+  "xpath-injection": "taint",
+  "csv-injection": "taint",
+  "prompt-injection": "taint",
+  redos: "taint",
+  // Missing or wrong authorization.
+  idor: "authz",
+  "access-control": "authz",
+  "broken-access-control": "authz",
+  authorization: "authz",
+  authentication: "authz",
+  authn: "authz",
+  "privilege-escalation": "authz",
+  csrf: "authz",
+  // Cryptography.
+  "weak-crypto": "crypto",
+  cryptography: "crypto",
+  tls: "crypto",
+  // Credentials.
+  credentials: "secret",
+  "hardcoded-secret": "secret",
+  "credential-leak": "secret",
+  // Deployment / hardening / third-party code.
+  misconfiguration: "config",
+  hardening: "config",
+  "security-headers": "config",
+  cors: "config",
+  csp: "config",
+  iac: "config",
+  dependency: "dep",
+  "vulnerable-dependency": "dep",
+  cve: "dep",
+  advisory: "dep",
+  "supply-chain": "dep",
+  logging: "logs",
+  "log-injection": "logs",
+  // Personal data.
+  gdpr: "privacy",
+  rgpd: "privacy",
+  pii: "privacy",
+  "data-protection": "privacy",
+  tracking: "privacy",
+  consent: "privacy",
+  // Real classes with no data-flow claim and no better home.
+  dos: "other",
+  "denial-of-service": "other",
+  "resource-exhaustion": "other",
+  disclosure: "other",
+  "information-disclosure": "other",
+  "info-leak": "other",
+  "error-handling": "other",
+  robustness: "other",
+  abuse: "other",
+  "rate-limit": "other",
+  "rate-limiting": "other",
+  "business-logic": "other",
+  race: "other",
+  "race-condition": "other"
+};
+function normalizeCategory(value) {
+  if (typeof value !== "string") return void 0;
+  const key = value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  if (CATEGORIES.includes(key)) return { category: key, folded: key !== value };
+  const alias = Object.prototype.hasOwnProperty.call(CATEGORY_ALIASES, key) ? CATEGORY_ALIASES[key] : void 0;
+  return alias ? { category: alias, folded: true } : void 0;
+}
 var VERDICTS = ["supported", "partial", "unsupported", "refuted"];
 var BROCARDS = [
   "no-threat-model",
@@ -25129,6 +25225,7 @@ function readApply(applyPath, dirRegex, parse) {
   const files = collectApplyFiles(applyPath, dirRegex);
   const rows = [];
   const dropped = [];
+  const normalized = [];
   for (const f of files) {
     let parsed;
     try {
@@ -25138,8 +25235,9 @@ function readApply(applyPath, dirRegex, parse) {
     }
     rows.push(...parsed.rows);
     dropped.push(...parsed.dropped.map((d) => files.length > 1 ? { ...d, file: f } : d));
+    normalized.push(...parsed.normalized ?? []);
   }
-  return { rows, dropped };
+  return { rows, dropped, ...normalized.length ? { normalized } : {} };
 }
 function persistFindings(run2, dossier, findings) {
   const manifest = { ...dossier.manifest, counts: { findings: findings.length, bySeverity: countBySeverity(findings) } };
@@ -25176,6 +25274,9 @@ function requireUsable(result, sourceLength, requirement) {
     throw new Error(`${sourceLength} row(s), none usable \u2014 each needs ${requirement} (fail-closed)${detail ? ` \u2014 ${detail}` : ""}`);
   }
   return result;
+}
+function formatNormalized(normalized) {
+  return normalized.map((n) => `  \u21B7 row ${n.index}: ${n.note}`);
 }
 function formatDropped(dropped) {
   return dropped.map((d) => `  \u2717 dropped ${d.file ? `${d.file} ` : ""}row ${d.index}: ${d.reason}`);
@@ -25886,6 +25987,7 @@ function parseDiscoveries(raw) {
   const arr = coerceRows(JSON.parse(raw), ["discoveries"], "discoveries");
   const rows = [];
   const dropped = [];
+  const normalized = [];
   const drop = (index, reason) => dropped.push({ index, reason });
   for (const [index, raw2] of arr.entries()) {
     const d = raw2;
@@ -25897,17 +25999,19 @@ function parseDiscoveries(raw) {
     for (const field of ["title", "message", "file"]) {
       if (typeof d[field] !== "string") bad.push(badField(field, d[field], "a string"));
     }
-    if (!Number.isInteger(d.line) || d.line < 1) bad.push(badField("line", d.line, "an integer \u2265 1"));
-    if (!CATEGORIES.includes(d.category)) bad.push(notInVocabulary("category", d.category, CATEGORIES));
+    if (!Number.isInteger(d.line) || d.line < 0) bad.push(badField("line", d.line, "an integer \u2265 0 (0 = the whole file)"));
+    const cat = normalizeCategory(d.category);
+    if (!cat) bad.push(`${notInVocabulary("category", d.category, CATEGORIES)} (nor a known alias \u2014 see CATEGORY_ALIASES)`);
     if (!SEVERITIES2.includes(d.severity)) bad.push(notInVocabulary("severity", d.severity, SEVERITIES2));
     if (bad.length) {
       drop(index, bad.join(", "));
       continue;
     }
     const path = Array.isArray(d.path) ? d.path.filter((p) => p && typeof p.file === "string" && Number.isInteger(p.line) && p.line >= 1).map((p) => ({ file: p.file, line: p.line, why: typeof p.why === "string" ? p.why : "" })) : void 0;
+    if (cat.folded) normalized.push({ index, note: `category ${describeValue(d.category)} folded to "${cat.category}"` });
     rows.push({
       title: d.title,
-      category: d.category,
+      category: cat.category,
       severity: d.severity,
       ...typeof d.cwe === "string" ? { cwe: d.cwe } : {},
       message: d.message,
@@ -25917,9 +26021,10 @@ function parseDiscoveries(raw) {
     });
   }
   return requireUsable(
-    { rows, dropped },
+    // Presence-gated: no fold ⇒ the result is shape-identical to before.
+    { rows, dropped, ...normalized.length ? { normalized } : {} },
     arr.length,
-    `title/message/file (strings), line \u2265 1, a category among ${CATEGORIES.join("|")} and a severity among ${SEVERITIES2.join("|")}`
+    `title/message/file (strings), line \u2265 0, a category among ${CATEGORIES.join("|")} (aliases accepted) and a severity among ${SEVERITIES2.join("|")}`
   );
 }
 
@@ -25952,6 +26057,7 @@ function runInvestigate(args2) {
           {
             ingested: res.ingested,
             folded: res.folded,
+            normalized: parsed.normalized ?? [],
             rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })),
             dropped: parsed.dropped
           },
@@ -25965,8 +26071,14 @@ function runInvestigate(args2) {
     println(
       `  ingested ${res.ingested} new ${"ultrasec-ai"} finding(s) \xB7 folded ${res.folded} into existing \xB7 rejected ${res.rejected.length} \xB7 dropped ${parsed.dropped.length}`
     );
+    for (const line of formatNormalized(parsed.normalized ?? [])) println(line);
     for (const r of res.rejected) println(`  \u2717 rejected "${r.discovery.title}": ${r.reason}`);
     const code = surfaceDropped(parsed.dropped, strict, println);
+    const submitted = parsed.rows.length + parsed.dropped.length;
+    if (parsed.dropped.length > 0 && parsed.dropped.length * 2 >= submitted)
+      println(
+        `  \u26A0 ${parsed.dropped.length} of ${submitted} discoveries were refused \u2014 those findings do NOT exist in the dossier and no later stage will report them missing. Fix the rows above and re-apply.`
+      );
     if (res.ingested) println(`  next: \`ultrasec dossier <id> --run ${run2}\` then \`verify\` \u2014 adjudicate them like any candidate.`);
     return code;
   }

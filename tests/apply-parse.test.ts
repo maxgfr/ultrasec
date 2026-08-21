@@ -81,9 +81,11 @@ describe("investigate --apply surfaces every refused row instead of dropping it"
       file,
       JSON.stringify([
         GOOD_DISCOVERY,
-        { ...GOOD_DISCOVERY, title: "bad category", category: "ssrf" },
+        // Not "ssrf"/"xss"/"dos" — those are ALIASES now and are folded, not
+        // refused. This has to be a name nothing sensibly maps to.
+        { ...GOOD_DISCOVERY, title: "bad category", category: "banana" },
         { ...GOOD_DISCOVERY, title: "bad severity", severity: "catastrophic" },
-        { ...GOOD_DISCOVERY, title: "no line", line: undefined },
+        { ...GOOD_DISCOVERY, title: "no line", line: "x" },
       ]),
     );
 
@@ -94,11 +96,50 @@ describe("investigate --apply surfaces every refused row instead of dropping it"
     expect(out).toMatch(/dropped 3/);
     // The reason must name BOTH the field and the value received — "invalid row"
     // would leave the author bisecting the file.
-    expect(out).toMatch(/row 1: category "ssrf" is not one of/);
+    expect(out).toMatch(/row 1: category "banana" is not one of/);
     expect(out).toMatch(/row 2: severity "catastrophic" is not one of/);
-    expect(out).toMatch(/row 3: line missing — expected an integer ≥ 1/);
+    expect(out).toMatch(/row 3: line "x" — expected an integer ≥ 0/);
     // …and the valid one really landed.
     expect(loadDossier(run).findings.some((f) => f.title === "IDOR on invoice")).toBe(true);
+  });
+
+  it("folds a class name onto the vocabulary instead of refusing it, and says so", () => {
+    // The defect this exists for: an auditor files what the bug IS ("xss"), the
+    // vocabulary stores how it was SURFACED ("taint"), and 11 of 12 real
+    // findings were dropped at that mismatch while the command exited 0.
+    const run = seed();
+    const file = join(run, "INVESTIGATE.json");
+    writeFileSync(
+      file,
+      JSON.stringify([
+        { ...GOOD_DISCOVERY, title: "stored XSS in the parser", category: "xss" },
+        { ...GOOD_DISCOVERY, title: "unbounded fuzzy match", category: "dos", line: 2 },
+        { ...GOOD_DISCOVERY, title: "raw error to the client", category: "disclosure", line: 3 },
+      ]),
+    );
+
+    const { code, out } = capture(() => runInvestigate(parseArgs(["--run", run, "--apply", file, "--repo", REPO])));
+
+    expect(code).toBe(0);
+    expect(out).toMatch(/ingested 3 new/);
+    expect(out).toMatch(/dropped 0/);
+    // Folded, never silently: each rewrite is named.
+    expect(out).toMatch(/category "xss" folded to "taint"/);
+    expect(out).toMatch(/category "dos" folded to "other"/);
+    const cats = loadDossier(run).findings.filter((f) => f.tool === "ultrasec-ai").map((f) => f.category);
+    expect(cats).toContain("taint");
+    expect(cats).toContain("other");
+  });
+
+  it("warns in plain terms when most of a batch is refused", () => {
+    const run = seed();
+    const file = join(run, "INVESTIGATE.json");
+    writeFileSync(file, JSON.stringify([GOOD_DISCOVERY, { ...GOOD_DISCOVERY, category: "banana" }, { ...GOOD_DISCOVERY, severity: "banana" }]));
+
+    const { out } = capture(() => runInvestigate(parseArgs(["--run", run, "--apply", file, "--repo", REPO])));
+
+    expect(out).toMatch(/2 of 3 discoveries were refused/);
+    expect(out).toMatch(/no later stage will report them missing/);
   });
 
   it("--strict turns a partial fold into a failure so CI can refuse it", () => {

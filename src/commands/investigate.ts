@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
-import { surfaceDropped } from "../apply-parse.js";
+import { formatNormalized, surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { scanRepo } from "../scan.js";
 import { buildAttackSurface } from "../map.js";
@@ -45,6 +45,7 @@ export function runInvestigate(args: ParsedArgs): number {
           {
             ingested: res.ingested,
             folded: res.folded,
+            normalized: parsed.normalized ?? [],
             rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })),
             dropped: parsed.dropped,
           },
@@ -58,8 +59,20 @@ export function runInvestigate(args: ParsedArgs): number {
     println(
       `  ingested ${res.ingested} new ${"ultrasec-ai"} finding(s) · folded ${res.folded} into existing · rejected ${res.rejected.length} · dropped ${parsed.dropped.length}`,
     );
+    for (const line of formatNormalized(parsed.normalized ?? [])) println(line);
     for (const r of res.rejected) println(`  ✗ rejected "${r.discovery.title}": ${r.reason}`);
     const code = surfaceDropped(parsed.dropped, strict, println);
+    // A refused discovery is unrecoverable in a way a refused verdict is not: a
+    // verdict left un-applied leaves the finding `open`, and `check --semantic`
+    // will not pass until someone rules on it. A dropped discovery becomes a
+    // finding that never existed — nothing downstream ever notices. So when most
+    // of a batch is refused, say so in those terms rather than leaving it to a
+    // count the reader has to compare against the file they submitted.
+    const submitted = parsed.rows.length + parsed.dropped.length;
+    if (parsed.dropped.length > 0 && parsed.dropped.length * 2 >= submitted)
+      println(
+        `  ⚠ ${parsed.dropped.length} of ${submitted} discoveries were refused — those findings do NOT exist in the dossier and no later stage will report them missing. Fix the rows above and re-apply.`,
+      );
     if (res.ingested) println(`  next: \`ultrasec dossier <id> --run ${run}\` then \`verify\` — adjudicate them like any candidate.`);
     return code;
   }

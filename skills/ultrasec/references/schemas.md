@@ -18,11 +18,23 @@ Two rules apply to everything below:
 |---|---|
 | `severity` | `critical` · `high` · `medium` · `low` · `info` |
 | `confidence` | `high` · `medium` · `low` |
-| `category` | `taint` · `sast` · `dep` · `secret` · `config` · `authz` · `crypto` · `logs` · `privacy` · `other` |
+| `category` | `taint` · `sast` · `dep` · `secret` · `config` · `authz` · `crypto` · `logs` · `privacy` · `other` (a vulnerability-class name is folded — see below) |
 | `status` | `open` · `confirmed` · `needs-human` · `dismissed` |
 | verify `verdict` | `supported` · `partial` · `unsupported` · `refuted` |
 | triage `verdict` | `noise` · `keep` |
 | revalidate `verdict` | `still-valid` · `fixed` · `false-positive` · `uncertain` |
+
+`category` records **how** a finding was surfaced, not what class of bug it is. An auditor filing
+a discovery naturally writes the class — `xss`, `ssrf`, `idor`, `dos`, `disclosure`,
+`input-validation` — so those are accepted as **aliases** and folded onto the vocabulary, with
+every rewrite reported (`↷ row 3: category "xss" folded to "taint"`). Anything that is untrusted
+input reaching a dangerous operation folds to `taint`; `idor`/`csrf`/`access-control` to `authz`;
+classes that assert no data flow (`dos`, `disclosure`, `robustness`, `business-logic`) to `other`.
+A name nothing maps to is still refused, and names the accepted set.
+
+This is not cosmetic. Before it, `investigate --apply` refused every one of those names and
+exited 0 — on the first real audit that silently dropped 11 of 12 manual findings, in the one
+stage that exists to carry the classes the engine cannot enumerate.
 
 **How a verdict becomes a status** (`nextStatus`, shared by every adjudicating stage — this is
 the conservative gate, and it is the same code for manual, powered and fan-out runs):

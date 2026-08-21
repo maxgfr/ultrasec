@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync, readdirSync, statSync } from "n
 import { join, resolve } from "node:path";
 import { countBySeverity, writeDossier, type Dossier } from "./store.js";
 import type { Finding } from "./types.js";
-import type { DroppedRow, ParseResult } from "./apply-parse.js";
+import type { DroppedRow, NormalizedRow, ParseResult } from "./apply-parse.js";
 
 // The shared stage harness. Every new AI stage (context/triage/investigate/
 // revalidate/narrative) follows the proven `verify` shape: the engine EMITS a
@@ -92,6 +92,7 @@ export function readApply<T>(applyPath: string, dirRegex: RegExp, parse: (raw: s
   const files = collectApplyFiles(applyPath, dirRegex);
   const rows: T[] = [];
   const dropped: DroppedRow[] = [];
+  const normalized: NormalizedRow[] = [];
   for (const f of files) {
     let parsed: ParseResult<T>;
     try {
@@ -103,8 +104,11 @@ export function readApply<T>(applyPath: string, dirRegex: RegExp, parse: (raw: s
     // Only qualify by file when the fold spans several — a single-file apply
     // reads better without the path repeated on every line.
     dropped.push(...parsed.dropped.map((d) => (files.length > 1 ? { ...d, file: f } : d)));
+    // Carry the rewrites too, or a multi-file fold reports what it refused and
+    // stays silent about what it changed.
+    normalized.push(...(parsed.normalized ?? []));
   }
-  return { rows, dropped };
+  return { rows, dropped, ...(normalized.length ? { normalized } : {}) };
 }
 
 /**

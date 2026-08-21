@@ -45,6 +45,135 @@ export type Confidence = (typeof CONFIDENCES)[number];
 export const CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "privacy", "other"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
+/**
+ * Vulnerability-class names an auditor reaches for, folded onto the closed
+ * `CATEGORIES` vocabulary above.
+ *
+ * `category` records HOW a finding was surfaced. An auditor filing a discovery
+ * names WHAT the bug is — "xss", "ssrf", "idor", "disclosure" — and every one of
+ * those was refused. On the first real audit that cost 11 of 12 manual findings:
+ * `investigate` is the documented route for exactly the classes the engine
+ * cannot enumerate (sanitizer bypasses, business logic, privacy), and the door
+ * it offers them is a vocabulary that does not contain their names. The command
+ * exited 0 while dropping them.
+ *
+ * A closed vocabulary is still right for storage — `category` keys dedup
+ * (`dedupKey`), correlation and ASVS coverage scoring, so it cannot be free
+ * text. The fix is to accept the names at the door and fold them, reporting what
+ * each one became rather than refusing the row.
+ *
+ * Mappings follow how the ENGINE files the same shape: everything that is
+ * "untrusted input reaches a dangerous operation" is `taint`, because that is
+ * what the catalog's own sink kinds produce. Classes that assert no data-flow
+ * (`dos`, `disclosure`, `robustness`) go to `other` rather than borrowing a
+ * flow they have not shown.
+ */
+export const CATEGORY_ALIASES: Readonly<Record<string, Category>> = {
+  // Untrusted input reaching a dangerous operation — the engine's `taint` shape.
+  xss: "taint",
+  "dom-xss": "taint",
+  "stored-xss": "taint",
+  "reflected-xss": "taint",
+  ssrf: "taint",
+  sqli: "taint",
+  "sql-injection": "taint",
+  "nosql-injection": "taint",
+  injection: "taint",
+  "command-injection": "taint",
+  "code-injection": "taint",
+  rce: "taint",
+  "path-traversal": "taint",
+  "directory-traversal": "taint",
+  lfi: "taint",
+  rfi: "taint",
+  ssti: "taint",
+  xxe: "taint",
+  "prototype-pollution": "taint",
+  "open-redirect": "taint",
+  "header-injection": "taint",
+  "crlf-injection": "taint",
+  "response-splitting": "taint",
+  "input-validation": "taint",
+  validation: "taint",
+  deserialization: "taint",
+  "insecure-deserialization": "taint",
+  "mass-assignment": "taint",
+  "ldap-injection": "taint",
+  "xpath-injection": "taint",
+  "csv-injection": "taint",
+  "prompt-injection": "taint",
+  redos: "taint",
+  // Missing or wrong authorization.
+  idor: "authz",
+  "access-control": "authz",
+  "broken-access-control": "authz",
+  authorization: "authz",
+  authentication: "authz",
+  authn: "authz",
+  "privilege-escalation": "authz",
+  csrf: "authz",
+  // Cryptography.
+  "weak-crypto": "crypto",
+  cryptography: "crypto",
+  tls: "crypto",
+  // Credentials.
+  credentials: "secret",
+  "hardcoded-secret": "secret",
+  "credential-leak": "secret",
+  // Deployment / hardening / third-party code.
+  misconfiguration: "config",
+  hardening: "config",
+  "security-headers": "config",
+  cors: "config",
+  csp: "config",
+  iac: "config",
+  dependency: "dep",
+  "vulnerable-dependency": "dep",
+  cve: "dep",
+  advisory: "dep",
+  "supply-chain": "dep",
+  logging: "logs",
+  "log-injection": "logs",
+  // Personal data.
+  gdpr: "privacy",
+  rgpd: "privacy",
+  pii: "privacy",
+  "data-protection": "privacy",
+  tracking: "privacy",
+  consent: "privacy",
+  // Real classes with no data-flow claim and no better home.
+  dos: "other",
+  "denial-of-service": "other",
+  "resource-exhaustion": "other",
+  disclosure: "other",
+  "information-disclosure": "other",
+  "info-leak": "other",
+  "error-handling": "other",
+  robustness: "other",
+  abuse: "other",
+  "rate-limit": "other",
+  "rate-limiting": "other",
+  "business-logic": "other",
+  race: "other",
+  "race-condition": "other",
+};
+
+/**
+ * Resolve a submitted category to a member of `CATEGORIES`, or `undefined` when
+ * nothing sensible maps. Case- and separator-insensitive, so `"SQL Injection"`,
+ * `"sql_injection"` and `"sql-injection"` all land the same way.
+ *
+ * Returns the canonical value AND whether it was folded, because a silent
+ * rewrite is its own kind of data loss — the caller reports every fold.
+ */
+export function normalizeCategory(value: unknown): { category: Category; folded: boolean } | undefined {
+  if (typeof value !== "string") return undefined;
+  const key = value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  if ((CATEGORIES as readonly string[]).includes(key)) return { category: key as Category, folded: key !== value };
+  const alias = Object.prototype.hasOwnProperty.call(CATEGORY_ALIASES, key) ? CATEGORY_ALIASES[key] : undefined;
+  return alias ? { category: alias, folded: true } : undefined;
+}
+
 // Lifecycle of a finding through the conservative verify gate. A candidate is
 // `open` until adjudicated; a true positive becomes `confirmed`; a proven false
 // positive is `dismissed`; anything uncertain (esp. high-severity) stays
