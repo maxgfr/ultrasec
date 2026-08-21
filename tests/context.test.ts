@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +32,37 @@ describe("buildContextScaffold", () => {
 
   it("captures the parameterized-query sanitizer in db.js", () => {
     expect(s.sanitizers.some((x) => x.file === "src/db.js" && x.kind === "sql")).toBe(true);
+  });
+
+  it("reports the placeholder rule only where a SQL sink actually is", () => {
+    // `?`, `:name` and `@scope` are ordinary TypeScript punctuation. Matching
+    // them anywhere made 3% of every line an "SQL sanitizer" — and because that
+    // rule is first in the catalog and the loop breaks, it also shadowed every
+    // real sanitizer behind it. On a real audit all 40 slots went to
+    // `.husky/`, `lighthouserc.cjs` and `app/a…`, and the repo's only HTML
+    // sanitizer never appeared.
+    const sql = s.sanitizers.filter((x) => x.kind === "sql");
+    for (const hit of sql) {
+      const line = readFileSync(join(FIXTURE, hit.file), "utf8").split(/\r?\n/)[hit.line - 1]!;
+      expect(line, `${hit.file}:${hit.line}`).toMatch(/query|execute|prepare/i);
+    }
+  });
+
+  it("keeps the real sanitizer when the cap bites, instead of an alphabetical prefix", () => {
+    // The defect, reproduced: 60 alphabetically-early files matching only the
+    // generic type-coercion rule, and the project's ACTUAL sanitizer in a file
+    // sorting last. A path-sorted `slice(0, 40)` returns a prefix, not a sample,
+    // so on a real audit all 40 slots went to `.husky/`, `lighthouserc.cjs` and
+    // `app/a…` while the repo's only HTML sanitizer — the subject of two of its
+    // five high findings — never appeared at all.
+    const repo = mkdtempSync(join(tmpdir(), "usec-sanitizer-"));
+    for (let i = 0; i < 60; i++) {
+      writeFileSync(join(repo, `aaa${String(i).padStart(3, "0")}.js`), `const n = parseInt(process.argv[2], 10);\nmodule.exports = n;\n`);
+    }
+    writeFileSync(join(repo, "zzz-sanitizer.js"), `const DOMPurify = require("dompurify");\nmodule.exports = (h) => DOMPurify.sanitize(h);\n`);
+
+    const sanitizers = scaffoldOf(repo).sanitizers;
+    expect(sanitizers.some((x) => x.file === "zzz-sanitizer.js")).toBe(true);
   });
 
   it("infers an HTTP trust boundary and an auth note", () => {

@@ -4,7 +4,7 @@ import { scanRepo } from "../src/scan.js";
 import { buildGraph } from "../src/graph.js";
 import { enumerateTaint } from "../src/taint.js";
 import { enumerateSinkCandidates } from "../src/sinks.js";
-import { findSinks, UNRESOLVED_RECEIVER } from "../src/catalog.js";
+import { findSinks, UNRESOLVED_RECEIVER, findTextSinks, isConstantAssignment } from "../src/catalog.js";
 import { langForFile } from "../src/lang.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
@@ -193,5 +193,70 @@ describe("requireModule matches case-insensitively", () => {
   it("still matches when the extractor lowercases it", () => {
     const hits = findSinks(cs, [{ callee: "Start", receiver: "Process", line: 1 }], undefined, [{ spec: "system.diagnostics" }]);
     expect(hits.some((h) => h.kind === "command")).toBe(true);
+  });
+});
+
+const js = langForFile("x.js")!;
+
+describe("window.open is navigation, not a filesystem read", () => {
+  // `open` sits in the CWE-22 path rule, which declares no `receivers` — and the
+  // receiver check is `if (rule.receivers && c.receiver && …)`, inert when a rule
+  // has none. So `window.open(url)` matched "Path traversal / archive extraction
+  // (zip-slip)" at HIGH, and the first-match `break` blocked any better rule.
+  it("classifies window.open as CWE-601, not CWE-22", () => {
+    const hits = findSinks(js, [{ callee: "open", receiver: "window", line: 1 }]);
+    expect(hits.map((h) => h.cwe)).toEqual(["CWE-601"]);
+    expect(hits[0]!.kind).toBe("redirect");
+  });
+
+  it("covers the other global receivers", () => {
+    for (const receiver of ["globalThis", "self", "top", "parent"]) {
+      expect(findSinks(js, [{ callee: "open", receiver, line: 1 }])[0]!.cwe, receiver).toBe("CWE-601");
+    }
+  });
+
+  it("still treats a filesystem open as path traversal", () => {
+    const hits = findSinks(js, [{ callee: "open", receiver: "fs", line: 1 }]);
+    expect(hits[0]!.cwe).toBe("CWE-22");
+  });
+
+  it("a bare open() is still path traversal — the new rule requires a receiver", () => {
+    expect(findSinks(js, [{ callee: "open", line: 1 }])[0]!.cwe).toBe("CWE-22");
+  });
+});
+
+describe("a URL/HTML attribute assigned a CONSTANT is not a sink", () => {
+  // Reachability is "a source at or above the sink line in the same file", so a
+  // literal `script.src = "https://…"` was reported as DOM XSS because an
+  // unrelated `location.hash` read appeared earlier in the file.
+  it("drops a literal src assignment", () => {
+    expect(findTextSinks(js, 'script.src = "https://www.googletagmanager.com/gtag/js?id=DC-3048978";')).toEqual([]);
+  });
+
+  it("keeps a dynamic one", () => {
+    expect(findTextSinks(js, "script.src = userUrl;")).toHaveLength(1);
+    expect(findTextSinks(js, "script.src = `${base}/x.js`;")).toHaveLength(1);
+    expect(findTextSinks(js, 'script.src = "https://cdn/" + name;')).toHaveLength(1);
+  });
+
+  it("drops a literal innerHTML but keeps an interpolated one", () => {
+    expect(findTextSinks(js, 'el.innerHTML = "<b>static</b>";')).toEqual([]);
+    expect(findTextSinks(js, "el.innerHTML = `<b>${name}</b>`;")).toHaveLength(1);
+  });
+
+  // The gate must NOT reach the framework rule: there the quotes delimit an HTML
+  // attribute and its contents are the expression.
+  it("never drops a Vue/Angular template binding", () => {
+    expect(findTextSinks(js, '<div v-html="userHtml"></div>')).toHaveLength(1);
+    expect(findTextSinks(js, '<div [innerHTML]="userHtml"></div>')).toHaveLength(1);
+  });
+
+  it("keeps anything it cannot prove constant", () => {
+    // value continued on the next line
+    expect(findTextSinks(js, "script.src =")).toHaveLength(1);
+    expect(isConstantAssignment("")).toBe(false);
+    expect(isConstantAssignment(' "a" + b')).toBe(false);
+    expect(isConstantAssignment(" `${x}`")).toBe(false);
+    expect(isConstantAssignment(' "plain";')).toBe(true);
   });
 });

@@ -19132,6 +19132,29 @@ var SINKS = [
     note: "Tainted data evaluated as code. Almost never safe; verify the argument is a constant."
   },
   {
+    // BEFORE the `path` rule, which also claims `open`.
+    //
+    // `window.open(url)` is navigation, not a filesystem read, but the path rule
+    // lists `open` with no `receivers`, and the receiver check in `findSinks` is
+    // written `if (rule.receivers && c.receiver && …)` — inert when a rule
+    // declares no receivers. So `window.open` matched CWE-22 "Path traversal /
+    // archive extraction (zip-slip)" at HIGH, and the `break` on first match
+    // stopped any better rule from ever seeing it. Observed on a real repo
+    // opening a legifrance.gouv.fr tab with a fixed host and URLSearchParams.
+    //
+    // Routed to CWE-601 instead: if the host IS attacker-controlled the bug is
+    // an open redirect / tabnabbing, which is the question worth asking.
+    kind: "redirect",
+    cwe: "CWE-601",
+    severity: "medium",
+    languages: ["javascript"],
+    callees: ["open"],
+    receivers: ["window", "globalThis", "self", "top", "parent"],
+    requireReceiver: true,
+    title: "Open redirect / reverse tabnabbing via window.open",
+    note: "Tainted data used as a navigation target. Allow-list the destination host (or permit only relative paths), and keep `noopener,noreferrer` on the feature string."
+  },
+  {
     kind: "path",
     cwe: "CWE-22",
     severity: "high",
@@ -19511,6 +19534,7 @@ var TEXT_SINKS = [
     severity: "high",
     languages: ["javascript"],
     re: /\.\s*(?:innerHTML|outerHTML)\s*(?:\+)?=(?!=)/,
+    requiresDynamicValue: true,
     label: "innerHTML",
     title: "DOM XSS (HTML sink)",
     note: "Tainted data assigned to innerHTML/outerHTML executes any markup it contains. Assign via textContent, or sanitize with DOMPurify and a Trusted Types policy."
@@ -19531,11 +19555,19 @@ var TEXT_SINKS = [
     severity: "medium",
     languages: ["javascript"],
     re: /\.\s*(?:src|href|action|formaction|srcdoc)\s*=(?!=)/,
+    requiresDynamicValue: true,
     label: "URL attribute",
     title: "DOM XSS via a URL attribute",
     note: "Tainted data assigned to src/href executes when the scheme is `javascript:` or `data:`. Allow-list the scheme before assigning."
   }
 ];
+var PURE_QUOTED = /^(['"])(?:\\.|(?!\1)[^\\])*\1$/;
+function isConstantAssignment(rhs) {
+  const v = rhs.trim().replace(/[;,]\s*$/, "").trim();
+  if (!v) return false;
+  if (v.startsWith("`") && v.endsWith("`") && v.length >= 2) return !v.includes("${");
+  return PURE_QUOTED.test(v);
+}
 function findTextSinks(lang, content) {
   const out2 = [];
   const lines5 = content.split(/\r?\n/);
@@ -19543,7 +19575,9 @@ function findTextSinks(lang, content) {
     const line = lines5[i2];
     for (const rule of TEXT_SINKS) {
       if (!appliesTo(rule.languages, lang.id)) continue;
-      if (!rule.re.test(line)) continue;
+      const m = rule.re.exec(line);
+      if (!m) continue;
+      if (rule.requiresDynamicValue && isConstantAssignment(line.slice(m.index + m[0].length))) continue;
       out2.push({ line: i2 + 1, callee: rule.label, kind: rule.kind, cwe: rule.cwe, severity: rule.severity, title: rule.title, note: rule.note });
       break;
     }
@@ -19911,10 +19945,16 @@ function findSources(lang, content, rel2) {
   return out2;
 }
 var SANITIZERS = [
-  { kind: "sql", languages: ["*"], re: /\?|\$\d+|:\w+|%s|@\w+/, note: "looks parameterized (placeholder present)" },
+  // Placeholder shapes: meaningful ON a query line, meaningless anywhere else —
+  // `?`, `:name` and `@scope` are ordinary TypeScript punctuation.
+  { kind: "sql", languages: ["*"], re: /\?|\$\d+|:\w+|%s|@\w+/, note: "looks parameterized (placeholder present)", sinkLineOnly: true },
   { kind: "command", languages: ["*"], re: /\bexecFile\b|\bexecvp?\b|shlex\.quote|escapeshellarg/, note: "argv-array / quoting present" },
   { kind: "path", languages: ["*"], re: /\bbasename\b|\brealpath\b|secure_filename|path\.resolve|startsWith\(/, note: "path-confinement helper present" },
-  { kind: "xss", languages: ["*"], re: /\bescape(?:Html)?\b|sanitize|DOMPurify|bleach|markupsafe|escapeHTML/, note: "escaping/sanitizer present" },
+  // `escape(?:Html)?\b` could not match the camelCase family (`escapeAttrValue`),
+  // and nothing looked for the `xss` library at all — so on a repo whose only
+  // HTML sanitizer is `xssWrapper` wrapping `xss@1.0.15`, the brief that exists
+  // to answer "which sanitizers does this project use?" named none of it.
+  { kind: "xss", languages: ["*"], re: /\bescape[A-Z]?\w*\b|sanitize|DOMPurify|bleach|markupsafe|\bxss[A-Za-z]*\b/, note: "escaping/sanitizer present" },
   { kind: "deserialize", languages: ["*"], re: /safe_load|safeLoad|JSON\.parse/, note: "safe loader present" },
   { kind: "nosql", languages: ["*"], re: /mongo-?[sS]anitize|sanitizeFilter|\$eq\b/, note: "operator-stripping sanitizer present" },
   {
@@ -19951,7 +19991,13 @@ var SANITIZERS = [
     re: /\bALLOWED\b|allowlist|allowList|\bin\s+\{|\bMap\s*\(|hasOwnProperty|\bdict\s*\[/,
     note: "allow-list lookup present"
   },
-  { kind: "xpath", languages: ["*"], re: /setXPathVariable|XPathVariableResolver|\bbindVariable\b|\$\w+/, note: "XPath variable binding present" },
+  {
+    kind: "xpath",
+    languages: ["*"],
+    re: /setXPathVariable|XPathVariableResolver|\bbindVariable\b|\$\w+/,
+    note: "XPath variable binding present",
+    sinkLineOnly: true
+  },
   {
     kind: "massassign",
     languages: ["*"],
@@ -23541,6 +23587,45 @@ function inferTrustBoundaries(surface, authCount) {
   );
   return out2;
 }
+var sinkIndexCache = /* @__PURE__ */ new WeakMap();
+function sinkKindsAt(fileScan, spec, lines5) {
+  const cached = sinkIndexCache.get(fileScan);
+  if (cached) return cached;
+  const index = /* @__PURE__ */ new Map();
+  const hits = [...findSinks(spec, fileScan.calls ?? [], void 0, fileScan.imports), ...findTextSinks(spec, lines5.join("\n"))];
+  for (const h of hits) {
+    let set = index.get(h.line);
+    if (!set) index.set(h.line, set = /* @__PURE__ */ new Set());
+    set.add(h.kind);
+  }
+  sinkIndexCache.set(fileScan, index);
+  return index;
+}
+function sanitizerWeight(kind) {
+  return kind === "*" ? 0 : 1;
+}
+function breadthFirstByKind(ranked) {
+  const rounds = /* @__PURE__ */ new Map();
+  for (const x of ranked) (rounds.get(x.kind) ?? rounds.set(x.kind, []).get(x.kind)).push(x);
+  const out2 = [];
+  for (let i2 = 0; out2.length < ranked.length; i2++) {
+    let any = false;
+    for (const list of rounds.values()) {
+      const at = list[i2];
+      if (at) {
+        out2.push(at);
+        any = true;
+      }
+    }
+    if (!any) break;
+  }
+  return out2;
+}
+function capBySite(items, weight, bySite) {
+  const ranked = items.slice().sort((a, b) => weight(b) - weight(a) || bySite(a, b));
+  const spread = ranked[0]?.kind === void 0 ? ranked : breadthFirstByKind(ranked);
+  return spread.slice(0, MAX_SCAFFOLD).sort(bySite);
+}
 function buildContextScaffold(repo, scan2, surface) {
   const frameworks = detectFrameworks(repo);
   const rank = new Map(surface.byFile.map((f) => [f.file, f.score]));
@@ -23561,6 +23646,7 @@ function buildContextScaffold(repo, scan2, surface) {
   ).slice(0, MAX_SCAFFOLD_ENTRIES).sort((a, b) => byStr2(a.file, b.file) || a.line - b.line || byStr2(a.kind, b.kind));
   const authMiddleware = [];
   const sanitizers = [];
+  const seenSanitizer = /* @__PURE__ */ new Set();
   for (const fileScan of scan2.files) {
     const spec = langForFile(fileScan.rel);
     if (!spec) continue;
@@ -23571,8 +23657,14 @@ function buildContextScaffold(repo, scan2, surface) {
       if (am) authMiddleware.push({ file: fileScan.rel, line: i2 + 1, hint: am[0] });
       for (const rule of SANITIZERS) {
         if (!appliesTo2(rule.languages, spec.id)) continue;
+        if (rule.sinkLineOnly && !sinkKindsAt(fileScan, spec, lines5).get(i2 + 1)?.has(rule.kind))
+          continue;
         if (rule.re.test(line)) {
-          sanitizers.push({ file: fileScan.rel, line: i2 + 1, kind: rule.kind });
+          const key = `${fileScan.rel}\0${rule.kind}`;
+          if (!seenSanitizer.has(key)) {
+            seenSanitizer.add(key);
+            sanitizers.push({ file: fileScan.rel, line: i2 + 1, kind: rule.kind });
+          }
           break;
         }
       }
@@ -23582,8 +23674,13 @@ function buildContextScaffold(repo, scan2, surface) {
   return {
     frameworks,
     entryPoints,
-    authMiddleware: authMiddleware.sort(bySite).slice(0, MAX_SCAFFOLD),
-    sanitizers: sanitizers.sort(bySite).slice(0, MAX_SCAFFOLD),
+    authMiddleware: capBySite(authMiddleware, () => 0, bySite),
+    // Rank BEFORE capping, for the same reason the entry-point brief does: a
+    // path-sorted `slice` is an alphabetical PREFIX, not a sample. On a real
+    // audit all 40 slots went to `.husky/`, `lighthouserc.cjs` and `app/a…`,
+    // while the repo's only HTML sanitizer — the subject of two of its five high
+    // findings — never appeared at all.
+    sanitizers: capBySite(sanitizers, (x) => sanitizerWeight(x.kind), bySite),
     trustBoundaries: inferTrustBoundaries(surface, authMiddleware.length)
   };
 }

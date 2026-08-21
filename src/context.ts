@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { findManifestDirs, readText } from "./walk.js";
-import { langForFile } from "./lang.js";
-import { SANITIZERS } from "./catalog.js";
+import { langForFile, type LangSpec } from "./lang.js";
+import { SANITIZERS, findSinks, findTextSinks } from "./catalog.js";
 import type { RepoScan } from "./scan.js";
 import type { AttackSurface } from "./map.js";
 import { entryWeight } from "./map.js";
@@ -186,6 +186,73 @@ function inferTrustBoundaries(surface: AttackSurface, authCount: number): string
  * a re-read of each language file for auth-middleware markers. Deterministic +
  * bounded (each list capped + id-sorted).
  */
+/**
+ * Line number → the sink kinds present on that line, for one file.
+ *
+ * Memoized per file and built lazily: most files never reach a `sinkLineOnly`
+ * rule, and the scaffold already re-reads every file once.
+ */
+const sinkIndexCache = new WeakMap<object, Map<number, Set<string>>>();
+function sinkKindsAt(fileScan: RepoScan["files"][number], spec: LangSpec, lines: string[]): Map<number, Set<string>> {
+  const cached = sinkIndexCache.get(fileScan);
+  if (cached) return cached;
+  const index = new Map<number, Set<string>>();
+  const hits = [...findSinks(spec, fileScan.calls ?? [], undefined, fileScan.imports), ...findTextSinks(spec, lines.join("\n"))];
+  for (const h of hits) {
+    let set = index.get(h.line);
+    if (!set) index.set(h.line, (set = new Set()));
+    set.add(h.kind);
+  }
+  sinkIndexCache.set(fileScan, index);
+  return index;
+}
+
+/**
+ * A specific sanitizer outranks the generic one. `*` is the catch-all "type
+ * coercion / validation present" rule, which matches `parseInt` and `Number(` —
+ * true of almost any file, and useless as a "which sanitizers does this project
+ * use?" answer next to a real `DOMPurify` or `escapeHtml`.
+ */
+function sanitizerWeight(kind: string): number {
+  return kind === "*" ? 0 : 1;
+}
+
+/**
+ * Re-order so every KIND's first site comes before any kind's second.
+ *
+ * Same argument as `breadthFirstByFile` in map.ts, one axis over: this list
+ * answers "which sanitizers does this project use?", so it must cover the kinds
+ * before it covers repetitions of one. Ranked by weight then path, the cap was
+ * still an alphabetical prefix within the specific tier — 40 slots went to
+ * `path` and `redos` hits under `app/` and `playwright.config.ts`, and the
+ * project's actual HTML sanitizer, three directories later in the alphabet,
+ * never appeared.
+ */
+function breadthFirstByKind<T extends { kind: string }>(ranked: T[]): T[] {
+  const rounds = new Map<string, T[]>();
+  for (const x of ranked) (rounds.get(x.kind) ?? rounds.set(x.kind, []).get(x.kind)!).push(x);
+  const out: T[] = [];
+  for (let i = 0; out.length < ranked.length; i++) {
+    let any = false;
+    for (const list of rounds.values()) {
+      const at = list[i];
+      if (at) {
+        out.push(at);
+        any = true;
+      }
+    }
+    if (!any) break;
+  }
+  return out;
+}
+
+/** Rank, spread across kinds, cap, then restore path order for presentation. */
+function capBySite<T extends { file: string; line: number; kind?: string }>(items: T[], weight: (x: T) => number, bySite: (a: T, b: T) => number): T[] {
+  const ranked = items.slice().sort((a, b) => weight(b) - weight(a) || bySite(a, b));
+  const spread = ranked[0]?.kind === undefined ? ranked : breadthFirstByKind(ranked as (T & { kind: string })[]);
+  return spread.slice(0, MAX_SCAFFOLD).sort(bySite);
+}
+
 export function buildContextScaffold(repo: string, scan: RepoScan, surface: AttackSurface): ContextScaffold {
   const frameworks = detectFrameworks(repo);
 
@@ -228,6 +295,7 @@ export function buildContextScaffold(repo: string, scan: RepoScan, surface: Atta
 
   const authMiddleware: { file: string; line: number; hint: string }[] = [];
   const sanitizers: { file: string; line: number; kind: string }[] = [];
+  const seenSanitizer = new Set<string>();
   for (const fileScan of scan.files) {
     const spec = langForFile(fileScan.rel);
     if (!spec) continue;
@@ -238,8 +306,26 @@ export function buildContextScaffold(repo: string, scan: RepoScan, surface: Atta
       if (am) authMiddleware.push({ file: fileScan.rel, line: i + 1, hint: am[0] });
       for (const rule of SANITIZERS) {
         if (!appliesTo(rule.languages, spec.id)) continue;
+        // A rule that only means something ON a sink line gets tested against
+        // one. `?` is a parameterized query on a `query()` line and ordinary
+        // punctuation everywhere else — and since that rule is first in the
+        // catalog and the loop `break`s, letting it match anywhere claimed 3% of
+        // every TypeScript line AND shadowed every real sanitizer behind it.
+        if (
+          rule.sinkLineOnly &&
+          !sinkKindsAt(fileScan, spec, lines)
+            .get(i + 1)
+            ?.has(rule.kind)
+        )
+          continue;
         if (rule.re.test(line)) {
-          sanitizers.push({ file: fileScan.rel, line: i + 1, kind: rule.kind });
+          // One row per (file, kind), lowest line — ten `path` hits in one file
+          // say nothing the first one did not, and they used to eat the budget.
+          const key = `${fileScan.rel}\u0000${rule.kind}`;
+          if (!seenSanitizer.has(key)) {
+            seenSanitizer.add(key);
+            sanitizers.push({ file: fileScan.rel, line: i + 1, kind: rule.kind });
+          }
           break; // first matching sanitizer per line
         }
       }
@@ -250,8 +336,13 @@ export function buildContextScaffold(repo: string, scan: RepoScan, surface: Atta
   return {
     frameworks,
     entryPoints,
-    authMiddleware: authMiddleware.sort(bySite).slice(0, MAX_SCAFFOLD),
-    sanitizers: sanitizers.sort(bySite).slice(0, MAX_SCAFFOLD),
+    authMiddleware: capBySite(authMiddleware, () => 0, bySite),
+    // Rank BEFORE capping, for the same reason the entry-point brief does: a
+    // path-sorted `slice` is an alphabetical PREFIX, not a sample. On a real
+    // audit all 40 slots went to `.husky/`, `lighthouserc.cjs` and `app/a…`,
+    // while the repo's only HTML sanitizer — the subject of two of its five high
+    // findings — never appeared at all.
+    sanitizers: capBySite(sanitizers, (x) => sanitizerWeight(x.kind), bySite),
     trustBoundaries: inferTrustBoundaries(surface, authMiddleware.length),
   };
 }
