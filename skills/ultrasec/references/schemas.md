@@ -97,6 +97,7 @@ Written by `scan`/`import`, rewritten by every `--apply`. The dossier's core rec
 | `fixedIn` | commit recorded by `revalidate --apply` on a `fixed` verdict. |
 | `brocard` | the named ground for a `refuted` verdict (see the list below). Optional and never blocking, but it is the ONLY field `check --semantic` reads as a ground — a refutation argued in `note` still reports as unargued. |
 | `noise` | the noise-by-construction class the finding was DEMOTED under (never dismissed). Engine-set, re-derived every scan. See below. |
+| `flow` | `{assigned?, tainted?}` — for an assignment sink the value assigned, plus the bindings the def-use walk followed. Evidence for the **Reachability evidence** block; the engine never acts on it. Note the walk is PER FILE, so on a cross-file path the assigned value is a parameter and "no tracked binding" is expected, not suspicious. |
 | `atCommit` | set when the finding came from a scan of git HISTORY: the commit its `file:line` belongs to. `check` resolves the citation against THAT tree, so a secret in a file since deleted is still graded — and a fabricated path still fails. |
 | `priorAnalysis` | `{tool, reasoning?, mitigationsChecked?, revalidationVerdict?}` ingested from an upstream agent. A **signal**, never a status. |
 
