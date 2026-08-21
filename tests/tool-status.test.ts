@@ -41,9 +41,22 @@ describe("tool status rendering", () => {
     expect(renderDossierMd(dossier(manifest()))).not.toContain("skipped");
   });
 
-  it("REPORT.md lists tool outcomes when present and not otherwise", () => {
-    expect(renderReport(dossier(manifest({ toolStatus: STATUS })))).toContain("osv-scanner: skipped");
-    expect(renderReport(dossier(manifest()))).not.toContain("skipped");
+  // REPORT.md SUMMARIZES where DOSSIER.md enumerates. Printing all 21 adapters
+  // verbatim put a wall of "skipped — not installed" at the top of the report
+  // with the FAILED scanners buried inside it — and a failed scanner is a hole
+  // in the coverage table, which is the one outcome a reader must not miss.
+  it("REPORT.md summarizes tool outcomes when present and says nothing otherwise", () => {
+    const md = renderReport(dossier(manifest({ toolStatus: STATUS })));
+    expect(md).toContain("2 ran");
+    expect(md).toContain("1 skipped");
+    expect(renderReport(dossier(manifest()))).not.toContain("scanners:");
+  });
+
+  it("REPORT.md names a FAILED scanner and calls it a coverage hole", () => {
+    const md = renderReport(dossier(manifest({ toolStatus: [...STATUS, { name: "checkov", status: "failed" as const, note: "docker ETIMEDOUT" }] })));
+    expect(md).toContain("1 FAILED");
+    expect(md).toContain("checkov");
+    expect(md).toContain("coverage hole");
   });
 });
 

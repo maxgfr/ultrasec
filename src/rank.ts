@@ -42,6 +42,30 @@ export function statusRank(s: Status | undefined | null): number {
 }
 
 /**
+ * What `riskScore` gives a finding from severity alone — `0.6 × weight × 100`,
+ * the exact severity-only branch of the composite.
+ */
+const SEVERITY_ONLY_RISK: Record<Severity, number> = { critical: 60, high: 48, medium: 30, low: 15, info: 6 };
+
+/**
+ * A finding's rank score: its composite `risk`, or what severity alone implies.
+ *
+ * The fallback is the whole point. `risk` is attached during `scan`, so a finding
+ * ingested afterwards has none, and the previous `risk ?? -1` read "unscored" as
+ * "worthless" — sorting it below every scored candidate including the refuted
+ * ones. `ingestDiscoveries` now scores what it ingests, but that only fixes runs
+ * made from here on: a dossier already on disk still carries unscored findings,
+ * and re-rendering it must not bury them.
+ *
+ * Ranking has no business depending on WHEN a finding was added. Scoring the
+ * fallback the same way the engine scores a severity-only finding makes the
+ * order a property of the finding instead.
+ */
+export function rankScore(f: Finding): number {
+  return f.risk ?? SEVERITY_ONLY_RISK[f.severity] ?? 0;
+}
+
+/**
  * Severity rank, with an unknown value sorted LAST.
  *
  * `SEVERITIES.indexOf(undefined)` is -1, which put a malformed finding above
@@ -61,9 +85,7 @@ export function severityRank(s: Severity | undefined | null): number {
  * produce byte-identical reports, which the whole artifact contract depends on.
  */
 export function compareFindings(a: Finding, b: Finding): number {
-  return (
-    statusRank(a.status) - statusRank(b.status) || (b.risk ?? -1) - (a.risk ?? -1) || severityRank(a.severity) - severityRank(b.severity) || byStr(a.id, b.id)
-  );
+  return statusRank(a.status) - statusRank(b.status) || rankScore(b) - rankScore(a) || severityRank(a.severity) - severityRank(b.severity) || byStr(a.id, b.id);
 }
 
 /** `compareFindings` as a sort, on a copy. */
@@ -79,5 +101,5 @@ export function sortFindings(fs: readonly Finding[]): Finding[] {
  * status comparison whose answer is constant.
  */
 export function compareWithinStatus(a: Finding, b: Finding): number {
-  return (b.risk ?? -1) - (a.risk ?? -1) || severityRank(a.severity) - severityRank(b.severity) || byStr(a.id, b.id);
+  return rankScore(b) - rankScore(a) || severityRank(a.severity) - severityRank(b.severity) || byStr(a.id, b.id);
 }

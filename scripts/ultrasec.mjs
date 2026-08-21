@@ -20296,15 +20296,22 @@ var STATUS_RANK = {
 function statusRank(s) {
   return (s && STATUS_RANK[s]) ?? STATUS_RANK.open;
 }
+var SEVERITY_ONLY_RISK = { critical: 60, high: 48, medium: 30, low: 15, info: 6 };
+function rankScore(f) {
+  return f.risk ?? SEVERITY_ONLY_RISK[f.severity] ?? 0;
+}
 function severityRank(s) {
   const at = SEVERITIES2.indexOf(s);
   return at === -1 ? SEVERITIES2.length : at;
 }
 function compareFindings(a, b) {
-  return statusRank(a.status) - statusRank(b.status) || (b.risk ?? -1) - (a.risk ?? -1) || severityRank(a.severity) - severityRank(b.severity) || byStr2(a.id, b.id);
+  return statusRank(a.status) - statusRank(b.status) || rankScore(b) - rankScore(a) || severityRank(a.severity) - severityRank(b.severity) || byStr2(a.id, b.id);
 }
 function sortFindings(fs2) {
   return fs2.slice().sort(compareFindings);
+}
+function compareWithinStatus(a, b) {
+  return rankScore(b) - rankScore(a) || severityRank(a.severity) - severityRank(b.severity) || byStr2(a.id, b.id);
 }
 
 // src/store.ts
@@ -28536,6 +28543,49 @@ function pathMermaid(f) {
   return L.join("\n");
 }
 
+// src/family.ts
+var MIN_FAMILY = 3;
+function pathRoot(file) {
+  const parts2 = file.split("/");
+  if (parts2.length <= 1) return ".";
+  return parts2.slice(0, Math.min(2, parts2.length - 1)).join("/");
+}
+function locationOf(f) {
+  return f.sink?.file ?? f.source?.file ?? f.path?.[f.path.length - 1]?.file;
+}
+var KEY_SEP = " :: ";
+var UNPLACED = "unplaced" + KEY_SEP;
+function groupFamilies2(findings, minFamily = MIN_FAMILY) {
+  const byKey2 = /* @__PURE__ */ new Map();
+  for (const f of findings) {
+    const at = locationOf(f);
+    const key = at ? f.title + KEY_SEP + pathRoot(at) : UNPLACED + f.id;
+    const list = byKey2.get(key);
+    if (list) list.push(f);
+    else byKey2.set(key, [f]);
+  }
+  const families = [];
+  const singles = [];
+  for (const [key, members] of byKey2) {
+    if (members.length < minFamily) {
+      singles.push(...members);
+      continue;
+    }
+    const ranked = members.slice().sort(compareWithinStatus);
+    const lead = ranked[0];
+    families.push({ key, title: lead.title, root: pathRoot(locationOf(lead)), lead, members: ranked });
+  }
+  families.sort((a, b) => compareWithinStatus(a.lead, b.lead) || byStr2(a.key, b.key));
+  singles.sort(compareWithinStatus);
+  return { families, singles };
+}
+function familyCount(f) {
+  return `\xD7${f.members.length}`;
+}
+function collapsedCount(grouped) {
+  return grouped.families.reduce((n, f) => n + f.members.length - 1, 0);
+}
+
 // src/render/report.ts
 var BADGE = {
   critical: "\u{1F7E5} CRITICAL",
@@ -28580,7 +28630,16 @@ function header(d) {
     `findings: **${d.manifest.counts.findings}** \u2014 ${SEVERITIES2.map((s) => `${BADGE[s]} ${c2[s]}`).join(" \xB7 ")}${kev ? ` \xB7 \u{1F6A8} ${kev} in CISA KEV` : ""}`,
     `tools: ${d.manifest.toolsRun.join(", ") || "none (graph + taint only)"}`
   ];
-  if (d.manifest.toolStatus?.length) lines5.push(`tool status: ${toolStatusLines(d.manifest.toolStatus).join(" \xB7 ")}`);
+  const st = d.manifest.toolStatus;
+  if (st?.length) {
+    const ran = st.filter((s) => s.status === "ran" || s.status === "empty");
+    const failed2 = st.filter((s) => s.status === "failed");
+    const skipped = st.filter((s) => s.status === "skipped");
+    const bits = [`${ran.length} ran`];
+    if (failed2.length) bits.push(`**${failed2.length} FAILED** (${failed2.map((s) => s.name).join(", ")}) \u2014 a coverage hole, not an empty result`);
+    if (skipped.length) bits.push(`${skipped.length} skipped`);
+    lines5.push(`scanners: ${bits.join(" \xB7 ")}`);
+  }
   if (ranked) lines5.push(`_ranked by composite risk (severity \u2295 EPSS \u2295 KEV)_`);
   return lines5.join("  \n");
 }
@@ -28589,29 +28648,59 @@ function statusTag(f) {
   const b = f.brocard ? ` \xB7 ground: **${f.brocard}** (${BROCARD_SUMMARY[f.brocard]})` : "";
   return `status **${f.status}**${v}${b} \xB7 confidence ${f.confidence}`;
 }
-function renderSummary(d, narrative) {
-  const fs2 = sortFindings(d.findings);
-  const confirmed = fs2.filter((f) => f.status === "confirmed");
-  const needs = fs2.filter((f) => f.status === "needs-human");
-  const L = [`# Security audit \u2014 summary`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
-  if (!confirmed.length && !needs.length) {
-    L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) \u2014 see REPORT.md.` : `No findings.`);
-    return L.join("\n") + "\n";
-  }
+var SUMMARY_LINES = 25;
+function summaryTier(findings, bold) {
+  const grouped = groupFamilies2(findings);
   const tail = (f) => {
     const rt = riskTag(f);
     return ` (${f.cwe ?? f.category})${rt ? ` \xB7 ${rt}` : ""}`;
   };
+  const name2 = (f) => bold ? `**${f.title}**` : f.title;
+  const rows = [
+    ...grouped.families.map((fam) => ({
+      at: fam.lead,
+      line: `- ${badgeOf(fam.lead.severity)} ${name2(fam.lead)} ${familyCount(fam)} \u2014 under \`${fam.root}\`${tail(fam.lead)}`
+    })),
+    ...grouped.singles.map((f) => ({ at: f, line: `- ${badgeOf(f.severity)} ${name2(f)} \u2014 ${pathLine(f)}${tail(f)}` }))
+  ].sort((a, b) => compareWithinStatus(a.at, b.at));
+  const out2 = rows.slice(0, SUMMARY_LINES).map((r) => r.line);
+  if (rows.length > SUMMARY_LINES) out2.push(`- _\u2026and ${rows.length - SUMMARY_LINES} more \u2014 see REPORT.md._`);
+  return out2;
+}
+function renderSummary(d, narrative) {
+  const confirmed = d.findings.filter((f) => f.status === "confirmed").sort(compareWithinStatus);
+  const needs = d.findings.filter((f) => f.status === "needs-human").sort(compareWithinStatus);
+  const L = [`# Security audit \u2014 summary`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
+  if (!confirmed.length && !needs.length) {
+    L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) \u2014 see REPORT.md.` : `No findings.`);
+    L.push("");
+    L.push(...coverageCaveat(d));
+    return L.join("\n") + "\n";
+  }
   if (confirmed.length) {
     L.push(`## Confirmed (${confirmed.length})`);
-    for (const f of confirmed) L.push(`- ${badgeOf(f.severity)} **${f.title}** \u2014 ${pathLine(f)}${tail(f)}`);
+    L.push(...summaryTier(confirmed, true));
     L.push("");
   }
   if (needs.length) {
     L.push(`## Needs human review (${needs.length})`);
-    for (const f of needs) L.push(`- ${badgeOf(f.severity)} ${f.title} \u2014 ${pathLine(f)}${tail(f)}`);
+    L.push(...summaryTier(needs, false));
+    L.push("");
   }
+  L.push(...coverageCaveat(d));
   return L.join("\n") + "\n";
+}
+function coverageCaveat(d) {
+  const rows = buildCoverage(d, enumeratedKindsOf(d.findings));
+  const unexamined = rows.filter((r) => r.state === "unexamined");
+  const failed2 = (d.manifest.toolStatus ?? []).filter((s) => s.status === "failed");
+  if (!unexamined.length && !failed2.length) return [];
+  const L = [`## Coverage caveat`, ""];
+  if (unexamined.length) L.push(`**${unexamined.length} of ${rows.length}** categories were NOT examined: ${unexamined.map((r) => r.title).join(" \xB7 ")}.`);
+  if (failed2.length) L.push(`**${failed2.length} scanner(s) failed** (${failed2.map((s) => s.name).join(", ")}) \u2014 a hole in the table, not an empty category.`);
+  L.push("");
+  L.push(`This is a gap in the audit, not a clean bill of health. Full matrix in REPORT.md.`);
+  return L;
 }
 function renderFinding(f, opts = {}) {
   const L = [];
@@ -28661,28 +28750,70 @@ function renderFinding(f, opts = {}) {
   }
   return L.join("\n");
 }
+function tierTable(findings) {
+  const L = [`| | finding | where | ground |`, `|---|---|---|---|`];
+  for (const f of findings) {
+    const ground = f.brocard ? `**${f.brocard}**` : f.verdict ?? "\u2014";
+    const where = f.locations?.length ? locationsLine(f.locations) : pathLine(f);
+    L.push(`| ${badgeOf(f.severity)} | ${f.title} <code>${f.id}</code> | ${where} | ${ground} |`);
+  }
+  return L;
+}
+function tierSections(findings, rem, mermaid) {
+  const grouped = groupFamilies2(findings);
+  const blocks = [
+    ...grouped.families.map((fam) => ({
+      at: fam.lead,
+      body: [
+        renderFinding(fam.lead, { mermaid, remediation: rem.get(fam.lead.id) }),
+        "",
+        `**${fam.members.length} occurrence(s)** of this finding under \`${fam.root}\`:`,
+        "",
+        `| id | location | severity |`,
+        `|---|---|---|`,
+        ...fam.members.map((m) => `| \`${m.id}\` | ${pathLine(m)} | ${m.severity ?? "\u2014"} |`)
+      ].join("\n")
+    })),
+    ...grouped.singles.map((f) => ({ at: f, body: renderFinding(f, { mermaid, remediation: rem.get(f.id) }) }))
+  ].sort((a, b) => compareWithinStatus(a.at, b.at));
+  const L = [];
+  for (const b of blocks) {
+    L.push(b.body);
+    L.push("");
+  }
+  const folded = collapsedCount(grouped);
+  if (folded) L.push(`_${folded} repeated occurrence(s) folded into the write-ups above; every one is in \`findings.json\`._`, "");
+  return L;
+}
 function renderReport(d, narrative) {
-  const fs2 = sortFindings(d.findings);
   const rem = remediationMap(narrative);
   const L = [`# Security audit \u2014 report`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
-  const groups = [
-    ["Confirmed", fs2.filter((f) => f.status === "confirmed")],
-    ["Needs human review", fs2.filter((f) => f.status === "needs-human")],
-    ["Unadjudicated candidates", fs2.filter((f) => f.status === "open")],
-    ["Dismissed", fs2.filter((f) => f.status === "dismissed")]
-  ];
-  if (!groups.some(([, list]) => list.length)) {
+  const byStatus = (s) => d.findings.filter((f) => f.status === s).sort(compareWithinStatus);
+  const confirmed = byStatus("confirmed");
+  const needs = byStatus("needs-human");
+  const open = byStatus("open");
+  const dismissed = byStatus("dismissed");
+  if (!confirmed.length && !needs.length && !open.length && !dismissed.length) {
     L.push(`No findings.`);
     return L.join("\n") + "\n";
   }
-  for (const [name2, list] of groups) {
-    if (!list.length) continue;
-    L.push(`## ${name2} (${list.length})`);
-    L.push("");
-    for (const f of list) {
-      L.push(renderFinding(f, { mermaid: name2 !== "Dismissed", remediation: rem.get(f.id) }));
-      L.push("");
-    }
+  if (confirmed.length) {
+    L.push(`## Confirmed (${confirmed.length})`, "");
+    L.push(...tierSections(confirmed, rem, true));
+  }
+  if (needs.length) {
+    L.push(`## Needs human review (${needs.length})`, "");
+    L.push(...tierSections(needs, rem, true));
+  }
+  if (open.length) {
+    L.push(`## Unadjudicated candidates (${open.length})`, "");
+    L.push(`Enumerated, not yet decided. Recall-oriented by design: many are false positives.`, "");
+    L.push(...tierTable(open), "");
+  }
+  if (dismissed.length) {
+    L.push(`## Refuted (${dismissed.length})`, "");
+    L.push(`Kept so the refutations can be disagreed with. **ground** names why each was dismissed.`, "");
+    L.push(...tierTable(dismissed), "");
   }
   L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
   L.push(renderCoverageMd(buildCoverage(d, enumeratedKindsOf(d.findings)), void 0, d));
@@ -28697,24 +28828,14 @@ function esc2(s) {
   if (s === void 0 || s === null) return MISSING;
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
+function sevClass(s) {
+  return s ? s[0].toLowerCase() : "x";
+}
 function sevLabel(s) {
   return s ? String(s).toUpperCase() : MISSING;
 }
-function sevColor(s) {
-  return s && SEV_COLOR[s] || SEV_COLOR.info;
-}
-var SEV_COLOR = {
-  critical: "#b91c1c",
-  high: "#c2410c",
-  medium: "#b45309",
-  low: "#15803d",
-  info: "#64748b"
-};
-function badge(text, color) {
-  return `<span class="badge" style="background:${color}">${esc2(text)}</span>`;
-}
 function pathHtml(f) {
-  if (!f.path?.length) return f.sink ? `<code>${esc2(f.sink.file)}:${f.sink.line}</code>` : "\u2014";
+  if (!f.path?.length) return f.sink ? `<p class="anchor"><code>${esc2(f.sink.file)}:${f.sink.line}</code></p>` : "";
   const nodes = f.path.map((p, i2) => {
     const tag = i2 === 0 ? "source" : i2 === f.path.length - 1 ? "sink" : "hop";
     const sym = p.symbol ? `<div class="sym">${esc2(p.symbol)}()</div>` : "";
@@ -28722,56 +28843,89 @@ function pathHtml(f) {
   }).join('<div class="arrow">\u2192</div>');
   return `<div class="flow">${nodes}</div>`;
 }
-function riskHtml(f) {
+function chipsHtml(f) {
   const out2 = [];
-  if (typeof f.risk === "number") out2.push(badge(`risk ${f.risk}`, f.risk >= 95 ? "#7f1d1d" : f.risk >= 70 ? "#b91c1c" : f.risk >= 40 ? "#b45309" : "#475569"));
-  if (typeof f.epss === "number") out2.push(`<span class="kv">EPSS ${(f.epss * 100).toFixed(1)}%</span>`);
-  if (f.kev) out2.push(badge(`CISA KEV${f.kevDateAdded ? ` ${f.kevDateAdded}` : ""}`, "#7f1d1d"));
-  if (f.verified) out2.push(badge("verified secret", "#7f1d1d"));
-  return out2.length ? `<div class="risk">${out2.join(" ")}</div>` : "";
+  if (typeof f.risk === "number") out2.push(`<span class="chip risk">risk ${f.risk}</span>`);
+  if (typeof f.epss === "number") out2.push(`<span class="chip">EPSS ${(f.epss * 100).toFixed(1)}%</span>`);
+  if (f.kev) out2.push(`<span class="chip kev">CISA KEV${f.kevDateAdded ? ` ${esc2(f.kevDateAdded)}` : ""}</span>`);
+  if (f.verified) out2.push(`<span class="chip kev">verified secret</span>`);
+  if (f.reachability && f.reachability !== "runtime") out2.push(`<span class="chip reach">${esc2(f.reachability)}</span>`);
+  if (f.noise) out2.push(`<span class="chip">de-prioritized: ${esc2(f.noise)}</span>`);
+  return out2.length ? `<div class="chips">${out2.join("")}</div>` : "";
 }
 function sourcesHtml(f) {
   const s = f.sources && f.sources.length ? f.sources : f.tool !== "ultrasec" ? [f.tool] : [];
-  if (s.length > 1) return `\xB7 agreed by ${esc2(s.join(", "))}`;
-  return f.tool !== "ultrasec" ? `\xB7 via ${esc2(f.tool)}` : "";
+  if (s.length > 1) return ` \xB7 agreed by ${esc2(s.join(", "))}`;
+  return f.tool !== "ultrasec" ? ` \xB7 via ${esc2(f.tool)}` : "";
 }
 function fixHtml(r) {
   if (!r) return "";
-  const patch = r.patch ? `<pre class="ai-patch">${esc2(r.patch)}</pre>` : "";
-  return `
-    <div class="ai-fix"><strong>Suggested fix (AI):</strong> ${esc2(r.fix)}${r.owner ? ` \xB7 owner ${esc2(r.owner)}` : ""}${patch}</div>`;
+  const patch = r.patch ? `<pre class="ai-patch"><code>${esc2(r.patch)}</code></pre>` : "";
+  return `<div class="ai-fix"><strong>Suggested fix (AI):</strong> ${esc2(r.fix)}${r.owner ? ` \xB7 owner ${esc2(r.owner)}` : ""}${patch}</div>`;
 }
-function findingHtml(f, rem) {
-  const refs = (f.references ?? []).slice(0, 5).map((r) => `<a href="${esc2(r)}" rel="noreferrer noopener">${esc2(r.replace(/^https?:\/\//, ""))}</a>`).join(" \xB7 ");
+function scenarioHtml(f) {
+  if (!f.exploitPath) return "";
+  return `<div class="scenario"><div class="s-label">Attack scenario</div><p>${esc2(f.exploitPath)}</p></div>`;
+}
+function refsHtml(f) {
+  const refs = (f.references ?? []).slice(0, 5).map((r) => `<a href="${esc2(r)}" rel="noreferrer noopener">${esc2(String(r).replace(/^https?:\/\//, ""))}</a>`).join(" \xB7 ");
+  return refs ? `<p class="refs">${refs}</p>` : "";
+}
+function metaHtml(f) {
+  return `<div class="meta"><code>${esc2(f.id)}</code>${f.cwe ? ` \xB7 ${esc2(f.cwe)}` : ""} \xB7 ${esc2(f.category)} \xB7 ${esc2(f.status ?? MISSING)}${f.verdict ? ` \xB7 ${esc2(f.verdict)}` : ""} \xB7 confidence ${esc2(f.confidence)}${sourcesHtml(f)}</div>`;
+}
+function findingHtml(f, rem, extra = "") {
   return `
-  <section class="finding" id="${esc2(f.id)}">
-    <h3>${badge(sevLabel(f.severity), sevColor(f.severity))} ${esc2(f.title)}</h3>
-    <div class="meta">
-      <code>${esc2(f.id)}</code>
-      ${f.cwe ? `\xB7 ${esc2(f.cwe)}` : ""} \xB7 ${esc2(f.category)}
-      \xB7 status ${badge(f.status ?? MISSING, f.status === "confirmed" ? "#b91c1c" : f.status === "needs-human" ? "#b45309" : f.status === "dismissed" ? "#64748b" : "#475569")}
-      \xB7 confidence ${esc2(f.confidence)}
-      ${f.verdict ? `\xB7 verdict ${esc2(f.verdict)}` : ""}
-      ${sourcesHtml(f)}
-    </div>
-    ${riskHtml(f)}
-    ${pathHtml(f)}
-    <p class="msg">${esc2(f.message)}</p>
-    ${f.exploitPath ? `<p class="exploit"><strong>Exploit path:</strong> ${esc2(f.exploitPath)}</p>` : ""}${fixHtml(rem)}
-    ${refs ? `<p class="refs">${refs}</p>` : ""}
-  </section>`;
+      <article class="find ${sevClass(f.severity)}" id="${esc2(f.id)}">
+        <div class="find-top"><span class="pill">${esc2(sevLabel(f.severity))}</span><h3>${esc2(f.title)}</h3></div>
+        ${metaHtml(f)}
+        ${chipsHtml(f)}
+        ${pathHtml(f)}
+        <p class="msg">${esc2(f.message)}</p>
+        ${scenarioHtml(f)}
+        ${fixHtml(rem)}
+        ${extra}
+        ${refsHtml(f)}
+      </article>`;
+}
+function atOf(f) {
+  const loc = f.sink ?? f.source ?? f.path?.[f.path.length - 1];
+  return loc ? `${loc.file}:${loc.line}` : MISSING;
+}
+function familyHtml(fam, rem) {
+  const rows = fam.members.map((m) => `<tr><td><code>${esc2(m.id)}</code></td><td class="at">${esc2(atOf(m))}</td><td>${esc2(sevLabel(m.severity))}</td></tr>`).join("");
+  const extra = `<details class="members"><summary>${fam.members.length} occurrence(s) under <code>${esc2(fam.root)}</code></summary>
+          <div class="tw"><table><thead><tr><th>id</th><th>location</th><th>severity</th></tr></thead><tbody>${rows}</tbody></table></div>
+        </details>`;
+  return findingHtml(fam.lead, rem, extra);
+}
+function tableHtml(findings) {
+  const rows = findings.map(
+    (f) => `<tr><td><span class="dot ${sevClass(f.severity)}"></span>${esc2(sevLabel(f.severity))}</td><td>${esc2(f.title)}</td><td class="at">${esc2(
+      atOf(f)
+    )}</td><td>${esc2(f.brocard ?? f.verdict ?? MISSING)}</td></tr>`
+  ).join("");
+  return `<div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>ground</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+function tierHtml(findings, rem) {
+  const grouped = groupFamilies2(findings);
+  const cards = [
+    ...grouped.families.map((fam) => ({ at: fam.lead, html: familyHtml(fam, rem.get(fam.lead.id)) })),
+    ...grouped.singles.map((f) => ({ at: f, html: findingHtml(f, rem.get(f.id)) }))
+  ].sort((a, b) => compareWithinStatus(a.at, b.at));
+  const folded = collapsedCount(grouped);
+  const note = folded ? `<p class="fold-note">${folded} repeated occurrence(s) folded into the cards above \u2014 open a card's fold for every location.</p>` : "";
+  return cards.map((c2) => c2.html).join("\n") + note;
 }
 function aiSectionHtml(title, items) {
   return `
   <section class="ai-narrative"><h2>${esc2(title)} <span class="ai-tag">AI</span></h2><p class="ai-note">${esc2(AI_DISCLAIMER)}</p>${items}</section>`;
 }
 function execSummaryHtml(n) {
-  if (!n?.executiveSummary) return "";
-  return aiSectionHtml("Executive summary", `<p>${esc2(n.executiveSummary)}</p>`);
+  return n?.executiveSummary ? aiSectionHtml("Executive summary", `<p>${esc2(n.executiveSummary)}</p>`) : "";
 }
 function positivePatternsHtml(n) {
-  if (!n?.positivePatterns) return "";
-  return aiSectionHtml("What the codebase does well", `<p>${esc2(n.positivePatterns)}</p>`);
+  return n?.positivePatterns ? aiSectionHtml("What the codebase does well", `<p>${esc2(n.positivePatterns)}</p>`) : "";
 }
 function hardeningNotesHtml(n) {
   if (!n?.hardeningNotes?.length) return "";
@@ -28781,71 +28935,216 @@ function hardeningNotesHtml(n) {
 function chainsHtml(n) {
   if (!n?.attackChains?.length) return "";
   const items = n.attackChains.map(
-    (c2) => `<div class="ai-block"><h3>${esc2(c2.title)}</h3><div class="meta">${c2.findingIds.map((id) => `<code>${esc2(id)}</code>`).join(" \u2192 ")}</div><p>${esc2(c2.narrative)}</p></div>`
+    (c2) => `<div class="chain"><h3>${esc2(c2.title)}</h3><div class="meta">${c2.findingIds.map((id) => `<a href="#${esc2(id)}"><code>${esc2(id)}</code></a>`).join(" \u2192 ")}</div><p>${esc2(c2.narrative)}</p></div>`
   ).join("");
-  return aiSectionHtml("Attack chains", items);
+  return `
+  <section id="chains"><h2>Attack chains <span class="ai-tag">AI</span></h2><p class="ai-note">${esc2(AI_DISCLAIMER)}</p>${items}</section>`;
 }
 function rootCausesHtml(n) {
   if (!n?.rootCauses?.length) return "";
   const items = n.rootCauses.map(
-    (g) => `<div class="ai-block"><h3>${esc2(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<code>${esc2(id)}</code>`).join(", ")}</div><p>${esc2(g.note)}</p></div>`
+    (g) => `<div class="ai-block"><h3>${esc2(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<a href="#${esc2(id)}"><code>${esc2(id)}</code></a>`).join(", ")}</div><p>${esc2(g.note)}</p></div>`
   ).join("");
   return aiSectionHtml("Root-cause groups", items);
 }
-function aiCss(narrative) {
-  if (!hasNarrativeContent(narrative)) return "";
+var COVERAGE_MARK = {
+  examined: "examined",
+  engine: "enumerated",
+  unexamined: "NOT examined"
+};
+function coverageHtml(d) {
+  const rows = buildCoverage(d, enumeratedKindsOf(d.findings));
+  const failed2 = (d.manifest.toolStatus ?? []).filter((s) => s.status === "failed");
+  const body2 = rows.map(
+    (r) => `<tr class="${r.state}"><td class="at">${esc2(r.id)}</td><td>${esc2(r.title)}</td><td>${esc2(COVERAGE_MARK[r.state])}</td><td>${r.hits || MISSING}</td></tr>`
+  ).join("");
+  const failedBlock = failed2.length ? `<div class="warn"><strong>${failed2.length} scanner(s) failed</strong> \u2014 each is a hole in the table above, not a category with nothing in it.
+       <ul>${failed2.map((s) => `<li><code>${esc2(s.name)}</code> \u2014 ${esc2(s.note ?? "run failed")}</li>`).join("")}</ul></div>` : "";
   return `
-  .ai-narrative { border:1px solid #6d28d9; background:#faf5ff; border-radius:10px; padding:10px 16px; margin:14px 0; }
-  @media (prefers-color-scheme: dark){ .ai-narrative{ background:#1e1b2e; border-color:#7c3aed; } .ai-fix{ background:#1e1b2e; } }
-  .ai-tag { background:#6d28d9; color:#fff; font-size:11px; padding:1px 6px; border-radius:8px; vertical-align:middle; }
-  .ai-note { color:#6b7280; font-size:12px; font-style:italic; margin:2px 0 8px; }
-  .ai-fix { border-left:3px solid #6d28d9; background:#faf5ff; padding:6px 10px; border-radius:4px; margin:8px 0; }
-  .ai-patch { background:#0b0f17; color:#e5e7eb; padding:8px; border-radius:6px; overflow:auto; font-size:12px; }
-  .ai-block { margin:8px 0; }`;
+  <section id="coverage">
+    <h2>Coverage \u2014 what was not looked at</h2>
+    <p>A category marked <strong>NOT examined</strong> is a gap in this audit, not a clean bill of health.</p>
+    ${failedBlock}
+    <div class="tw"><table><thead><tr><th>#</th><th>category</th><th>state</th><th>findings</th></tr></thead><tbody>${body2}</tbody></table></div>
+  </section>`;
 }
+function railHtml(actionable) {
+  if (!actionable.length) return "";
+  const items = actionable.map((f) => `<li><a href="#${esc2(f.id)}"><span class="dot ${sevClass(f.severity)}"></span><span class="rt">${esc2(f.title)}</span></a></li>`).join("");
+  return `<nav class="rail" aria-label="Finding registry"><div class="rail-title">Registry</div><ol>${items}</ol></nav>`;
+}
+var CSS = `
+  :root {
+    color-scheme: light dark;
+    --ground:#f6f7f9; --surface:#fff; --surface-alt:#eef1f5;
+    --ink:#14181f; --ink-soft:#4e5769; --ink-faint:#79808f;
+    --rule:#dce1ea; --rule-soft:#e9edf3; --accent:#24487a;
+    --crit:#9b2233; --high:#b05315; --med:#7e6212; --low:#3f6350; --info:#5a6472; --unknown:#79808f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#101319; --surface:#171b23; --surface-alt:#1e232d;
+      --ink:#e6eaf2; --ink-soft:#a3acbe; --ink-faint:#757e92;
+      --rule:#2a303c; --rule-soft:#232833; --accent:#8daedd;
+      --crit:#e8798a; --high:#e39355; --med:#d4b04a; --low:#7fb295; --info:#96a0b2; --unknown:#8a93a5;
+    }
+  }
+  *,*::before,*::after { box-sizing:border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1180px; margin:0 auto; padding:0 24px 72px; }
+  a { color:var(--accent); text-underline-offset:.15em; }
+  code { font-family:var(--mono); font-size:.86em; background:var(--surface-alt); border:1px solid var(--rule-soft); border-radius:3px; padding:.08em .34em; }
+  h1 { font-size:clamp(1.7rem,4vw,2.4rem); line-height:1.12; margin:0; letter-spacing:-.015em; }
+  h2 { font-size:1.4rem; margin:0 0 4px; padding-bottom:8px; border-bottom:2px solid var(--ink); letter-spacing:-.01em; }
+  h3 { font-size:1rem; margin:0; line-height:1.35; }
+  p { margin:0; }
+
+  header.masthead { border-bottom:1px solid var(--rule); padding:44px 0 24px; display:flex; flex-direction:column; gap:12px; }
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); }
+  .meta-line { font-family:var(--mono); font-size:12px; color:var(--ink-faint); display:flex; flex-wrap:wrap; gap:4px 22px; }
+
+  .cols { display:grid; grid-template-columns:230px minmax(0,1fr); gap:48px; align-items:start; padding-top:32px; }
+  @media (max-width:939px) { .cols { grid-template-columns:1fr; gap:0; } .rail { display:none; } }
+  .rail { position:sticky; top:20px; max-height:calc(100vh - 40px); overflow-y:auto; }
+  .rail-title { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); padding-bottom:8px; border-bottom:1px solid var(--rule); margin-bottom:10px; }
+  .rail ol { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+  .rail a { display:flex; align-items:baseline; gap:8px; padding:4px 6px; border-radius:4px; font-size:13px; line-height:1.3; color:var(--ink-soft); text-decoration:none; }
+  .rail a:hover { background:var(--surface-alt); color:var(--ink); }
+  .rail .rt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  main { min-width:0; display:flex; flex-direction:column; gap:40px; }
+  section { display:flex; flex-direction:column; gap:14px; scroll-margin-top:20px; }
+
+  .band { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:6px; overflow:hidden; }
+  .tile { background:var(--surface); padding:14px 16px 12px; display:flex; flex-direction:column; gap:2px; }
+  .tile .n { font-size:1.9rem; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; }
+  .tile .k { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); }
+  .tile.c .n{color:var(--crit)} .tile.h .n{color:var(--high)} .tile.m .n{color:var(--med)} .tile.l .n{color:var(--low)} .tile.i .n{color:var(--info)}
+
+  .dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; display:inline-block; align-self:center; background:var(--unknown); }
+  .dot.c{background:var(--crit)} .dot.h{background:var(--high)} .dot.m{background:var(--med)} .dot.l{background:var(--low)} .dot.i{background:var(--info)}
+
+  .find { background:var(--surface); border:1px solid var(--rule); border-left:4px solid var(--sev,var(--unknown)); border-radius:5px; padding:16px 20px 18px; display:flex; flex-direction:column; gap:10px; }
+  .find.c{--sev:var(--crit)} .find.h{--sev:var(--high)} .find.m{--sev:var(--med)} .find.l{--sev:var(--low)} .find.i{--sev:var(--info)}
+  .find-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px; }
+  .pill { font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.1em; padding:2px 7px; border-radius:3px; color:var(--sev,var(--unknown)); border:1px solid var(--sev,var(--unknown)); }
+  .find-top h3 { flex:1 1 240px; }
+  .meta { font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); word-break:break-word; }
+  .msg { color:var(--ink-soft); }
+  .anchor { font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); word-break:break-all; }
+
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { font-family:var(--mono); font-size:10.5px; padding:2px 7px; border-radius:10px; background:var(--surface-alt); border:1px solid var(--rule); color:var(--ink-soft); }
+  .chip.risk { font-weight:700; }
+  .chip.kev { color:var(--crit); border-color:var(--crit); }
+  .chip.reach { color:var(--med); border-color:var(--med); }
+
+  .flow { display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; }
+  .node { background:var(--surface-alt); border:1px solid var(--rule); border-radius:6px; padding:6px 10px; min-width:118px; }
+  .node.source { border-color:var(--high); } .node.sink { border-color:var(--crit); }
+  .node .loc { font-family:var(--mono); font-size:11.5px; font-weight:600; }
+  .node .sym { font-family:var(--mono); font-size:11px; color:var(--ink-faint); }
+  .node .why { font-size:11px; color:var(--ink-faint); margin-top:2px; max-width:220px; }
+  .arrow { align-self:center; color:var(--ink-faint); }
+
+  .scenario { background:var(--surface-alt); border-radius:4px; padding:11px 14px; display:flex; flex-direction:column; gap:5px; }
+  .s-label { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); }
+  .refs { font-size:11.5px; color:var(--ink-faint); word-break:break-all; }
+  .fold-note { font-size:12.5px; color:var(--ink-faint); font-style:italic; }
+
+  .chain { background:var(--surface); border:1px solid var(--crit); border-left:4px solid var(--crit); border-radius:5px; padding:16px 20px; display:flex; flex-direction:column; gap:8px; }
+  .chain h3 { color:var(--crit); }
+  .warn { background:var(--surface); border:1px solid var(--high); border-left:4px solid var(--high); border-radius:5px; padding:12px 16px; }
+  .warn ul { margin:6px 0 0; padding-left:1.2em; }
+
+  .tw { overflow-x:auto; border:1px solid var(--rule); border-radius:5px; background:var(--surface); }
+  table { border-collapse:collapse; width:100%; font-size:13.5px; }
+  th,td { text-align:left; padding:7px 12px; border-bottom:1px solid var(--rule-soft); vertical-align:top; }
+  thead th { font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); background:var(--surface-alt); border-bottom:1px solid var(--rule); white-space:nowrap; }
+  tbody tr:last-child td { border-bottom:0; }
+  td.at { font-family:var(--mono); font-size:12px; word-break:break-all; }
+  tr.unexamined td { color:var(--high); }
+
+  details { background:var(--surface); border:1px solid var(--rule); border-radius:5px; }
+  details.members { background:transparent; border:0; }
+  summary { cursor:pointer; padding:10px 16px; font-weight:600; font-size:14px; }
+  details.members summary { padding:4px 0; font-weight:500; font-size:13px; color:var(--ink-faint); }
+  details > *:not(summary) { padding:0 16px 14px; }
+  details.members > *:not(summary) { padding:0; }
+
+  footer { margin-top:56px; padding-top:18px; border-top:1px solid var(--rule); font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); display:flex; flex-direction:column; gap:5px; }
+`;
+var AI_CSS = `
+  .ai-narrative { border:1px solid var(--accent); border-radius:6px; padding:12px 18px; background:var(--surface); }
+  .ai-tag { font-family:var(--mono); font-size:10px; letter-spacing:.1em; padding:2px 6px; border-radius:8px; border:1px solid var(--accent); color:var(--accent); vertical-align:middle; }
+  .ai-note { color:var(--ink-faint); font-size:12px; font-style:italic; }
+  .ai-fix { border-left:3px solid var(--accent); background:var(--surface-alt); padding:8px 12px; border-radius:0 4px 4px 0; }
+  .ai-patch { background:var(--surface-alt); border:1px solid var(--rule); border-radius:4px; padding:8px 10px; overflow-x:auto; font-size:12px; margin:6px 0 0; }
+  .ai-block { display:flex; flex-direction:column; gap:5px; }
+`;
+var SEV_KEY = { critical: "c", high: "h", medium: "m", low: "l", info: "i" };
 function renderHtml(d, narrative) {
   const c2 = d.manifest.counts.bySeverity;
-  const fs2 = sortFindings(d.findings);
-  const shown = fs2.filter((f) => f.status !== "dismissed");
-  const dismissed = fs2.filter((f) => f.status === "dismissed");
   const rem = remediationMap(narrative);
-  const counts = SEVERITIES2.map((s) => `${badge(`${s} ${c2[s]}`, SEV_COLOR[s])}`).join(" ");
+  const byStatus = (s) => d.findings.filter((f) => f.status === s).sort(compareWithinStatus);
+  const confirmed = byStatus("confirmed");
+  const needsHuman = byStatus("needs-human");
+  const open = byStatus("open");
+  const dismissed = byStatus("dismissed");
+  const actionable = [...confirmed, ...needsHuman];
+  const tiles = SEVERITIES2.map((s) => `<div class="tile ${SEV_KEY[s]}"><span class="n">${c2[s] ?? 0}</span><span class="k">${s}</span></div>`).join("");
+  const section = (id, title, sub, body2) => body2 ? `
+  <section id="${id}"><h2>${esc2(title)}</h2>${sub ? `<p class="msg">${esc2(sub)}</p>` : ""}${body2}</section>` : "";
+  const tools = d.manifest.toolStatus?.length ? toolStatusLines(d.manifest.toolStatus).join(" \xB7 ") : d.manifest.toolsRun.join(", ") || "none";
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ultrasec \u2014 security audit</title>
-<style>
-  :root { color-scheme: light dark; }
-  body { font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; color: #111; background: #fff; }
-  @media (prefers-color-scheme: dark) { body { color: #e5e7eb; background: #0b0f17; } a { color: #93c5fd; } code { background: #1f2937; } .node { background: #111827; border-color:#374151; } .finding{border-color:#1f2937;} }
-  h1 { font-size: 24px; margin: 0 0 4px; }
-  .sub { color: #6b7280; margin-bottom: 16px; }
-  .badge { display:inline-block; color:#fff; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; }
-  code { background:#f3f4f6; padding:1px 5px; border-radius:4px; font-size:13px; }
-  .finding { border:1px solid #e5e7eb; border-radius:10px; padding:14px 16px; margin:14px 0; }
-  .finding h3 { margin:0 0 6px; font-size:17px; }
-  .meta { color:#6b7280; font-size:13px; margin-bottom:10px; }
-  .flow { display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; margin:10px 0; }
-  .node { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:6px 10px; min-width:120px; }
-  .node.source { border-color:#b45309; } .node.sink { border-color:#b91c1c; }
-  .node .loc { font-family: ui-monospace, monospace; font-size:12px; font-weight:600; }
-  .node .sym { font-family: ui-monospace, monospace; font-size:11px; color:#6b7280; }
-  .node .why { font-size:11px; color:#6b7280; margin-top:2px; max-width:220px; }
-  .arrow { align-self:center; color:#9ca3af; font-size:18px; }
-  .msg { margin:8px 0; }
-  .exploit { background:#fef2f2; border-left:3px solid #b91c1c; padding:6px 10px; border-radius:4px; }
-  @media (prefers-color-scheme: dark){ .exploit{ background:#1f1315; } }
-  .refs { font-size:12px; color:#6b7280; word-break:break-all; }
-  .risk { margin:6px 0 4px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-  .kv { font-size:12px; font-weight:600; color:#6b7280; }
-  details { margin-top:18px; }${aiCss(narrative)}
-</style></head>
+<style>${CSS}${hasNarrativeContent(narrative) ? AI_CSS : ""}</style></head>
 <body>
-  <h1>Security audit</h1>
-  <div class="sub">repo <code>${esc2(d.manifest.repo)}</code> \xB7 ultrasec ${esc2(d.manifest.version)} \xB7 tools: ${esc2(d.manifest.toolsRun.join(", ") || "none")}</div>
-  <div>${counts}</div>${execSummaryHtml(narrative)}${positivePatternsHtml(narrative)}
-  ${shown.length ? shown.map((f) => findingHtml(f, rem.get(f.id))).join("\n") : "<p>No actionable findings.</p>"}
-  ${dismissed.length ? `<details><summary>${dismissed.length} dismissed candidate(s)</summary>${dismissed.map((f) => findingHtml(f, rem.get(f.id))).join("\n")}</details>` : ""}${chainsHtml(narrative)}${rootCausesHtml(narrative)}${hardeningNotesHtml(narrative)}
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Security audit \xB7 ultrasec ${esc2(d.manifest.version)}</div>
+    <h1>${esc2(d.manifest.repo)}</h1>
+    <div class="meta-line">
+      <span>${d.manifest.counts.findings} candidate(s)</span>
+      <span>${confirmed.length} confirmed</span>
+      <span>${needsHuman.length} needs human</span>
+      <span>${open.length} unadjudicated</span>
+      <span>${dismissed.length} refuted</span>
+    </div>
+    <div class="meta-line"><span>tools: ${esc2(tools)}</span></div>
+  </header>
+  <div class="cols">
+  ${railHtml(actionable)}
+  <main>
+    <section id="summary">
+      <h2>Summary</h2>
+      <div class="band">${tiles}</div>
+    </section>${execSummaryHtml(narrative)}${chainsHtml(narrative)}${positivePatternsHtml(narrative)}${section(
+    "confirmed",
+    `Confirmed (${confirmed.length})`,
+    "",
+    confirmed.length ? tierHtml(confirmed, rem) : ""
+  )}${section("needs-human", `Needs human review (${needsHuman.length})`, "Uncertain, and too severe to dismiss without proof.", needsHuman.length ? tierHtml(needsHuman, rem) : "")}${section(
+    "open",
+    `Unadjudicated candidates (${open.length})`,
+    "Enumerated but not yet decided. Recall-oriented by design \u2014 many are false positives.",
+    open.length ? tableHtml(open) : ""
+  )}${dismissed.length ? `
+  <section id="dismissed"><h2>Refuted (${dismissed.length})</h2>
+      <details><summary>Show the ${dismissed.length} candidate(s) this audit refuted, and on what ground</summary>
+      <p class="msg">Kept because an audit that hides its refutations cannot be checked. The <em>ground</em> column names why each was dismissed.</p>
+      ${tableHtml(dismissed)}</details></section>` : ""}${rootCausesHtml(narrative)}${hardeningNotesHtml(narrative)}
+    ${coverageHtml(d)}
+    <footer>
+      <span>ultrasec ${esc2(d.manifest.version)} \xB7 ${esc2(d.manifest.generatedNote)}</span>
+      <span>Every finding cites a resolvable file:line \u2014 \`ultrasec check\` fails the audit otherwise.</span>
+    </footer>
+  </main>
+  </div>
+</div>
 </body></html>
 `;
 }

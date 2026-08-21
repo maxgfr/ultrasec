@@ -6,103 +6,171 @@ exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtm
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ultrasec — security audit</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; color: #111; background: #fff; }
-  @media (prefers-color-scheme: dark) { body { color: #e5e7eb; background: #0b0f17; } a { color: #93c5fd; } code { background: #1f2937; } .node { background: #111827; border-color:#374151; } .finding{border-color:#1f2937;} }
-  h1 { font-size: 24px; margin: 0 0 4px; }
-  .sub { color: #6b7280; margin-bottom: 16px; }
-  .badge { display:inline-block; color:#fff; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; }
-  code { background:#f3f4f6; padding:1px 5px; border-radius:4px; font-size:13px; }
-  .finding { border:1px solid #e5e7eb; border-radius:10px; padding:14px 16px; margin:14px 0; }
-  .finding h3 { margin:0 0 6px; font-size:17px; }
-  .meta { color:#6b7280; font-size:13px; margin-bottom:10px; }
-  .flow { display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; margin:10px 0; }
-  .node { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:6px 10px; min-width:120px; }
-  .node.source { border-color:#b45309; } .node.sink { border-color:#b91c1c; }
-  .node .loc { font-family: ui-monospace, monospace; font-size:12px; font-weight:600; }
-  .node .sym { font-family: ui-monospace, monospace; font-size:11px; color:#6b7280; }
-  .node .why { font-size:11px; color:#6b7280; margin-top:2px; max-width:220px; }
-  .arrow { align-self:center; color:#9ca3af; font-size:18px; }
-  .msg { margin:8px 0; }
-  .exploit { background:#fef2f2; border-left:3px solid #b91c1c; padding:6px 10px; border-radius:4px; }
-  @media (prefers-color-scheme: dark){ .exploit{ background:#1f1315; } }
-  .refs { font-size:12px; color:#6b7280; word-break:break-all; }
-  .risk { margin:6px 0 4px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-  .kv { font-size:12px; font-weight:600; color:#6b7280; }
-  details { margin-top:18px; }
+  :root {
+    color-scheme: light dark;
+    --ground:#f6f7f9; --surface:#fff; --surface-alt:#eef1f5;
+    --ink:#14181f; --ink-soft:#4e5769; --ink-faint:#79808f;
+    --rule:#dce1ea; --rule-soft:#e9edf3; --accent:#24487a;
+    --crit:#9b2233; --high:#b05315; --med:#7e6212; --low:#3f6350; --info:#5a6472; --unknown:#79808f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#101319; --surface:#171b23; --surface-alt:#1e232d;
+      --ink:#e6eaf2; --ink-soft:#a3acbe; --ink-faint:#757e92;
+      --rule:#2a303c; --rule-soft:#232833; --accent:#8daedd;
+      --crit:#e8798a; --high:#e39355; --med:#d4b04a; --low:#7fb295; --info:#96a0b2; --unknown:#8a93a5;
+    }
+  }
+  *,*::before,*::after { box-sizing:border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1180px; margin:0 auto; padding:0 24px 72px; }
+  a { color:var(--accent); text-underline-offset:.15em; }
+  code { font-family:var(--mono); font-size:.86em; background:var(--surface-alt); border:1px solid var(--rule-soft); border-radius:3px; padding:.08em .34em; }
+  h1 { font-size:clamp(1.7rem,4vw,2.4rem); line-height:1.12; margin:0; letter-spacing:-.015em; }
+  h2 { font-size:1.4rem; margin:0 0 4px; padding-bottom:8px; border-bottom:2px solid var(--ink); letter-spacing:-.01em; }
+  h3 { font-size:1rem; margin:0; line-height:1.35; }
+  p { margin:0; }
+
+  header.masthead { border-bottom:1px solid var(--rule); padding:44px 0 24px; display:flex; flex-direction:column; gap:12px; }
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); }
+  .meta-line { font-family:var(--mono); font-size:12px; color:var(--ink-faint); display:flex; flex-wrap:wrap; gap:4px 22px; }
+
+  .cols { display:grid; grid-template-columns:230px minmax(0,1fr); gap:48px; align-items:start; padding-top:32px; }
+  @media (max-width:939px) { .cols { grid-template-columns:1fr; gap:0; } .rail { display:none; } }
+  .rail { position:sticky; top:20px; max-height:calc(100vh - 40px); overflow-y:auto; }
+  .rail-title { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); padding-bottom:8px; border-bottom:1px solid var(--rule); margin-bottom:10px; }
+  .rail ol { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+  .rail a { display:flex; align-items:baseline; gap:8px; padding:4px 6px; border-radius:4px; font-size:13px; line-height:1.3; color:var(--ink-soft); text-decoration:none; }
+  .rail a:hover { background:var(--surface-alt); color:var(--ink); }
+  .rail .rt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  main { min-width:0; display:flex; flex-direction:column; gap:40px; }
+  section { display:flex; flex-direction:column; gap:14px; scroll-margin-top:20px; }
+
+  .band { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:6px; overflow:hidden; }
+  .tile { background:var(--surface); padding:14px 16px 12px; display:flex; flex-direction:column; gap:2px; }
+  .tile .n { font-size:1.9rem; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; }
+  .tile .k { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); }
+  .tile.c .n{color:var(--crit)} .tile.h .n{color:var(--high)} .tile.m .n{color:var(--med)} .tile.l .n{color:var(--low)} .tile.i .n{color:var(--info)}
+
+  .dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; display:inline-block; align-self:center; background:var(--unknown); }
+  .dot.c{background:var(--crit)} .dot.h{background:var(--high)} .dot.m{background:var(--med)} .dot.l{background:var(--low)} .dot.i{background:var(--info)}
+
+  .find { background:var(--surface); border:1px solid var(--rule); border-left:4px solid var(--sev,var(--unknown)); border-radius:5px; padding:16px 20px 18px; display:flex; flex-direction:column; gap:10px; }
+  .find.c{--sev:var(--crit)} .find.h{--sev:var(--high)} .find.m{--sev:var(--med)} .find.l{--sev:var(--low)} .find.i{--sev:var(--info)}
+  .find-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px; }
+  .pill { font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.1em; padding:2px 7px; border-radius:3px; color:var(--sev,var(--unknown)); border:1px solid var(--sev,var(--unknown)); }
+  .find-top h3 { flex:1 1 240px; }
+  .meta { font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); word-break:break-word; }
+  .msg { color:var(--ink-soft); }
+  .anchor { font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); word-break:break-all; }
+
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { font-family:var(--mono); font-size:10.5px; padding:2px 7px; border-radius:10px; background:var(--surface-alt); border:1px solid var(--rule); color:var(--ink-soft); }
+  .chip.risk { font-weight:700; }
+  .chip.kev { color:var(--crit); border-color:var(--crit); }
+  .chip.reach { color:var(--med); border-color:var(--med); }
+
+  .flow { display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; }
+  .node { background:var(--surface-alt); border:1px solid var(--rule); border-radius:6px; padding:6px 10px; min-width:118px; }
+  .node.source { border-color:var(--high); } .node.sink { border-color:var(--crit); }
+  .node .loc { font-family:var(--mono); font-size:11.5px; font-weight:600; }
+  .node .sym { font-family:var(--mono); font-size:11px; color:var(--ink-faint); }
+  .node .why { font-size:11px; color:var(--ink-faint); margin-top:2px; max-width:220px; }
+  .arrow { align-self:center; color:var(--ink-faint); }
+
+  .scenario { background:var(--surface-alt); border-radius:4px; padding:11px 14px; display:flex; flex-direction:column; gap:5px; }
+  .s-label { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); }
+  .refs { font-size:11.5px; color:var(--ink-faint); word-break:break-all; }
+  .fold-note { font-size:12.5px; color:var(--ink-faint); font-style:italic; }
+
+  .chain { background:var(--surface); border:1px solid var(--crit); border-left:4px solid var(--crit); border-radius:5px; padding:16px 20px; display:flex; flex-direction:column; gap:8px; }
+  .chain h3 { color:var(--crit); }
+  .warn { background:var(--surface); border:1px solid var(--high); border-left:4px solid var(--high); border-radius:5px; padding:12px 16px; }
+  .warn ul { margin:6px 0 0; padding-left:1.2em; }
+
+  .tw { overflow-x:auto; border:1px solid var(--rule); border-radius:5px; background:var(--surface); }
+  table { border-collapse:collapse; width:100%; font-size:13.5px; }
+  th,td { text-align:left; padding:7px 12px; border-bottom:1px solid var(--rule-soft); vertical-align:top; }
+  thead th { font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); background:var(--surface-alt); border-bottom:1px solid var(--rule); white-space:nowrap; }
+  tbody tr:last-child td { border-bottom:0; }
+  td.at { font-family:var(--mono); font-size:12px; word-break:break-all; }
+  tr.unexamined td { color:var(--high); }
+
+  details { background:var(--surface); border:1px solid var(--rule); border-radius:5px; }
+  details.members { background:transparent; border:0; }
+  summary { cursor:pointer; padding:10px 16px; font-weight:600; font-size:14px; }
+  details.members summary { padding:4px 0; font-weight:500; font-size:13px; color:var(--ink-faint); }
+  details > *:not(summary) { padding:0 16px 14px; }
+  details.members > *:not(summary) { padding:0; }
+
+  footer { margin-top:56px; padding-top:18px; border-top:1px solid var(--rule); font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); display:flex; flex-direction:column; gap:5px; }
 </style></head>
 <body>
-  <h1>Security audit</h1>
-  <div class="sub">repo <code>/repo</code> · ultrasec 9.9.9 · tools: semgrep, deepsec</div>
-  <div><span class="badge" style="background:#b91c1c">critical 1</span> <span class="badge" style="background:#c2410c">high 1</span> <span class="badge" style="background:#b45309">medium 1</span> <span class="badge" style="background:#15803d">low 1</span> <span class="badge" style="background:#64748b">info 0</span></div>
-  
-  <section class="finding" id="conf1">
-    <h3><span class="badge" style="background:#c2410c">HIGH</span> SQL injection in user lookup</h3>
-    <div class="meta">
-      <code>conf1</code>
-      · CWE-89 · taint
-      · status <span class="badge" style="background:#b91c1c">confirmed</span>
-      · confidence high
-      · verdict supported
-      
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Security audit · ultrasec 9.9.9</div>
+    <h1>/repo</h1>
+    <div class="meta-line">
+      <span>4 candidate(s)</span>
+      <span>1 confirmed</span>
+      <span>1 needs human</span>
+      <span>1 unadjudicated</span>
+      <span>1 refuted</span>
     </div>
-    <div class="risk"><span class="badge" style="background:#b91c1c">risk 72</span></div>
-    <div class="flow"><div class="node source"><div class="loc">src/server.js:10</div><div class="why">source: req.query.id</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/db.js:6</div><div class="why">sink: string-concat SQL</div></div></div>
-    <p class="msg">Tainted req.query.id reaches a raw SQL query.</p>
-    <p class="exploit"><strong>Exploit path:</strong> GET /user?id=1 OR 1=1</p>
-    <p class="refs"><a href="https://cwe.mitre.org/data/definitions/89.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/89.html</a></p>
+    <div class="meta-line"><span>tools: semgrep, deepsec</span></div>
+  </header>
+  <div class="cols">
+  <nav class="rail" aria-label="Finding registry"><div class="rail-title">Registry</div><ol><li><a href="#conf1"><span class="dot h"></span><span class="rt">SQL injection in user lookup</span></a></li><li><a href="#nh1"><span class="dot c"></span><span class="rt">Possible missing authorization on /admin</span></a></li></ol></nav>
+  <main>
+    <section id="summary">
+      <h2>Summary</h2>
+      <div class="band"><div class="tile c"><span class="n">1</span><span class="k">critical</span></div><div class="tile h"><span class="n">1</span><span class="k">high</span></div><div class="tile m"><span class="n">1</span><span class="k">medium</span></div><div class="tile l"><span class="n">1</span><span class="k">low</span></div><div class="tile i"><span class="n">0</span><span class="k">info</span></div></div>
+    </section>
+  <section id="confirmed"><h2>Confirmed (1)</h2>
+      <article class="find h" id="conf1">
+        <div class="find-top"><span class="pill">HIGH</span><h3>SQL injection in user lookup</h3></div>
+        <div class="meta"><code>conf1</code> · CWE-89 · taint · confirmed · supported · confidence high</div>
+        <div class="chips"><span class="chip risk">risk 72</span></div>
+        <div class="flow"><div class="node source"><div class="loc">src/server.js:10</div><div class="why">source: req.query.id</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/db.js:6</div><div class="why">sink: string-concat SQL</div></div></div>
+        <p class="msg">Tainted req.query.id reaches a raw SQL query.</p>
+        <div class="scenario"><div class="s-label">Attack scenario</div><p>GET /user?id=1 OR 1=1</p></div>
+        
+        
+        <p class="refs"><a href="https://cwe.mitre.org/data/definitions/89.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/89.html</a></p>
+      </article></section>
+  <section id="needs-human"><h2>Needs human review (1)</h2><p class="msg">Uncertain, and too severe to dismiss without proof.</p>
+      <article class="find c" id="nh1">
+        <div class="find-top"><span class="pill">CRITICAL</span><h3>Possible missing authorization on /admin</h3></div>
+        <div class="meta"><code>nh1</code> · authz · needs-human · confidence medium · via deepsec</div>
+        
+        <p class="anchor"><code>src/admin.js:3</code></p>
+        <p class="msg">Admin route may lack an auth guard.</p>
+        
+        
+        
+        
+      </article></section>
+  <section id="open"><h2>Unadjudicated candidates (1)</h2><p class="msg">Enumerated but not yet decided. Recall-oriented by design — many are false positives.</p><div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>ground</th></tr></thead><tbody><tr><td><span class="dot m"></span>MEDIUM</td><td>Reflected XSS candidate</td><td class="at">src/view.js:20</td><td>—</td></tr></tbody></table></div></section>
+  <section id="dismissed"><h2>Refuted (1)</h2>
+      <details><summary>Show the 1 candidate(s) this audit refuted, and on what ground</summary>
+      <p class="msg">Kept because an audit that hides its refutations cannot be checked. The <em>ground</em> column names why each was dismissed.</p>
+      <div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>ground</th></tr></thead><tbody><tr><td><span class="dot l"></span>LOW</td><td>Dismissed false lead</td><td class="at">src/safe.js:1</td><td>refuted</td></tr></tbody></table></div></details></section>
+    
+  <section id="coverage">
+    <h2>Coverage — what was not looked at</h2>
+    <p>A category marked <strong>NOT examined</strong> is a gap in this audit, not a clean bill of health.</p>
+    
+    <div class="tw"><table><thead><tr><th>#</th><th>category</th><th>state</th><th>findings</th></tr></thead><tbody><tr class="unexamined"><td class="at">V1</td><td>Architecture &amp; threat modelling</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V2</td><td>Authentication</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V3</td><td>Session management</td><td>NOT examined</td><td>—</td></tr><tr class="examined"><td class="at">V4</td><td>Access control</td><td>examined</td><td>1</td></tr><tr class="unexamined"><td class="at">V5</td><td>Validation, sanitization &amp; encoding</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V6</td><td>Stored cryptography</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V7</td><td>Error handling &amp; logging</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V8</td><td>Data protection &amp; privacy</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V9</td><td>Communications</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V11</td><td>Business logic</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V12</td><td>Files &amp; resources</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V13</td><td>API &amp; web service</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V14</td><td>Configuration &amp; supply chain</td><td>NOT examined</td><td>—</td></tr></tbody></table></div>
   </section>
-
-  <section class="finding" id="nh1">
-    <h3><span class="badge" style="background:#b91c1c">CRITICAL</span> Possible missing authorization on /admin</h3>
-    <div class="meta">
-      <code>nh1</code>
-       · authz
-      · status <span class="badge" style="background:#b45309">needs-human</span>
-      · confidence medium
-      
-      · via deepsec
-    </div>
-    
-    <code>src/admin.js:3</code>
-    <p class="msg">Admin route may lack an auth guard.</p>
-    
-    
-  </section>
-
-  <section class="finding" id="open1">
-    <h3><span class="badge" style="background:#b45309">MEDIUM</span> Reflected XSS candidate</h3>
-    <div class="meta">
-      <code>open1</code>
-      · CWE-79 · sast
-      · status <span class="badge" style="background:#475569">open</span>
-      · confidence low
-      
-      · agreed by opengrep, semgrep
-    </div>
-    
-    <code>src/view.js:20</code>
-    <p class="msg">Unescaped value written to response.</p>
-    
-    
-  </section>
-  <details><summary>1 dismissed candidate(s)</summary>
-  <section class="finding" id="dism1">
-    <h3><span class="badge" style="background:#15803d">LOW</span> Dismissed false lead</h3>
-    <div class="meta">
-      <code>dism1</code>
-       · taint
-      · status <span class="badge" style="background:#64748b">dismissed</span>
-      · confidence low
-      · verdict refuted
-      
-    </div>
-    
-    <code>src/safe.js:1</code>
-    <p class="msg">Looked tainted, proven safe.</p>
-    
-    
-  </section></details>
+    <footer>
+      <span>ultrasec 9.9.9 · deterministic note.</span>
+      <span>Every finding cites a resolvable file:line — \`ultrasec check\` fails the audit otherwise.</span>
+    </footer>
+  </main>
+  </div>
+</div>
 </body></html>
 "
 `;
@@ -156,23 +224,19 @@ Admin route may lack an auth guard.
 
 ## Unadjudicated candidates (1)
 
-### 🟨 MEDIUM Reflected XSS candidate
+Enumerated, not yet decided. Recall-oriented by design: many are false positives.
 
-\`open1\` · [CWE-79](https://cwe.mitre.org/) · sast · status **open** · confidence low · agreed by opengrep, semgrep
+| | finding | where | ground |
+|---|---|---|---|
+| 🟨 MEDIUM | Reflected XSS candidate <code>open1</code> | \`src/view.js:20\` | — |
 
-**Path:** \`src/view.js:20\`
+## Refuted (1)
 
-Unescaped value written to response.
+Kept so the refutations can be disagreed with. **ground** names why each was dismissed.
 
-## Dismissed (1)
-
-### 🟩 LOW Dismissed false lead
-
-\`dism1\` · taint · status **dismissed** · verdict refuted · confidence low
-
-**Path:** \`src/safe.js:1\`
-
-Looked tainted, proven safe.
+| | finding | where | ground |
+|---|---|---|---|
+| 🟩 LOW | Dismissed false lead <code>dism1</code> | \`src/safe.js:1\` | refuted |
 
 ## Coverage (OWASP ASVS)
 
@@ -244,5 +308,11 @@ _ranked by composite risk (severity ⊕ EPSS ⊕ KEV)_
 
 ## Needs human review (1)
 - 🟥 CRITICAL Possible missing authorization on /admin — \`src/admin.js:3\` (authz)
+
+## Coverage caveat
+
+**12 of 13** categories were NOT examined: Architecture & threat modelling · Authentication · Session management · Validation, sanitization & encoding · Stored cryptography · Error handling & logging · Data protection & privacy · Communications · Business logic · Files & resources · API & web service · Configuration & supply chain.
+
+This is a gap in the audit, not a clean bill of health. Full matrix in REPORT.md.
 "
 `;

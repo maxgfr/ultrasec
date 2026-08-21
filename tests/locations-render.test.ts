@@ -57,12 +57,22 @@ describe("locations[] rendering", () => {
     expect(renderDossierMd(dossier(depFinding()))).not.toContain("affects:");
   });
 
+  // An advisory merged across versions cites ONE lockfile line and affects
+  // several. REPORT.md must show every instance whichever tier the finding lands
+  // in — full write-up (confirmed/needs-human) or compact table (open/refuted).
+  // Compacting the refuted tier is what makes a 1000-finding report readable;
+  // losing the per-version evidence while doing it would make it wrong.
   it("REPORT.md lists every merged instance on an 'Affects' line", () => {
-    const md = renderReport(dossier(depFinding({ locations: LOCS })));
+    const md = renderReport(dossier(depFinding({ locations: LOCS, status: "confirmed" })));
     expect(md).toContain("**Affects:** v0.6.6 `package-lock.json:1` · v6.5.2 `app/package-lock.json:1`");
   });
 
+  it("REPORT.md keeps every merged instance in the compact tier too", () => {
+    const md = renderReport(dossier(depFinding({ locations: LOCS })));
+    expect(md).toContain("v0.6.6 `package-lock.json:1` · v6.5.2 `app/package-lock.json:1`");
+  });
+
   it("REPORT.md has no 'Affects' line when locations is absent", () => {
-    expect(renderReport(dossier(depFinding()))).not.toContain("**Affects:**");
+    expect(renderReport(dossier(depFinding({ status: "confirmed" })))).not.toContain("**Affects:**");
   });
 });
