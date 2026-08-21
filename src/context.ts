@@ -320,6 +320,36 @@ export function renderContextScaffoldMd(repo: string, run: string, s: ContextSca
  * Returns `undefined` otherwise — so every grounding consumer is presence-gated
  * and output stays byte-identical to today when no CONTEXT.md exists.
  */
+/**
+ * The sections of CONTEXT.md that bear on ADJUDICATING one candidate: what the
+ * attacker can reach, how exposed the deployment is, how much it matters.
+ *
+ * `dossier` reprints the whole document before every finding, and an adjudicator
+ * runs it dozens of times in a row. On a real audit the context was 4.5 KB and
+ * the candidate's own path and code — the thing being scrolled for — sat below
+ * it every single time. The trust model still has to be there; the purpose
+ * statement and the stack inventory do not have to be there fifty times.
+ */
+const COMPACT_SECTIONS = /^##\s*(hunt list|exposure|criticality|trust model|trust boundaries|auth)/i;
+
+/**
+ * CONTEXT.md reduced to its adjudication-bearing sections, or `undefined` when
+ * none match — in which case the caller keeps the full document rather than
+ * showing nothing, because an unrecognised heading layout must not silently cost
+ * the adjudicator their threat model.
+ */
+export function compactContextDoc(doc: string): string | undefined {
+  const lines = doc.split(/\r?\n/);
+  const out: string[] = [];
+  let keeping = false;
+  for (const line of lines) {
+    if (/^##\s/.test(line)) keeping = COMPACT_SECTIONS.test(line);
+    if (keeping) out.push(line);
+  }
+  const kept = out.join("\n").trim();
+  return kept.length ? kept : undefined;
+}
+
 export function loadContextDoc(run: string): string | undefined {
   const p = join(run, "CONTEXT.md");
   if (!existsSync(p)) return undefined;

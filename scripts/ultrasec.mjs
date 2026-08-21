@@ -17108,6 +17108,8 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "list",
   "no-redact",
   "strict",
+  "no-context",
+  "compact",
   "include-tests",
   "re-verdict",
   "no-journal",
@@ -23636,6 +23638,18 @@ function renderContextScaffoldMd(repo, run2, s) {
   L.push("");
   return L.join("\n") + "\n";
 }
+var COMPACT_SECTIONS = /^##\s*(hunt list|exposure|criticality|trust model|trust boundaries|auth)/i;
+function compactContextDoc(doc) {
+  const lines5 = doc.split(/\r?\n/);
+  const out2 = [];
+  let keeping = false;
+  for (const line of lines5) {
+    if (/^##\s/.test(line)) keeping = COMPACT_SECTIONS.test(line);
+    if (keeping) out2.push(line);
+  }
+  const kept = out2.join("\n").trim();
+  return kept.length ? kept : void 0;
+}
 function loadContextDoc(run2) {
   const p = join47(run2, "CONTEXT.md");
   if (!existsSync22(p)) return void 0;
@@ -25266,7 +25280,9 @@ function runDossier(args2) {
     return 2;
   }
   const repo = flagStr(args2, "repo") ?? d.manifest.repo;
-  println(renderFindingDossier(repo, d.graph, f, loadContextDoc(run2)));
+  const context = flagBool(args2, "no-context") ? void 0 : loadContextDoc(run2);
+  const shown = context && flagBool(args2, "compact") ? compactContextDoc(context) ?? context : context;
+  println(renderFindingDossier(repo, d.graph, f, shown));
   return 0;
 }
 
@@ -30952,7 +30968,10 @@ COMMANDS
   paths      List candidate cross-file source\u2192sink chains.
              Flags: --run \xB7 --kind <k> \xB7 --severity <s> \xB7 --json.
   dossier    Print the grounding packet for one finding (real code + neighbours).
-             The id may be a unique PREFIX. Flags: <finding-id> \xB7 --run \xB7 --repo.
+             The id may be a unique PREFIX. CONTEXT.md is reprinted before each
+             finding: --compact keeps only the hunt-list/exposure/criticality
+             sections, --no-context drops it. Flags: <finding-id> \xB7 --run \xB7
+             --repo \xB7 --compact \xB7 --no-context.
   triage     Fast, code-free first pass over OPEN candidates: emit / apply
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
              it is ignored (kept open for verify). Flags: --run \xB7 --apply \xB7 --json.

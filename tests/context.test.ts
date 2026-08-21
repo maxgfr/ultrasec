@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanRepo } from "../src/scan.js";
 import { buildAttackSurface } from "../src/map.js";
-import { buildContextScaffold, loadContextDoc } from "../src/context.js";
+import { buildContextScaffold, loadContextDoc, compactContextDoc } from "../src/context.js";
 import { renderFindingDossier } from "../src/dossier.js";
 import type { Finding } from "../src/types.js";
 import type { Graph } from "../src/graph.js";
@@ -93,5 +93,44 @@ describe("renderFindingDossier — CONTEXT.md injection (back-compat)", () => {
     expect(out).toContain(ctx);
     // the section sits before the decision prompt
     expect(out.indexOf("## Project context")).toBeLessThan(out.indexOf("## What to decide"));
+  });
+});
+
+describe("compactContextDoc — the adjudication-bearing sections only", () => {
+  // Shaped like the CONTEXT.md a real audit produced: purpose and stack take
+  // most of the document, and `dossier` reprinted all of it before every one of
+  // dozens of candidates.
+  const DOC = [
+    "# CONTEXT — app",
+    "## Purpose",
+    "Public site for looking up employment law.",
+    "## Stack",
+    "Next.js 16 App Router, react 19, Elasticsearch v8.",
+    "## Trust model / boundaries",
+    "1. Anonymous visitor → query/body of the API routes. NOT trusted.",
+    "## Hunt list (STRIDE par frontière)",
+    "- Boundary 1: Elasticsearch DSL injection, CPU DoS on `q`.",
+    "## Exposure: Internet-facing production",
+    "## Criticality: high — official public service",
+  ].join("\n");
+
+  it("keeps what bears on reachability and severity", () => {
+    const out = compactContextDoc(DOC)!;
+    expect(out).toContain("Hunt list");
+    expect(out).toContain("Exposure");
+    expect(out).toContain("Criticality");
+    expect(out).toContain("Trust model");
+  });
+
+  it("drops the inventory an adjudicator does not re-read per candidate", () => {
+    const out = compactContextDoc(DOC)!;
+    expect(out).not.toContain("Next.js 16 App Router");
+    expect(out).not.toContain("Public site for looking up");
+    expect(out.length).toBeLessThan(DOC.length);
+  });
+
+  it("returns undefined on an unrecognised layout, so the caller keeps the whole document", () => {
+    // Losing the threat model silently would be far worse than printing it.
+    expect(compactContextDoc("# CONTEXT\n\nJust prose, no headings.\n")).toBeUndefined();
   });
 });

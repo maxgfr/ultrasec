@@ -73,7 +73,10 @@ COMMANDS
   paths      List candidate cross-file source→sink chains.
              Flags: --run · --kind <k> · --severity <s> · --json.
   dossier    Print the grounding packet for one finding (real code + neighbours).
-             The id may be a unique PREFIX. Flags: <finding-id> · --run · --repo.
+             The id may be a unique PREFIX. CONTEXT.md is reprinted before each
+             finding: --compact keeps only the hunt-list/exposure/criticality
+             sections, --no-context drops it. Flags: <finding-id> · --run ·
+             --repo · --compact · --no-context.
   triage     Fast, code-free first pass over OPEN candidates: emit / apply
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
              it is ignored (kept open for verify). Flags: --run · --apply · --json.
