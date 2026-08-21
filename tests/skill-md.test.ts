@@ -111,9 +111,17 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
   //                 detection pack). Each bought a cheat-sheet line; `route` also a References
   //                 entry (route-playbook.md). The cloud/K8s detector runs under `scan` and
   //                 is documented in references/frameworks.md §Cloud, not the body.
+  //   2860 -> 2975: the `guards` stage — the entry-point × auth-guard matrix. It is a new
+  //                 workflow STEP, not another flag, and the one class the engine could not
+  //                 reach at all: a missing authorization check has no line to taint-trace,
+  //                 and on the audit it was built from that gap cost the three worst findings
+  //                 in the repo. It buys a cheat-sheet line, one workflow step, one Common
+  //                 mistake, and a `scan --include-vendored` mention. Everything else — the
+  //                 row shape, the verdict vocabulary, what a marker does and does not prove —
+  //                 went to references/schemas.md and references/commands.md.
   it("keeps the SKILL.md body within its word budget", () => {
     const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
-    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2860);
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2975);
   });
 
   // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits

@@ -62,7 +62,7 @@ cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 **Output** `--out` (default `.ultrasec`) · `--json` · `--quiet`
 **Tools** `--tools auto|none|<a,b>` (default `auto`) · `--no-tools` (= `--tools none`) ·
 `--docker` · `--offline` / `--no-enrich`
-**Focus** `--scope` · `--include` · `--exclude` · `--max-files` · `--gitignore`
+**Focus** `--scope` · `--include` · `--exclude` · `--max-files` · `--gitignore` · `--include-vendored`
 **Budget** `--budget quick|standard|thorough` · `--max-depth` · `--max-candidates`
 **Incremental** `--diff <ref>` / `--since <commit>` · `--merge` · `--resume`
 **Recall & provenance** `--sinks` · `--log-hygiene` · `--blame` (alias `--provenance`) ·
@@ -120,6 +120,13 @@ an explicit `--max-candidates`, never the budget preset — logging call sites f
 files above **1.5 MB** are skipped; `.git`, `node_modules`, `vendor`, `dist`, `build`, `target`,
 `.next`, `coverage`, `.venv`, `__pycache__`, `.terraform` and ~20 more are always ignored;
 `<repo>/.ultrasec` is always excluded so a scan never indexes its own dossier.
+
+That ignore set now applies to **external scanner output too**, with or without `--gitignore`.
+The walk had always skipped those trees while semgrep, bandit and gitleaks reported freely from
+them: on one real monorepo that was 561 of 1366 findings (41 %), 559 of them refuted, and bandit
+produced 519 findings of which 518 sat inside `.venv/` or `node_modules/`. `--gitignore` could not
+have helped — `.next/` was not in that repo's `.gitignore`. Pass **`--include-vendored`** when you
+genuinely mean to audit a vendored blob; the count of pruned results is always reported.
 
 Candidates are **rank-then-cap**, and any cap lands in `manifest.truncation` — truncation is
 never silent. External scanners are skipped by default in scoped/diff mode; pass `--tools auto`
@@ -186,13 +193,14 @@ The verdict→status table and every JSON shape live in [schemas.md](schemas.md)
 | command | emits | you write | apply rule |
 |---|---|---|---|
 | `triage --run <d>` | `TRIAGE.todo.json` + `.md` | `noise\|keep` | `noise` clears only low/med/info; on high/critical it is **ignored** |
+| `guards --run <d>` | `GUARDS.todo.json` + `.md` | `guarded\|unguarded\|intentionally-public` | `unguarded` becomes a cited `authz` finding; the matrix is re-derived from the code, so a stale row is refused |
 | `verify --run <d>` | `VERIFY.todo.json` + `.md` | `supported\|partial\|unsupported\|refuted` | `partial` → needs-human at any severity; `unsupported` → needs-human on high/critical |
 | `investigate --run <d>` | `INVESTIGATE.todo.json` + `.md` | `Discovery[]` | citations checked **before** ingest; a bad one is rejected, not folded |
 | `revalidate --run <d>` | `REVALIDATE.todo.json` + `.md` | `still-valid\|fixed\|false-positive\|uncertain` | `fixed` → dismissed + `fixedIn`; high/critical `false-positive` → needs-human |
 
 Shared `--apply` behaviour: the argument may be **a file, a comma-separated list, or a
 directory**. From a directory each stage picks up its own pattern, sorted for determinism —
-`*verdict*.json` (verify), `*triage*.json`, `*revalidat*.json`, `*investigat*`/`*discover*.json`.
+`*verdict*.json` (verify), `*triage*.json`, `*guard*.json`, `*revalidat*.json`, `*investigat*`/`*discover*.json`.
 A directory with no match, or a fragment set where **no id matches the dossier**, exits 2 rather
 than folding nothing and reporting success. `--apply -` reads the payload from **stdin**, so a
 generated set of verdicts can be piped straight in.

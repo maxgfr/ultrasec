@@ -3,111 +3,191 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>ultrasec — security audit</title>
 <style>
-  :root { color-scheme: light dark; }
-  body { font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 980px; margin: 0 auto; padding: 24px; color: #111; background: #fff; }
-  @media (prefers-color-scheme: dark) { body { color: #e5e7eb; background: #0b0f17; } a { color: #93c5fd; } code { background: #1f2937; } .node { background: #111827; border-color:#374151; } .finding{border-color:#1f2937;} }
-  h1 { font-size: 24px; margin: 0 0 4px; }
-  .sub { color: #6b7280; margin-bottom: 16px; }
-  .badge { display:inline-block; color:#fff; padding:1px 8px; border-radius:10px; font-size:12px; font-weight:600; }
-  code { background:#f3f4f6; padding:1px 5px; border-radius:4px; font-size:13px; }
-  .finding { border:1px solid #e5e7eb; border-radius:10px; padding:14px 16px; margin:14px 0; }
-  .finding h3 { margin:0 0 6px; font-size:17px; }
-  .meta { color:#6b7280; font-size:13px; margin-bottom:10px; }
-  .flow { display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; margin:10px 0; }
-  .node { background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:6px 10px; min-width:120px; }
-  .node.source { border-color:#b45309; } .node.sink { border-color:#b91c1c; }
-  .node .loc { font-family: ui-monospace, monospace; font-size:12px; font-weight:600; }
-  .node .sym { font-family: ui-monospace, monospace; font-size:11px; color:#6b7280; }
-  .node .why { font-size:11px; color:#6b7280; margin-top:2px; max-width:220px; }
-  .arrow { align-self:center; color:#9ca3af; font-size:18px; }
-  .msg { margin:8px 0; }
-  .exploit { background:#fef2f2; border-left:3px solid #b91c1c; padding:6px 10px; border-radius:4px; }
-  @media (prefers-color-scheme: dark){ .exploit{ background:#1f1315; } }
-  .refs { font-size:12px; color:#6b7280; word-break:break-all; }
-  .risk { margin:6px 0 4px; display:flex; flex-wrap:wrap; gap:6px; align-items:center; }
-  .kv { font-size:12px; font-weight:600; color:#6b7280; }
-  details { margin-top:18px; }
-  .ai-narrative { border:1px solid #6d28d9; background:#faf5ff; border-radius:10px; padding:10px 16px; margin:14px 0; }
-  @media (prefers-color-scheme: dark){ .ai-narrative{ background:#1e1b2e; border-color:#7c3aed; } .ai-fix{ background:#1e1b2e; } }
-  .ai-tag { background:#6d28d9; color:#fff; font-size:11px; padding:1px 6px; border-radius:8px; vertical-align:middle; }
-  .ai-note { color:#6b7280; font-size:12px; font-style:italic; margin:2px 0 8px; }
-  .ai-fix { border-left:3px solid #6d28d9; background:#faf5ff; padding:6px 10px; border-radius:4px; margin:8px 0; }
-  .ai-patch { background:#0b0f17; color:#e5e7eb; padding:8px; border-radius:6px; overflow:auto; font-size:12px; }
-  .ai-block { margin:8px 0; }
+  :root {
+    color-scheme: light dark;
+    --ground:#f6f7f9; --surface:#fff; --surface-alt:#eef1f5;
+    --ink:#14181f; --ink-soft:#4e5769; --ink-faint:#79808f;
+    --rule:#dce1ea; --rule-soft:#e9edf3; --accent:#24487a;
+    --crit:#9b2233; --high:#b05315; --med:#7e6212; --low:#3f6350; --info:#5a6472; --unknown:#79808f;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:#101319; --surface:#171b23; --surface-alt:#1e232d;
+      --ink:#e6eaf2; --ink-soft:#a3acbe; --ink-faint:#757e92;
+      --rule:#2a303c; --rule-soft:#232833; --accent:#8daedd;
+      --crit:#e8798a; --high:#e39355; --med:#d4b04a; --low:#7fb295; --info:#96a0b2; --unknown:#8a93a5;
+    }
+  }
+  *,*::before,*::after { box-sizing:border-box; }
+  body { margin:0; background:var(--ground); color:var(--ink); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1180px; margin:0 auto; padding:0 24px 72px; }
+  a { color:var(--accent); text-underline-offset:.15em; }
+  code { font-family:var(--mono); font-size:.86em; background:var(--surface-alt); border:1px solid var(--rule-soft); border-radius:3px; padding:.08em .34em; }
+  h1 { font-size:clamp(1.7rem,4vw,2.4rem); line-height:1.12; margin:0; letter-spacing:-.015em; }
+  h2 { font-size:1.4rem; margin:0 0 4px; padding-bottom:8px; border-bottom:2px solid var(--ink); letter-spacing:-.01em; }
+  h3 { font-size:1rem; margin:0; line-height:1.35; }
+  p { margin:0; }
+
+  header.masthead { border-bottom:1px solid var(--rule); padding:44px 0 24px; display:flex; flex-direction:column; gap:12px; }
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); }
+  .meta-line { font-family:var(--mono); font-size:12px; color:var(--ink-faint); display:flex; flex-wrap:wrap; gap:4px 22px; }
+
+  .cols { display:grid; grid-template-columns:230px minmax(0,1fr); gap:48px; align-items:start; padding-top:32px; }
+  @media (max-width:939px) { .cols { grid-template-columns:1fr; gap:0; } .rail { display:none; } }
+  .rail { position:sticky; top:20px; max-height:calc(100vh - 40px); overflow-y:auto; }
+  .rail-title { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); padding-bottom:8px; border-bottom:1px solid var(--rule); margin-bottom:10px; }
+  .rail ol { list-style:none; margin:0; padding:0; display:flex; flex-direction:column; gap:2px; }
+  .rail a { display:flex; align-items:baseline; gap:8px; padding:4px 6px; border-radius:4px; font-size:13px; line-height:1.3; color:var(--ink-soft); text-decoration:none; }
+  .rail a:hover { background:var(--surface-alt); color:var(--ink); }
+  .rail .rt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  main { min-width:0; display:flex; flex-direction:column; gap:40px; }
+  section { display:flex; flex-direction:column; gap:14px; scroll-margin-top:20px; }
+
+  .band { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:6px; overflow:hidden; }
+  .tile { background:var(--surface); padding:14px 16px 12px; display:flex; flex-direction:column; gap:2px; }
+  .tile .n { font-size:1.9rem; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; }
+  .tile .k { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); }
+  .tile.c .n{color:var(--crit)} .tile.h .n{color:var(--high)} .tile.m .n{color:var(--med)} .tile.l .n{color:var(--low)} .tile.i .n{color:var(--info)}
+
+  .dot { width:7px; height:7px; border-radius:50%; flex:0 0 auto; display:inline-block; align-self:center; background:var(--unknown); }
+  .dot.c{background:var(--crit)} .dot.h{background:var(--high)} .dot.m{background:var(--med)} .dot.l{background:var(--low)} .dot.i{background:var(--info)}
+
+  .find { background:var(--surface); border:1px solid var(--rule); border-left:4px solid var(--sev,var(--unknown)); border-radius:5px; padding:16px 20px 18px; display:flex; flex-direction:column; gap:10px; }
+  .find.c{--sev:var(--crit)} .find.h{--sev:var(--high)} .find.m{--sev:var(--med)} .find.l{--sev:var(--low)} .find.i{--sev:var(--info)}
+  .find-top { display:flex; flex-wrap:wrap; align-items:baseline; gap:10px; }
+  .pill { font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.1em; padding:2px 7px; border-radius:3px; color:var(--sev,var(--unknown)); border:1px solid var(--sev,var(--unknown)); }
+  .find-top h3 { flex:1 1 240px; }
+  .meta { font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); word-break:break-word; }
+  .msg { color:var(--ink-soft); }
+  .anchor { font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); word-break:break-all; }
+
+  .chips { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { font-family:var(--mono); font-size:10.5px; padding:2px 7px; border-radius:10px; background:var(--surface-alt); border:1px solid var(--rule); color:var(--ink-soft); }
+  .chip.risk { font-weight:700; }
+  .chip.kev { color:var(--crit); border-color:var(--crit); }
+  .chip.reach { color:var(--med); border-color:var(--med); }
+
+  .flow { display:flex; flex-wrap:wrap; align-items:stretch; gap:6px; }
+  .node { background:var(--surface-alt); border:1px solid var(--rule); border-radius:6px; padding:6px 10px; min-width:118px; }
+  .node.source { border-color:var(--high); } .node.sink { border-color:var(--crit); }
+  .node .loc { font-family:var(--mono); font-size:11.5px; font-weight:600; }
+  .node .sym { font-family:var(--mono); font-size:11px; color:var(--ink-faint); }
+  .node .why { font-size:11px; color:var(--ink-faint); margin-top:2px; max-width:220px; }
+  .arrow { align-self:center; color:var(--ink-faint); }
+
+  .scenario { background:var(--surface-alt); border-radius:4px; padding:11px 14px; display:flex; flex-direction:column; gap:5px; }
+  .s-label { font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-faint); }
+  .refs { font-size:11.5px; color:var(--ink-faint); word-break:break-all; }
+  .fold-note { font-size:12.5px; color:var(--ink-faint); font-style:italic; }
+
+  .chain { background:var(--surface); border:1px solid var(--crit); border-left:4px solid var(--crit); border-radius:5px; padding:16px 20px; display:flex; flex-direction:column; gap:8px; }
+  .chain h3 { color:var(--crit); }
+  .warn { background:var(--surface); border:1px solid var(--high); border-left:4px solid var(--high); border-radius:5px; padding:12px 16px; }
+  .warn ul { margin:6px 0 0; padding-left:1.2em; }
+
+  .tw { overflow-x:auto; border:1px solid var(--rule); border-radius:5px; background:var(--surface); }
+  table { border-collapse:collapse; width:100%; font-size:13.5px; }
+  th,td { text-align:left; padding:7px 12px; border-bottom:1px solid var(--rule-soft); vertical-align:top; }
+  thead th { font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-faint); background:var(--surface-alt); border-bottom:1px solid var(--rule); white-space:nowrap; }
+  tbody tr:last-child td { border-bottom:0; }
+  td.at { font-family:var(--mono); font-size:12px; word-break:break-all; }
+  tr.unexamined td { color:var(--high); }
+
+  details { background:var(--surface); border:1px solid var(--rule); border-radius:5px; }
+  details.members { background:transparent; border:0; }
+  summary { cursor:pointer; padding:10px 16px; font-weight:600; font-size:14px; }
+  details.members summary { padding:4px 0; font-weight:500; font-size:13px; color:var(--ink-faint); }
+  details > *:not(summary) { padding:0 16px 14px; }
+  details.members > *:not(summary) { padding:0; }
+
+  footer { margin-top:56px; padding-top:18px; border-top:1px solid var(--rule); font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); display:flex; flex-direction:column; gap:5px; }
+
+  .ai-narrative { border:1px solid var(--accent); border-radius:6px; padding:12px 18px; background:var(--surface); }
+  .ai-tag { font-family:var(--mono); font-size:10px; letter-spacing:.1em; padding:2px 6px; border-radius:8px; border:1px solid var(--accent); color:var(--accent); vertical-align:middle; }
+  .ai-note { color:var(--ink-faint); font-size:12px; font-style:italic; }
+  .ai-fix { border-left:3px solid var(--accent); background:var(--surface-alt); padding:8px 12px; border-radius:0 4px 4px 0; }
+  .ai-patch { background:var(--surface-alt); border:1px solid var(--rule); border-radius:4px; padding:8px 10px; overflow-x:auto; font-size:12px; margin:6px 0 0; }
+  .ai-block { display:flex; flex-direction:column; gap:5px; }
 </style></head>
 <body>
-  <h1>Security audit</h1>
-  <div class="sub">repo <code>examples/vuln-express</code> · ultrasec 0.0.0-development · tools: none</div>
-  <div><span class="badge" style="background:#b91c1c">critical 1</span> <span class="badge" style="background:#c2410c">high 1</span> <span class="badge" style="background:#b45309">medium 1</span> <span class="badge" style="background:#15803d">low 0</span> <span class="badge" style="background:#64748b">info 0</span></div>
-  <section class="ai-narrative"><h2>Executive summary <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p>Two confirmed injection flaws in a public Express API. Untrusted req.query values cross file boundaries into a raw SQL statement and a shell command, with no validation on any hop and no authentication on either route, so both are exploitable by any unauthenticated client — command injection first, which yields code execution as the app user. Both come from the same habit: request values handed straight to a helper that builds an interpreter string.</p></section>
-  <section class="ai-narrative"><h2>What the codebase does well <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p>The data layer already knows how to do this correctly — db.getUserSafe (src/db.js:11) uses a `?` placeholder with a parameter array, so the parameterized path exists and is the one to standardize on. The two findings below are deviations from it, not a missing capability.</p></section>
-  
-  <section class="finding" id="3ffa0917b004">
-    <h3><span class="badge" style="background:#b91c1c">CRITICAL</span> OS command injection: untrusted input reaches execSync()</h3>
-    <div class="meta">
-      <code>3ffa0917b004</code>
-      · CWE-78 · taint
-      · status <span class="badge" style="background:#b91c1c">confirmed</span>
-      · confidence high
-      · verdict supported
-      
+<div class="wrap">
+  <header class="masthead">
+    <div class="eyebrow">Security audit · ultrasec 0.0.0-development</div>
+    <h1>examples/vuln-express</h1>
+    <div class="meta-line">
+      <span>3 candidate(s)</span>
+      <span>2 confirmed</span>
+      <span>0 needs human</span>
+      <span>0 unadjudicated</span>
+      <span>1 refuted</span>
     </div>
-    <div class="risk"><span class="badge" style="background:#b45309">risk 60</span></div>
-    <div class="flow"><div class="node source"><div class="loc">src/server.js:18</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node hop"><div class="loc">src/server.js:19</div><div class="why">calls runReport()</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/report.js:5</div><div class="sym">runReport()</div><div class="why">command sink: execSync()</div></div></div>
-    <p class="msg">Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
+    <div class="meta-line"><span>tools: none</span></div>
+  </header>
+  <div class="cols">
+  <nav class="rail" aria-label="Finding registry"><div class="rail-title">Registry</div><ol><li><a href="#3ffa0917b004"><span class="dot c"></span><span class="rt">OS command injection: untrusted input reaches execSync()</span></a></li><li><a href="#54b733703450"><span class="dot h"></span><span class="rt">SQL injection: untrusted input reaches query()</span></a></li></ol></nav>
+  <main>
+    <section id="summary">
+      <h2>Summary</h2>
+      <div class="band"><div class="tile c"><span class="n">1</span><span class="k">critical</span></div><div class="tile h"><span class="n">1</span><span class="k">high</span></div><div class="tile m"><span class="n">1</span><span class="k">medium</span></div><div class="tile l"><span class="n">0</span><span class="k">low</span></div><div class="tile i"><span class="n">0</span><span class="k">info</span></div></div>
+    </section>
+  <section class="ai-narrative"><h2>Executive summary <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p>Two confirmed injection flaws in a public Express API. Untrusted req.query values cross file boundaries into a raw SQL statement and a shell command, with no validation on any hop and no authentication on either route, so both are exploitable by any unauthenticated client — command injection first, which yields code execution as the app user. Both come from the same habit: request values handed straight to a helper that builds an interpreter string.</p></section>
+  <section id="chains"><h2>Attack chains <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="chain"><h3>Unauthenticated code execution, then data access</h3><div class="meta"><a href="#3ffa0917b004"><code>3ffa0917b004</code></a> → <a href="#54b733703450"><code>54b733703450</code></a></div><p>Neither route requires authentication. GET /report gives shell execution as the app user (report.js:5), which already reaches the database file directly; GET /user independently returns arbitrary rows (db.js:6). Fixing only the SQL injection leaves the stronger path intact.</p></div></section>
+  <section class="ai-narrative"><h2>What the codebase does well <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p>The data layer already knows how to do this correctly — db.getUserSafe (src/db.js:11) uses a `?` placeholder with a parameter array, so the parameterized path exists and is the one to standardize on. The two findings below are deviations from it, not a missing capability.</p></section>
+  <section id="confirmed"><h2>Confirmed (2)</h2>
+      <article class="find c" id="3ffa0917b004">
+        <div class="find-top"><span class="pill">CRITICAL</span><h3>OS command injection: untrusted input reaches execSync()</h3></div>
+        <div class="meta"><code>3ffa0917b004</code> · CWE-78 · taint · confirmed · supported · confidence high</div>
+        <div class="chips"><span class="chip risk">risk 60</span></div>
+        <div class="flow"><div class="node source"><div class="loc">src/server.js:18</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node hop"><div class="loc">src/server.js:19</div><div class="why">calls runReport()</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/report.js:5</div><div class="sym">runReport()</div><div class="why">command sink: execSync()</div></div></div>
+        <p class="msg">Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
 Verdict (supported): req.query.name is concatenated into a shell string at report.js:5 and executed with execSync; no validation on any hop, and the route has no auth.
 
 Revalidation (still-valid): report.js:5 is unchanged at HEAD — still execSync on a concatenated string.</p>
-    <p class="exploit"><strong>Exploit path:</strong> GET /report?name=x;sleep%205 · unauthenticated → the response takes 5s (baseline ~40ms), proving shell execution as the app user</p>
-    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Replace execSync with execFile and an argv array: execFile(&quot;generate-report&quot;, [&quot;--for&quot;, name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can't be read as an option. · owner @backend<pre class="ai-patch">- return execSync(&quot;generate-report --for &quot; + name).toString();
-+ return execFileSync(&quot;generate-report&quot;, [&quot;--for&quot;, &quot;--&quot;, name]).toString();</pre></div>
-    <p class="refs"><a href="https://cwe.mitre.org/data/definitions/78.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/78.html</a></p>
-  </section>
+        <div class="scenario"><div class="s-label">Attack scenario</div><p>GET /report?name=x;sleep%205 · unauthenticated → the response takes 5s (baseline ~40ms), proving shell execution as the app user</p></div>
+        <div class="ai-fix"><strong>Suggested fix (AI):</strong> Replace execSync with execFile and an argv array: execFile(&quot;generate-report&quot;, [&quot;--for&quot;, name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can't be read as an option. · owner @backend<pre class="ai-patch"><code>- return execSync(&quot;generate-report --for &quot; + name).toString();
++ return execFileSync(&quot;generate-report&quot;, [&quot;--for&quot;, &quot;--&quot;, name]).toString();</code></pre></div>
+        
+        <p class="refs"><a href="https://cwe.mitre.org/data/definitions/78.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/78.html</a></p>
+      </article>
 
-  <section class="finding" id="54b733703450">
-    <h3><span class="badge" style="background:#c2410c">HIGH</span> SQL injection: untrusted input reaches query()</h3>
-    <div class="meta">
-      <code>54b733703450</code>
-      · CWE-89 · taint
-      · status <span class="badge" style="background:#b91c1c">confirmed</span>
-      · confidence high
-      · verdict supported
-      
-    </div>
-    <div class="risk"><span class="badge" style="background:#b45309">risk 48</span></div>
-    <div class="flow"><div class="node source"><div class="loc">src/server.js:10</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node hop"><div class="loc">src/server.js:11</div><div class="why">calls getUser()</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/db.js:6</div><div class="sym">getUser()</div><div class="why">sql sink: query()</div></div></div>
-    <p class="msg">Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
+      <article class="find h" id="54b733703450">
+        <div class="find-top"><span class="pill">HIGH</span><h3>SQL injection: untrusted input reaches query()</h3></div>
+        <div class="meta"><code>54b733703450</code> · CWE-89 · taint · confirmed · supported · confidence high</div>
+        <div class="chips"><span class="chip risk">risk 48</span></div>
+        <div class="flow"><div class="node source"><div class="loc">src/server.js:10</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node hop"><div class="loc">src/server.js:11</div><div class="why">calls getUser()</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/db.js:6</div><div class="sym">getUser()</div><div class="why">sql sink: query()</div></div></div>
+        <p class="msg">Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
 Verdict (supported): req.query.id is concatenated into SQL at db.js:5 and reaches sqlite.query() with no parameter array. The parameterized sibling getUserSafe (db.js:11) is NOT on this path.
 
 Revalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation it consumes is still at db.js:5.</p>
-    <p class="exploit"><strong>Exploit path:</strong> GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`, proving the value is parsed as SQL, not data</p>
-    <div class="ai-fix"><strong>Suggested fix (AI):</strong> Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query(&quot;SELECT * FROM users WHERE id = ?&quot;, [id]). · owner @backend<pre class="ai-patch">- const sql = &quot;SELECT * FROM users WHERE id = &quot; + id;
+        <div class="scenario"><div class="s-label">Attack scenario</div><p>GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`, proving the value is parsed as SQL, not data</p></div>
+        <div class="ai-fix"><strong>Suggested fix (AI):</strong> Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query(&quot;SELECT * FROM users WHERE id = ?&quot;, [id]). · owner @backend<pre class="ai-patch"><code>- const sql = &quot;SELECT * FROM users WHERE id = &quot; + id;
 - return sqlite.query(sql);
-+ return sqlite.query(&quot;SELECT * FROM users WHERE id = ?&quot;, [id]);</pre></div>
-    <p class="refs"><a href="https://cwe.mitre.org/data/definitions/89.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/89.html</a></p>
-  </section>
-  <details><summary>1 dismissed candidate(s)</summary>
-  <section class="finding" id="9b0bcc91ea6a">
-    <h3><span class="badge" style="background:#b45309">MEDIUM</span> Cross-site scripting (reflected): untrusted input reaches send()</h3>
-    <div class="meta">
-      <code>9b0bcc91ea6a</code>
-      · CWE-79 · taint
-      · status <span class="badge" style="background:#64748b">dismissed</span>
-      · confidence low
-      · verdict unsupported
-      
-    </div>
-    <div class="risk"><span class="badge" style="background:#475569">risk 30</span></div>
-    <div class="flow"><div class="node source"><div class="loc">src/server.js:18</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/server.js:20</div><div class="why">xss sink: send()</div></div></div>
-    <p class="msg">Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
-
-Verdict (unsupported): The argument to res.send() at server.js:20 is `out` — the return value of runReport() — not req.query.name, so the query parameter is never reflected. The attacker does control that output, but only by way of the command injection at report.js:5, whose impact (RCE) subsumes it; reporting a separate MEDIUM XSS would double-count one bug. Tracked by 3ffa0917b004.</p>
-    
-    <p class="refs"><a href="https://cwe.mitre.org/data/definitions/79.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/79.html</a></p>
-  </section></details>
-  <section class="ai-narrative"><h2>Attack chains <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="ai-block"><h3>Unauthenticated code execution, then data access</h3><div class="meta"><code>3ffa0917b004</code> → <code>54b733703450</code></div><p>Neither route requires authentication. GET /report gives shell execution as the app user (report.js:5), which already reaches the database file directly; GET /user independently returns arbitrary rows (db.js:6). Fixing only the SQL injection leaves the stronger path intact.</p></div></section>
-  <section class="ai-narrative"><h2>Root-cause groups <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="ai-block"><h3>Request values handed to a helper that builds an interpreter string</h3><div class="meta"><code>3ffa0917b004</code>, <code>54b733703450</code></div><p>Both handlers read req.query.* and pass it, unvalidated, to a helper that concatenates it into SQL or a shell command. The fix is structural, not per-site: bind parameters at the data layer and use argv arrays for process execution, then add validation at the route boundary so a future helper inherits neither habit.</p></div></section>
++ return sqlite.query(&quot;SELECT * FROM users WHERE id = ?&quot;, [id]);</code></pre></div>
+        
+        <p class="refs"><a href="https://cwe.mitre.org/data/definitions/89.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/89.html</a></p>
+      </article></section>
+  <section id="dismissed"><h2>Refuted (1)</h2>
+      <details><summary>Show the 1 candidate(s) this audit refuted, and on what ground</summary>
+      <p class="msg">Kept because an audit that hides its refutations cannot be checked. The <em>ground</em> column names why each was dismissed.</p>
+      <div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>ground</th></tr></thead><tbody><tr><td><span class="dot m"></span>MEDIUM</td><td>Cross-site scripting (reflected): untrusted input reaches send()</td><td class="at">src/server.js:20</td><td>unsupported</td></tr></tbody></table></div></details></section>
+  <section class="ai-narrative"><h2>Root-cause groups <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="ai-block"><h3>Request values handed to a helper that builds an interpreter string</h3><div class="meta"><a href="#3ffa0917b004"><code>3ffa0917b004</code></a>, <a href="#54b733703450"><code>54b733703450</code></a></div><p>Both handlers read req.query.* and pass it, unvalidated, to a helper that concatenates it into SQL or a shell command. The fix is structural, not per-site: bind parameters at the data layer and use argv arrays for process execution, then add validation at the route boundary so a future helper inherits neither habit.</p></div></section>
   <section class="ai-narrative"><h2>Hardening notes <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p class="ai-note">Defense-in-depth suggestions — not findings; excluded from the severity counts.</p><ul><li>Neither route validates the shape of its input before use (an integer id, a report name from a known set). Type/shape validation at the boundary is defense in depth once the two fixes above land — it is not what makes them exploitable today.</li><li>res.send() at server.js:20 returns command output with the default text/html content type. Once the command injection is fixed the attacker no longer controls that body, but setting an explicit content type (or res.json) removes the reflected-content question entirely.</li></ul></section>
+    
+  <section id="coverage">
+    <h2>Coverage — what was not looked at</h2>
+    <p>A category marked <strong>NOT examined</strong> is a gap in this audit, not a clean bill of health.</p>
+    
+    <div class="tw"><table><thead><tr><th>#</th><th>category</th><th>state</th><th>findings</th></tr></thead><tbody><tr class="unexamined"><td class="at">V1</td><td>Architecture &amp; threat modelling</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V2</td><td>Authentication</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V3</td><td>Session management</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V4</td><td>Access control</td><td>NOT examined</td><td>—</td></tr><tr class="examined"><td class="at">V5</td><td>Validation, sanitization &amp; encoding</td><td>examined</td><td>3</td></tr><tr class="unexamined"><td class="at">V6</td><td>Stored cryptography</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V7</td><td>Error handling &amp; logging</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V8</td><td>Data protection &amp; privacy</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V9</td><td>Communications</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V11</td><td>Business logic</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V12</td><td>Files &amp; resources</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V13</td><td>API &amp; web service</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V14</td><td>Configuration &amp; supply chain</td><td>NOT examined</td><td>—</td></tr></tbody></table></div>
+  </section>
+    <footer>
+      <span>ultrasec 0.0.0-development · Taint candidates are deterministic; external-tool results depend on installed scanners.</span>
+      <span>Every finding cites a resolvable file:line — `ultrasec check` fails the audit otherwise.</span>
+    </footer>
+  </main>
+  </div>
+</div>
 </body></html>

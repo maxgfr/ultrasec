@@ -91,7 +91,8 @@ Written by `scan`/`import`, rewritten by every `--apply`. The dossier's core rec
 | `tool` | producer: `ultrasec` (engine), `ultrasec-ai` (your `investigate` discovery), else the scanner name. |
 | `sources[]` | every tool that independently reported it. Length > 1 is corroboration, a prior for verify — not a verdict. |
 | `cve`, `aliases[]`, `pkg`, `version`, `locations[]` | dependency identity. `locations[]` holds each `{file, line?, version}` instance when one advisory was merged across versions/lockfiles. |
-| `epss`, `kev`, `kevDateAdded`, `risk` | deterministic post-scan enrichment. `risk` 0–100 (severity ⊕ EPSS ⊕ KEV) is the dossier's sort key. Absent under `--offline`. |
+| `epss`, `kev`, `kevDateAdded`, `risk` | deterministic post-scan enrichment. `risk` 0–100 (severity ⊕ EPSS ⊕ KEV ⊕ reachability) orders findings WITHIN a decision tier. Absent under `--offline`, and then derived from severity alone — a finding with no score is never sorted below one that has one. |
+| `reachability` | `runtime` \| `toolchain` \| `unproven` — whether anything puts this on a path that runs. Damps `risk` and floors the displayed severity. `unproven` is the orphan-sink case (a dangerous callee with no source path: 182 of them on one real audit, **zero** confirmed); `toolchain` is a build-only dependency. Evidence, not a verdict — find the path the engine missed and it is confirmable. Absent means the run established nothing, and nothing is damped. |
 | `verified` | secret findings only: a scanner actively confirmed the credential is live. Treat a `true` as an incident, not a finding. |
 | `provenance` | `{author?, commit?, date?, owner?}` from `--blame`. Evidence only — never a suppression rule. |
 | `fixedIn` | commit recorded by `revalidate --apply` on a `fixed` verdict. |
@@ -183,6 +184,40 @@ You write (only `id` + `verdict` are read):
 [ { "id": "409b0c792964", "verdict": "keep" },
   { "id": "8104ef108b3e", "verdict": "noise" } ]
 ```
+
+The Markdown brief groups repeated candidates under one heading with a `×N` count — 1342 rows
+collapse to a few dozen groups on a large repo. **The grouping is for reading, never for deciding**:
+`TRIAGE.todo.json` still carries one row per finding and your `TRIAGE.json` must still name every
+id you mean. A group is not a verdict.
+
+## `GUARDS.todo.json` → `GUARDS.json`
+
+`guards --run <dir>` crosses every handler that reads request data against the auth/authorization
+markers visible in its scope — the vulnerability that is an **absence**, which no taint path can
+reach. One row per handler, not per request read.
+
+```json
+[ { "id": "2767aa999f18", "file": "src/pages/api/storage/index.ts", "line": 7,
+    "handler": "endPoint", "kinds": ["http"], "reads": 5,
+    "guards": [], "scope": "approx", "state": "unguarded", "verdict": null } ]
+```
+
+`scope` says how far the guard search reached, weakest last: `symbol` (the extractor gave an end
+line), `approx` (bounded by the next symbol — the common case), `file` (nothing to bound against).
+
+You write:
+
+```json
+[ { "id": "2767aa999f18", "verdict": "unguarded",
+    "note": "No getServerSession, no middleware; POST writes to S3 with ACL public-read." } ]
+```
+
+`guarded` · `unguarded` · `intentionally-public` (a health check, a login route, a webhook with its
+own signature check). An `unguarded` verdict becomes a cited `authz` finding through the same
+citation gate as any discovery. **A marker in scope is a candidate, not a proof** — it may guard a
+different branch, run after the object is read, or check authentication where the route needs
+authorization; and a route protected by framework middleware this pass cannot see will show as
+`unguarded` when it is fine.
 
 ## `VERIFY.todo.json` → `verdicts.json`
 

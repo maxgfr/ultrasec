@@ -60,6 +60,7 @@ ultrasec map     --repo . --out .ultrasec       # cheap attack-surface recon; no
 ultrasec context --repo . --out .ultrasec       # scaffold → you author .ultrasec/CONTEXT.md
 ultrasec scan    --repo . --out .ultrasec       # graph + cross-file taint + tools → the dossier
   # focus:  --scope <dir> --include/--exclude <glob> --max-files N --gitignore
+  #         --include-vendored (audit node_modules/.venv/dist too — pruned by default)
   # budget: --budget quick|standard|thorough  --max-candidates N  --max-depth N
   # again:  --diff origin/main --merge --resume        # incremental, folds into one run
   # recall: --sinks (orphan sinks)  --log-hygiene (CWE-117/532)  --blame (git provenance)
@@ -70,6 +71,7 @@ ultrasec dossier <id> --run .ultrasec           # ONE finding's real code + path
 ultrasec graph   <file|symbol> --run .ultrasec  # cross-file links into/out of a node
 ultrasec assumptions --run .ultrasec            # what each unit trusts that NOTHING enforces (--apply)
 ultrasec triage  --run .ultrasec                # cheap noise|keep fast-lane  (--apply TRIAGE.json)
+ultrasec guards  --run .ultrasec                # entry point × auth guard — the MISSING check (--apply)
 ultrasec investigate --run .ultrasec            # hunt authz/logic  (--apply INVESTIGATE.json)
 ultrasec verify  --run .ultrasec                # adversarial worklist → write verdicts.json
 ultrasec verify  --apply verdicts.json --run .ultrasec       # a file, comma-list, DIRECTORY, or -
@@ -172,6 +174,11 @@ each: [references/schemas.md](references/schemas.md).
    invisible to the engine. `--apply` feeds the leads to `investigate`.
    [references/assumptions-playbook.md](references/assumptions-playbook.md).
 
+6c. **Enumerate the MISSING guard.** `guards --run <run>` lists every handler reading request data
+   with no auth marker in scope — the class taint cannot reach, since an absent check has no line
+   to trace. A marker is a *candidate*: read the handler, confirm it guards authorization before
+   the object is touched. `--apply` turns `unguarded` into a cited finding.
+
 7. **Hunt what the engine can't enumerate.** `investigate --run <run>` groups the attack surface
    by region; find broken access control/IDOR, business logic, auth/session/JWT, crypto, races,
    feature abuse, chained attacks, and emit grounded `Discovery[]` — citations are checked before
@@ -260,6 +267,8 @@ whoever adjudicated it. Re-run `orchestrate` whenever a worklist changes (emissi
 7. **Stopping at the scanners.** They cover known patterns; authz, business logic and races are
    where a manual pass earns its keep.
 8. **Skipping `context`.** Without a trust model you are rating in the abstract.
+9. **Hunting only what the engine listed.** It finds PATTERNS, not ABSENCES — run `guards`. A
+   FAILED scanner is the same trap: a hole that reads exactly like an empty result.
 
 ## Do not
 

@@ -61,6 +61,7 @@ const COMMAND_OF: Record<string, string> = {
   ultrasec_dossier: "dossier",
   ultrasec_graph: "graph",
   ultrasec_triage: "triage",
+  ultrasec_guards: "guards",
   ultrasec_verify: "verify",
   ultrasec_investigate: "investigate",
   ultrasec_revalidate: "revalidate",
@@ -314,6 +315,7 @@ function artifactFor(name: string, flags: Record<string, unknown>): string | und
   if (name === "ultrasec_map") return join(run, "MAP.md");
   if (name === "ultrasec_scan") return join(run, "findings.json");
   if (name === "ultrasec_triage") return join(run, "TRIAGE.todo.json");
+  if (name === "ultrasec_guards") return join(run, "GUARDS.todo.json");
   if (name === "ultrasec_verify") return join(run, "VERIFY.todo.json");
   if (name === "ultrasec_investigate") return join(run, "INVESTIGATE.todo.json");
   return undefined;

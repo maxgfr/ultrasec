@@ -105,6 +105,19 @@ export const TOOLS: ToolDecl[] = [
     inputSchema: { type: "object", properties: { repo: repoProp, run: runProp }, required: ["repo"] },
   },
   {
+    name: "ultrasec_guards",
+    title: "Find the request handlers nothing checks",
+    description:
+      "Cross every handler that reads request data against the authentication/authorization markers visible in its scope, and list the ones with none. " +
+      "This is the vulnerability that is an ABSENCE: a missing authorization check has no line to point at, so no taint path and no scanner can reach it — " +
+      "and it is where the worst findings of a real audit lived. A marker in scope is a CANDIDATE, never a proof: read the handler and confirm the check " +
+      "runs before the object is touched, and that it checks authorization rather than only authentication. " +
+      JUDGMENT_NOTE +
+      " " +
+      RUN_NOTE,
+    inputSchema: { type: "object", properties: { repo: repoProp, run: runProp }, required: ["repo"] },
+  },
+  {
     name: "ultrasec_verify",
     title: "Build a claim-support worklist",
     description:
@@ -273,6 +286,7 @@ export const TOOL_META: Record<string, { write?: boolean; destructive?: boolean;
   ultrasec_dossier: { openWorld: false },
   ultrasec_graph: { openWorld: false },
   ultrasec_triage: { openWorld: false },
+  ultrasec_guards: { openWorld: false },
   ultrasec_verify: { openWorld: false },
   ultrasec_investigate: { openWorld: false },
   ultrasec_revalidate: { openWorld: false },

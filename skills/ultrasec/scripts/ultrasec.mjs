@@ -30924,6 +30924,7 @@ var COMMAND_OF = {
   ultrasec_dossier: "dossier",
   ultrasec_graph: "graph",
   ultrasec_triage: "triage",
+  ultrasec_guards: "guards",
   ultrasec_verify: "verify",
   ultrasec_investigate: "investigate",
   ultrasec_revalidate: "revalidate",
@@ -31106,6 +31107,7 @@ function artifactFor(name2, flags2) {
   if (name2 === "ultrasec_map") return join73(run2, "MAP.md");
   if (name2 === "ultrasec_scan") return join73(run2, "findings.json");
   if (name2 === "ultrasec_triage") return join73(run2, "TRIAGE.todo.json");
+  if (name2 === "ultrasec_guards") return join73(run2, "GUARDS.todo.json");
   if (name2 === "ultrasec_verify") return join73(run2, "VERIFY.todo.json");
   if (name2 === "ultrasec_investigate") return join73(run2, "INVESTIGATE.todo.json");
   return void 0;
@@ -31312,6 +31314,12 @@ var TOOLS3 = [
     inputSchema: { type: "object", properties: { repo: repoProp2, run: runProp }, required: ["repo"] }
   },
   {
+    name: "ultrasec_guards",
+    title: "Find the request handlers nothing checks",
+    description: "Cross every handler that reads request data against the authentication/authorization markers visible in its scope, and list the ones with none. This is the vulnerability that is an ABSENCE: a missing authorization check has no line to point at, so no taint path and no scanner can reach it \u2014 and it is where the worst findings of a real audit lived. A marker in scope is a CANDIDATE, never a proof: read the handler and confirm the check runs before the object is touched, and that it checks authorization rather than only authentication. " + JUDGMENT_NOTE + " " + RUN_NOTE,
+    inputSchema: { type: "object", properties: { repo: repoProp2, run: runProp }, required: ["repo"] }
+  },
+  {
     name: "ultrasec_verify",
     title: "Build a claim-support worklist",
     description: "Go past 'the finding exists' to 'the evidence supports it'. Emits a claim-by-evidence worklist for you to adjudicate each as supported / partial / refuted / unsupported. This is the adversarial pass \u2014 try to REFUTE each finding, and keep the ones that survive. " + RUN_NOTE,
@@ -31446,6 +31454,7 @@ var TOOL_META2 = {
   ultrasec_dossier: { openWorld: false },
   ultrasec_graph: { openWorld: false },
   ultrasec_triage: { openWorld: false },
+  ultrasec_guards: { openWorld: false },
   ultrasec_verify: { openWorld: false },
   ultrasec_investigate: { openWorld: false },
   ultrasec_revalidate: { openWorld: false },
