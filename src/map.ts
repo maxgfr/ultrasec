@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { readText } from "./walk.js";
+import { detectWorkspaces } from "./vendor/codeindex-engine.mjs";
 import type { RepoScan } from "./scan.js";
 import { localDefNames } from "./scan.js";
 import { langForFile } from "./lang.js";
@@ -15,6 +16,17 @@ import { SEVERITIES, type Severity } from "./types.js";
 
 const SEV_WEIGHT: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 const MAX_SAMPLES = 8;
+/** Entry points retained per kind. Larger than MAX_SAMPLES because the context
+ *  scaffold reads this list and applies its OWN (larger) cap. */
+const MAX_ENTRY_SAMPLES = 64;
+/** What one entry point contributes to a region's rank, on the same scale as
+ *  SEV_WEIGHT. The score used to count sinks ONLY, so a directory full of
+ *  internet-reachable routes and no local sink scored 0 and sorted last — which
+ *  is how a batch-job directory came to outrank an entire authenticated web
+ *  surface in the `investigate` worklist. Between a `high` sink (3) and a
+ *  `critical` one (4), because reachability is the thing that turns a sink into
+ *  a bug and an entry point is where reachability starts. */
+const ENTRY_WEIGHT = 3;
 
 export interface EntryPoint {
   file: string;
@@ -40,6 +52,24 @@ export interface LangSummary {
   sources: number;
   sinks: number;
 }
+/**
+ * One file's attack surface. `EntryGroup.samples` and `SinkSummary.samples` are
+ * capped for DISPLAY (8 per kind); anything that has to *choose* files — the
+ * `investigate` region worklist above all — needs the full set, ranked. Reading
+ * the samples instead meant a region's file list was a sample of a sample, and
+ * because it was then sorted alphabetically the first sub-directory in the
+ * alphabet consumed the entire budget: on a monorepo, `targets/alert-cli/**`
+ * took all 8 slots and `targets/frontend/**` — the only component an anonymous
+ * attacker could reach — never appeared at all.
+ */
+export interface FileSurface {
+  file: string;
+  region: string;
+  sources: number;
+  sinks: number;
+  /** Severity-weighted sinks ⊕ entry points — the ranking key. */
+  score: number;
+}
 export interface DirSummary {
   dir: string;
   files: number;
@@ -63,6 +93,8 @@ export interface AttackSurface {
   sinks: SinkSummary[];
   byLanguage: LangSummary[];
   byTopDir: DirSummary[];
+  /** Every file carrying surface, ranked (highest first). Unsampled. */
+  byFile: FileSurface[];
   /** Deterministic default order the AI may override — highest-value scopes first. */
   suggestedTargets: TargetSuggestion[];
 }
@@ -72,6 +104,32 @@ function topDir(rel: string): string {
   return i === -1 ? "." : rel.slice(0, i);
 }
 
+/**
+ * How a repo is carved into regions: the workspace package a file belongs to,
+ * falling back to its top-level directory.
+ *
+ * The first path segment is the right answer for a single-package repo and the
+ * wrong one for every monorepo, where it collapses each workspace — a web app,
+ * a CLI, two batch pipelines — into ONE region under a shared parent like
+ * `targets/` or `packages/`. `detectWorkspaces` is the engine's own detector and
+ * covers npm/pnpm/lerna/nx/cargo/go/maven/uv/composer/gradle, so this is not a
+ * JavaScript special case.
+ */
+export function regionKeyer(repo: string): (rel: string) => string {
+  let dirs: string[] = [];
+  try {
+    dirs = detectWorkspaces(repo)
+      .packages.map((w) => w.dir.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, ""))
+      .filter((d) => d && d !== ".")
+      // Longest first: a nested package must win over its parent.
+      .sort((a, b) => b.length - a.length || byStr(a, b));
+  } catch {
+    /* not a workspace, or unreadable — top-level directories it is */
+  }
+  if (!dirs.length) return topDir;
+  return (rel) => dirs.find((d) => rel.startsWith(`${d}/`)) ?? topDir(rel);
+}
+
 /** Build the attack-surface map. `coveredScopes` marks targets a prior run handled. */
 export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = []): AttackSurface {
   const covered = new Set(coveredScopes);
@@ -79,23 +137,29 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
   const sinkByKind = new Map<string, SinkSummary>();
   const langAgg = new Map<string, LangSummary>();
   const dirAgg = new Map<string, DirSummary>();
+  const fileAgg: FileSurface[] = [];
+  const regionOf = regionKeyer(scan.repo);
   let totalSources = 0;
   let totalSinks = 0;
 
   for (const f of scan.files) {
     const lang = langForFile(f.rel);
     if (!lang) continue;
-    const dir = topDir(f.rel);
+    const dir = regionOf(f.rel);
     const la = langAgg.get(f.lang) ?? langAgg.set(f.lang, { lang: f.lang, files: 0, sources: 0, sinks: 0 }).get(f.lang)!;
     const da = dirAgg.get(dir) ?? dirAgg.set(dir, { dir, files: 0, sources: 0, sinks: 0, score: 0 }).get(dir)!;
     la.files++;
     da.files++;
+    const fs: FileSurface = { file: f.rel, region: dir, sources: 0, sinks: 0, score: 0 };
 
-    const sources = findSources(lang, readText(join(scan.repo, f.rel)));
+    const sources = findSources(lang, readText(join(scan.repo, f.rel)), f.rel);
     for (const s of sources) {
       totalSources++;
       la.sources++;
       da.sources++;
+      da.score += ENTRY_WEIGHT;
+      fs.sources++;
+      fs.score += ENTRY_WEIGHT;
       const arr = entryByKind.get(s.kind) ?? entryByKind.set(s.kind, []).get(s.kind)!;
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
@@ -105,19 +169,28 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
       la.sinks++;
       da.sinks++;
       da.score += SEV_WEIGHT[sink.severity];
+      fs.sinks++;
+      fs.score += SEV_WEIGHT[sink.severity];
       const ss =
         sinkByKind.get(sink.kind) ??
         sinkByKind.set(sink.kind, { kind: sink.kind, cwe: sink.cwe, severity: sink.severity, count: 0, samples: [] }).get(sink.kind)!;
       ss.count++;
       if (ss.samples.length < MAX_SAMPLES) ss.samples.push({ file: f.rel, line: sink.line, callee: sink.callee });
     }
+
+    if (fs.score > 0) fileAgg.push(fs);
   }
 
+  // Entry points are retained up to MAX_ENTRY_SAMPLES, not MAX_SAMPLES: the
+  // context scaffold flattens these into its own list and then caps at 40, so an
+  // 8-per-kind cut here was the binding constraint and it made `context` report
+  // eight routes on a repo with dozens. `renderMapMd` still prints MAX_SAMPLES
+  // of them, so MAP.md is unchanged.
   const entryPoints: EntryGroup[] = [...entryByKind.entries()]
     .sort((a, b) => byStr(a[0], b[0]))
     .map(([kind, eps]) => {
       const sorted = eps.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
-      return { kind, count: sorted.length, samples: sorted.slice(0, MAX_SAMPLES) };
+      return { kind, count: sorted.length, samples: sorted.slice(0, MAX_ENTRY_SAMPLES) };
     });
 
   const sinks = [...sinkByKind.values()].sort(
@@ -127,6 +200,9 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
 
   const byLanguage = [...langAgg.values()].sort((a, b) => byStr(a.lang, b.lang));
   const byTopDir = [...dirAgg.values()].sort((a, b) => b.score - a.score || b.sinks - a.sinks || byStr(a.dir, b.dir));
+  // Ranked, not sampled, and not alphabetical — this is what anything CHOOSING
+  // files must read. Ties break on the path so the order stays deterministic.
+  const byFile = fileAgg.sort((a, b) => b.score - a.score || b.sinks - a.sinks || byStr(a.file, b.file));
 
   // Suggested targets: dirs with attack surface, highest severity-weighted density
   // first. The AI is free to override; un-covered targets are surfaced for the loop.
@@ -147,6 +223,7 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
     sinks,
     byLanguage,
     byTopDir,
+    byFile,
     suggestedTargets,
   };
 }
@@ -186,7 +263,8 @@ export function renderMapMd(repo: string, s: AttackSurface): string {
   L.push("");
   if (!s.entryPoints.length) L.push(`_None detected._`);
   for (const g of s.entryPoints) {
-    L.push(`- **${g.kind}** (${g.count}): ${g.samples.map((e) => `\`${e.file}:${e.line}\``).join(", ")}${g.count > g.samples.length ? " …" : ""}`);
+    const shown = g.samples.slice(0, MAX_SAMPLES);
+    L.push(`- **${g.kind}** (${g.count}): ${shown.map((e) => `\`${e.file}:${e.line}\``).join(", ")}${g.count > shown.length ? " …" : ""}`);
   }
   L.push("");
 

@@ -109,7 +109,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     let s = sourceCache.get(rel);
     if (!s) {
       const lang = langForFile(rel);
-      s = lang ? findSources(lang, content(rel)) : [];
+      s = lang ? findSources(lang, content(rel), rel) : [];
       sourceCache.set(rel, s);
     }
     return s;

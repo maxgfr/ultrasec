@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { readText } from "./walk.js";
+import { findManifestDirs, readText } from "./walk.js";
 import { langForFile } from "./lang.js";
 import { SANITIZERS } from "./catalog.js";
 import type { RepoScan } from "./scan.js";
@@ -109,16 +109,28 @@ const TEXT_MANIFESTS: { file: string; rules: [RegExp, string][] }[] = [
   },
 ];
 
-/** Detect frameworks from on-disk manifests. Offline + tolerant: a missing or
- *  malformed manifest contributes nothing rather than throwing. */
+/**
+ * Detect frameworks from on-disk manifests. Offline + tolerant: a missing or
+ * malformed manifest contributes nothing rather than throwing.
+ *
+ * EVERY manifest in the tree is read, not just the root's. A monorepo keeps its
+ * dependencies in the workspace packages — `targets/frontend/package.json`, not
+ * `./package.json` — so reading only the root reported `frameworks: —` on a
+ * repo whose whole attack surface was a Next.js app, and the trust boundaries
+ * inferred from that emptiness were wrong for the same reason. `findManifestDirs`
+ * is the same bounded walk the lockfile adapters already use for exactly this.
+ */
 function detectFrameworks(repo: string): string[] {
   const found = new Set<string>();
 
-  const pkgPath = join(repo, "package.json");
-  if (existsSync(pkgPath)) {
+  for (const dir of findManifestDirs(repo, ["package.json"])) {
     try {
-      const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
-      const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
+      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+        peerDependencies?: Record<string, string>;
+      };
+      const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}), ...(pkg.peerDependencies ?? {}) };
       for (const name of Object.keys(deps)) {
         const label = Object.hasOwn(JS_FRAMEWORKS, name) ? JS_FRAMEWORKS[name] : undefined;
         if (label) found.add(label);
@@ -129,15 +141,15 @@ function detectFrameworks(repo: string): string[] {
   }
 
   for (const m of TEXT_MANIFESTS) {
-    const p = join(repo, m.file);
-    if (!existsSync(p)) continue;
-    let raw: string;
-    try {
-      raw = readFileSync(p, "utf8");
-    } catch {
-      continue;
+    for (const dir of findManifestDirs(repo, [m.file])) {
+      let raw: string;
+      try {
+        raw = readFileSync(join(dir, m.file), "utf8");
+      } catch {
+        continue;
+      }
+      for (const [re, name] of m.rules) if (re.test(raw)) found.add(name);
     }
-    for (const [re, name] of m.rules) if (re.test(raw)) found.add(name);
   }
 
   return [...found].sort(byStr);

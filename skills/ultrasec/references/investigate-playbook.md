@@ -17,6 +17,13 @@ ultrasec investigate --run .ultrasec
 Writes `INVESTIGATE.todo.json` + `INVESTIGATE.md`. Each region lists its files,
 graph neighbours, and a hunt prompt. Work the highest-attack-surface regions first.
 
+A **region** is a workspace package when the repo is a workspace (npm/pnpm/lerna/nx/cargo/go/
+maven/uv/composer/gradle are all detected), and a top-level directory otherwise — so a monorepo's
+web app, CLI and batch pipelines get their own regions instead of sharing one. Region files are
+chosen by ranked attack surface (severity-weighted sinks ⊕ entry points), not alphabetically, and
+entry points carry weight in the rank: a package full of internet-reachable routes and no local
+sink is a region worth opening, not one worth sorting last.
+
 ## 2. Hunt and emit grounded Discovery[]
 
 Regions are ranked by attack-surface score, but **override that with judgment**: an

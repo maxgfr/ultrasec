@@ -1,5 +1,6 @@
 import type { Severity } from "./types.js";
 import type { LangSpec, Call } from "./lang.js";
+import { expandBraces, globToRe } from "./walk.js";
 
 // The taint catalog: untrusted-input SOURCES, dangerous SINKS, and SANITIZERS
 // that neutralize a flow. Pure data + matchers — the deterministic half of the
@@ -843,11 +844,63 @@ export const SOURCES: SourceRule[] = [
   {
     kind: "http",
     languages: ["javascript"],
-    re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|params|headers|cookies|url|originalUrl|hostname|ip|files|file)\b/,
+    re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|rawBody|params|headers|cookies|method|url|originalUrl|hostname|ip|files|file)\b/,
     title: "HTTP request input",
   },
   { kind: "ws", languages: ["javascript"], re: /\.on\s*\(\s*['"](?:message|data)['"]/, title: "WebSocket/stream message" },
   { kind: "http", languages: ["javascript"], re: /\bctx\s*\.\s*(?:request|query|params|body)\b/, title: "Koa/HTTP context input" },
+  // ── Handler SIGNATURES ────────────────────────────────────────────────────
+  // The request/response parameter pair is the one shape every HTTP framework
+  // in a given language agrees on, so matching the signature covers Express,
+  // Koa, Fastify, Next, Nuxt and hand-rolled servers with one rule instead of
+  // one per framework. It also catches the handler whose body never names
+  // `req.query` — it destructures, reads `params`, or forwards `req` whole —
+  // which is precisely the handler a line-content scan cannot see.
+  {
+    kind: "http",
+    languages: ["javascript"],
+    // `(req, res)`, `(req: NextApiRequest, res: NextApiResponse)`,
+    // `(request, reply)`. The type annotation is optional and skipped, so this
+    // is not tied to any one framework's types.
+    //
+    // A LEADING UNDERSCORE on the request parameter is honoured as what it
+    // universally means — deliberately unused. `(_req, res)` is the author
+    // saying this handler reads nothing from the request, so it is not a live
+    // entry point, and treating it as one would tell the taint walk that a
+    // constant-command handler shares a scope with untrusted input.
+    re: /\(\s*(?:req|request)\w*\s*(?::[^,)]+)?\s*,\s*_?(?:res|response|reply)\w*\s*(?::[^,)]+)?\s*[,)]/,
+    title: "HTTP handler signature (request/response pair)",
+  },
+  {
+    kind: "http",
+    languages: ["javascript", "python", "ruby"],
+    // AWS Lambda / Azure / GCP: `(event, context)` and `(event)` on an exported
+    // handler. Kept to the two-arg form so an ordinary `on(event)` callback in
+    // application code is not mistaken for an internet-facing entry point.
+    re: /\(\s*event\s*(?::[^,)]+)?\s*,\s*_?(?:context|ctx|callback)\s*(?::[^,)]+)?\s*[,)]/,
+    title: "Serverless handler signature (event/context)",
+  },
+  {
+    kind: "http",
+    languages: ["go"],
+    re: /\(\s*\w+\s+http\.ResponseWriter\s*,\s*\w+\s+\*http\.Request\s*\)/,
+    title: "net/http handler signature",
+  },
+  {
+    kind: "http",
+    languages: ["java", "kotlin", "scala", "csharp"],
+    re: /\b(?:HttpServletRequest|HttpRequest|HttpRequestMessage|ServerRequest)\s+\w+/,
+    title: "Servlet/HTTP handler signature",
+  },
+  {
+    kind: "http",
+    languages: ["python"],
+    // `def view(request)` / `def get(self, request)` — the Django/DRF shape,
+    // where the request object is a positional parameter and the body may never
+    // spell out `request.GET`.
+    re: /\bdef\s+\w+\s*\(\s*(?:self\s*,\s*|cls\s*,\s*)?request\b/,
+    title: "Django/DRF view signature",
+  },
   {
     kind: "http",
     languages: ["python"],
@@ -992,7 +1045,102 @@ export interface SourceHit {
   title: string;
 }
 
-export function findSources(lang: LangSpec, content: string): SourceHit[] {
+// ── Routes by convention ────────────────────────────────────────────────────
+// `SOURCES` above is a line-content scan, and that is a blind spot no regex can
+// close: in a file-system-routed framework the fact that makes a file an HTTP
+// entry point is its PATH, not anything written inside it. A handler that never
+// touches `req.query` — it destructures the body, reads `params`, or just passes
+// `req` along — was invisible to `context`, `map`, the taint seeder and, through
+// them, to `investigate`. Measured on a real Next.js admin app: 3 of 27 routes
+// detected, and the region worklist for the whole authenticated surface empty.
+//
+// So this table is keyed on the path, and it is deliberately not per-framework:
+// the labels are documentation, the mechanism is `files` × `decl`. Adding a new
+// stack is a row, not a code path.
+export interface RouteRule {
+  /** Entry-point kind, as `SOURCES` uses it — "http" for everything here. */
+  kind: string;
+  /** Repo-relative globs the file must match (compiled with `globToRe`). */
+  files: string[];
+  /**
+   * Which declaration lines are handlers. Omitted ⇒ `DEFAULT_HANDLER_DECL`, the
+   * "any exported or default-exported function" fallback — which is the whole
+   * point: in a routes directory, an exported function IS the endpoint, whatever
+   * shape the declaration takes.
+   */
+  decl?: RegExp;
+  /** What the convention is, for the scaffold and the report. */
+  title: string;
+}
+
+/** Exported / default-exported / assigned callables, across ecosystems. The
+ *  fallback for every routes directory that does not need something narrower. */
+const DEFAULT_HANDLER_DECL =
+  /^\s*(?:export\s+default\s+|export\s+|module\.exports\s*=|exports\.\w+\s*=|public\s+|def\s+|func\s+|fn\s+|sub\s+)|^\s*(?:async\s+)?function\s+\w|^\s*(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?(?:\(|function\b)/;
+
+/** HTTP-verb named exports — the App-Router / Nitro / SvelteKit shape, where the
+ *  export NAME is the method. Narrower than the default so a route module's
+ *  helpers are not each reported as an endpoint. */
+const VERB_EXPORT_DECL = /^\s*export\s+(?:async\s+)?(?:function\s+)?(?:const\s+)?(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|ALL|default)\b/;
+
+export const ROUTE_FILES: RouteRule[] = [
+  // ── File-system routers (JS/TS) ───────────────────────────────────────────
+  { kind: "http", files: ["**/pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}", "pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}"], title: "Pages-Router API route" },
+  { kind: "http", files: ["**/app/**/route.{js,ts,jsx,tsx}", "app/**/route.{js,ts,jsx,tsx}"], decl: VERB_EXPORT_DECL, title: "App-Router route handler" },
+  { kind: "http", files: ["**/server/api/**/*.{js,ts}", "**/server/routes/**/*.{js,ts}"], title: "Nitro/Nuxt server route" },
+  { kind: "http", files: ["**/routes/**/+server.{js,ts}"], decl: VERB_EXPORT_DECL, title: "SvelteKit endpoint" },
+  { kind: "http", files: ["**/routes/**/+page.server.{js,ts}", "**/routes/**/*.server.{js,ts}"], title: "Server-side route module" },
+  // ── Serverless / edge ─────────────────────────────────────────────────────
+  { kind: "http", files: ["api/**/*.{js,ts,py,go,rb}", "**/netlify/functions/**/*.{js,ts}", "**/functions/**/*.{js,ts}"], title: "Serverless function" },
+  { kind: "http", files: ["**/handler.{js,ts,py,rb}", "**/lambda_function.py", "**/*_handler.py"], title: "Serverless handler module" },
+  // ── Controller conventions ────────────────────────────────────────────────
+  { kind: "http", files: ["**/app/controllers/**/*.rb", "**/controllers/**/*.{js,ts,php,py,rb}"], title: "Controller action" },
+  { kind: "http", files: ["**/*Controller.{java,kt,cs,php,ts}", "**/*_controller.rb"], title: "Controller action" },
+  { kind: "http", files: ["**/views.py", "**/urls.py", "**/routes.py"], title: "Django view / URL module" },
+  // ── PHP web roots: any reachable script is an entry point ──────────────────
+  {
+    kind: "http",
+    files: ["{public,web,htdocs,www,public_html}/**/*.php", "**/{public,web,htdocs,www}/**/*.php"],
+    decl: /^\s*<\?php/,
+    title: "Web-root PHP script",
+  },
+];
+
+const routeMatchers = ROUTE_FILES.map((r) => ({ rule: r, res: r.files.flatMap(expandBraces).map(globToRe) }));
+
+/**
+ * Entry points a file has by CONVENTION — because of where it sits, not what it
+ * says. Emitted in the same `SourceHit` shape as `findSources`, so every
+ * consumer (attack surface, context scaffold, taint seeding) gets them for free.
+ *
+ * `rel` must be a repo-relative POSIX path.
+ */
+export function findRouteEntryPoints(rel: string, content: string): SourceHit[] {
+  const matched = routeMatchers.filter((m) => m.res.some((re) => re.test(rel)));
+  if (!matched.length) return [];
+  const out: SourceHit[] = [];
+  const lines = content.split(/\r?\n/);
+  for (const { rule } of matched) {
+    const decl = rule.decl ?? DEFAULT_HANDLER_DECL;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]!;
+      const m = decl.exec(line);
+      if (m) out.push({ line: i + 1, kind: rule.kind, match: m[0].trim(), title: rule.title });
+    }
+  }
+  // One entry point per line: two conventions can match the same path (an
+  // `app/api/**/route.ts` is also under a `functions/**` glob on some layouts)
+  // and the surface should count the endpoint once.
+  const seen = new Set<number>();
+  return out.sort((a, b) => a.line - b.line).filter((h) => (seen.has(h.line) ? false : (seen.add(h.line), true)));
+}
+
+/**
+ * @param rel Repo-relative path. When given, entry points the file has by
+ * ROUTE CONVENTION are unioned in — see `ROUTE_FILES`. Omitted ⇒ line-content
+ * rules only, byte-identical to before this param existed.
+ */
+export function findSources(lang: LangSpec, content: string, rel?: string): SourceHit[] {
   const out: SourceHit[] = [];
   const lines = content.split(/\r?\n/);
   for (let i = 0; i < lines.length; i++) {
@@ -1002,6 +1150,13 @@ export function findSources(lang: LangSpec, content: string): SourceHit[] {
       const m = rule.re.exec(line);
       if (m) out.push({ line: i + 1, kind: rule.kind, match: m[0], title: rule.title });
     }
+  }
+  if (rel) {
+    // Don't double-report a line the content rules already claimed: a handler
+    // that reads `req.query` on its declaration line is one entry point.
+    const claimed = new Set(out.map((h) => h.line));
+    for (const h of findRouteEntryPoints(rel, content)) if (!claimed.has(h.line)) out.push(h);
+    out.sort((a, b) => a.line - b.line);
   }
   return out;
 }

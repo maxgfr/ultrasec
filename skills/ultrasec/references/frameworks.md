@@ -12,6 +12,23 @@ the real SQLi is), and **the stack-specific traps**.
 and sanitizers — start from `CONTEXT.scaffold.json`, then use the notes below to find what it
 couldn't.
 
+**Entry points come from three places, and only one of them reads the code.** A line-content rule
+matches `req.query`/`params[:id]`/`$_GET`; a *signature* rule matches the request/response
+parameter pair (`(req, res)`, `(w http.ResponseWriter, r *http.Request)`, `HttpServletRequest req`,
+`def view(request)`), which covers every framework in a language with one rule; and a *convention*
+rule matches the PATH — `pages/api/**`, `app/**/route.ts`, `server/api/**`, `routes/**/+server.ts`,
+`app/controllers/**/*_controller.rb`, `**/views.py`, `netlify/functions/**`, a web-root `.php`.
+
+That last one exists because in a file-system-routed framework nothing inside the file says it is
+an endpoint. A handler that destructures the body, reads `params`, or forwards `req` whole is
+invisible to a content scan — and it is exactly the handler worth reading, because it is usually
+the one doing the privileged thing. If `context` misses a route shape your stack uses, that is a
+row in `ROUTE_FILES` (`src/catalog.ts`), not a new code path.
+
+A leading underscore is honoured as what it means: `(_req, res)` is the author saying the handler
+reads nothing from the request, so the signature rule stays quiet. The path convention still
+applies — a file under `pages/api/` is an endpoint whatever it names its parameters.
+
 ---
 
 ## Express / Node

@@ -14,6 +14,7 @@ const surface: AttackSurface = {
   sinks: [{ kind: "sql", cwe: "CWE-89", severity: "high", count: 1, samples: [{ file: "src/routes.js", line: 9, callee: "query" }] }],
   byLanguage: [{ lang: "javascript", files: 1, sources: 1, sinks: 1 }],
   byTopDir: [{ dir: "src", files: 1, sources: 1, sinks: 1, score: 5 }],
+  byFile: [{ file: "src/routes.js", region: "src", sources: 1, sinks: 1, score: 5 }],
   suggestedTargets: [{ scope: "src", sinks: 1, sources: 1, score: 5, covered: false, reason: "sink density" }],
 };
 const graph: Graph = { files: ["src/routes.js"], edges: [], symbolDefs: {} };

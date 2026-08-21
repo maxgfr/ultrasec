@@ -63,6 +63,47 @@ export interface WalkResult {
 // non-slash char), and a trailing `/` (match the dir and everything under it).
 // Anchored to the repo-relative POSIX path. `**/x` matches `x` at any depth
 // (including the root), mirroring .gitignore / Semgrep conventions.
+/**
+ * Expand brace alternation — `a/{x,y}.ts` → `["a/x.ts", "a/y.ts"]` — into the
+ * plain globs `globToRe` understands. Nested braces expand recursively; an
+ * unbalanced brace is left alone and matched literally, as before.
+ *
+ * Deliberately NOT folded into `globToRe`: `--include`/`--exclude` have shipped
+ * with `{}` as literal characters, and quietly changing what a user's existing
+ * pattern matches is not this function's job. Callers that want alternation opt
+ * in by expanding first.
+ */
+export function expandBraces(pattern: string): string[] {
+  const open = pattern.indexOf("{");
+  if (open === -1) return [pattern];
+  let depth = 0;
+  let close = -1;
+  for (let i = open; i < pattern.length; i++) {
+    if (pattern[i] === "{") depth++;
+    else if (pattern[i] === "}" && --depth === 0) {
+      close = i;
+      break;
+    }
+  }
+  if (close === -1) return [pattern]; // unbalanced — literal, as before
+  const head = pattern.slice(0, open);
+  const tail = pattern.slice(close + 1);
+  const parts: string[] = [];
+  let level = 0;
+  let start = open + 1;
+  for (let i = open + 1; i < close; i++) {
+    const ch = pattern[i];
+    if (ch === "{") level++;
+    else if (ch === "}") level--;
+    else if (ch === "," && level === 0) {
+      parts.push(pattern.slice(start, i));
+      start = i + 1;
+    }
+  }
+  parts.push(pattern.slice(start, close));
+  return parts.flatMap((alt) => expandBraces(head + alt + tail));
+}
+
 export function globToRe(pattern: string): RegExp {
   let p = pattern.replace(/^\.\//, "").replace(/\/+$/g, (m) => (m ? "/" : "")); // collapse trailing slashes to one
   let dirMatch = false;

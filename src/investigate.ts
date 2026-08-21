@@ -23,11 +23,6 @@ const MAX_FILES_PER_REGION = 8;
 const MAX_NEIGHBORS_PER_REGION = 12;
 export const AI_TOOL = "ultrasec-ai";
 
-function topDir(rel: string): string {
-  const i = rel.indexOf("/");
-  return i === -1 ? "." : rel.slice(0, i);
-}
-
 export interface InvestigateRegion {
   region: string;
   score: number;
@@ -80,14 +75,22 @@ export function buildInvestigateWorklist(
   assumptionLeads: { at: string; claim: string }[] = [],
   lens?: string,
 ): InvestigateRegion[] {
-  const filesByRegion = new Map<string, Set<string>>();
-  const add = (region: string, file: string) => (filesByRegion.get(region) ?? filesByRegion.set(region, new Set()).get(region)!).add(file);
-  for (const g of surface.entryPoints) for (const s of g.samples) add(topDir(s.file), s.file);
-  for (const k of surface.sinks) for (const s of k.samples) add(topDir(s.file), s.file);
+  // `surface.byFile` is the FULL ranked set. The previous version read
+  // `entryPoints[].samples` and `sinks[].samples` — each already capped at 8 per
+  // kind — and then sorted the survivors alphabetically, so a region's file list
+  // was a sample of a sample in name order. On a monorepo that put
+  // `targets/alert-cli/**` in all 8 slots of the `targets` region and left
+  // `targets/frontend/**`, the only internet-facing component, entirely out of
+  // the worklist. Rank by attack surface, then cap.
+  const filesByRegion = new Map<string, string[]>();
+  for (const fs of surface.byFile) {
+    const arr = filesByRegion.get(fs.region) ?? filesByRegion.set(fs.region, []).get(fs.region)!;
+    if (arr.length < MAX_FILES_PER_REGION) arr.push(fs.file);
+  }
 
   const regions: InvestigateRegion[] = [];
   for (const t of surface.suggestedTargets) {
-    const files = [...(filesByRegion.get(t.scope) ?? [])].sort(byStr).slice(0, MAX_FILES_PER_REGION);
+    const files = [...(filesByRegion.get(t.scope) ?? [])];
     const nb = new Set<string>();
     for (const f of files) {
       if (!graph.files.includes(f)) continue;

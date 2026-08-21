@@ -18153,6 +18153,36 @@ var DEFAULT_IGNORE_DIRS = /* @__PURE__ */ new Set([
   ".ultrasec"
 ]);
 var MAX_FILE_BYTES = 15e5;
+function expandBraces(pattern) {
+  const open = pattern.indexOf("{");
+  if (open === -1) return [pattern];
+  let depth = 0;
+  let close = -1;
+  for (let i2 = open; i2 < pattern.length; i2++) {
+    if (pattern[i2] === "{") depth++;
+    else if (pattern[i2] === "}" && --depth === 0) {
+      close = i2;
+      break;
+    }
+  }
+  if (close === -1) return [pattern];
+  const head = pattern.slice(0, open);
+  const tail = pattern.slice(close + 1);
+  const parts2 = [];
+  let level = 0;
+  let start2 = open + 1;
+  for (let i2 = open + 1; i2 < close; i2++) {
+    const ch = pattern[i2];
+    if (ch === "{") level++;
+    else if (ch === "}") level--;
+    else if (ch === "," && level === 0) {
+      parts2.push(pattern.slice(start2, i2));
+      start2 = i2 + 1;
+    }
+  }
+  parts2.push(pattern.slice(start2, close));
+  return parts2.flatMap((alt) => expandBraces(head + alt + tail));
+}
 function globToRe(pattern) {
   let p = pattern.replace(/^\.\//, "").replace(/\/+$/g, (m) => m ? "/" : "");
   let dirMatch = false;
@@ -19453,11 +19483,63 @@ var SOURCES = [
   {
     kind: "http",
     languages: ["javascript"],
-    re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|params|headers|cookies|url|originalUrl|hostname|ip|files|file)\b/,
+    re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|rawBody|params|headers|cookies|method|url|originalUrl|hostname|ip|files|file)\b/,
     title: "HTTP request input"
   },
   { kind: "ws", languages: ["javascript"], re: /\.on\s*\(\s*['"](?:message|data)['"]/, title: "WebSocket/stream message" },
   { kind: "http", languages: ["javascript"], re: /\bctx\s*\.\s*(?:request|query|params|body)\b/, title: "Koa/HTTP context input" },
+  // ── Handler SIGNATURES ────────────────────────────────────────────────────
+  // The request/response parameter pair is the one shape every HTTP framework
+  // in a given language agrees on, so matching the signature covers Express,
+  // Koa, Fastify, Next, Nuxt and hand-rolled servers with one rule instead of
+  // one per framework. It also catches the handler whose body never names
+  // `req.query` — it destructures, reads `params`, or forwards `req` whole —
+  // which is precisely the handler a line-content scan cannot see.
+  {
+    kind: "http",
+    languages: ["javascript"],
+    // `(req, res)`, `(req: NextApiRequest, res: NextApiResponse)`,
+    // `(request, reply)`. The type annotation is optional and skipped, so this
+    // is not tied to any one framework's types.
+    //
+    // A LEADING UNDERSCORE on the request parameter is honoured as what it
+    // universally means — deliberately unused. `(_req, res)` is the author
+    // saying this handler reads nothing from the request, so it is not a live
+    // entry point, and treating it as one would tell the taint walk that a
+    // constant-command handler shares a scope with untrusted input.
+    re: /\(\s*(?:req|request)\w*\s*(?::[^,)]+)?\s*,\s*_?(?:res|response|reply)\w*\s*(?::[^,)]+)?\s*[,)]/,
+    title: "HTTP handler signature (request/response pair)"
+  },
+  {
+    kind: "http",
+    languages: ["javascript", "python", "ruby"],
+    // AWS Lambda / Azure / GCP: `(event, context)` and `(event)` on an exported
+    // handler. Kept to the two-arg form so an ordinary `on(event)` callback in
+    // application code is not mistaken for an internet-facing entry point.
+    re: /\(\s*event\s*(?::[^,)]+)?\s*,\s*_?(?:context|ctx|callback)\s*(?::[^,)]+)?\s*[,)]/,
+    title: "Serverless handler signature (event/context)"
+  },
+  {
+    kind: "http",
+    languages: ["go"],
+    re: /\(\s*\w+\s+http\.ResponseWriter\s*,\s*\w+\s+\*http\.Request\s*\)/,
+    title: "net/http handler signature"
+  },
+  {
+    kind: "http",
+    languages: ["java", "kotlin", "scala", "csharp"],
+    re: /\b(?:HttpServletRequest|HttpRequest|HttpRequestMessage|ServerRequest)\s+\w+/,
+    title: "Servlet/HTTP handler signature"
+  },
+  {
+    kind: "http",
+    languages: ["python"],
+    // `def view(request)` / `def get(self, request)` — the Django/DRF shape,
+    // where the request object is a positional parameter and the body may never
+    // spell out `request.GET`.
+    re: /\bdef\s+\w+\s*\(\s*(?:self\s*,\s*|cls\s*,\s*)?request\b/,
+    title: "Django/DRF view signature"
+  },
   {
     kind: "http",
     languages: ["python"],
@@ -19591,7 +19673,48 @@ var SOURCES = [
     title: "LLM/agent invocation result"
   }
 ];
-function findSources(lang, content) {
+var DEFAULT_HANDLER_DECL = /^\s*(?:export\s+default\s+|export\s+|module\.exports\s*=|exports\.\w+\s*=|public\s+|def\s+|func\s+|fn\s+|sub\s+)|^\s*(?:async\s+)?function\s+\w|^\s*(?:const|let|var)\s+\w+\s*=\s*(?:async\s*)?(?:\(|function\b)/;
+var VERB_EXPORT_DECL = /^\s*export\s+(?:async\s+)?(?:function\s+)?(?:const\s+)?(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|ALL|default)\b/;
+var ROUTE_FILES = [
+  // ── File-system routers (JS/TS) ───────────────────────────────────────────
+  { kind: "http", files: ["**/pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}", "pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}"], title: "Pages-Router API route" },
+  { kind: "http", files: ["**/app/**/route.{js,ts,jsx,tsx}", "app/**/route.{js,ts,jsx,tsx}"], decl: VERB_EXPORT_DECL, title: "App-Router route handler" },
+  { kind: "http", files: ["**/server/api/**/*.{js,ts}", "**/server/routes/**/*.{js,ts}"], title: "Nitro/Nuxt server route" },
+  { kind: "http", files: ["**/routes/**/+server.{js,ts}"], decl: VERB_EXPORT_DECL, title: "SvelteKit endpoint" },
+  { kind: "http", files: ["**/routes/**/+page.server.{js,ts}", "**/routes/**/*.server.{js,ts}"], title: "Server-side route module" },
+  // ── Serverless / edge ─────────────────────────────────────────────────────
+  { kind: "http", files: ["api/**/*.{js,ts,py,go,rb}", "**/netlify/functions/**/*.{js,ts}", "**/functions/**/*.{js,ts}"], title: "Serverless function" },
+  { kind: "http", files: ["**/handler.{js,ts,py,rb}", "**/lambda_function.py", "**/*_handler.py"], title: "Serverless handler module" },
+  // ── Controller conventions ────────────────────────────────────────────────
+  { kind: "http", files: ["**/app/controllers/**/*.rb", "**/controllers/**/*.{js,ts,php,py,rb}"], title: "Controller action" },
+  { kind: "http", files: ["**/*Controller.{java,kt,cs,php,ts}", "**/*_controller.rb"], title: "Controller action" },
+  { kind: "http", files: ["**/views.py", "**/urls.py", "**/routes.py"], title: "Django view / URL module" },
+  // ── PHP web roots: any reachable script is an entry point ──────────────────
+  {
+    kind: "http",
+    files: ["{public,web,htdocs,www,public_html}/**/*.php", "**/{public,web,htdocs,www}/**/*.php"],
+    decl: /^\s*<\?php/,
+    title: "Web-root PHP script"
+  }
+];
+var routeMatchers = ROUTE_FILES.map((r) => ({ rule: r, res: r.files.flatMap(expandBraces).map(globToRe) }));
+function findRouteEntryPoints(rel2, content) {
+  const matched = routeMatchers.filter((m) => m.res.some((re) => re.test(rel2)));
+  if (!matched.length) return [];
+  const out2 = [];
+  const lines5 = content.split(/\r?\n/);
+  for (const { rule } of matched) {
+    const decl = rule.decl ?? DEFAULT_HANDLER_DECL;
+    for (let i2 = 0; i2 < lines5.length; i2++) {
+      const line = lines5[i2];
+      const m = decl.exec(line);
+      if (m) out2.push({ line: i2 + 1, kind: rule.kind, match: m[0].trim(), title: rule.title });
+    }
+  }
+  const seen = /* @__PURE__ */ new Set();
+  return out2.sort((a, b) => a.line - b.line).filter((h) => seen.has(h.line) ? false : (seen.add(h.line), true));
+}
+function findSources(lang, content, rel2) {
   const out2 = [];
   const lines5 = content.split(/\r?\n/);
   for (let i2 = 0; i2 < lines5.length; i2++) {
@@ -19601,6 +19724,11 @@ function findSources(lang, content) {
       const m = rule.re.exec(line);
       if (m) out2.push({ line: i2 + 1, kind: rule.kind, match: m[0], title: rule.title });
     }
+  }
+  if (rel2) {
+    const claimed = new Set(out2.map((h) => h.line));
+    for (const h of findRouteEntryPoints(rel2, content)) if (!claimed.has(h.line)) out2.push(h);
+    out2.sort((a, b) => a.line - b.line);
   }
   return out2;
 }
@@ -19687,9 +19815,20 @@ function findSanitizers(lang, line, sinkKind) {
 // src/map.ts
 var SEV_WEIGHT = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 var MAX_SAMPLES = 8;
+var MAX_ENTRY_SAMPLES = 64;
+var ENTRY_WEIGHT = 3;
 function topDir(rel2) {
   const i2 = rel2.indexOf("/");
   return i2 === -1 ? "." : rel2.slice(0, i2);
+}
+function regionKeyer(repo) {
+  let dirs = [];
+  try {
+    dirs = detectWorkspaces(repo).packages.map((w) => w.dir.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/+$/, "")).filter((d) => d && d !== ".").sort((a, b) => b.length - a.length || byStr2(a, b));
+  } catch {
+  }
+  if (!dirs.length) return topDir;
+  return (rel2) => dirs.find((d) => rel2.startsWith(`${d}/`)) ?? topDir(rel2);
 }
 function buildAttackSurface(scan2, coveredScopes = []) {
   const covered = new Set(coveredScopes);
@@ -19697,21 +19836,27 @@ function buildAttackSurface(scan2, coveredScopes = []) {
   const sinkByKind = /* @__PURE__ */ new Map();
   const langAgg = /* @__PURE__ */ new Map();
   const dirAgg = /* @__PURE__ */ new Map();
+  const fileAgg = [];
+  const regionOf = regionKeyer(scan2.repo);
   let totalSources = 0;
   let totalSinks = 0;
   for (const f of scan2.files) {
     const lang = langForFile(f.rel);
     if (!lang) continue;
-    const dir = topDir(f.rel);
+    const dir = regionOf(f.rel);
     const la = langAgg.get(f.lang) ?? langAgg.set(f.lang, { lang: f.lang, files: 0, sources: 0, sinks: 0 }).get(f.lang);
     const da = dirAgg.get(dir) ?? dirAgg.set(dir, { dir, files: 0, sources: 0, sinks: 0, score: 0 }).get(dir);
     la.files++;
     da.files++;
-    const sources = findSources(lang, readText2(join30(scan2.repo, f.rel)));
+    const fs2 = { file: f.rel, region: dir, sources: 0, sinks: 0, score: 0 };
+    const sources = findSources(lang, readText2(join30(scan2.repo, f.rel)), f.rel);
     for (const s of sources) {
       totalSources++;
       la.sources++;
       da.sources++;
+      da.score += ENTRY_WEIGHT;
+      fs2.sources++;
+      fs2.score += ENTRY_WEIGHT;
       const arr = entryByKind.get(s.kind) ?? entryByKind.set(s.kind, []).get(s.kind);
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
@@ -19720,14 +19865,17 @@ function buildAttackSurface(scan2, coveredScopes = []) {
       la.sinks++;
       da.sinks++;
       da.score += SEV_WEIGHT[sink.severity];
+      fs2.sinks++;
+      fs2.score += SEV_WEIGHT[sink.severity];
       const ss = sinkByKind.get(sink.kind) ?? sinkByKind.set(sink.kind, { kind: sink.kind, cwe: sink.cwe, severity: sink.severity, count: 0, samples: [] }).get(sink.kind);
       ss.count++;
       if (ss.samples.length < MAX_SAMPLES) ss.samples.push({ file: f.rel, line: sink.line, callee: sink.callee });
     }
+    if (fs2.score > 0) fileAgg.push(fs2);
   }
   const entryPoints = [...entryByKind.entries()].sort((a, b) => byStr2(a[0], b[0])).map(([kind, eps]) => {
     const sorted = eps.sort((a, b) => byStr2(a.file, b.file) || a.line - b.line);
-    return { kind, count: sorted.length, samples: sorted.slice(0, MAX_SAMPLES) };
+    return { kind, count: sorted.length, samples: sorted.slice(0, MAX_ENTRY_SAMPLES) };
   });
   const sinks = [...sinkByKind.values()].sort(
     (a, b) => SEVERITIES2.indexOf(a.severity) - SEVERITIES2.indexOf(b.severity) || b.count - a.count || byStr2(a.kind, b.kind)
@@ -19735,6 +19883,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
   for (const s of sinks) s.samples.sort((a, b) => byStr2(a.file, b.file) || a.line - b.line);
   const byLanguage = [...langAgg.values()].sort((a, b) => byStr2(a.lang, b.lang));
   const byTopDir = [...dirAgg.values()].sort((a, b) => b.score - a.score || b.sinks - a.sinks || byStr2(a.dir, b.dir));
+  const byFile = fileAgg.sort((a, b) => b.score - a.score || b.sinks - a.sinks || byStr2(a.file, b.file));
   const suggestedTargets = byTopDir.filter((d) => d.sinks > 0 || d.sources > 0).map((d) => ({
     scope: d.dir,
     sinks: d.sinks,
@@ -19749,6 +19898,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
     sinks,
     byLanguage,
     byTopDir,
+    byFile,
     suggestedTargets
   };
 }
@@ -19784,7 +19934,8 @@ function renderMapMd(repo, s) {
   L.push("");
   if (!s.entryPoints.length) L.push(`_None detected._`);
   for (const g of s.entryPoints) {
-    L.push(`- **${g.kind}** (${g.count}): ${g.samples.map((e) => `\`${e.file}:${e.line}\``).join(", ")}${g.count > g.samples.length ? " \u2026" : ""}`);
+    const shown = g.samples.slice(0, MAX_SAMPLES);
+    L.push(`- **${g.kind}** (${g.count}): ${shown.map((e) => `\`${e.file}:${e.line}\``).join(", ")}${g.count > shown.length ? " \u2026" : ""}`);
   }
   L.push("");
   L.push(`## Sinks by class`);
@@ -20093,7 +20244,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
     let s = sourceCache.get(rel2);
     if (!s) {
       const lang = langForFile(rel2);
-      s = lang ? findSources(lang, content(rel2)) : [];
+      s = lang ? findSources(lang, content(rel2), rel2) : [];
       sourceCache.set(rel2, s);
     }
     return s;
@@ -22912,11 +23063,10 @@ var TEXT_MANIFESTS = [
 ];
 function detectFrameworks(repo) {
   const found = /* @__PURE__ */ new Set();
-  const pkgPath = join45(repo, "package.json");
-  if (existsSync22(pkgPath)) {
+  for (const dir of findManifestDirs(repo, ["package.json"])) {
     try {
-      const pkg = JSON.parse(readFileSync21(pkgPath, "utf8"));
-      const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {} };
+      const pkg = JSON.parse(readFileSync21(join45(dir, "package.json"), "utf8"));
+      const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {}, ...pkg.peerDependencies ?? {} };
       for (const name2 of Object.keys(deps)) {
         const label = Object.hasOwn(JS_FRAMEWORKS, name2) ? JS_FRAMEWORKS[name2] : void 0;
         if (label) found.add(label);
@@ -22925,15 +23075,15 @@ function detectFrameworks(repo) {
     }
   }
   for (const m of TEXT_MANIFESTS) {
-    const p = join45(repo, m.file);
-    if (!existsSync22(p)) continue;
-    let raw;
-    try {
-      raw = readFileSync21(p, "utf8");
-    } catch {
-      continue;
+    for (const dir of findManifestDirs(repo, [m.file])) {
+      let raw;
+      try {
+        raw = readFileSync21(join45(dir, m.file), "utf8");
+      } catch {
+        continue;
+      }
+      for (const [re, name2] of m.rules) if (re.test(raw)) found.add(name2);
     }
-    for (const [re, name2] of m.rules) if (re.test(raw)) found.add(name2);
   }
   return [...found].sort(byStr2);
 }
@@ -25265,10 +25415,6 @@ function leadsForRegion(leads, region, files) {
 var MAX_FILES_PER_REGION = 8;
 var MAX_NEIGHBORS_PER_REGION = 12;
 var AI_TOOL = "ultrasec-ai";
-function topDir2(rel2) {
-  const i2 = rel2.indexOf("/");
-  return i2 === -1 ? "." : rel2.slice(0, i2);
-}
 var ACCESS_CONTROL_LENS = "Access control \u2014 the highest-yield class, never enumerable by taint. For every route/handler in these files ask two questions. (1) Is there ANY authorization check before the object is read or written? A missing one is BFLA (broken function-level authz) \u2014 the classic shape is an admin/privileged action reachable by a normal role, or a method/version downgrade (GET\u2192PUT, /v2\u2192/v1) that skips the guard. (2) Does the check bind the CALLER to the SPECIFIC object in the request? Compare the guard to the object returned: an owner_id/tenant_id taken from the SESSION/token vs. an id taken from the URL/body/query. When they are not compared, an attacker swaps the id and reads another principal's data \u2014 IDOR/BOLA. Hunt horizontal escalation (user A reaching user B via a predictable/sequential/enumerable id), vertical escalation (a normal user reaching an admin object), and tenant-boundary crossing in multi-tenant code. Mass-assignment onto role/isAdmin/tenant/permissions is access control too \u2014 a body field that overwrites who you are. Cite resolvable [file:line] for the guard that is missing or the comparison that is absent. See references/access-control.md.";
 var LENSES = {
   "sharp-edges": "Ask a DIFFERENT question here: not 'is this code vulnerable' but 'does this API make the insecure use easier than the secure one'. Six shapes: an algorithm/mode the caller picks; an insecure default or an ambiguous zero; raw bytes where a semantic type belongs; a config cliff that fails open; a verification that returns instead of throwing; permissions as strings. Model three users \u2014 the attacker, the copy-paster, the confused reader. Rate by how EASY the mistake is. See references/sharp-edges.md.",
@@ -25280,12 +25426,13 @@ var LENSES = {
 };
 function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens) {
   const filesByRegion = /* @__PURE__ */ new Map();
-  const add3 = (region, file) => (filesByRegion.get(region) ?? filesByRegion.set(region, /* @__PURE__ */ new Set()).get(region)).add(file);
-  for (const g of surface.entryPoints) for (const s of g.samples) add3(topDir2(s.file), s.file);
-  for (const k of surface.sinks) for (const s of k.samples) add3(topDir2(s.file), s.file);
+  for (const fs2 of surface.byFile) {
+    const arr = filesByRegion.get(fs2.region) ?? filesByRegion.set(fs2.region, []).get(fs2.region);
+    if (arr.length < MAX_FILES_PER_REGION) arr.push(fs2.file);
+  }
   const regions = [];
   for (const t of surface.suggestedTargets) {
-    const files = [...filesByRegion.get(t.scope) ?? []].sort(byStr2).slice(0, MAX_FILES_PER_REGION);
+    const files = [...filesByRegion.get(t.scope) ?? []];
     const nb = /* @__PURE__ */ new Set();
     for (const f of files) {
       if (!graph.files.includes(f)) continue;

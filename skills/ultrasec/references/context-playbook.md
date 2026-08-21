@@ -18,6 +18,11 @@ Writes `CONTEXT.scaffold.json` (frameworks, entry points, auth-middleware candid
 inferred trust boundaries — shape in [schemas.md](schemas.md)) and `CONTEXT.todo.md`. The
 scaffold is deterministic pattern-matching: it tells you where to look, not what's true.
 
+`frameworks` is read from **every** manifest in the tree, not just the root's — a monorepo keeps
+its dependencies in the workspace packages. An empty list on a repo that plainly has a web
+framework means the manifest is somewhere the bounded walk didn't reach (more than three levels
+down), and it is worth saying so in `CONTEXT.md` rather than concluding there is no framework.
+
 Pair it with `map --repo . --out .ultrasec` on anything large — the two together give you the
 entry surface and the sink density before you read a line.
 
