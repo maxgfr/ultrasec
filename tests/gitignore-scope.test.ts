@@ -36,10 +36,38 @@ const at = (file: string): Finding => ({
 });
 
 describe("buildPruneMatcher", () => {
-  it("is undefined when nothing would be pruned — the un-pruned path stays identical", () => {
+  // The vendored trees are pruned WITHOUT --gitignore, because the walker has
+  // always skipped them unconditionally and the scanners had not. On the first
+  // large audit that gap was 561 of 1366 findings (41 %), 559 of them refuted:
+  // bandit alone produced 519, of which 518 sat inside `.venv/` or
+  // `node_modules/`. `--gitignore` could not have helped — `.next/` was not in
+  // that repo's `.gitignore` at all.
+  it("prunes the vendored/build trees with no flags at all", () => {
     const repo = repoWith({ "a.js": "x\n" });
-    expect(buildPruneMatcher(repo, {})).toBeUndefined();
-    expect(buildPruneMatcher(repo, { gitignore: true })).toBeUndefined();
+    const prune = buildPruneMatcher(repo, {})!;
+    expect(prune("node_modules/left-pad/index.js")).toBe(true);
+    expect(prune("analysis/.venv/lib/python3.12/site-packages/foo.py")).toBe(true);
+    expect(prune("targets/frontend/.next/static/chunk.js")).toBe(true);
+    expect(prune("dist/bundle.js")).toBe(true);
+    expect(prune("coverage/lcov-report/index.html")).toBe(true);
+    expect(prune("src/a.js")).toBe(false);
+    // A directory NAME that merely contains an ignored name is not a match.
+    expect(prune("src/distribution/a.js")).toBe(false);
+    // The last segment is the file itself — a file called `dist` is not a tree.
+    expect(prune("dist")).toBe(false);
+  });
+
+  it("is undefined only when the caller opts out and asks for nothing else", () => {
+    const repo = repoWith({ "a.js": "x\n" });
+    expect(buildPruneMatcher(repo, { includeVendored: true })).toBeUndefined();
+    expect(buildPruneMatcher(repo, { includeVendored: true, gitignore: true })).toBeUndefined();
+  });
+
+  it("--include-vendored lets an audit read the vendored tree on purpose", () => {
+    const repo = repoWith({ ".gitignore": "*.log\n", "a.js": "x\n" });
+    const prune = buildPruneMatcher(repo, { includeVendored: true, gitignore: true })!;
+    expect(prune("node_modules/left-pad/index.js")).toBe(false);
+    expect(prune("debug.log")).toBe(true); // the other rules still apply
   });
 
   it("honours the root .gitignore", () => {

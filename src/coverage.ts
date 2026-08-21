@@ -450,13 +450,39 @@ const MARK: Record<CoverageState, string> = {
   unexamined: "⬜ **not examined**",
 };
 
-export function renderCoverageMd(rows: CoverageRow[], standardTitle: string = "OWASP ASVS"): string {
+/**
+ * Scanners that were supposed to run and did not, phrased as the coverage loss
+ * they are.
+ *
+ * `toolStatus` has always recorded this, in the manifest, where a reader has to
+ * go looking. On the first large audit three of nine scanners died — all three
+ * on docker — and one of them was checkov, so the run had NO infrastructure-
+ * as-code coverage at all. The single worst finding of that audit lived in a
+ * Kubernetes SQL file. The report never said the pass was missing, and a short
+ * IaC section read exactly like a clean one.
+ */
+function failedToolLines(dossier?: Dossier): string[] {
+  const failed = (dossier?.manifest.toolStatus ?? []).filter((s) => s.status === "failed");
+  if (!failed.length) return [];
+  return [
+    `### Scanners that failed (${failed.length})`,
+    "",
+    `Each of these is a hole in the table above, not a category with nothing in it. Re-run them`,
+    `before treating any row they feed as examined.`,
+    "",
+    ...failed.map((s) => `- **${s.name}** — ${s.note ?? "run failed"}`),
+    "",
+  ];
+}
+
+export function renderCoverageMd(rows: CoverageRow[], standardTitle: string = "OWASP ASVS", dossier?: Dossier): string {
   const unexamined = rows.filter((r) => r.state === "unexamined");
   const judgment = rows.filter((r) => r.judgment && r.state !== "examined");
   const L: string[] = [`## Coverage (${standardTitle})`, ""];
   L.push(`What this audit looked at, and what it did not. A category marked **not examined** is not`);
   L.push(`a clean bill of health — it is a gap in the audit, and it belongs in the report.`);
   L.push("");
+  L.push(...failedToolLines(dossier));
   L.push(`| | category | state | findings |`);
   L.push(`|---|---|---|---|`);
   for (const r of rows) L.push(`| ${r.id} | ${r.title} | ${MARK[r.state]} | ${r.hits || "—"} |`);

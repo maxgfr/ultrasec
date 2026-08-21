@@ -35,7 +35,7 @@ export function runCoverage(args: ParsedArgs): number {
   // counts as walked — the pass ran, it simply found nothing.
   const enumerated = enumeratedKindsOf(dossier.findings);
   const rows = buildCoverage(dossier, enumerated, standardId);
-  const md = renderCoverageMd(rows, STANDARDS[standardId]!.title);
+  const md = renderCoverageMd(rows, STANDARDS[standardId]!.title, dossier);
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(rows, null, 2));

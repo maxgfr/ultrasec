@@ -55,6 +55,7 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "no-context",
   "compact",
   "include-tests",
+  "include-vendored",
   "re-verdict",
   "no-journal",
   "no-env-sources",

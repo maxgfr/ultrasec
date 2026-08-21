@@ -190,7 +190,13 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // a scan that pruned 1.1 GB of vendored data from its taint graph still
   // shipped 51 findings out of it. Built from the engine's own gitignore
   // primitives so it honours nested `.gitignore` files exactly as the walk does.
-  const prune = buildPruneMatcher(repo, { gitignore, exclude });
+  //
+  // It also applies `DEFAULT_IGNORE_DIRS` unconditionally, because the walk
+  // always has: a scanner reporting from `node_modules/` or `.venv/` is
+  // reporting on code this audit's own taint pass never read.
+  // `--include-vendored` is the way to mean it.
+  const includeVendored = flagBool(args, "include-vendored");
+  const prune = buildPruneMatcher(repo, { gitignore, exclude, includeVendored });
 
   step(`agentic-CI, config, auth, cloud and credential detectors…`);
   // Agentic CI: workflows that hand a coding agent the repo's own event data.

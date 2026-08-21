@@ -187,7 +187,7 @@ export function renderReport(d: Dossier, narrative?: Narrative): string {
   // `f.cwe`, so REPORT.md and `ultrasec coverage` disagreed on every CWE-keyed
   // pack (Top 10, CWE Top 25) — which the comment on that helper promises can
   // never happen.
-  L.push(renderCoverageMd(buildCoverage(d, enumeratedKindsOf(d.findings))));
+  L.push(renderCoverageMd(buildCoverage(d, enumeratedKindsOf(d.findings)), undefined, d));
   L.push(`---`);
   L.push(`Engine: ultrasec ${d.manifest.version}. ${d.manifest.generatedNote}`);
   return L.join("\n") + "\n";
