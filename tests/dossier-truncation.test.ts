@@ -63,3 +63,38 @@ describe("renderDossierMd — truncation banner", () => {
     expect(md).not.toContain("narrow `--scope`");
   });
 });
+
+describe("renderDossierMd — de-noised families are named once", () => {
+  // #12: "regrouper les candidats … dans le DOSSIER". Without this a reader
+  // meets 46 separate "untrusted input reaches query()" entries and has to work
+  // out one at a time that they are the same test harness.
+  function withNoise(): Dossier {
+    const d = dossier();
+    d.findings = [
+      { ...finding(), id: "a", noise: "test-only-path" as const },
+      { ...finding(), id: "b", noise: "test-only-path" as const },
+      { ...finding(), id: "c", noise: "vendored-artifact" as const },
+      { ...finding(), id: "d" },
+    ];
+    return d;
+  }
+
+  it("lists each class once, with its ground and its members, before the candidates", () => {
+    const md = renderDossierMd(withNoise());
+    expect(md).toContain("## Proposed noise classes (2)");
+    expect(md).toContain("**test-only-path** (2)");
+    expect(md).toContain("`outside-usage`");
+    expect(md).toContain("**vendored-artifact** (1)");
+    // The block introduces the list it explains.
+    expect(md.indexOf("## Proposed noise classes")).toBeLessThan(md.indexOf("## Candidates"));
+  });
+
+  it("says outright that it is a suggestion, not an adjudication", () => {
+    expect(renderDossierMd(withNoise())).toMatch(/did not\s+adjudicate them/);
+  });
+
+  it("renders byte-identically when nothing was demoted", () => {
+    const clean = dossier();
+    expect(renderDossierMd(clean)).not.toContain("Proposed noise classes");
+  });
+});
