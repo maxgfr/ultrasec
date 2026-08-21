@@ -40,6 +40,37 @@ export function writeDossier(outDir: string, d: Dossier): void {
  *    re-scan must never delete what it didn't look at.
  * Idempotent and order-independent (findings keyed by content-hash id).
  */
+/**
+ * Carry a prior adjudication onto a freshly-scanned finding, keeping `next`'s
+ * deterministic fields (severity, path, risk).
+ *
+ * Every field an adjudicator AUTHORS has to be listed here, and the list used to
+ * be written out twice — here and in `import`. Both copies named
+ * status/verdict/exploitPath/confidence/message and both omitted `brocard` and
+ * `fixedIn`, so a `scan --merge` silently erased the named ground of every
+ * refutation and the commit a fix was folded in at. `check --semantic` then
+ * reported those dismissals as naming no ground, which is the audit trail
+ * accusing the auditor of the tool's own data loss.
+ *
+ * One function, one list: a new authored field is added once and both callers
+ * get it.
+ */
+export function preserveAdjudication(next: Finding, old: Finding): Finding {
+  const merged: Finding = {
+    ...next,
+    status: old.status,
+    verdict: old.verdict,
+    exploitPath: old.exploitPath,
+    confidence: old.confidence,
+    message: old.message,
+  };
+  // Optional authored fields: only set when present, so a merge never
+  // introduces an explicit `undefined` the JSON round-trip would drop anyway.
+  if (old.brocard) merged.brocard = old.brocard;
+  if (old.fixedIn) merged.fixedIn = old.fixedIn;
+  return merged;
+}
+
 export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
   const byId = new Map<string, Finding>();
   for (const f of prev.findings) byId.set(f.id, f);
@@ -47,14 +78,7 @@ export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
     const old = byId.get(f.id);
     if (old && old.status !== "open") {
       // preserve adjudication; keep `next`'s deterministic fields (severity/path/risk).
-      byId.set(f.id, {
-        ...f,
-        status: old.status,
-        verdict: old.verdict,
-        exploitPath: old.exploitPath,
-        confidence: old.confidence,
-        message: old.message,
-      });
+      byId.set(f.id, preserveAdjudication(f, old));
     } else {
       byId.set(f.id, f);
     }

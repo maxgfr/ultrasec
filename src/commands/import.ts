@@ -6,7 +6,7 @@ import { correlate } from "../tools/correlate.js";
 import { enrichFindings } from "../tools/scoring.js";
 import { addProvenance } from "../provenance.js";
 import { buildGraph } from "../graph.js";
-import { writeDossier, loadDossier, countBySeverity, type Dossier } from "../store.js";
+import { writeDossier, loadDossier, countBySeverity, preserveAdjudication, type Dossier } from "../store.js";
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest } from "../types.js";
 import { loadContextDoc } from "../context.js";
 
@@ -78,9 +78,7 @@ export async function runImport(args: ParsedArgs): Promise<number> {
   const findings = withProv
     .map((f): Finding => {
       const old = prevById.get(f.id);
-      return old && old.status !== "open"
-        ? { ...f, status: old.status, verdict: old.verdict, exploitPath: old.exploitPath, confidence: old.confidence, message: old.message }
-        : f;
+      return old && old.status !== "open" ? preserveAdjudication(f, old) : f;
     })
     .sort((a, b) => byStr(a.id, b.id));
 

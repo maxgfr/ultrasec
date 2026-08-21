@@ -18614,20 +18614,26 @@ function writeDossier(outDir, d) {
   writeFileSync6(join29(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
   writeFileSync6(join29(outDir, "DOSSIER.md"), renderDossierMd(d));
 }
+function preserveAdjudication(next, old) {
+  const merged = {
+    ...next,
+    status: old.status,
+    verdict: old.verdict,
+    exploitPath: old.exploitPath,
+    confidence: old.confidence,
+    message: old.message
+  };
+  if (old.brocard) merged.brocard = old.brocard;
+  if (old.fixedIn) merged.fixedIn = old.fixedIn;
+  return merged;
+}
 function mergeDossier(prev, next) {
   const byId = /* @__PURE__ */ new Map();
   for (const f of prev.findings) byId.set(f.id, f);
   for (const f of next.findings) {
     const old = byId.get(f.id);
     if (old && old.status !== "open") {
-      byId.set(f.id, {
-        ...f,
-        status: old.status,
-        verdict: old.verdict,
-        exploitPath: old.exploitPath,
-        confidence: old.confidence,
-        message: old.message
-      });
+      byId.set(f.id, preserveAdjudication(f, old));
     } else {
       byId.set(f.id, f);
     }
@@ -23846,7 +23852,7 @@ async function runImport(args2) {
   const prevById = new Map(prevFindings.map((f) => [f.id, f]));
   const findings = withProv.map((f) => {
     const old = prevById.get(f.id);
-    return old && old.status !== "open" ? { ...f, status: old.status, verdict: old.verdict, exploitPath: old.exploitPath, confidence: old.confidence, message: old.message } : f;
+    return old && old.status !== "open" ? preserveAdjudication(f, old) : f;
   }).sort((a, b) => byStr2(a.id, b.id));
   const graph = prev?.graph ?? buildGraph2({ repo, files: [] });
   const toolsRun = [.../* @__PURE__ */ new Set([...prev?.manifest.toolsRun ?? [], "deepsec"])].sort();
