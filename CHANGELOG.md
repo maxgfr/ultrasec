@@ -2,6 +2,24 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.37.0](https://github.com/maxgfr/ultrasec/compare/v1.36.0...v1.37.0) (2026-08-21)
+
+
+### Bug Fixes
+
+* **catalog:** corroborate ambiguous command callees before firing CWE-78 ([adac6f5](https://github.com/maxgfr/ultrasec/commit/adac6f5468d58d0f20d3a2e84c428aa2f0cf237b)), closes [#10](https://github.com/maxgfr/ultrasec/issues/10)
+* **catalog:** match requireModule case-insensitively, and correct the record ([d1fb3d3](https://github.com/maxgfr/ultrasec/commit/d1fb3d3fa185c481452ed4a3e4a51ad9667c1029)), closes [#10](https://github.com/maxgfr/ultrasec/issues/10)
+* **context:** rank the entry-point brief by surface, and stop capping by alphabet ([8d9e7dd](https://github.com/maxgfr/ultrasec/commit/8d9e7ddc58638cee8ac524ac5cae51c411c7fa6b)), closes [#10](https://github.com/maxgfr/ultrasec/issues/10)
+* **coverage:** score logging coverage from the CWEs present, not the pass ([4b3dabe](https://github.com/maxgfr/ultrasec/commit/4b3dabea9dd1c3edbe8bcb1fa4bddb890d136545)), closes [#10](https://github.com/maxgfr/ultrasec/issues/10)
+* **scope:** make --gitignore mean one thing across the whole run ([bfb81b2](https://github.com/maxgfr/ultrasec/commit/bfb81b25b4eb4e1e9f35dc4bde7772c436dbd835)), closes [#10](https://github.com/maxgfr/ultrasec/issues/10)
+
+
+### Features
+
+* **context:** find entry points by convention and signature, not only by content ([a5a95eb](https://github.com/maxgfr/ultrasec/commit/a5a95ebc3b649e7f8cabc155a4135c0519830731)), closes [#10](https://github.com/maxgfr/ultrasec/issues/10)
+* **scan:** report progress on stderr instead of running silently ([479b29f](https://github.com/maxgfr/ultrasec/commit/479b29f1f0f563ff19f50530acd800703f6d7a48)), closes [#10](https://github.com/maxgfr/ultrasec/issues/10)
+* **secrets:** de-prioritize ciphertext-by-design, and catch templated credential URIs ([b6e731f](https://github.com/maxgfr/ultrasec/commit/b6e731f1941bce9020412bc18d142bfa73011a98)), closes [#10](https://github.com/maxgfr/ultrasec/issues/10)
+
 # [1.36.0](https://github.com/maxgfr/ultrasec/compare/v1.35.0...v1.36.0) (2026-08-19)
 
 
