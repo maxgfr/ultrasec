@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { mergeGraphs, type Graph } from "./graph.js";
 import { byStr } from "./util.js";
 import { SEVERITIES, type Finding, type Manifest, type Severity } from "./types.js";
+import { proposedFor, renderProposalSummary } from "./noise.js";
 
 // The on-disk audit dossier — the hand-off between the deterministic engine and
 // the AI. Plain JSON + a Markdown index, so it is reviewable and diffable.
@@ -214,6 +215,15 @@ export function renderDossierMd(d: Dossier): string {
     L.push(`_No candidate findings._`);
     return L.join("\n") + "\n";
   }
+
+  // The de-noised families, named once each before the per-candidate list.
+  // Presence-gated, so a run with no demotions renders byte-identically.
+  //
+  // Without it the reader meets 46 separate "untrusted input reaches query()"
+  // entries and has to infer, one at a time, that they are the same test
+  // harness. Naming the class once — with its ground and its members — is the
+  // whole of the grouping this design does: reading, never verdicts.
+  L.push(...renderProposalSummary(findings.map((f) => ({ id: f.id, proposed: proposedFor(f) }))));
 
   L.push(`## Candidates`);
   L.push("");

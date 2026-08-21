@@ -18720,257 +18720,13 @@ function reverseDependents(graph, seeds2, depth) {
 
 // src/store.ts
 import { mkdirSync as mkdirSync5, writeFileSync as writeFileSync6, readFileSync as readFileSync15, existsSync as existsSync13 } from "fs";
-import { join as join29 } from "path";
-function emptySeverityCounts() {
-  return { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
-}
-function countBySeverity(findings) {
-  const c2 = emptySeverityCounts();
-  for (const f of findings) c2[f.severity]++;
-  return c2;
-}
-function writeDossier(outDir, d) {
-  mkdirSync5(outDir, { recursive: true });
-  writeFileSync6(join29(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
-  writeFileSync6(join29(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
-  writeFileSync6(join29(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
-  writeFileSync6(join29(outDir, "DOSSIER.md"), renderDossierMd(d));
-}
-function preserveAdjudication(next, old) {
-  const merged = {
-    ...next,
-    status: old.status,
-    verdict: old.verdict,
-    exploitPath: old.exploitPath,
-    confidence: old.confidence,
-    message: old.message
-  };
-  if (old.brocard) merged.brocard = old.brocard;
-  if (old.fixedIn) merged.fixedIn = old.fixedIn;
-  return merged;
-}
-function mergeDossier(prev, next) {
-  const byId = /* @__PURE__ */ new Map();
-  for (const f of prev.findings) byId.set(f.id, f);
-  for (const f of next.findings) {
-    const old = byId.get(f.id);
-    if (old && old.status !== "open") {
-      byId.set(f.id, preserveAdjudication(f, old));
-    } else {
-      byId.set(f.id, f);
-    }
-  }
-  const findings = [...byId.values()].sort((a, b) => byStr2(a.id, b.id));
-  const graph = mergeGraphs(prev.graph, next.graph);
-  const scopes = [.../* @__PURE__ */ new Set([...prev.manifest.scopes ?? [], ...next.manifest.scopes ?? []])].sort(byStr2);
-  const pt = prev.manifest.truncation;
-  const nt = next.manifest.truncation;
-  const nextScoped = !!(next.manifest.scopes && next.manifest.scopes.length);
-  const truncation = nextScoped ? pt || nt ? {
-    candidates: Math.max(pt?.candidates ?? 0, nt?.candidates ?? 0),
-    total: Math.max(pt?.total ?? 0, nt?.total ?? 0),
-    ...pt?.files || nt?.files ? { files: true } : {}
-  } : void 0 : nt;
-  const statusByName = /* @__PURE__ */ new Map();
-  for (const s of prev.manifest.toolStatus ?? []) statusByName.set(s.name, s);
-  for (const s of next.manifest.toolStatus ?? []) statusByName.set(s.name, s);
-  const toolStatus2 = [...statusByName.values()];
-  const sbom = next.manifest.sbom ?? prev.manifest.sbom;
-  const manifest = {
-    ...next.manifest,
-    languages: [.../* @__PURE__ */ new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
-    toolsRun: [.../* @__PURE__ */ new Set([...prev.manifest.toolsRun, ...next.manifest.toolsRun])].sort(),
-    ...toolStatus2.length ? { toolStatus: toolStatus2 } : {},
-    counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
-    ...truncation ? { truncation } : { truncation: void 0 },
-    ...scopes.length ? { scopes } : {},
-    ...sbom ? { sbom } : {}
-  };
-  return { manifest, findings, graph };
-}
-function loadDossier(outDir) {
-  const read = (name2) => JSON.parse(readFileSync15(join29(outDir, name2), "utf8"));
-  if (!existsSync13(join29(outDir, "findings.json"))) {
-    throw new Error(`no audit dossier at ${outDir} (run \`ultrasec scan --out ${outDir}\` first)`);
-  }
-  return { manifest: read("manifest.json"), findings: read("findings.json"), graph: read("graph.json") };
-}
-function severityBadge(s) {
-  return { critical: "\u{1F7E5} CRIT", high: "\u{1F7E7} HIGH", medium: "\u{1F7E8} MED", low: "\u{1F7E9} LOW", info: "\u2B1C INFO" }[s];
-}
-function locationsLine(locations) {
-  return locations.map((e) => `${e.version ? `v${e.version} ` : ""}\`${e.file}${e.line !== void 0 ? `:${e.line}` : ""}\``).join(" \xB7 ");
-}
-function toolStatusLines(status) {
-  return status.map((s) => {
-    const count = typeof s.findings === "number" && (s.status === "ran" || s.status === "empty") ? ` (${s.findings})` : "";
-    const why = s.note && (s.status === "skipped" || s.status === "failed") ? ` \u2014 ${s.note}` : "";
-    return `${s.name}: ${s.status}${count}${why}`;
-  });
-}
-function provenanceLine(f) {
-  const p = f.provenance;
-  if (!p) return "";
-  const who = [p.author, p.date].filter(Boolean).join(" \xB7 ");
-  const bits = [who, p.commit ? `@${p.commit}` : "", p.owner ? `owner ${p.owner}` : ""].filter(Boolean);
-  return bits.length ? `provenance: ${bits.join(" \xB7 ")}` : "";
-}
-function renderDossierMd(d) {
-  const { manifest: m, findings } = d;
-  const c2 = m.counts.bySeverity;
-  const L = [];
-  L.push(`# ultrasec audit dossier`);
-  L.push("");
-  L.push(`- repo: \`${m.repo}\``);
-  L.push(`- languages: ${m.languages.join(", ") || "\u2014"}`);
-  L.push(`- external tools run: ${m.toolsRun.join(", ") || "none (graph + taint only)"}`);
-  if (m.toolStatus?.length) for (const line of toolStatusLines(m.toolStatus)) L.push(`  - ${line}`);
-  if (m.sbom) L.push(`- SBOM: \`${m.sbom}\` (CycloneDX)`);
-  L.push(`- findings: **${m.counts.findings}** \u2014 ${SEVERITIES2.map((s) => `${severityBadge(s)} ${c2[s]}`).join("  ")}`);
-  L.push("");
-  L.push(`> Candidates are deterministic and **recall-oriented** \u2014 every one needs`);
-  L.push(`> adjudication. Open each with \`ultrasec dossier <id>\` (real code + the`);
-  L.push(`> cross-file path), confirm whether the flow is real and exploitable, then`);
-  L.push(`> record a verdict via \`ultrasec verify\`. An uncertain high-severity stays`);
-  L.push(`> **needs-human** \u2014 never silently dropped.`);
-  L.push("");
-  if (m.truncation?.candidates) {
-    const advice = m.truncation.hint ?? "Raise `--max-candidates` (or `--budget thorough`) or narrow `--scope` to see the rest.";
-    L.push(`> \u26A0\uFE0F **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. ${advice}`);
-    L.push("");
-  }
-  if (m.truncation?.files) {
-    L.push(`> \u26A0\uFE0F **Partial walk:** the file walk hit \`--max-files\` \u2014 some files were **not scanned**. Raise \`--max-files\` or narrow \`--scope\`.`);
-    L.push("");
-  }
-  if (m.scopes && m.scopes.length) {
-    L.push(
-      `> \u{1F50E} **Scoped run** \u2014 only these paths were analysed: ${m.scopes.map((s) => `\`${s}\``).join(", ")}. Findings outside this scope are not represented.`
-    );
-    L.push("");
-  }
-  if (!findings.length) {
-    L.push(`_No candidate findings._`);
-    return L.join("\n") + "\n";
-  }
-  L.push(`## Candidates`);
-  L.push("");
-  const ordered = findings.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || SEVERITIES2.indexOf(a.severity) - SEVERITIES2.indexOf(b.severity));
-  for (const f of ordered) {
-    L.push(`### ${f.id} \u2014 ${severityBadge(f.severity)} ${f.title}`);
-    L.push("");
-    const src = f.sources && f.sources.length > 1 ? ` \xB7 agreed by ${f.sources.join(", ")}` : f.tool !== "ultrasec" ? ` \xB7 via ${f.tool}` : "";
-    L.push(`- category: ${f.category}${f.cwe ? ` \xB7 ${f.cwe}` : ""} \xB7 confidence ${f.confidence} \xB7 status ${f.status}${src}`);
-    const risk = [];
-    if (typeof f.risk === "number") risk.push(`risk ${f.risk}`);
-    if (typeof f.epss === "number") risk.push(`EPSS ${(f.epss * 100).toFixed(1)}%`);
-    if (f.kev) risk.push(`\u{1F6A8} CISA KEV${f.kevDateAdded ? ` (${f.kevDateAdded})` : ""}`);
-    if (f.verified) risk.push(`\u2705 verified secret`);
-    if (risk.length) L.push(`- ${risk.join(" \xB7 ")}`);
-    if (f.path && f.path.length) {
-      L.push(`- path: ${f.path.map((p) => `\`${p.file}:${p.line}\``).join(" \u2192 ")}`);
-    } else if (f.sink) {
-      L.push(`- at: \`${f.sink.file}:${f.sink.line}\``);
-    }
-    if (f.locations?.length) L.push(`- affects: ${locationsLine(f.locations)}`);
-    const prov = provenanceLine(f);
-    if (prov) L.push(`- ${prov}`);
-    L.push(`- ${f.message}`);
-    L.push("");
-  }
-  L.push(`---`);
-  L.push(`Engine: ultrasec ${m.version}. ${m.generatedNote}`);
-  return L.join("\n") + "\n";
-}
+import { join as join31 } from "path";
 
-// src/neighbors.ts
-function neighbors(graph, target, depth = 1) {
-  const out2 = /* @__PURE__ */ new Map();
-  const inn = /* @__PURE__ */ new Map();
-  for (const e of graph.edges) {
-    (out2.get(e.from) ?? out2.set(e.from, []).get(e.from)).push(e);
-    (inn.get(e.to) ?? inn.set(e.to, []).get(e.to)).push(e);
-  }
-  const seen = /* @__PURE__ */ new Set([target]);
-  const links = [];
-  let frontier = [target];
-  for (let d = 1; d <= depth; d++) {
-    const next = [];
-    for (const node of frontier) {
-      for (const e of (out2.get(node) ?? []).slice().sort((a, b) => byStr2(a.to, b.to))) {
-        if (seen.has(e.to)) continue;
-        links.push({ node: e.to, direction: "out", kind: e.kind, weight: e.weight, depth: d, symbol: e.toSymbol });
-        seen.add(e.to);
-        next.push(e.to);
-      }
-      for (const e of (inn.get(node) ?? []).slice().sort((a, b) => byStr2(a.from, b.from))) {
-        if (seen.has(e.from)) continue;
-        links.push({ node: e.from, direction: "in", kind: e.kind, weight: e.weight, depth: d, symbol: e.fromSymbol });
-        seen.add(e.from);
-        next.push(e.from);
-      }
-    }
-    frontier = next;
-  }
-  return { target, links };
-}
-
-// src/commands/graph.ts
-function runGraph(args2) {
-  const target = args2._[1];
-  const depth = Number(flagStr(args2, "depth") ?? "1") || 1;
-  if (!target) {
-    eprintln("ultrasec graph: need a <file|symbol> argument. e.g. `graph src/db.js`");
-    return 2;
-  }
-  const runFlag = flagStr(args2, "run");
-  let graph;
-  if (runFlag) {
-    try {
-      graph = loadDossier(resolve7(runFlag)).graph;
-    } catch (e) {
-      eprintln(`ultrasec graph: ${e.message}`);
-      return 2;
-    }
-  } else {
-    graph = buildGraph2(scanRepo2(flagStr(args2, "repo") ?? "."));
-  }
-  let node = target;
-  if (!graph.files.includes(target)) {
-    const defs = graph.symbolDefs[target];
-    if (Array.isArray(defs) && defs.length === 1) node = defs[0];
-    else if (Array.isArray(defs) && defs.length > 1) {
-      eprintln(`ultrasec graph: symbol "${target}" is defined in ${defs.length} files: ${defs.join(", ")}`);
-      return 2;
-    } else {
-      eprintln(`ultrasec graph: "${target}" is not a file node nor a known exported symbol.`);
-      return 2;
-    }
-  }
-  const result = neighbors(graph, node, depth);
-  if (flagBool(args2, "json")) {
-    println(JSON.stringify(result, null, 2));
-    return 0;
-  }
-  println(`${node}  (depth ${depth})`);
-  if (!result.links.length) {
-    println("  (no links)");
-    return 0;
-  }
-  for (const l of result.links) {
-    const arrow = l.direction === "out" ? "\u2192" : "\u2190";
-    const sym = l.symbol ? ` [${l.symbol}]` : "";
-    println(`  ${arrow} ${l.kind.padEnd(6)} ${l.node}${sym}  (d${l.depth})`);
-  }
-  return 0;
-}
-
-// src/commands/map.ts
-import { resolve as resolve8, join as join31 } from "path";
-import { mkdirSync as mkdirSync6, writeFileSync as writeFileSync7, readFileSync as readFileSync16, existsSync as existsSync14 } from "fs";
-
-// src/map.ts
+// src/noise.ts
 import { join as join30 } from "path";
+
+// src/secrets.ts
+import "path";
 
 // src/catalog.ts
 function appliesTo(languages, langId) {
@@ -20047,7 +19803,704 @@ function findSanitizers(lang, line, sinkKind) {
   return hints;
 }
 
+// src/secrets.ts
+function extOf2(rel2) {
+  const i2 = rel2.lastIndexOf(".");
+  return i2 === -1 ? "" : rel2.slice(i2 + 1).toLowerCase();
+}
+var ENCRYPTED_AT_REST = [
+  { id: "sealed-secret", label: "Bitnami SealedSecret", paths: [".sealed-secret.yaml", ".sealedsecret.yaml"], marker: /(^|\n)\s*kind:\s*SealedSecret\b/ },
+  {
+    id: "sops",
+    label: "SOPS-encrypted file",
+    paths: [".sops.yaml", ".sops.yml", ".enc.yaml", ".enc.yml", ".enc.json", ".enc.env"],
+    marker: /(^|\n)\s*sops:\s*(\n|$)|"sops"\s*:\s*\{/
+  },
+  { id: "ansible-vault", label: "Ansible Vault", marker: /\$ANSIBLE_VAULT;\d/ },
+  { id: "age", label: "age-encrypted file", marker: /-----BEGIN AGE ENCRYPTED FILE-----/ },
+  { id: "pgp", label: "PGP/GPG armoured message", marker: /-----BEGIN PGP MESSAGE-----/ },
+  // git-crypt writes a NUL-delimited `GITCRYPT` magic in the first bytes. Matched
+  // without the NUL itself: a control character in a regex is a lint error here,
+  // and anchoring `GITCRYPT` to the head of the file is just as specific.
+  { id: "git-crypt", label: "git-crypt blob", marker: /^.{0,4}GITCRYPT/ },
+  { id: "jasypt", label: "Jasypt/Jenkins encrypted value", marker: /\bENC\([A-Za-z0-9+/=]{16,}\)|\{AQAA[A-Za-z0-9+/=]{16,}\}/ }
+];
+function encryptedShapeOf(rel2, content) {
+  const lower = rel2.toLowerCase();
+  for (const shape of ENCRYPTED_AT_REST) {
+    if (shape.paths?.some((p) => lower.endsWith(p))) return shape;
+    if (shape.marker?.test(content)) return shape;
+  }
+  return void 0;
+}
+var CREDENTIAL_URI = /\b([a-z][a-z0-9+.-]{1,20}):\/\/([^\s:@/'"`]{1,64}):([^\s@/'"`]{1,256})@/gi;
+var TEMPLATE_ONLY = /^(?:\$\([^)]*\)|\$\{[^}]*\}|\$[A-Za-z_]\w*|\{\{[^}]*\}\}|<[^>]*>|%\([^)]*\)[sd]|%[sdv]|\{[^}]*\}|:[A-Za-z_]\w*|#\{[^}]*\})$/;
+var PLACEHOLDER = /^(?:x{3,}|\*{3,}|\.{3,}|-+|_+|pass(?:word)?|passwd|secret|changeme|change_me|your[_-]?\w*|my[_-]?\w*|todo|none|null|empty|dummy|example|sample|test|s3cr3t|hunter2|redacted|\[[^\]]*\])$/i;
+var TEXT_EXTS = /* @__PURE__ */ new Set([
+  "yaml",
+  "yml",
+  "json",
+  "toml",
+  "ini",
+  "cfg",
+  "conf",
+  "properties",
+  "env",
+  "tf",
+  "tfvars",
+  "hcl",
+  "xml",
+  "md",
+  "txt",
+  "sh",
+  "bash",
+  "zsh",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "mjs",
+  "cjs",
+  "py",
+  "rb",
+  "php",
+  "go",
+  "java",
+  "kt",
+  "cs",
+  "rs",
+  "scala",
+  "ex",
+  "exs",
+  "pl",
+  "lua",
+  "tpl",
+  "template"
+]);
+function isLiteralSecret(password) {
+  const p = password.trim();
+  if (p.length < 4) return false;
+  if (TEMPLATE_ONLY.test(p)) return false;
+  if (PLACEHOLDER.test(p)) return false;
+  if (/\$\{|\$\(|\{\{|%\(/.test(p)) return false;
+  return true;
+}
+function auditSecrets(repo, prune) {
+  const out2 = [];
+  for (const wf of walk2(repo)) {
+    if (prune?.(wf.rel)) continue;
+    if (!TEXT_EXTS.has(extOf2(wf.rel))) continue;
+    const content = readText2(wf.abs);
+    if (!content?.includes("://")) continue;
+    if (encryptedShapeOf(wf.rel, content)) continue;
+    const lines5 = content.split(/\r?\n/);
+    for (let i2 = 0; i2 < lines5.length; i2++) {
+      const line = lines5[i2];
+      CREDENTIAL_URI.lastIndex = 0;
+      let m;
+      while ((m = CREDENTIAL_URI.exec(line)) !== null) {
+        const [, scheme, user, password] = m;
+        if (!isLiteralSecret(password)) continue;
+        const redacted = `${scheme}://${user}:${"*".repeat(Math.min(password.length, 8))}@\u2026`;
+        out2.push(
+          makeToolFinding({
+            tool: "ultrasec",
+            category: "secret",
+            ident: `credential-uri:${wf.rel}:${i2 + 1}`,
+            title: "Credential embedded in a connection string",
+            severity: "high",
+            confidence: "medium",
+            cwe: "CWE-798",
+            message: `A ${scheme} connection string at ${wf.rel}:${i2 + 1} carries a literal password (${redacted}). Neighbouring components may be templated \u2014 that is how these survive review, because the line reads as configuration rather than as a credential. Confirm the value is live, then rotate it and move it to a secret store; note that removing it from HEAD does not remove it from history.`,
+            file: wf.rel,
+            line: i2 + 1,
+            references: [cweUrl("CWE-798")]
+          })
+        );
+      }
+    }
+  }
+  return out2;
+}
+
+// src/git.ts
+import { execFileSync as execFileSync5 } from "child_process";
+function git(repo, args2) {
+  try {
+    return execFileSync5("git", ["-C", repo, ...args2], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024
+    });
+  } catch {
+    return null;
+  }
+}
+function isGitRepo(repo) {
+  return git(repo, ["rev-parse", "--is-inside-work-tree"])?.trim() === "true";
+}
+function changedFiles(repo, ref) {
+  if (!isGitRepo(repo)) return null;
+  if (git(repo, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]) === null) return null;
+  const out2 = /* @__PURE__ */ new Set();
+  const diff = git(repo, ["diff", "--name-only", "--diff-filter=d", `${ref}...HEAD`]);
+  if (diff === null) return null;
+  for (const line of diff.split(/\r?\n/)) if (line.trim()) out2.add(line.trim());
+  const worktree = git(repo, ["diff", "--name-only", "--diff-filter=d", ref]);
+  if (worktree) {
+    for (const line of worktree.split(/\r?\n/)) if (line.trim()) out2.add(line.trim());
+  }
+  const untracked = git(repo, ["ls-files", "--others", "--exclude-standard"]);
+  if (untracked) {
+    for (const line of untracked.split(/\r?\n/)) if (line.trim()) out2.add(line.trim());
+  }
+  return [...out2].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
+}
+function parseBlamePorcelain(raw) {
+  if (!raw) return null;
+  const lines5 = raw.split(/\r?\n/);
+  const m = /^([0-9a-f]{40})\b/.exec((lines5[0] ?? "").trim());
+  if (!m) return null;
+  const info2 = { commit: m[1].slice(0, 10) };
+  for (const line of lines5) {
+    if (line.startsWith("author ")) info2.author = line.slice(7).trim();
+    else if (line.startsWith("author-time ")) {
+      const t = Number(line.slice(12).trim());
+      if (Number.isFinite(t)) info2.date = new Date(t * 1e3).toISOString().slice(0, 10);
+    }
+  }
+  return info2;
+}
+function blameLine(repo, file, line) {
+  if (!Number.isInteger(line) || line < 1) return null;
+  const out2 = git(repo, ["blame", "-L", `${line},${line}`, "--porcelain", "--", file]);
+  return out2 === null ? null : parseBlamePorcelain(out2);
+}
+var LOG_CAP = 50;
+var HUGE_FILE_LINES = 2e4;
+var prefixCache = /* @__PURE__ */ new Map();
+function worktreePrefix(repo) {
+  const cached = prefixCache.get(repo);
+  if (cached !== void 0) return cached;
+  const p = git(repo, ["rev-parse", "--show-prefix"])?.trim() ?? "";
+  prefixCache.set(repo, p);
+  return p;
+}
+function fileExistsAtHead(repo, file) {
+  return git(repo, ["cat-file", "-e", `HEAD:${worktreePrefix(repo)}${file}`]) !== null;
+}
+function lineCountAtCommit(repo, commit, file) {
+  if (!/^[0-9a-f]{7,40}$/i.test(commit)) return null;
+  const blob = git(repo, ["show", `${commit}:${worktreePrefix(repo)}${file}`]);
+  if (blob === null) return null;
+  const lines5 = blob.split(/\r?\n/);
+  return lines5.length > 0 && lines5[lines5.length - 1] === "" ? lines5.length - 1 : lines5.length;
+}
+function fileContentAtCommit(repo, commit, file) {
+  if (!/^[0-9a-f]{7,40}$/i.test(commit)) return null;
+  return git(repo, ["show", `${commit}:${worktreePrefix(repo)}${file}`]);
+}
+function lineContentAtCommit(repo, commit, file, line) {
+  if (!/^[0-9a-f]{7,40}$/i.test(commit) || !Number.isInteger(line) || line < 1) return null;
+  const blob = git(repo, ["show", `${commit}:${worktreePrefix(repo)}${file}`]);
+  if (blob === null) return null;
+  const lines5 = blob.split(/\r?\n/);
+  return line <= lines5.length ? lines5[line - 1] : null;
+}
+function lineContentAtHead(repo, file, line) {
+  if (!Number.isInteger(line) || line < 1) return null;
+  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
+  if (blob === null) return null;
+  const lines5 = blob.split(/\r?\n/);
+  return line <= lines5.length ? lines5[line - 1] : null;
+}
+function logSince(repo, file, sinceRef) {
+  if (git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) === null) return null;
+  const out2 = git(repo, ["log", `--max-count=${LOG_CAP}`, "--format=%h", `${sinceRef}..HEAD`, "--", file]);
+  if (out2 === null) return null;
+  return out2.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+}
+function parseLineLog(raw) {
+  const header3 = raw.split(/\r?\n/).find((l) => l.includes("\0"));
+  if (!header3) return null;
+  const [commit, author, date] = header3.split("\0");
+  if (!commit || !commit.trim()) return null;
+  return { commit: commit.trim(), author: author?.trim() || void 0, date: date?.trim() || void 0 };
+}
+function lineLastChanged(repo, file, line) {
+  if (!Number.isInteger(line) || line < 1) return null;
+  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
+  if (blob === null) return null;
+  const total = blob.split(/\r?\n/).length;
+  if (line > total || total > HUGE_FILE_LINES) return null;
+  const out2 = git(repo, ["log", "-n", "1", "--format=%h%x00%an%x00%ad", "--date=short", "-L", `${line},${line}:${file}`]);
+  return out2 === null ? null : parseLineLog(out2);
+}
+function parseRenameStatus(raw, oldPath) {
+  for (const l of raw.split(/\r?\n/)) {
+    const m = /^R\d*\t([^\t]+)\t([^\t]+)$/.exec(l);
+    if (m && m[1] === oldPath) return m[2];
+  }
+  return null;
+}
+function fileRenamedTo(repo, file) {
+  if (fileExistsAtHead(repo, file)) return null;
+  const out2 = git(repo, ["log", "--all", "-M", "--diff-filter=R", "--name-status", "--format=", `--max-count=${LOG_CAP * 4}`]);
+  if (out2 === null) return null;
+  return parseRenameStatus(out2, file);
+}
+
+// src/noise.ts
+var VENDORED_DIR = /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules)\//i;
+var MINIFIED = /\.min\.(js|mjs|cjs|css)$/i;
+function locationsOf(f) {
+  const out2 = [];
+  if (f.source?.file) out2.push(f.source.file);
+  if (f.sink?.file) out2.push(f.sink.file);
+  for (const p of f.path ?? []) if (p.file) out2.push(p.file);
+  return out2;
+}
+var RULES17 = [
+  {
+    id: "encrypted-at-rest",
+    severity: "info",
+    confidence: "low",
+    why: (f, repo) => {
+      const shape = f.sink?.file ? shapeOf(repo, f.sink.file, f.atCommit) : void 0;
+      return `de-prioritized: ${f.sink?.file} is a ${shape?.label ?? "ciphertext-by-design file"}, where ciphertext is the point of the file. Check that the ENCRYPTION KEY is not also committed, and that this really is the format it claims.`;
+    },
+    // Secret findings only: a SAST hit inside a SealedSecret is a different claim.
+    matches: (f, repo) => f.category === "secret" && !!f.sink?.file && !!shapeOf(repo, f.sink.file, f.atCommit)
+  },
+  {
+    id: "test-only-path",
+    severity: "low",
+    confidence: "low",
+    why: () => `de-prioritized: every cited location is a test path, so the flow does not exist in the shipped artifact. Confirm the harness is not itself the product (fixtures served in production, a test route mounted by the app) before dismissing.`,
+    // Deliberately scoped to the enumerated classes. A hardcoded credential in a
+    // test file is a classic real leak — CI tokens live there — so `secret` and
+    // `config` findings are NOT demoted for sitting in a test.
+    matches: (f) => {
+      if (f.category !== "taint" && f.category !== "sast") return false;
+      const locs = locationsOf(f);
+      return locs.length > 0 && locs.every((l) => isTestPath(l));
+    }
+  },
+  {
+    // The flagged value is a RESOURCE identifier, not a credential.
+    //
+    // `const SPREADSHEET_KEY = "1a2b…"` is a Google Sheets document id. gitleaks
+    // rates it a "Generic API Key" on entropy — helped along by the word KEY in
+    // the name — but holding a document id is not holding access to the
+    // document: the sharing setting is, and that is not in the repo. Seven of
+    // the 37 false positives on the first real audit were exactly this.
+    //
+    // The claim here is narrow and checkable: the NAME says what the value is.
+    // It is deliberately NOT the claim "this document is public", which nothing
+    // in the repo can establish — so the message asks for that check rather than
+    // making it, and the finding is demoted to `low`, not `info`.
+    id: "resource-identifier",
+    severity: "low",
+    confidence: "low",
+    why: (f) => `de-prioritized: ${f.sink?.file}:${f.sink?.line} assigns a resource/document identifier, not a credential \u2014 possessing the id is not possessing access. CHECK the document's sharing setting and whether its contents are sensitive; that is not knowable from this repo.`,
+    matches: (f, repo) => {
+      if (f.category !== "secret" || !f.sink?.file) return false;
+      const line = lineAt(repo, f.sink.file, f.sink.line, f.atCommit);
+      if (!line) return false;
+      return RESOURCE_NAME.test(line) && !CREDENTIAL_SHAPE.test(line);
+    }
+  },
+  {
+    // The cited line DECLARES a dangerous pattern rather than performing one.
+    //
+    // Found by auditing ultrasec with ultrasec: `src/authtokens.ts` holds the
+    // rules that detect `alg: none` and `wantAssertionsSigned: false`, and the
+    // `note:` fields quoting those strings matched the rules describing them —
+    // two CRITICALs on a file whose entire job is to name that bug.
+    //
+    // Not specific to security tools. WAF signature sets, custom lint rules,
+    // payload corpora and security documentation all carry the pattern they
+    // warn about, and the line-regex auditors cannot tell a string from a
+    // statement.
+    id: "pattern-declaration",
+    severity: "info",
+    confidence: "low",
+    why: (f) => `de-prioritized: ${f.sink?.file}:${f.sink?.line} declares a pattern rather than performing the operation \u2014 it is a rule/metadata field, a bare regex literal, or a comment. Confirm the value is not ALSO applied somewhere \u2014 a rule file that configures the running system is both.`,
+    matches: (f, repo) => {
+      if (f.category === "dep" || !f.sink?.file) return false;
+      const line = lineAt(repo, f.sink.file, f.sink.line, f.atCommit);
+      return !!line && (PATTERN_METADATA.test(line) || BARE_REGEX_LINE.test(line) || WHOLE_LINE_COMMENT.test(line));
+    }
+  },
+  {
+    id: "vendored-artifact",
+    severity: "info",
+    confidence: "low",
+    why: (f) => `de-prioritized: ${f.sink?.file ?? f.source?.file} is a vendored or minified build artifact, not this repo's source. Fix it upstream or re-vendor; editing it here is overwritten by the next install.`,
+    matches: (f) => {
+      if (f.category === "dep") return false;
+      const at = f.sink?.file ?? f.source?.file;
+      return !!at && (VENDORED_DIR.test(at) || MINIFIED.test(at));
+    }
+  }
+];
+var PATTERN_METADATA = /^\s*(?:re|regex|regexp|pattern|patterns|rule|rules|note|title|description|detail|remediation|example|examples|hint|advice|summary|docs?)\s*:\s*(?:\/|["'`])/;
+var RESOURCE_NAME = /\b(?:SPREADSHEET|SHEET|WORKSHEET|DOC|DOCUMENT|FOLDER|DRIVE|DATASET|CALENDAR|PROJECT|BUCKET|WORKSPACE|CHANNEL|TENANT|ORG|GROUP)[_-]?(?:KEY|ID|GID|UUID|SLUG)\b/i;
+var CREDENTIAL_SHAPE = /-----BEGIN|\beyJ[A-Za-z0-9_-]{10,}|\bAKIA[0-9A-Z]{12,}|\b(?:sk|rk)-[A-Za-z0-9]{16,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[baprs]-|\bAIza[0-9A-Za-z_-]{30,}/;
+var WHOLE_LINE_COMMENT = /^\s*(?:\/\/|#|\*|<!--)/;
+var BARE_REGEX_LINE = /^\s*\/(?:[^/\\\n]|\\.)+\/[gimsuy]*\s*,?\s*$/;
+var lineCache = /* @__PURE__ */ new Map();
+function lineAt(repo, rel2, line, commit) {
+  if (commit) return lineContentAtCommit(repo, commit, rel2, line) ?? void 0;
+  const key = `${repo}\0${rel2}`;
+  if (!lineCache.has(key)) {
+    try {
+      lineCache.set(key, readText2(join30(repo, rel2)).split(/\r?\n/));
+    } catch {
+      lineCache.set(key, void 0);
+    }
+  }
+  return lineCache.get(key)?.[line - 1];
+}
+var shapeCache = /* @__PURE__ */ new Map();
+function shapeOf(repo, rel2, commit) {
+  const key = `${repo}\0${commit ?? ""}\0${rel2}`;
+  if (!shapeCache.has(key)) {
+    let content;
+    if (commit) content = fileContentAtCommit(repo, commit, rel2) ?? void 0;
+    if (content === void 0) {
+      try {
+        content = readText2(join30(repo, rel2));
+      } catch {
+        content = void 0;
+      }
+    }
+    shapeCache.set(key, encryptedShapeOf(rel2, content ?? ""));
+  }
+  return shapeCache.get(key);
+}
+function proposalSummary(items) {
+  const byClass = /* @__PURE__ */ new Map();
+  for (const it of items) {
+    if (!it.proposed) continue;
+    const row = byClass.get(it.proposed.class) ?? { class: it.proposed.class, ground: it.proposed.ground, why: it.proposed.why, ids: [] };
+    row.ids.push(it.id);
+    byClass.set(it.proposed.class, row);
+  }
+  return NOISE_CLASSES.filter((c2) => byClass.has(c2)).map((c2) => byClass.get(c2));
+}
+function renderProposalSummary(items) {
+  const rows = proposalSummary(items);
+  if (!rows.length) return [];
+  const L = [`## Proposed noise classes (${rows.length})`, ""];
+  L.push(`_The engine classified these as noise BY CONSTRUCTION and DEMOTED them \u2014 it did not`);
+  L.push(`adjudicate them. Each row is a suggestion with a named ground: accept it per item, or`);
+  L.push(`refuse it. Read the caveat \u2014 a demotion you cannot interrogate is a silent filter._`);
+  L.push("");
+  for (const r of rows) {
+    L.push(`- **${r.class}** (${r.ids.length}) \u2192 ground \`${r.ground}\` \u2014 ${r.why}`);
+    const shown = r.ids.slice(0, SUMMARY_IDS);
+    L.push(`  - ${shown.map((i2) => `\`${i2}\``).join(", ")}${r.ids.length > shown.length ? `, \u2026 and ${r.ids.length - shown.length} more` : ""}`);
+  }
+  L.push("");
+  return L;
+}
+var SUMMARY_IDS = 8;
+function proposedFor(f) {
+  if (!f.noise) return void 0;
+  return { class: f.noise, ground: NOISE_GROUND[f.noise], why: PROPOSAL_WHY[f.noise] };
+}
+var PROPOSAL_WHY = {
+  "encrypted-at-rest": "the file is ciphertext by design \u2014 the blob is not the secret; check the KEY is not committed too",
+  "test-only-path": "every node of the path is a test path \u2014 it does not exist in the shipped artifact",
+  "vendored-artifact": "a vendored or minified upstream build artifact, byte-identical to a published release",
+  "pattern-declaration": "the cited line declares the pattern (rule metadata or a bare regex) rather than performing the operation",
+  "resource-identifier": "the value addresses a document, it is not a credential \u2014 but confirm the document's sharing setting, which this repo cannot tell you"
+};
+function classifyNoise(f, repo, opts = {}) {
+  if (f.verified) return void 0;
+  for (const rule of RULES17) {
+    if (rule.id === "test-only-path" && opts.includeTests) continue;
+    if (rule.matches(f, repo)) return rule.id;
+  }
+  return void 0;
+}
+var SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
+function floorOf(current, floor) {
+  return SEVERITY_ORDER.indexOf(current) >= SEVERITY_ORDER.indexOf(floor) ? current : floor;
+}
+function demoteNoise(findings, repo, opts = {}) {
+  const counts = /* @__PURE__ */ new Map();
+  const byId = new Map(RULES17.map((r) => [r.id, r]));
+  const out2 = findings.map((f) => {
+    const cls = classifyNoise(f, repo, opts);
+    if (!cls) return f;
+    const rule = byId.get(cls);
+    counts.set(cls, (counts.get(cls) ?? 0) + 1);
+    return {
+      ...f,
+      severity: floorOf(f.severity, rule.severity),
+      confidence: rule.confidence,
+      noise: cls,
+      message: `${f.message} \u2014 ${rule.why(f, repo)}`
+    };
+  });
+  const downgraded = NOISE_CLASSES.filter((c2) => counts.has(c2)).map((c2) => ({ reason: c2, count: counts.get(c2) }));
+  return { findings: out2, downgraded };
+}
+
+// src/store.ts
+function emptySeverityCounts() {
+  return { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
+}
+function countBySeverity(findings) {
+  const c2 = emptySeverityCounts();
+  for (const f of findings) c2[f.severity]++;
+  return c2;
+}
+function writeDossier(outDir, d) {
+  mkdirSync5(outDir, { recursive: true });
+  writeFileSync6(join31(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
+  writeFileSync6(join31(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
+  writeFileSync6(join31(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
+  writeFileSync6(join31(outDir, "DOSSIER.md"), renderDossierMd(d));
+}
+function preserveAdjudication(next, old) {
+  const merged = {
+    ...next,
+    status: old.status,
+    verdict: old.verdict,
+    exploitPath: old.exploitPath,
+    confidence: old.confidence,
+    message: old.message
+  };
+  if (old.brocard) merged.brocard = old.brocard;
+  if (old.fixedIn) merged.fixedIn = old.fixedIn;
+  return merged;
+}
+function mergeDossier(prev, next) {
+  const byId = /* @__PURE__ */ new Map();
+  for (const f of prev.findings) byId.set(f.id, f);
+  for (const f of next.findings) {
+    const old = byId.get(f.id);
+    if (old && old.status !== "open") {
+      byId.set(f.id, preserveAdjudication(f, old));
+    } else {
+      byId.set(f.id, f);
+    }
+  }
+  const findings = [...byId.values()].sort((a, b) => byStr2(a.id, b.id));
+  const graph = mergeGraphs(prev.graph, next.graph);
+  const scopes = [.../* @__PURE__ */ new Set([...prev.manifest.scopes ?? [], ...next.manifest.scopes ?? []])].sort(byStr2);
+  const pt = prev.manifest.truncation;
+  const nt = next.manifest.truncation;
+  const nextScoped = !!(next.manifest.scopes && next.manifest.scopes.length);
+  const truncation = nextScoped ? pt || nt ? {
+    candidates: Math.max(pt?.candidates ?? 0, nt?.candidates ?? 0),
+    total: Math.max(pt?.total ?? 0, nt?.total ?? 0),
+    ...pt?.files || nt?.files ? { files: true } : {}
+  } : void 0 : nt;
+  const statusByName = /* @__PURE__ */ new Map();
+  for (const s of prev.manifest.toolStatus ?? []) statusByName.set(s.name, s);
+  for (const s of next.manifest.toolStatus ?? []) statusByName.set(s.name, s);
+  const toolStatus2 = [...statusByName.values()];
+  const sbom = next.manifest.sbom ?? prev.manifest.sbom;
+  const manifest = {
+    ...next.manifest,
+    languages: [.../* @__PURE__ */ new Set([...prev.manifest.languages, ...next.manifest.languages])].sort(),
+    toolsRun: [.../* @__PURE__ */ new Set([...prev.manifest.toolsRun, ...next.manifest.toolsRun])].sort(),
+    ...toolStatus2.length ? { toolStatus: toolStatus2 } : {},
+    counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
+    ...truncation ? { truncation } : { truncation: void 0 },
+    ...scopes.length ? { scopes } : {},
+    ...sbom ? { sbom } : {}
+  };
+  return { manifest, findings, graph };
+}
+function loadDossier(outDir) {
+  const read = (name2) => JSON.parse(readFileSync15(join31(outDir, name2), "utf8"));
+  if (!existsSync13(join31(outDir, "findings.json"))) {
+    throw new Error(`no audit dossier at ${outDir} (run \`ultrasec scan --out ${outDir}\` first)`);
+  }
+  return { manifest: read("manifest.json"), findings: read("findings.json"), graph: read("graph.json") };
+}
+function severityBadge(s) {
+  return { critical: "\u{1F7E5} CRIT", high: "\u{1F7E7} HIGH", medium: "\u{1F7E8} MED", low: "\u{1F7E9} LOW", info: "\u2B1C INFO" }[s];
+}
+function locationsLine(locations) {
+  return locations.map((e) => `${e.version ? `v${e.version} ` : ""}\`${e.file}${e.line !== void 0 ? `:${e.line}` : ""}\``).join(" \xB7 ");
+}
+function toolStatusLines(status) {
+  return status.map((s) => {
+    const count = typeof s.findings === "number" && (s.status === "ran" || s.status === "empty") ? ` (${s.findings})` : "";
+    const why = s.note && (s.status === "skipped" || s.status === "failed") ? ` \u2014 ${s.note}` : "";
+    return `${s.name}: ${s.status}${count}${why}`;
+  });
+}
+function provenanceLine(f) {
+  const p = f.provenance;
+  if (!p) return "";
+  const who = [p.author, p.date].filter(Boolean).join(" \xB7 ");
+  const bits = [who, p.commit ? `@${p.commit}` : "", p.owner ? `owner ${p.owner}` : ""].filter(Boolean);
+  return bits.length ? `provenance: ${bits.join(" \xB7 ")}` : "";
+}
+function renderDossierMd(d) {
+  const { manifest: m, findings } = d;
+  const c2 = m.counts.bySeverity;
+  const L = [];
+  L.push(`# ultrasec audit dossier`);
+  L.push("");
+  L.push(`- repo: \`${m.repo}\``);
+  L.push(`- languages: ${m.languages.join(", ") || "\u2014"}`);
+  L.push(`- external tools run: ${m.toolsRun.join(", ") || "none (graph + taint only)"}`);
+  if (m.toolStatus?.length) for (const line of toolStatusLines(m.toolStatus)) L.push(`  - ${line}`);
+  if (m.sbom) L.push(`- SBOM: \`${m.sbom}\` (CycloneDX)`);
+  L.push(`- findings: **${m.counts.findings}** \u2014 ${SEVERITIES2.map((s) => `${severityBadge(s)} ${c2[s]}`).join("  ")}`);
+  L.push("");
+  L.push(`> Candidates are deterministic and **recall-oriented** \u2014 every one needs`);
+  L.push(`> adjudication. Open each with \`ultrasec dossier <id>\` (real code + the`);
+  L.push(`> cross-file path), confirm whether the flow is real and exploitable, then`);
+  L.push(`> record a verdict via \`ultrasec verify\`. An uncertain high-severity stays`);
+  L.push(`> **needs-human** \u2014 never silently dropped.`);
+  L.push("");
+  if (m.truncation?.candidates) {
+    const advice = m.truncation.hint ?? "Raise `--max-candidates` (or `--budget thorough`) or narrow `--scope` to see the rest.";
+    L.push(`> \u26A0\uFE0F **Coverage capped:** **${m.truncation.candidates}** of **${m.truncation.total}** candidate(s) were not enumerated. ${advice}`);
+    L.push("");
+  }
+  if (m.truncation?.files) {
+    L.push(`> \u26A0\uFE0F **Partial walk:** the file walk hit \`--max-files\` \u2014 some files were **not scanned**. Raise \`--max-files\` or narrow \`--scope\`.`);
+    L.push("");
+  }
+  if (m.scopes && m.scopes.length) {
+    L.push(
+      `> \u{1F50E} **Scoped run** \u2014 only these paths were analysed: ${m.scopes.map((s) => `\`${s}\``).join(", ")}. Findings outside this scope are not represented.`
+    );
+    L.push("");
+  }
+  if (!findings.length) {
+    L.push(`_No candidate findings._`);
+    return L.join("\n") + "\n";
+  }
+  L.push(...renderProposalSummary(findings.map((f) => ({ id: f.id, proposed: proposedFor(f) }))));
+  L.push(`## Candidates`);
+  L.push("");
+  const ordered = findings.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || SEVERITIES2.indexOf(a.severity) - SEVERITIES2.indexOf(b.severity));
+  for (const f of ordered) {
+    L.push(`### ${f.id} \u2014 ${severityBadge(f.severity)} ${f.title}`);
+    L.push("");
+    const src = f.sources && f.sources.length > 1 ? ` \xB7 agreed by ${f.sources.join(", ")}` : f.tool !== "ultrasec" ? ` \xB7 via ${f.tool}` : "";
+    L.push(`- category: ${f.category}${f.cwe ? ` \xB7 ${f.cwe}` : ""} \xB7 confidence ${f.confidence} \xB7 status ${f.status}${src}`);
+    const risk = [];
+    if (typeof f.risk === "number") risk.push(`risk ${f.risk}`);
+    if (typeof f.epss === "number") risk.push(`EPSS ${(f.epss * 100).toFixed(1)}%`);
+    if (f.kev) risk.push(`\u{1F6A8} CISA KEV${f.kevDateAdded ? ` (${f.kevDateAdded})` : ""}`);
+    if (f.verified) risk.push(`\u2705 verified secret`);
+    if (risk.length) L.push(`- ${risk.join(" \xB7 ")}`);
+    if (f.path && f.path.length) {
+      L.push(`- path: ${f.path.map((p) => `\`${p.file}:${p.line}\``).join(" \u2192 ")}`);
+    } else if (f.sink) {
+      L.push(`- at: \`${f.sink.file}:${f.sink.line}\``);
+    }
+    if (f.locations?.length) L.push(`- affects: ${locationsLine(f.locations)}`);
+    const prov = provenanceLine(f);
+    if (prov) L.push(`- ${prov}`);
+    L.push(`- ${f.message}`);
+    L.push("");
+  }
+  L.push(`---`);
+  L.push(`Engine: ultrasec ${m.version}. ${m.generatedNote}`);
+  return L.join("\n") + "\n";
+}
+
+// src/neighbors.ts
+function neighbors(graph, target, depth = 1) {
+  const out2 = /* @__PURE__ */ new Map();
+  const inn = /* @__PURE__ */ new Map();
+  for (const e of graph.edges) {
+    (out2.get(e.from) ?? out2.set(e.from, []).get(e.from)).push(e);
+    (inn.get(e.to) ?? inn.set(e.to, []).get(e.to)).push(e);
+  }
+  const seen = /* @__PURE__ */ new Set([target]);
+  const links = [];
+  let frontier = [target];
+  for (let d = 1; d <= depth; d++) {
+    const next = [];
+    for (const node of frontier) {
+      for (const e of (out2.get(node) ?? []).slice().sort((a, b) => byStr2(a.to, b.to))) {
+        if (seen.has(e.to)) continue;
+        links.push({ node: e.to, direction: "out", kind: e.kind, weight: e.weight, depth: d, symbol: e.toSymbol });
+        seen.add(e.to);
+        next.push(e.to);
+      }
+      for (const e of (inn.get(node) ?? []).slice().sort((a, b) => byStr2(a.from, b.from))) {
+        if (seen.has(e.from)) continue;
+        links.push({ node: e.from, direction: "in", kind: e.kind, weight: e.weight, depth: d, symbol: e.fromSymbol });
+        seen.add(e.from);
+        next.push(e.from);
+      }
+    }
+    frontier = next;
+  }
+  return { target, links };
+}
+
+// src/commands/graph.ts
+function runGraph(args2) {
+  const target = args2._[1];
+  const depth = Number(flagStr(args2, "depth") ?? "1") || 1;
+  if (!target) {
+    eprintln("ultrasec graph: need a <file|symbol> argument. e.g. `graph src/db.js`");
+    return 2;
+  }
+  const runFlag = flagStr(args2, "run");
+  let graph;
+  if (runFlag) {
+    try {
+      graph = loadDossier(resolve7(runFlag)).graph;
+    } catch (e) {
+      eprintln(`ultrasec graph: ${e.message}`);
+      return 2;
+    }
+  } else {
+    graph = buildGraph2(scanRepo2(flagStr(args2, "repo") ?? "."));
+  }
+  let node = target;
+  if (!graph.files.includes(target)) {
+    const defs = graph.symbolDefs[target];
+    if (Array.isArray(defs) && defs.length === 1) node = defs[0];
+    else if (Array.isArray(defs) && defs.length > 1) {
+      eprintln(`ultrasec graph: symbol "${target}" is defined in ${defs.length} files: ${defs.join(", ")}`);
+      return 2;
+    } else {
+      eprintln(`ultrasec graph: "${target}" is not a file node nor a known exported symbol.`);
+      return 2;
+    }
+  }
+  const result = neighbors(graph, node, depth);
+  if (flagBool(args2, "json")) {
+    println(JSON.stringify(result, null, 2));
+    return 0;
+  }
+  println(`${node}  (depth ${depth})`);
+  if (!result.links.length) {
+    println("  (no links)");
+    return 0;
+  }
+  for (const l of result.links) {
+    const arrow = l.direction === "out" ? "\u2192" : "\u2190";
+    const sym = l.symbol ? ` [${l.symbol}]` : "";
+    println(`  ${arrow} ${l.kind.padEnd(6)} ${l.node}${sym}  (d${l.depth})`);
+  }
+  return 0;
+}
+
+// src/commands/map.ts
+import { resolve as resolve8, join as join33 } from "path";
+import { mkdirSync as mkdirSync6, writeFileSync as writeFileSync7, readFileSync as readFileSync16, existsSync as existsSync14 } from "fs";
+
 // src/map.ts
+import { join as join32 } from "path";
 var SEV_WEIGHT = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 var MAX_SAMPLES = 8;
 var MAX_ENTRY_SAMPLES = 64;
@@ -20112,7 +20565,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
     la.files++;
     da.files++;
     const fs2 = { file: f.rel, region: dir, sources: 0, sinks: 0, score: 0 };
-    const sources = findSources(lang, readText2(join30(scan2.repo, f.rel)), f.rel);
+    const sources = findSources(lang, readText2(join32(scan2.repo, f.rel)), f.rel);
     for (const s of sources) {
       totalSources++;
       la.sources++;
@@ -20235,7 +20688,7 @@ async function runMap(args2) {
   const gitignore = flagBool(args2, "gitignore");
   let coveredScopes = [];
   if (out2) {
-    const mPath = join31(resolve8(out2), "manifest.json");
+    const mPath = join33(resolve8(out2), "manifest.json");
     if (existsSync14(mPath)) {
       try {
         const m = JSON.parse(readFileSync16(mPath, "utf8"));
@@ -20249,8 +20702,8 @@ async function runMap(args2) {
   if (out2) {
     const outDir = resolve8(out2);
     mkdirSync6(outDir, { recursive: true });
-    writeFileSync7(join31(outDir, "attack-surface.json"), JSON.stringify(surface, null, 2));
-    writeFileSync7(join31(outDir, "MAP.md"), renderMapMd(repo, surface));
+    writeFileSync7(join33(outDir, "attack-surface.json"), JSON.stringify(surface, null, 2));
+    writeFileSync7(join33(outDir, "MAP.md"), renderMapMd(repo, surface));
   }
   if (flagBool(args2, "json")) {
     println(JSON.stringify(surface, null, 2));
@@ -20258,7 +20711,7 @@ async function runMap(args2) {
   }
   println(renderMapMd(repo, surface));
   if (out2) println(`
-wrote ${join31(resolve8(out2), "MAP.md")} + attack-surface.json`);
+wrote ${join33(resolve8(out2), "MAP.md")} + attack-surface.json`);
   return 0;
 }
 
@@ -20267,7 +20720,7 @@ import { resolve as resolve11, join as join48, relative as relative4 } from "pat
 import { existsSync as existsSync23 } from "fs";
 
 // src/taint.ts
-import { join as join32 } from "path";
+import { join as join34 } from "path";
 
 // src/dataflow.ts
 var CONTROL_OPEN = /^\s*(?:\}\s*)?(?:else\s+)?(?:if|for|while|switch|case|catch|try|do|finally|with|using|lock|unsafe|synchronized|match|loop|unless|begin)\b/;
@@ -20498,7 +20951,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
   const unitCache = /* @__PURE__ */ new Map();
   const content = (rel2) => {
     let c2 = contentCache.get(rel2);
-    if (c2 === void 0) contentCache.set(rel2, c2 = readText2(join32(scan2.repo, rel2)));
+    if (c2 === void 0) contentCache.set(rel2, c2 = readText2(join34(scan2.repo, rel2)));
     return c2;
   };
   const lines5 = (rel2) => {
@@ -20623,7 +21076,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
 }
 
 // src/sinks.ts
-import { join as join33 } from "path";
+import { join as join35 } from "path";
 var DEFAULT_MAX_CANDIDATES2 = 1e3;
 function severityRank2(s) {
   return SEVERITIES2.indexOf(s);
@@ -20635,7 +21088,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
   const lineCache2 = /* @__PURE__ */ new Map();
   const lines5 = (rel2) => {
     let l = lineCache2.get(rel2);
-    if (!l) lineCache2.set(rel2, l = readText2(join33(scan2.repo, rel2)).split(/\r?\n/));
+    if (!l) lineCache2.set(rel2, l = readText2(join35(scan2.repo, rel2)).split(/\r?\n/));
     return l;
   };
   const findings = [];
@@ -20672,7 +21125,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
 }
 
 // src/logs/hygiene.ts
-import { join as join34 } from "path";
+import { join as join36 } from "path";
 
 // src/logs/secrets.ts
 var SECRET_PATTERNS = [
@@ -20752,7 +21205,7 @@ function enumerateSensitiveLogCandidates(scan2, opts = {}) {
   const lineCache2 = /* @__PURE__ */ new Map();
   const lines5 = (rel2) => {
     let l = lineCache2.get(rel2);
-    if (!l) lineCache2.set(rel2, l = readText2(join34(scan2.repo, rel2)).split(/\r?\n/));
+    if (!l) lineCache2.set(rel2, l = readText2(join36(scan2.repo, rel2)).split(/\r?\n/));
     return l;
   };
   const findings = [];
@@ -20790,7 +21243,7 @@ function enumerateSensitiveLogCandidates(scan2, opts = {}) {
 }
 
 // src/actions.ts
-import { join as join35 } from "path";
+import { join as join37 } from "path";
 var AI_ACTIONS = [
   "anthropics/claude-code-action",
   "anthropics/claude-code-base-action",
@@ -20926,7 +21379,7 @@ function auditAgenticWorkflows(repo, prune) {
   const findings = [];
   const files = walk2(repo).map((f) => f.rel).filter((rel2) => WORKFLOW.test(rel2) && !prune?.(rel2));
   for (const rel2 of files) {
-    const content = readText2(join35(repo, rel2));
+    const content = readText2(join37(repo, rel2));
     if (!content) continue;
     const usesAi = AI_ACTIONS.some((a) => content.includes(a));
     const ls = lines(content);
@@ -21080,7 +21533,7 @@ var WEBCONFIG_SHAPES = {
 function lines2(content) {
   return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
 }
-function extOf2(rel2) {
+function extOf3(rel2) {
   const i2 = rel2.lastIndexOf(".");
   return i2 === -1 ? "" : rel2.slice(i2 + 1).toLowerCase();
 }
@@ -21185,7 +21638,7 @@ function auditWebConfig(repo, prune) {
   const out2 = [];
   for (const wf of walk2(repo)) {
     if (prune?.(wf.rel)) continue;
-    const ext = extOf2(wf.rel);
+    const ext = extOf3(wf.rel);
     if (!SCAN.has(ext)) continue;
     const content = readText2(wf.abs);
     if (!content) continue;
@@ -21304,7 +21757,7 @@ var AUTH_SHAPES = {
 function lines3(content) {
   return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
 }
-function extOf3(rel2) {
+function extOf4(rel2) {
   const i2 = rel2.lastIndexOf(".");
   return i2 === -1 ? "" : rel2.slice(i2 + 1).toLowerCase();
 }
@@ -21421,7 +21874,7 @@ function auditAuthTokens(repo, prune) {
   const out2 = [];
   for (const wf of walk2(repo)) {
     if (prune?.(wf.rel)) continue;
-    const ext = extOf3(wf.rel);
+    const ext = extOf4(wf.rel);
     if (!CODE2.has(ext)) continue;
     const content = readText2(wf.abs);
     if (!content) continue;
@@ -21521,7 +21974,7 @@ var CLOUD_SHAPES = {
 function lines4(content) {
   return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
 }
-function extOf4(rel2) {
+function extOf5(rel2) {
   const i2 = rel2.lastIndexOf(".");
   return i2 === -1 ? "" : rel2.slice(i2 + 1).toLowerCase();
 }
@@ -21554,7 +22007,7 @@ var INGRESS_MARK = /\btype\s*=\s*["']ingress["']|\bdirection\s*=\s*["']INGRESS["
 var DIRECTION_LOOKBACK = 25;
 var IAC_SECRET_RE = /\b(?:\w*password|\w*secret|\w*token|access_key|secret_key|api_key|private_key|passwd|credential)\w*\s*=\s*/i;
 var INTERPOLATED = /^["']?\$\{|(?:^|=\s*)(?:var|local|data|module|each|jsondecode|file)\b/i;
-function isLiteralSecret(text) {
+function isLiteralSecret2(text) {
   const m = /=\s*(.+?)\s*$/.exec(text);
   const rhs = (m?.[1] ?? "").trim();
   if (!rhs || INTERPOLATED.test(rhs)) return false;
@@ -21575,7 +22028,7 @@ function auditCloud(repo, prune) {
   const out2 = [];
   for (const wf of walk2(repo)) {
     if (prune?.(wf.rel)) continue;
-    const ext = extOf4(wf.rel);
+    const ext = extOf5(wf.rel);
     if (!SCAN2.has(ext)) continue;
     const content = readText2(wf.abs);
     if (!content) continue;
@@ -21612,443 +22065,10 @@ function auditCloud(repo, prune) {
       if (/\b(?:storage_encrypted|encrypted|encryption_enabled|encrypt_at_rest)\s*=\s*false\b/i.test(l.text))
         out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-unencrypted"], l.text));
       if (/\bpublicly_accessible\s*=\s*true\b/i.test(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-public-instance"], l.text));
-      if (IAC_SECRET_RE.test(l.text) && isLiteralSecret(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-hardcoded-secret"], l.text));
+      if (IAC_SECRET_RE.test(l.text) && isLiteralSecret2(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-hardcoded-secret"], l.text));
     }
   }
   return out2;
-}
-
-// src/secrets.ts
-import "path";
-function extOf5(rel2) {
-  const i2 = rel2.lastIndexOf(".");
-  return i2 === -1 ? "" : rel2.slice(i2 + 1).toLowerCase();
-}
-var ENCRYPTED_AT_REST = [
-  { id: "sealed-secret", label: "Bitnami SealedSecret", paths: [".sealed-secret.yaml", ".sealedsecret.yaml"], marker: /(^|\n)\s*kind:\s*SealedSecret\b/ },
-  {
-    id: "sops",
-    label: "SOPS-encrypted file",
-    paths: [".sops.yaml", ".sops.yml", ".enc.yaml", ".enc.yml", ".enc.json", ".enc.env"],
-    marker: /(^|\n)\s*sops:\s*(\n|$)|"sops"\s*:\s*\{/
-  },
-  { id: "ansible-vault", label: "Ansible Vault", marker: /\$ANSIBLE_VAULT;\d/ },
-  { id: "age", label: "age-encrypted file", marker: /-----BEGIN AGE ENCRYPTED FILE-----/ },
-  { id: "pgp", label: "PGP/GPG armoured message", marker: /-----BEGIN PGP MESSAGE-----/ },
-  // git-crypt writes a NUL-delimited `GITCRYPT` magic in the first bytes. Matched
-  // without the NUL itself: a control character in a regex is a lint error here,
-  // and anchoring `GITCRYPT` to the head of the file is just as specific.
-  { id: "git-crypt", label: "git-crypt blob", marker: /^.{0,4}GITCRYPT/ },
-  { id: "jasypt", label: "Jasypt/Jenkins encrypted value", marker: /\bENC\([A-Za-z0-9+/=]{16,}\)|\{AQAA[A-Za-z0-9+/=]{16,}\}/ }
-];
-function encryptedShapeOf(rel2, content) {
-  const lower = rel2.toLowerCase();
-  for (const shape of ENCRYPTED_AT_REST) {
-    if (shape.paths?.some((p) => lower.endsWith(p))) return shape;
-    if (shape.marker?.test(content)) return shape;
-  }
-  return void 0;
-}
-var CREDENTIAL_URI = /\b([a-z][a-z0-9+.-]{1,20}):\/\/([^\s:@/'"`]{1,64}):([^\s@/'"`]{1,256})@/gi;
-var TEMPLATE_ONLY = /^(?:\$\([^)]*\)|\$\{[^}]*\}|\$[A-Za-z_]\w*|\{\{[^}]*\}\}|<[^>]*>|%\([^)]*\)[sd]|%[sdv]|\{[^}]*\}|:[A-Za-z_]\w*|#\{[^}]*\})$/;
-var PLACEHOLDER = /^(?:x{3,}|\*{3,}|\.{3,}|-+|_+|pass(?:word)?|passwd|secret|changeme|change_me|your[_-]?\w*|my[_-]?\w*|todo|none|null|empty|dummy|example|sample|test|s3cr3t|hunter2|redacted|\[[^\]]*\])$/i;
-var TEXT_EXTS = /* @__PURE__ */ new Set([
-  "yaml",
-  "yml",
-  "json",
-  "toml",
-  "ini",
-  "cfg",
-  "conf",
-  "properties",
-  "env",
-  "tf",
-  "tfvars",
-  "hcl",
-  "xml",
-  "md",
-  "txt",
-  "sh",
-  "bash",
-  "zsh",
-  "js",
-  "jsx",
-  "ts",
-  "tsx",
-  "mjs",
-  "cjs",
-  "py",
-  "rb",
-  "php",
-  "go",
-  "java",
-  "kt",
-  "cs",
-  "rs",
-  "scala",
-  "ex",
-  "exs",
-  "pl",
-  "lua",
-  "tpl",
-  "template"
-]);
-function isLiteralSecret2(password) {
-  const p = password.trim();
-  if (p.length < 4) return false;
-  if (TEMPLATE_ONLY.test(p)) return false;
-  if (PLACEHOLDER.test(p)) return false;
-  if (/\$\{|\$\(|\{\{|%\(/.test(p)) return false;
-  return true;
-}
-function auditSecrets(repo, prune) {
-  const out2 = [];
-  for (const wf of walk2(repo)) {
-    if (prune?.(wf.rel)) continue;
-    if (!TEXT_EXTS.has(extOf5(wf.rel))) continue;
-    const content = readText2(wf.abs);
-    if (!content?.includes("://")) continue;
-    if (encryptedShapeOf(wf.rel, content)) continue;
-    const lines5 = content.split(/\r?\n/);
-    for (let i2 = 0; i2 < lines5.length; i2++) {
-      const line = lines5[i2];
-      CREDENTIAL_URI.lastIndex = 0;
-      let m;
-      while ((m = CREDENTIAL_URI.exec(line)) !== null) {
-        const [, scheme, user, password] = m;
-        if (!isLiteralSecret2(password)) continue;
-        const redacted = `${scheme}://${user}:${"*".repeat(Math.min(password.length, 8))}@\u2026`;
-        out2.push(
-          makeToolFinding({
-            tool: "ultrasec",
-            category: "secret",
-            ident: `credential-uri:${wf.rel}:${i2 + 1}`,
-            title: "Credential embedded in a connection string",
-            severity: "high",
-            confidence: "medium",
-            cwe: "CWE-798",
-            message: `A ${scheme} connection string at ${wf.rel}:${i2 + 1} carries a literal password (${redacted}). Neighbouring components may be templated \u2014 that is how these survive review, because the line reads as configuration rather than as a credential. Confirm the value is live, then rotate it and move it to a secret store; note that removing it from HEAD does not remove it from history.`,
-            file: wf.rel,
-            line: i2 + 1,
-            references: [cweUrl("CWE-798")]
-          })
-        );
-      }
-    }
-  }
-  return out2;
-}
-
-// src/noise.ts
-import { join as join37 } from "path";
-var VENDORED_DIR = /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules)\//i;
-var MINIFIED = /\.min\.(js|mjs|cjs|css)$/i;
-function locationsOf(f) {
-  const out2 = [];
-  if (f.source?.file) out2.push(f.source.file);
-  if (f.sink?.file) out2.push(f.sink.file);
-  for (const p of f.path ?? []) if (p.file) out2.push(p.file);
-  return out2;
-}
-var RULES17 = [
-  {
-    id: "encrypted-at-rest",
-    severity: "info",
-    confidence: "low",
-    why: (f, repo) => {
-      const shape = f.sink?.file ? shapeOf(repo, f.sink.file) : void 0;
-      return `de-prioritized: ${f.sink?.file} is a ${shape?.label ?? "ciphertext-by-design file"}, where ciphertext is the point of the file. Check that the ENCRYPTION KEY is not also committed, and that this really is the format it claims.`;
-    },
-    // Secret findings only: a SAST hit inside a SealedSecret is a different claim.
-    matches: (f, repo) => f.category === "secret" && !!f.sink?.file && !!shapeOf(repo, f.sink.file)
-  },
-  {
-    id: "test-only-path",
-    severity: "low",
-    confidence: "low",
-    why: () => `de-prioritized: every cited location is a test path, so the flow does not exist in the shipped artifact. Confirm the harness is not itself the product (fixtures served in production, a test route mounted by the app) before dismissing.`,
-    // Deliberately scoped to the enumerated classes. A hardcoded credential in a
-    // test file is a classic real leak — CI tokens live there — so `secret` and
-    // `config` findings are NOT demoted for sitting in a test.
-    matches: (f) => {
-      if (f.category !== "taint" && f.category !== "sast") return false;
-      const locs = locationsOf(f);
-      return locs.length > 0 && locs.every((l) => isTestPath(l));
-    }
-  },
-  {
-    // The flagged value is a RESOURCE identifier, not a credential.
-    //
-    // `const SPREADSHEET_KEY = "1a2b…"` is a Google Sheets document id. gitleaks
-    // rates it a "Generic API Key" on entropy — helped along by the word KEY in
-    // the name — but holding a document id is not holding access to the
-    // document: the sharing setting is, and that is not in the repo. Seven of
-    // the 37 false positives on the first real audit were exactly this.
-    //
-    // The claim here is narrow and checkable: the NAME says what the value is.
-    // It is deliberately NOT the claim "this document is public", which nothing
-    // in the repo can establish — so the message asks for that check rather than
-    // making it, and the finding is demoted to `low`, not `info`.
-    id: "resource-identifier",
-    severity: "low",
-    confidence: "low",
-    why: (f) => `de-prioritized: ${f.sink?.file}:${f.sink?.line} assigns a resource/document identifier, not a credential \u2014 possessing the id is not possessing access. CHECK the document's sharing setting and whether its contents are sensitive; that is not knowable from this repo.`,
-    matches: (f, repo) => {
-      if (f.category !== "secret" || !f.sink?.file) return false;
-      const line = lineAt(repo, f.sink.file, f.sink.line);
-      if (!line) return false;
-      return RESOURCE_NAME.test(line) && !CREDENTIAL_SHAPE.test(line);
-    }
-  },
-  {
-    // The cited line DECLARES a dangerous pattern rather than performing one.
-    //
-    // Found by auditing ultrasec with ultrasec: `src/authtokens.ts` holds the
-    // rules that detect `alg: none` and `wantAssertionsSigned: false`, and the
-    // `note:` fields quoting those strings matched the rules describing them —
-    // two CRITICALs on a file whose entire job is to name that bug.
-    //
-    // Not specific to security tools. WAF signature sets, custom lint rules,
-    // payload corpora and security documentation all carry the pattern they
-    // warn about, and the line-regex auditors cannot tell a string from a
-    // statement.
-    id: "pattern-declaration",
-    severity: "info",
-    confidence: "low",
-    why: (f) => `de-prioritized: ${f.sink?.file}:${f.sink?.line} declares a pattern rather than performing the operation \u2014 it is a rule/metadata field, a bare regex literal, or a comment. Confirm the value is not ALSO applied somewhere \u2014 a rule file that configures the running system is both.`,
-    matches: (f, repo) => {
-      if (f.category === "dep" || !f.sink?.file) return false;
-      const line = lineAt(repo, f.sink.file, f.sink.line);
-      return !!line && (PATTERN_METADATA.test(line) || BARE_REGEX_LINE.test(line) || WHOLE_LINE_COMMENT.test(line));
-    }
-  },
-  {
-    id: "vendored-artifact",
-    severity: "info",
-    confidence: "low",
-    why: (f) => `de-prioritized: ${f.sink?.file ?? f.source?.file} is a vendored or minified build artifact, not this repo's source. Fix it upstream or re-vendor; editing it here is overwritten by the next install.`,
-    matches: (f) => {
-      if (f.category === "dep") return false;
-      const at = f.sink?.file ?? f.source?.file;
-      return !!at && (VENDORED_DIR.test(at) || MINIFIED.test(at));
-    }
-  }
-];
-var PATTERN_METADATA = /^\s*(?:re|regex|regexp|pattern|patterns|rule|rules|note|title|description|detail|remediation|example|examples|hint|advice|summary|docs?)\s*:\s*(?:\/|["'`])/;
-var RESOURCE_NAME = /\b(?:SPREADSHEET|SHEET|WORKSHEET|DOC|DOCUMENT|FOLDER|DRIVE|DATASET|CALENDAR|PROJECT|BUCKET|WORKSPACE|CHANNEL|TENANT|ORG|GROUP)[_-]?(?:KEY|ID|GID|UUID|SLUG)\b/i;
-var CREDENTIAL_SHAPE = /-----BEGIN|\beyJ[A-Za-z0-9_-]{10,}|\bAKIA[0-9A-Z]{12,}|\b(?:sk|rk)-[A-Za-z0-9]{16,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[baprs]-|\bAIza[0-9A-Za-z_-]{30,}/;
-var WHOLE_LINE_COMMENT = /^\s*(?:\/\/|#|\*|<!--)/;
-var BARE_REGEX_LINE = /^\s*\/(?:[^/\\\n]|\\.)+\/[gimsuy]*\s*,?\s*$/;
-var lineCache = /* @__PURE__ */ new Map();
-function lineAt(repo, rel2, line) {
-  const key = `${repo}\0${rel2}`;
-  if (!lineCache.has(key)) {
-    try {
-      lineCache.set(key, readText2(join37(repo, rel2)).split(/\r?\n/));
-    } catch {
-      lineCache.set(key, void 0);
-    }
-  }
-  return lineCache.get(key)?.[line - 1];
-}
-var shapeCache = /* @__PURE__ */ new Map();
-function shapeOf(repo, rel2) {
-  const key = `${repo}\0${rel2}`;
-  if (!shapeCache.has(key)) {
-    let shape;
-    try {
-      shape = encryptedShapeOf(rel2, readText2(join37(repo, rel2)));
-    } catch {
-      shape = void 0;
-    }
-    shapeCache.set(key, shape);
-  }
-  return shapeCache.get(key);
-}
-function proposalSummary(items) {
-  const byClass = /* @__PURE__ */ new Map();
-  for (const it of items) {
-    if (!it.proposed) continue;
-    const row = byClass.get(it.proposed.class) ?? { class: it.proposed.class, ground: it.proposed.ground, why: it.proposed.why, ids: [] };
-    row.ids.push(it.id);
-    byClass.set(it.proposed.class, row);
-  }
-  return NOISE_CLASSES.filter((c2) => byClass.has(c2)).map((c2) => byClass.get(c2));
-}
-function renderProposalSummary(items) {
-  const rows = proposalSummary(items);
-  if (!rows.length) return [];
-  const L = [`## Proposed noise classes (${rows.length})`, ""];
-  L.push(`_The engine classified these as noise BY CONSTRUCTION and DEMOTED them \u2014 it did not`);
-  L.push(`adjudicate them. Each row is a suggestion with a named ground: accept it per item, or`);
-  L.push(`refuse it. Read the caveat \u2014 a demotion you cannot interrogate is a silent filter._`);
-  L.push("");
-  for (const r of rows) {
-    L.push(`- **${r.class}** (${r.ids.length}) \u2192 ground \`${r.ground}\` \u2014 ${r.why}`);
-    const shown = r.ids.slice(0, SUMMARY_IDS);
-    L.push(`  - ${shown.map((i2) => `\`${i2}\``).join(", ")}${r.ids.length > shown.length ? `, \u2026 and ${r.ids.length - shown.length} more` : ""}`);
-  }
-  L.push("");
-  return L;
-}
-var SUMMARY_IDS = 8;
-function proposedFor(f) {
-  if (!f.noise) return void 0;
-  return { class: f.noise, ground: NOISE_GROUND[f.noise], why: PROPOSAL_WHY[f.noise] };
-}
-var PROPOSAL_WHY = {
-  "encrypted-at-rest": "the file is ciphertext by design \u2014 the blob is not the secret; check the KEY is not committed too",
-  "test-only-path": "every node of the path is a test path \u2014 it does not exist in the shipped artifact",
-  "vendored-artifact": "a vendored or minified upstream build artifact, byte-identical to a published release",
-  "pattern-declaration": "the cited line declares the pattern (rule metadata or a bare regex) rather than performing the operation",
-  "resource-identifier": "the value addresses a document, it is not a credential \u2014 but confirm the document's sharing setting, which this repo cannot tell you"
-};
-function classifyNoise(f, repo, opts = {}) {
-  if (f.verified) return void 0;
-  for (const rule of RULES17) {
-    if (rule.id === "test-only-path" && opts.includeTests) continue;
-    if (rule.matches(f, repo)) return rule.id;
-  }
-  return void 0;
-}
-var SEVERITY_ORDER = ["critical", "high", "medium", "low", "info"];
-function floorOf(current, floor) {
-  return SEVERITY_ORDER.indexOf(current) >= SEVERITY_ORDER.indexOf(floor) ? current : floor;
-}
-function demoteNoise(findings, repo, opts = {}) {
-  const counts = /* @__PURE__ */ new Map();
-  const byId = new Map(RULES17.map((r) => [r.id, r]));
-  const out2 = findings.map((f) => {
-    const cls = classifyNoise(f, repo, opts);
-    if (!cls) return f;
-    const rule = byId.get(cls);
-    counts.set(cls, (counts.get(cls) ?? 0) + 1);
-    return {
-      ...f,
-      severity: floorOf(f.severity, rule.severity),
-      confidence: rule.confidence,
-      noise: cls,
-      message: `${f.message} \u2014 ${rule.why(f, repo)}`
-    };
-  });
-  const downgraded = NOISE_CLASSES.filter((c2) => counts.has(c2)).map((c2) => ({ reason: c2, count: counts.get(c2) }));
-  return { findings: out2, downgraded };
-}
-
-// src/git.ts
-import { execFileSync as execFileSync5 } from "child_process";
-function git(repo, args2) {
-  try {
-    return execFileSync5("git", ["-C", repo, ...args2], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-      maxBuffer: 64 * 1024 * 1024
-    });
-  } catch {
-    return null;
-  }
-}
-function isGitRepo(repo) {
-  return git(repo, ["rev-parse", "--is-inside-work-tree"])?.trim() === "true";
-}
-function changedFiles(repo, ref) {
-  if (!isGitRepo(repo)) return null;
-  if (git(repo, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]) === null) return null;
-  const out2 = /* @__PURE__ */ new Set();
-  const diff = git(repo, ["diff", "--name-only", "--diff-filter=d", `${ref}...HEAD`]);
-  if (diff === null) return null;
-  for (const line of diff.split(/\r?\n/)) if (line.trim()) out2.add(line.trim());
-  const worktree = git(repo, ["diff", "--name-only", "--diff-filter=d", ref]);
-  if (worktree) {
-    for (const line of worktree.split(/\r?\n/)) if (line.trim()) out2.add(line.trim());
-  }
-  const untracked = git(repo, ["ls-files", "--others", "--exclude-standard"]);
-  if (untracked) {
-    for (const line of untracked.split(/\r?\n/)) if (line.trim()) out2.add(line.trim());
-  }
-  return [...out2].sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
-}
-function parseBlamePorcelain(raw) {
-  if (!raw) return null;
-  const lines5 = raw.split(/\r?\n/);
-  const m = /^([0-9a-f]{40})\b/.exec((lines5[0] ?? "").trim());
-  if (!m) return null;
-  const info2 = { commit: m[1].slice(0, 10) };
-  for (const line of lines5) {
-    if (line.startsWith("author ")) info2.author = line.slice(7).trim();
-    else if (line.startsWith("author-time ")) {
-      const t = Number(line.slice(12).trim());
-      if (Number.isFinite(t)) info2.date = new Date(t * 1e3).toISOString().slice(0, 10);
-    }
-  }
-  return info2;
-}
-function blameLine(repo, file, line) {
-  if (!Number.isInteger(line) || line < 1) return null;
-  const out2 = git(repo, ["blame", "-L", `${line},${line}`, "--porcelain", "--", file]);
-  return out2 === null ? null : parseBlamePorcelain(out2);
-}
-var LOG_CAP = 50;
-var HUGE_FILE_LINES = 2e4;
-var prefixCache = /* @__PURE__ */ new Map();
-function worktreePrefix(repo) {
-  const cached = prefixCache.get(repo);
-  if (cached !== void 0) return cached;
-  const p = git(repo, ["rev-parse", "--show-prefix"])?.trim() ?? "";
-  prefixCache.set(repo, p);
-  return p;
-}
-function fileExistsAtHead(repo, file) {
-  return git(repo, ["cat-file", "-e", `HEAD:${worktreePrefix(repo)}${file}`]) !== null;
-}
-function lineCountAtCommit(repo, commit, file) {
-  if (!/^[0-9a-f]{7,40}$/i.test(commit)) return null;
-  const blob = git(repo, ["show", `${commit}:${worktreePrefix(repo)}${file}`]);
-  if (blob === null) return null;
-  const lines5 = blob.split(/\r?\n/);
-  return lines5.length > 0 && lines5[lines5.length - 1] === "" ? lines5.length - 1 : lines5.length;
-}
-function lineContentAtHead(repo, file, line) {
-  if (!Number.isInteger(line) || line < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
-  if (blob === null) return null;
-  const lines5 = blob.split(/\r?\n/);
-  return line <= lines5.length ? lines5[line - 1] : null;
-}
-function logSince(repo, file, sinceRef) {
-  if (git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) === null) return null;
-  const out2 = git(repo, ["log", `--max-count=${LOG_CAP}`, "--format=%h", `${sinceRef}..HEAD`, "--", file]);
-  if (out2 === null) return null;
-  return out2.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
-}
-function parseLineLog(raw) {
-  const header3 = raw.split(/\r?\n/).find((l) => l.includes("\0"));
-  if (!header3) return null;
-  const [commit, author, date] = header3.split("\0");
-  if (!commit || !commit.trim()) return null;
-  return { commit: commit.trim(), author: author?.trim() || void 0, date: date?.trim() || void 0 };
-}
-function lineLastChanged(repo, file, line) {
-  if (!Number.isInteger(line) || line < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
-  if (blob === null) return null;
-  const total = blob.split(/\r?\n/).length;
-  if (line > total || total > HUGE_FILE_LINES) return null;
-  const out2 = git(repo, ["log", "-n", "1", "--format=%h%x00%an%x00%ad", "--date=short", "-L", `${line},${line}:${file}`]);
-  return out2 === null ? null : parseLineLog(out2);
-}
-function parseRenameStatus(raw, oldPath) {
-  for (const l of raw.split(/\r?\n/)) {
-    const m = /^R\d*\t([^\t]+)\t([^\t]+)$/.exec(l);
-    if (m && m[1] === oldPath) return m[2];
-  }
-  return null;
-}
-function fileRenamedTo(repo, file) {
-  if (fileExistsAtHead(repo, file)) return null;
-  const out2 = git(repo, ["log", "--all", "-M", "--diff-filter=R", "--name-status", "--format=", `--max-count=${LOG_CAP * 4}`]);
-  if (out2 === null) return null;
-  return parseRenameStatus(out2, file);
 }
 
 // src/provenance.ts

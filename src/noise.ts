@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { encryptedShapeOf } from "./secrets.js";
 import { readText } from "./walk.js";
+import { fileContentAtCommit, lineContentAtCommit } from "./git.js";
 import { isTestPath } from "./vendor/codeindex-engine.mjs";
 import { NOISE_CLASSES, NOISE_GROUND, type Brocard, type Confidence, type Finding, type NoiseClass, type Severity } from "./types.js";
 
@@ -68,11 +69,11 @@ const RULES: NoiseRule[] = [
     severity: "info",
     confidence: "low",
     why: (f, repo) => {
-      const shape = f.sink?.file ? shapeOf(repo, f.sink.file) : undefined;
+      const shape = f.sink?.file ? shapeOf(repo, f.sink.file, f.atCommit) : undefined;
       return `de-prioritized: ${f.sink?.file} is a ${shape?.label ?? "ciphertext-by-design file"}, where ciphertext is the point of the file. Check that the ENCRYPTION KEY is not also committed, and that this really is the format it claims.`;
     },
     // Secret findings only: a SAST hit inside a SealedSecret is a different claim.
-    matches: (f, repo) => f.category === "secret" && !!f.sink?.file && !!shapeOf(repo, f.sink.file),
+    matches: (f, repo) => f.category === "secret" && !!f.sink?.file && !!shapeOf(repo, f.sink.file, f.atCommit),
   },
   {
     id: "test-only-path",
@@ -109,7 +110,7 @@ const RULES: NoiseRule[] = [
       `de-prioritized: ${f.sink?.file}:${f.sink?.line} assigns a resource/document identifier, not a credential — possessing the id is not possessing access. CHECK the document's sharing setting and whether its contents are sensitive; that is not knowable from this repo.`,
     matches: (f, repo) => {
       if (f.category !== "secret" || !f.sink?.file) return false;
-      const line = lineAt(repo, f.sink.file, f.sink.line);
+      const line = lineAt(repo, f.sink.file, f.sink.line, f.atCommit);
       if (!line) return false;
       // Both must hold: a name that says "document", and a value that is not a
       // recognisable credential. A real key in a badly-named variable still fires.
@@ -137,7 +138,7 @@ const RULES: NoiseRule[] = [
       // Dep advisories key on the package; taint paths are multi-node and this
       // asks about ONE cited line.
       if (f.category === "dep" || !f.sink?.file) return false;
-      const line = lineAt(repo, f.sink.file, f.sink.line);
+      const line = lineAt(repo, f.sink.file, f.sink.line, f.atCommit);
       return !!line && (PATTERN_METADATA.test(line) || BARE_REGEX_LINE.test(line) || WHOLE_LINE_COMMENT.test(line));
     },
   },
@@ -190,9 +191,18 @@ const WHOLE_LINE_COMMENT = /^\s*(?:\/\/|#|\*|<!--)/;
 /** A line that is nothing but a regex literal — how rule arrays are written. */
 const BARE_REGEX_LINE = /^\s*\/(?:[^/\\\n]|\\.)+\/[gimsuy]*\s*,?\s*$/;
 
-/** One line of a repo file, or `undefined` if it cannot be read. */
+/**
+ * One line of a repo file, or `undefined` if it cannot be read.
+ *
+ * A finding from a scan of git HISTORY cites a file that may not exist at HEAD,
+ * so `atCommit` is read from that commit instead. Without this the two
+ * line-reading classes below silently never fire on history findings — which is
+ * exactly the population they exist for: a scanner reads every commit, and the
+ * secrets worth classifying are usually the ones someone already deleted.
+ */
 const lineCache = new Map<string, string[] | undefined>();
-function lineAt(repo: string, rel: string, line: number): string | undefined {
+function lineAt(repo: string, rel: string, line: number, commit?: string): string | undefined {
+  if (commit) return lineContentAtCommit(repo, commit, rel, line) ?? undefined;
   const key = `${repo}\u0000${rel}`;
   if (!lineCache.has(key)) {
     try {
@@ -206,16 +216,27 @@ function lineAt(repo: string, rel: string, line: number): string | undefined {
 
 /** Cached `encryptedShapeOf` — it reads the file to test the content marker. */
 const shapeCache = new Map<string, ReturnType<typeof encryptedShapeOf>>();
-function shapeOf(repo: string, rel: string): ReturnType<typeof encryptedShapeOf> {
-  const key = `${repo}\u0000${rel}`;
+function shapeOf(repo: string, rel: string, commit?: string): ReturnType<typeof encryptedShapeOf> {
+  const key = `${repo}\u0000${commit ?? ""}\u0000${rel}`;
   if (!shapeCache.has(key)) {
-    let shape: ReturnType<typeof encryptedShapeOf>;
-    try {
-      shape = encryptedShapeOf(rel, readText(join(repo, rel)));
-    } catch {
-      shape = undefined; // unreadable — treat as ordinary, never as suppressed
+    let content: string | undefined;
+    // A history-scanned finding cites a file that may be gone from HEAD, so read
+    // it from the commit the scanner named.
+    if (commit) content = fileContentAtCommit(repo, commit, rel) ?? undefined;
+    if (content === undefined) {
+      try {
+        content = readText(join(repo, rel));
+      } catch {
+        content = undefined;
+      }
     }
-    shapeCache.set(key, shape);
+    // Unreadable either way: `encryptedShapeOf` matches the path suffix BEFORE
+    // it looks at content, so an empty read still recognises
+    // `*.sealed-secret.yaml`. The filename is a claim the file makes about
+    // itself, and refusing to classify a deleted file that plainly says what it
+    // is would leave the entire deleted-secrets population unclassified — the
+    // very population a history scan exists to surface.
+    shapeCache.set(key, encryptedShapeOf(rel, content ?? ""));
   }
   return shapeCache.get(key);
 }
