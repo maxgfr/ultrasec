@@ -103,3 +103,85 @@ describe("family — a repetition is one judgment, not N", () => {
     expect(pathRoot("README.md")).toBe(".");
   });
 });
+
+// ── Compaction must not be lossy ───────────────────────────────────────────
+//
+// The first cut of the compact tiers showed only the named ground (`brocard`)
+// and dropped the auditor's argument, which lives appended to `message` as
+// "Verdict (refuted): …". Measured on a real run: 1041 refuted findings carried
+// **384 distinct arguments**, and 38 of 69 families mixed different ones under a
+// single exemplar. A tier printed so its refutations can be checked, minus the
+// reasoning, is not checkable.
+
+import { renderReport } from "../src/render/report.js";
+import { renderHtml } from "../src/render/html.js";
+import type { Dossier } from "../src/store.js";
+
+const REFUTED_BECAUSE = "the cited value is a literal, never attacker-controlled";
+
+const dossierOf = (findings: Finding[]): Dossier => ({
+  manifest: {
+    version: "0.0.0-test",
+    schema: 9,
+    repo: "/tmp/repo",
+    generatedNote: "test",
+    languages: [],
+    toolsRun: [],
+    counts: { findings: findings.length, bySeverity: { critical: 0, high: 0, medium: findings.length, low: 0, info: 0 } },
+  } as unknown as Dossier["manifest"],
+  findings,
+  graph: { files: [], edges: [], symbolDefs: {} },
+});
+
+describe("compaction keeps the judgment and drops only the mechanical", () => {
+  const refuted = (id: string, file: string): Finding =>
+    f({
+      id,
+      status: "dismissed",
+      verdict: "refuted",
+      brocard: "standard-behavior",
+      title: "Log injection: untrusted input reaches info()",
+      message: `Engine boilerplate about the candidate.\n\nVerdict (refuted): ${REFUTED_BECAUSE}`,
+      ...at(file),
+    });
+
+  const findings = [refuted("r1", "src/a.js"), refuted("r2", "src/b.js"), refuted("r3", "src/c.js")];
+
+  it("prints the refutation ARGUMENT in the compact Markdown tier, not just the ground", () => {
+    const md = renderReport(dossierOf(findings));
+    expect(md).toContain("standard-behavior");
+    expect(md, "the reasoning that decided the audit must survive compaction").toContain(REFUTED_BECAUSE);
+  });
+
+  it("prints it in the compact HTML tier too", () => {
+    const html = renderHtml(dossierOf(findings));
+    expect(html).toContain(REFUTED_BECAUSE);
+  });
+
+  it("never folds two DIFFERENT judgments into one family", () => {
+    const mixed = [
+      refuted("m1", "src/a.js"),
+      refuted("m2", "src/b.js"),
+      f({
+        id: "m3",
+        status: "dismissed",
+        verdict: "refuted",
+        title: "Log injection: untrusted input reaches info()",
+        message: "Engine boilerplate.\n\nVerdict (refuted): a completely different reason",
+        ...at("src/c.js"),
+      }),
+    ];
+    // Same title, same path root — but not the same judgment, so not one family.
+    expect(groupFamilies(mixed).families).toHaveLength(0);
+    const md = renderReport(dossierOf(mixed));
+    expect(md).toContain(REFUTED_BECAUSE);
+    expect(md).toContain("a completely different reason");
+  });
+
+  it("folds findings that DO share a judgment, and says the adjudication is shared", () => {
+    const { families } = groupFamilies(findings);
+    expect(families).toHaveLength(1);
+    expect(families[0]!.note).toContain(REFUTED_BECAUSE);
+    expect(families[0]!.members).toHaveLength(3);
+  });
+});

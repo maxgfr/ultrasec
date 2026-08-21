@@ -96,11 +96,14 @@ References: <https://cwe.mitre.org/data/definitions/89.html>
 
 ## Refuted (1)
 
-Kept so the refutations can be disagreed with. **ground** names why each was dismissed.
+Kept so the refutations can be disagreed with: **why** carries the named ground and the
+argument that was actually made.
 
-| | finding | where | ground |
+| | finding | where | why |
 |---|---|---|---|
-| 🟨 MEDIUM | Cross-site scripting (reflected): untrusted input reaches send() <code>9b0bcc91ea6a</code> | `src/server.js:18` → `src/server.js:20` | unsupported |
+| 🟨 MEDIUM | Cross-site scripting (reflected): untrusted input reaches send() <code>9b0bcc91ea6a</code> | `src/server.js:18` → `src/server.js:20` | unsupported — Verdict (unsupported): The argument to res.send() at server.js:20 is `out` — the return value of runReport() — not req.query.name, so the query parameter is never reflected. The attacker does control that output, but only by way of the command injection at report.js:5, whose impact (RCE) subsumes it; reporting a separate MEDIUM XSS would double-count one bug. Tracked by 3ffa0917b004. |
+
+_The compact tiers above carry every finding's id, location, severity and adjudication — what is dropped is the engine's own boilerplate, the diagrams and the CWE links, all of which are in `findings.json`._
 
 ## Attack chains (AI-authored)
 _AI-authored — verify against the cited findings before acting._

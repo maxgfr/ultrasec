@@ -4,6 +4,7 @@ import { compareWithinStatus } from "../rank.js";
 import { groupFamilies, collapsedCount, type Family } from "../family.js";
 import { buildCoverage, enumeratedKindsOf, type CoverageRow } from "../coverage.js";
 import { AI_DISCLAIMER, hasNarrativeContent, remediationMap } from "../narrative.js";
+import { stageNotes } from "../util.js";
 
 // A single self-contained index.html — embedded CSS, no external assets, no JS
 // required. The cross-file path renders as offline boxes-and-arrows so it works
@@ -139,29 +140,41 @@ function atOf(f: Finding): string {
  *
  * The members are listed, not merged: `findings.json` still holds each one, and
  * a reader who wants the 149th `pickle` warning can open the fold and get its
- * id. What the fold removes is 148 restatements of the same paragraph.
+ * id. What the fold removes is 148 restatements of the same paragraph — and
+ * they ARE the same paragraph, because the family key includes the adjudication.
+ * Two findings refuted for different reasons are never one card.
  */
 function familyHtml(fam: Family, rem?: Remediation): string {
   const rows = fam.members
     .map((m) => `<tr><td><code>${esc(m.id)}</code></td><td class="at">${esc(atOf(m))}</td><td>${esc(sevLabel(m.severity))}</td></tr>`)
     .join("");
-  const extra = `<details class="members"><summary>${fam.members.length} occurrence(s) under <code>${esc(fam.root)}</code></summary>
+  const extra = `<details class="members"><summary>${fam.members.length} occurrence(s), same root <code>${esc(fam.root)}</code>, same adjudication</summary>
           <div class="tw"><table><thead><tr><th>id</th><th>location</th><th>severity</th></tr></thead><tbody>${rows}</tbody></table></div>
         </details>`;
   return findingHtml(fam.lead, rem, extra);
 }
 
-/** A whole tier as one scannable table — for the refuted and unadjudicated. */
+/**
+ * A whole tier as one scannable table — for the refuted and unadjudicated.
+ *
+ * Carries the auditor's ARGUMENT, not just the named ground. Compact must not
+ * mean lossy: one audit's refuted tier held 384 distinct refutation arguments
+ * across 1041 findings, and a table showing only the brocard hid every one of
+ * them — while the section header claimed the tier was printed so the
+ * refutations could be checked.
+ */
 function tableHtml(findings: readonly Finding[]): string {
   const rows = findings
-    .map(
-      (f) =>
-        `<tr><td><span class="dot ${sevClass(f.severity)}"></span>${esc(sevLabel(f.severity))}</td><td>${esc(f.title)}</td><td class="at">${esc(
-          atOf(f),
-        )}</td><td>${esc(f.brocard ?? f.verdict ?? MISSING)}</td></tr>`,
-    )
+    .map((f) => {
+      const ground = f.brocard ? `<strong>${esc(f.brocard)}</strong>` : f.verdict ? esc(f.verdict) : "";
+      const note = stageNotes(f.message);
+      const why = [ground, note ? esc(note) : ""].filter(Boolean).join(" — ") || MISSING;
+      return `<tr><td><span class="dot ${sevClass(f.severity)}"></span>${esc(sevLabel(f.severity))}</td><td>${esc(f.title)} <code>${esc(
+        f.id,
+      )}</code></td><td class="at">${esc(atOf(f))}</td><td>${why}</td></tr>`;
+    })
     .join("");
-  return `<div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>ground</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  return `<div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 /** One tier of findings: cards for the singles, one card per collapsed family. */

@@ -1,6 +1,6 @@
 import type { Finding } from "./types.js";
 import { compareWithinStatus } from "./rank.js";
-import { byStr } from "./util.js";
+import { byStr, stageNotes } from "./util.js";
 
 // Collapsing a repeated finding into ONE entry with a count.
 //
@@ -11,10 +11,19 @@ import { byStr } from "./util.js";
 // Markdown report emitted a full section with a mermaid diagram per row, and the
 // HTML grew to 2.1 MB — a report nobody can read is not a report.
 //
-// The grouping is by (title × path root), because that is the unit a reader
-// actually decides about: "149 pickle warnings under analysis/" is one judgment,
-// and splitting it into 149 identical ones does not make the audit more
-// thorough, only longer.
+// The grouping is by (title × path root × ADJUDICATION), because that is the
+// unit a reader actually decides about: "149 pickle warnings under analysis/,
+// all refuted for the same reason" is one judgment, and splitting it into 149
+// identical ones does not make the audit more thorough, only longer.
+//
+// The adjudication belongs in the key, and leaving it out was a real defect.
+// Keyed on (title × root) alone, 38 of 69 families on a real audit contained
+// DIFFERENT refutation arguments — 384 distinct ones across the run — and
+// collapsing them onto one exemplar presented several judgments as one. Adding
+// it splits those into honest groups: on that same run, 78 families instead of
+// 69, still folding 503 rows away. Slightly less compression, and it is no
+// longer bought by conflating things a reader has to be able to disagree with
+// separately.
 //
 // ── Grouping is for READING, never for deciding ────────────────────────────
 //
@@ -57,10 +66,13 @@ const KEY_SEP = " :: ";
 const UNPLACED = "unplaced" + KEY_SEP;
 
 export interface Family {
-  /** Stable key — title, separator, path root. Never displayed. */
+  /** Stable key — title, path root, adjudication. Never displayed. */
   key: string;
   title: string;
   root: string;
+  /** The adjudication every member shares — the reason they are ONE judgment.
+   *  Empty when the family is unadjudicated (an `open` tier). */
+  note: string;
   /** The best-ranked member, rendered in full as the family's exemplar. */
   lead: Finding;
   /** Every member, `lead` included, in rank order. */
@@ -89,7 +101,7 @@ export function groupFamilies(findings: readonly Finding[], minFamily = MIN_FAMI
     // A finding with no location cannot be placed in a path family, and its
     // title alone is too weak a key — dependency advisories all cite the same
     // lockfile line but are genuinely distinct CVEs.
-    const key = at ? f.title + KEY_SEP + pathRoot(at) : UNPLACED + f.id;
+    const key = at ? f.title + KEY_SEP + pathRoot(at) + KEY_SEP + stageNotes(f.message) : UNPLACED + f.id;
     const list = byKey.get(key);
     if (list) list.push(f);
     else byKey.set(key, [f]);
@@ -104,7 +116,7 @@ export function groupFamilies(findings: readonly Finding[], minFamily = MIN_FAMI
     }
     const ranked = members.slice().sort(compareWithinStatus);
     const lead = ranked[0]!;
-    families.push({ key, title: lead.title, root: pathRoot(locationOf(lead)!), lead, members: ranked });
+    families.push({ key, title: lead.title, root: pathRoot(locationOf(lead)!), note: stageNotes(lead.message), lead, members: ranked });
   }
 
   families.sort((a, b) => compareWithinStatus(a.lead, b.lead) || byStr(a.key, b.key));

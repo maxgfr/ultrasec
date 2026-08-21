@@ -216,6 +216,24 @@ export function withStageNote(message: string, stage: (typeof STAGE_LABELS)[numb
   return `${kept.join("\n\n")}\n\n${stage} (${label})${note ? `: ${note}` : ""}`;
 }
 
+/**
+ * The stage blocks a message carries — the ADJUDICATION, separated from the
+ * engine's own prose.
+ *
+ * `withStageNote` appends "Verdict (refuted): <the auditor's argument>" to a
+ * finding's message, so the reasoning that decides an audit lives inside a field
+ * that also holds boilerplate. Anything that compacts a finding for display has
+ * to be able to tell the two apart, or it drops the half that took the work: a
+ * 1041-finding refuted tier held **384 distinct arguments**, and a table showing
+ * only the named ground hid every one of them.
+ *
+ * Returns "" when the finding was never adjudicated.
+ */
+export function stageNotes(message: string | undefined | null): string {
+  const parts = String(message ?? "").split(STAGE_SPLIT);
+  return parts.slice(1).join(" · ").trim();
+}
+
 // ── Output sink ──────────────────────────────────────────────────────────────
 // The commands print their results. That is right for a CLI and fatal for the
 // MCP server, whose stdout carries JSON-RPC frames and nothing else — a single

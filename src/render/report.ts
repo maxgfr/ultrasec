@@ -3,6 +3,7 @@ import { BROCARD_SUMMARY, SEVERITIES, type Finding, type Narrative, type Remedia
 import { pathMermaid } from "./mermaid.js";
 import { compareWithinStatus } from "../rank.js";
 import { groupFamilies, collapsedCount, familyCount } from "../family.js";
+import { stageNotes } from "../util.js";
 import { executiveSummaryMd, positivePatternsMd, suggestedFixMd, attackChainsMd, rootCausesMd, hardeningNotesMd, remediationMap } from "../narrative.js";
 import { buildCoverage, enumeratedKindsOf, renderCoverageMd } from "../coverage.js";
 
@@ -223,20 +224,33 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Reme
 }
 
 /**
- * A tier as a compact table — severity, finding, where, ground.
+ * A tier as a compact table — severity, finding, where, and WHY.
  *
- * `locations[]` takes precedence over the single cited path: a dependency
- * advisory merged across versions cites one lockfile line but AFFECTS several,
- * and that per-instance evidence is the whole reason the field exists. Compact
- * is not the same as lossy, and dropping it here would have made a two-workspace
- * monorepo look like a one-workspace problem.
+ * Compact must not mean lossy, and the line between them is: everything that is
+ * a JUDGMENT stays, everything mechanical goes. So the auditor's argument stays
+ * and the engine's boilerplate, the mermaid diagram and the reference URLs do
+ * not — those are derivable from `findings.json`, and the argument is not.
+ *
+ * Dropping the argument was a real defect in the first cut of this: the refuted
+ * tier of one audit carried **384 distinct refutation arguments** across 1041
+ * findings, and a table showing only the named ground hid every one. "An audit
+ * trail that hides its refutations cannot be checked" is the reason the tier is
+ * printed at all; printing it without the reasoning honours the letter of that
+ * and none of it.
+ *
+ * `locations[]` likewise takes precedence over the single cited path: a
+ * dependency advisory merged across versions cites one lockfile line but AFFECTS
+ * several, and dropping that would make a two-workspace monorepo look like a
+ * one-workspace problem.
  */
 function tierTable(findings: readonly Finding[]): string[] {
-  const L = [`| | finding | where | ground |`, `|---|---|---|---|`];
+  const L = [`| | finding | where | why |`, `|---|---|---|---|`];
   for (const f of findings) {
-    const ground = f.brocard ? `**${f.brocard}**` : (f.verdict ?? "—");
+    const ground = f.brocard ? `**${f.brocard}**` : (f.verdict ?? "");
+    const note = stageNotes(f.message).replace(/\|/g, "\\|").replace(/\n+/g, " ");
+    const why = [ground, note].filter(Boolean).join(" — ") || "—";
     const where = f.locations?.length ? locationsLine(f.locations) : pathLine(f);
-    L.push(`| ${badgeOf(f.severity)} | ${f.title} <code>${f.id}</code> | ${where} | ${ground} |`);
+    L.push(`| ${badgeOf(f.severity)} | ${f.title} <code>${f.id}</code> | ${where} | ${why} |`);
   }
   return L;
 }
@@ -257,7 +271,11 @@ function tierSections(findings: readonly Finding[], rem: Map<string, Remediation
       body: [
         renderFinding(fam.lead, { mermaid, remediation: rem.get(fam.lead.id) }),
         "",
-        `**${fam.members.length} occurrence(s)** of this finding under \`${fam.root}\`:`,
+        // Every member shares this finding's title, its path root AND its
+        // adjudication — that is what makes them one judgment and what the key
+        // enforces. So the write-up above speaks for all of them, and the table
+        // only has to say where each one is.
+        `**${fam.members.length} occurrence(s)**, same location root \`${fam.root}\`, same adjudication:`,
         "",
         `| id | location | severity |`,
         `|---|---|---|`,
@@ -310,8 +328,18 @@ export function renderReport(d: Dossier, narrative?: Narrative): string {
   }
   if (dismissed.length) {
     L.push(`## Refuted (${dismissed.length})`, "");
-    L.push(`Kept so the refutations can be disagreed with. **ground** names why each was dismissed.`, "");
+    L.push(`Kept so the refutations can be disagreed with: **why** carries the named ground and the`, `argument that was actually made.`, "");
     L.push(...tierTable(dismissed), "");
+  }
+  // What the compact tiers drop, said out loud. A reader who cannot tell
+  // "summarized" from "omitted" has to distrust the whole document.
+  if (open.length || dismissed.length) {
+    L.push(
+      `_The compact tiers above carry every finding's id, location, severity and adjudication —` +
+        ` what is dropped is the engine's own boilerplate, the diagrams and the CWE links, all of` +
+        ` which are in \`findings.json\`._`,
+      "",
+    );
   }
   L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
   // What the audit did NOT look at, stated in the report itself. Without it a

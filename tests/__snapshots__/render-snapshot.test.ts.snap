@@ -152,11 +152,11 @@ exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtm
         
         
       </article></section>
-  <section id="open"><h2>Unadjudicated candidates (1)</h2><p class="msg">Enumerated but not yet decided. Recall-oriented by design — many are false positives.</p><div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>ground</th></tr></thead><tbody><tr><td><span class="dot m"></span>MEDIUM</td><td>Reflected XSS candidate</td><td class="at">src/view.js:20</td><td>—</td></tr></tbody></table></div></section>
+  <section id="open"><h2>Unadjudicated candidates (1)</h2><p class="msg">Enumerated but not yet decided. Recall-oriented by design — many are false positives.</p><div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody><tr><td><span class="dot m"></span>MEDIUM</td><td>Reflected XSS candidate <code>open1</code></td><td class="at">src/view.js:20</td><td>—</td></tr></tbody></table></div></section>
   <section id="dismissed"><h2>Refuted (1)</h2>
       <details><summary>Show the 1 candidate(s) this audit refuted, and on what ground</summary>
       <p class="msg">Kept because an audit that hides its refutations cannot be checked. The <em>ground</em> column names why each was dismissed.</p>
-      <div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>ground</th></tr></thead><tbody><tr><td><span class="dot l"></span>LOW</td><td>Dismissed false lead</td><td class="at">src/safe.js:1</td><td>refuted</td></tr></tbody></table></div></details></section>
+      <div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody><tr><td><span class="dot l"></span>LOW</td><td>Dismissed false lead <code>dism1</code></td><td class="at">src/safe.js:1</td><td>refuted</td></tr></tbody></table></div></details></section>
     
   <section id="coverage">
     <h2>Coverage — what was not looked at</h2>
@@ -226,17 +226,20 @@ Admin route may lack an auth guard.
 
 Enumerated, not yet decided. Recall-oriented by design: many are false positives.
 
-| | finding | where | ground |
+| | finding | where | why |
 |---|---|---|---|
 | 🟨 MEDIUM | Reflected XSS candidate <code>open1</code> | \`src/view.js:20\` | — |
 
 ## Refuted (1)
 
-Kept so the refutations can be disagreed with. **ground** names why each was dismissed.
+Kept so the refutations can be disagreed with: **why** carries the named ground and the
+argument that was actually made.
 
-| | finding | where | ground |
+| | finding | where | why |
 |---|---|---|---|
 | 🟩 LOW | Dismissed false lead <code>dism1</code> | \`src/safe.js:1\` | refuted |
+
+_The compact tiers above carry every finding's id, location, severity and adjudication — what is dropped is the engine's own boilerplate, the diagrams and the CWE links, all of which are in \`findings.json\`._
 
 ## Coverage (OWASP ASVS)
 

@@ -17225,6 +17225,10 @@ function withStageNote(message, stage, label, note) {
 
 ${stage} (${label})${note ? `: ${note}` : ""}`;
 }
+function stageNotes(message) {
+  const parts2 = String(message ?? "").split(STAGE_SPLIT);
+  return parts2.slice(1).join(" \xB7 ").trim();
+}
 var outputSink = new AsyncLocalStorage();
 function eprintln(msg) {
   const sink = outputSink.getStore();
@@ -26147,7 +26151,7 @@ function groupFamilies2(findings, minFamily = MIN_FAMILY) {
   const byKey2 = /* @__PURE__ */ new Map();
   for (const f of findings) {
     const at = locationOf(f);
-    const key = at ? f.title + KEY_SEP + pathRoot(at) : UNPLACED + f.id;
+    const key = at ? f.title + KEY_SEP + pathRoot(at) + KEY_SEP + stageNotes(f.message) : UNPLACED + f.id;
     const list = byKey2.get(key);
     if (list) list.push(f);
     else byKey2.set(key, [f]);
@@ -26161,7 +26165,7 @@ function groupFamilies2(findings, minFamily = MIN_FAMILY) {
     }
     const ranked = members.slice().sort(compareWithinStatus);
     const lead = ranked[0];
-    families.push({ key, title: lead.title, root: pathRoot(locationOf(lead)), lead, members: ranked });
+    families.push({ key, title: lead.title, root: pathRoot(locationOf(lead)), note: stageNotes(lead.message), lead, members: ranked });
   }
   families.sort((a, b) => compareWithinStatus(a.lead, b.lead) || byStr2(a.key, b.key));
   singles.sort(compareWithinStatus);
@@ -28782,11 +28786,13 @@ function renderFinding(f, opts = {}) {
   return L.join("\n");
 }
 function tierTable(findings) {
-  const L = [`| | finding | where | ground |`, `|---|---|---|---|`];
+  const L = [`| | finding | where | why |`, `|---|---|---|---|`];
   for (const f of findings) {
-    const ground = f.brocard ? `**${f.brocard}**` : f.verdict ?? "\u2014";
+    const ground = f.brocard ? `**${f.brocard}**` : f.verdict ?? "";
+    const note = stageNotes(f.message).replace(/\|/g, "\\|").replace(/\n+/g, " ");
+    const why = [ground, note].filter(Boolean).join(" \u2014 ") || "\u2014";
     const where = f.locations?.length ? locationsLine(f.locations) : pathLine(f);
-    L.push(`| ${badgeOf(f.severity)} | ${f.title} <code>${f.id}</code> | ${where} | ${ground} |`);
+    L.push(`| ${badgeOf(f.severity)} | ${f.title} <code>${f.id}</code> | ${where} | ${why} |`);
   }
   return L;
 }
@@ -28798,7 +28804,11 @@ function tierSections(findings, rem, mermaid) {
       body: [
         renderFinding(fam.lead, { mermaid, remediation: rem.get(fam.lead.id) }),
         "",
-        `**${fam.members.length} occurrence(s)** of this finding under \`${fam.root}\`:`,
+        // Every member shares this finding's title, its path root AND its
+        // adjudication — that is what makes them one judgment and what the key
+        // enforces. So the write-up above speaks for all of them, and the table
+        // only has to say where each one is.
+        `**${fam.members.length} occurrence(s)**, same location root \`${fam.root}\`, same adjudication:`,
         "",
         `| id | location | severity |`,
         `|---|---|---|`,
@@ -28843,8 +28853,14 @@ function renderReport(d, narrative) {
   }
   if (dismissed.length) {
     L.push(`## Refuted (${dismissed.length})`, "");
-    L.push(`Kept so the refutations can be disagreed with. **ground** names why each was dismissed.`, "");
+    L.push(`Kept so the refutations can be disagreed with: **why** carries the named ground and the`, `argument that was actually made.`, "");
     L.push(...tierTable(dismissed), "");
+  }
+  if (open.length || dismissed.length) {
+    L.push(
+      `_The compact tiers above carry every finding's id, location, severity and adjudication \u2014 what is dropped is the engine's own boilerplate, the diagrams and the CWE links, all of which are in \`findings.json\`._`,
+      ""
+    );
   }
   L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
   L.push(renderCoverageMd(buildCoverage(d, enumeratedKindsOf(d.findings)), void 0, d));
@@ -28925,18 +28941,21 @@ function atOf(f) {
 }
 function familyHtml(fam, rem) {
   const rows = fam.members.map((m) => `<tr><td><code>${esc2(m.id)}</code></td><td class="at">${esc2(atOf(m))}</td><td>${esc2(sevLabel(m.severity))}</td></tr>`).join("");
-  const extra = `<details class="members"><summary>${fam.members.length} occurrence(s) under <code>${esc2(fam.root)}</code></summary>
+  const extra = `<details class="members"><summary>${fam.members.length} occurrence(s), same root <code>${esc2(fam.root)}</code>, same adjudication</summary>
           <div class="tw"><table><thead><tr><th>id</th><th>location</th><th>severity</th></tr></thead><tbody>${rows}</tbody></table></div>
         </details>`;
   return findingHtml(fam.lead, rem, extra);
 }
 function tableHtml(findings) {
-  const rows = findings.map(
-    (f) => `<tr><td><span class="dot ${sevClass(f.severity)}"></span>${esc2(sevLabel(f.severity))}</td><td>${esc2(f.title)}</td><td class="at">${esc2(
-      atOf(f)
-    )}</td><td>${esc2(f.brocard ?? f.verdict ?? MISSING)}</td></tr>`
-  ).join("");
-  return `<div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>ground</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const rows = findings.map((f) => {
+    const ground = f.brocard ? `<strong>${esc2(f.brocard)}</strong>` : f.verdict ? esc2(f.verdict) : "";
+    const note = stageNotes(f.message);
+    const why = [ground, note ? esc2(note) : ""].filter(Boolean).join(" \u2014 ") || MISSING;
+    return `<tr><td><span class="dot ${sevClass(f.severity)}"></span>${esc2(sevLabel(f.severity))}</td><td>${esc2(f.title)} <code>${esc2(
+      f.id
+    )}</code></td><td class="at">${esc2(atOf(f))}</td><td>${why}</td></tr>`;
+  }).join("");
+  return `<div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function tierHtml(findings, rem) {
   const grouped = groupFamilies2(findings);
