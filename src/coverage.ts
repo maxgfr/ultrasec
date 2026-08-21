@@ -1,5 +1,5 @@
 import type { Dossier } from "./store.js";
-import type { Finding } from "./types.js";
+import type { Finding, Manifest } from "./types.js";
 
 // The coverage matrix — the honest complement to "only report what you can
 // exploit".
@@ -39,6 +39,14 @@ export interface AsvsCategory {
   judgment?: boolean;
   /** What answering it well requires. */
   hint: string;
+  /** The opt-in `scan` pass this class needs in order to be enumerated at all.
+   *  When the manifest records that the pass DID run, `hintWhenRan` replaces
+   *  `hint` — telling a user to enable a flag they already passed is a confusing
+   *  signal, and it is what made a run with 117 CWE-117 findings read as if the
+   *  option had been forgotten. */
+  requiresPass?: keyof NonNullable<Manifest["passes"]>;
+  /** Advice for the case where `requiresPass` ran and still turned up nothing. */
+  hintWhenRan?: string;
 }
 
 /** A named coverage standard: an ordered list of categories the report scores. */
@@ -82,7 +90,20 @@ const ASVS_CATEGORIES: AsvsCategory[] = [
     judgment: true,
     hint: "Weak-hash detection is mechanical; key management, IV reuse and constant-time comparison are not.",
   },
-  { id: "V7", title: "Error handling & logging", kinds: ["logs"], hint: "Needs `scan --log-hygiene` to be enumerated at all (CWE-117/532)." },
+  {
+    id: "V7",
+    title: "Error handling & logging",
+    // Keyed on the CWEs, not on which pass produced them. `--log-hygiene` turns on
+    // TWO passes with two different shapes: the line-content pass emits
+    // `category: "logs"` + CWE-532, while the taint walk emits `category: "taint"`
+    // + `sink.kind: "log"` + CWE-117. Listing only "logs" scored a run with 117
+    // CWE-117 findings as "not examined" — the exact coverage theatre this file
+    // exists to avoid, pointed the other way.
+    kinds: ["logs", "log", "CWE-117", "CWE-532"],
+    hint: "Needs `scan --log-hygiene` to be enumerated at all (CWE-117/532).",
+    requiresPass: "logHygiene",
+    hintWhenRan: "`--log-hygiene` ran and found no CWE-117/532 candidate — error handling and log content are still yours to read.",
+  },
   {
     id: "V8",
     title: "Data protection & privacy",
@@ -170,9 +191,12 @@ const OWASP_TOP10_2021: AsvsCategory[] = [
   {
     id: "A09",
     title: "Security logging & monitoring failures",
-    kinds: ["logs"],
+    // Same CWE-keyed union as ASVS V7 — see the note there.
+    kinds: ["logs", "log", "CWE-117", "CWE-532"],
     judgment: true,
     hint: "Needs `scan --log-hygiene`; monitoring/alerting is out of a source audit's reach.",
+    requiresPass: "logHygiene",
+    hintWhenRan: "`--log-hygiene` ran and found nothing; monitoring/alerting is out of a source audit's reach either way.",
   },
   { id: "A10", title: "Server-side request forgery (SSRF)", kinds: ["ssrf"], hint: "SSRF sinks are enumerated by the taint walk." },
 ];
@@ -412,7 +436,11 @@ export function buildCoverage(dossier: Dossier, enumeratedKinds: string[] = [], 
     const hits = dossier.findings.filter((f) => (c.kinds ?? []).some((k) => kindsOf(f).includes(k))).length;
     const engineCovers = (c.kinds ?? []).some((k) => enumerated.has(k));
     const state: CoverageState = hits > 0 ? "examined" : engineCovers ? "engine" : "unexamined";
-    return { id: c.id, title: c.title, state, hits, judgment: !!c.judgment, hint: c.hint };
+    // `undefined` from an older dossier means "unknown", so the default advice
+    // stands — only a manifest that positively records the pass swaps it out.
+    const ranIt = c.requiresPass ? dossier.manifest.passes?.[c.requiresPass] === true : false;
+    const hint = ranIt && c.hintWhenRan ? c.hintWhenRan : c.hint;
+    return { id: c.id, title: c.title, state, hits, judgment: !!c.judgment, hint };
   });
 }
 

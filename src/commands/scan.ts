@@ -247,6 +247,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...(perToolStatus ? { toolStatus: perToolStatus } : {}),
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     extraction: extractionTier(),
+    // Which opt-in passes ran, so a later stage can distinguish "the flag was
+    // never passed" from "the flag was passed and the pass found nothing".
+    passes: { sinks: sinksOn, logHygiene: logHygieneOn, blame: blameOn },
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
     ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),

@@ -157,3 +157,58 @@ describe("runCoverage — standard selection", () => {
     restore();
   });
 });
+
+// ── Issue #10 (5): V7 keyed on the CWEs present, not on the pass that made them ──
+// `--log-hygiene` turns on two passes with two shapes: the line-content pass
+// emits `category: "logs"` + CWE-532, the taint walk emits `category: "taint"` +
+// `sink.kind: "log"` + CWE-117. The matrix listed only "logs", so a real audit
+// with 117 CWE-117 findings scored V7 as "not examined".
+describe("V7 / A09 — logging coverage is CWE-keyed", () => {
+  const logTaint = f({ category: "taint", cwe: "CWE-117", sink: { file: "a.js", line: 1, kind: "log" } });
+
+  it("scores V7 examined from CWE-117 taint findings alone", () => {
+    const rows = buildCoverage(dossier([logTaint]), enumeratedKindsOf([logTaint]));
+    const v7 = rows.find((r) => r.id === "V7")!;
+    expect(v7.state).toBe("examined");
+    expect(v7.hits).toBe(1);
+  });
+
+  it("still scores V7 examined from the CWE-532 hygiene pass", () => {
+    const hygiene = f({ category: "logs", cwe: "CWE-532", sink: { file: "a.js", line: 1, kind: "log" } });
+    expect(buildCoverage(dossier([hygiene])).find((r) => r.id === "V7")!.state).toBe("examined");
+  });
+
+  it("scores OWASP A09 the same way", () => {
+    const rows = buildCoverage(dossier([logTaint]), enumeratedKindsOf([logTaint]), "owasp-top10");
+    expect(rows.find((r) => r.id === "A09")!.state).toBe("examined");
+  });
+
+  it("leaves V7 unexamined when nothing logging-shaped is present", () => {
+    expect(buildCoverage(dossier([f({ cwe: "CWE-89" })])).find((r) => r.id === "V7")!.state).toBe("unexamined");
+  });
+});
+
+// ── Issue #10 (5): "flag not passed" vs "flag passed, zero results" ───────────
+describe("V7 advice distinguishes a missing flag from an empty pass", () => {
+  const withPasses = (passes?: { logHygiene?: boolean }): Dossier => {
+    const d = dossier([]);
+    if (passes) d.manifest.passes = passes;
+    return d;
+  };
+
+  it("tells you to enable --log-hygiene when the manifest doesn't say it ran", () => {
+    expect(buildCoverage(withPasses()).find((r) => r.id === "V7")!.hint).toMatch(/Needs `scan --log-hygiene`/);
+  });
+
+  it("does NOT tell you to enable a flag you already passed", () => {
+    const hint = buildCoverage(withPasses({ logHygiene: true })).find((r) => r.id === "V7")!.hint;
+    expect(hint).not.toMatch(/Needs `scan --log-hygiene`/);
+    expect(hint).toMatch(/ran and found no/);
+  });
+
+  it("keeps the old advice for a dossier written before `passes` existed", () => {
+    // schemaVersion 7 dossiers omit the field entirely — undefined means
+    // "unknown", never "off".
+    expect(buildCoverage(withPasses({})).find((r) => r.id === "V7")!.hint).toMatch(/Needs `scan --log-hygiene`/);
+  });
+});

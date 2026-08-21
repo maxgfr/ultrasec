@@ -16945,7 +16945,7 @@ ${HELP}`);
 
 // src/types.ts
 var VERSION = "1.36.0";
-var SCHEMA_VERSION2 = 7;
+var SCHEMA_VERSION2 = 8;
 var SEVERITIES2 = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
 var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "privacy", "other"];
@@ -23068,6 +23068,9 @@ async function runScan(args2) {
     ...perToolStatus ? { toolStatus: perToolStatus } : {},
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     extraction: extractionTier(),
+    // Which opt-in passes ran, so a later stage can distinguish "the flag was
+    // never passed" from "the flag was passed and the pass found nothing".
+    passes: { sinks: sinksOn, logHygiene: logHygieneOn, blame: blameOn },
     ...truncation ? { truncation } : {},
     ...recordedScopes.length ? { scopes: recordedScopes } : {},
     ...sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}
@@ -26098,7 +26101,20 @@ var ASVS_CATEGORIES = [
     judgment: true,
     hint: "Weak-hash detection is mechanical; key management, IV reuse and constant-time comparison are not."
   },
-  { id: "V7", title: "Error handling & logging", kinds: ["logs"], hint: "Needs `scan --log-hygiene` to be enumerated at all (CWE-117/532)." },
+  {
+    id: "V7",
+    title: "Error handling & logging",
+    // Keyed on the CWEs, not on which pass produced them. `--log-hygiene` turns on
+    // TWO passes with two different shapes: the line-content pass emits
+    // `category: "logs"` + CWE-532, while the taint walk emits `category: "taint"`
+    // + `sink.kind: "log"` + CWE-117. Listing only "logs" scored a run with 117
+    // CWE-117 findings as "not examined" — the exact coverage theatre this file
+    // exists to avoid, pointed the other way.
+    kinds: ["logs", "log", "CWE-117", "CWE-532"],
+    hint: "Needs `scan --log-hygiene` to be enumerated at all (CWE-117/532).",
+    requiresPass: "logHygiene",
+    hintWhenRan: "`--log-hygiene` ran and found no CWE-117/532 candidate \u2014 error handling and log content are still yours to read."
+  },
   {
     id: "V8",
     title: "Data protection & privacy",
@@ -26182,9 +26198,12 @@ var OWASP_TOP10_2021 = [
   {
     id: "A09",
     title: "Security logging & monitoring failures",
-    kinds: ["logs"],
+    // Same CWE-keyed union as ASVS V7 — see the note there.
+    kinds: ["logs", "log", "CWE-117", "CWE-532"],
     judgment: true,
-    hint: "Needs `scan --log-hygiene`; monitoring/alerting is out of a source audit's reach."
+    hint: "Needs `scan --log-hygiene`; monitoring/alerting is out of a source audit's reach.",
+    requiresPass: "logHygiene",
+    hintWhenRan: "`--log-hygiene` ran and found nothing; monitoring/alerting is out of a source audit's reach either way."
   },
   { id: "A10", title: "Server-side request forgery (SSRF)", kinds: ["ssrf"], hint: "SSRF sinks are enumerated by the taint walk." }
 ];
@@ -26379,7 +26398,9 @@ function buildCoverage(dossier, enumeratedKinds = [], standardId = DEFAULT_STAND
     const hits = dossier.findings.filter((f) => (c2.kinds ?? []).some((k) => kindsOf(f).includes(k))).length;
     const engineCovers = (c2.kinds ?? []).some((k) => enumerated.has(k));
     const state = hits > 0 ? "examined" : engineCovers ? "engine" : "unexamined";
-    return { id: c2.id, title: c2.title, state, hits, judgment: !!c2.judgment, hint: c2.hint };
+    const ranIt = c2.requiresPass ? dossier.manifest.passes?.[c2.requiresPass] === true : false;
+    const hint = ranIt && c2.hintWhenRan ? c2.hintWhenRan : c2.hint;
+    return { id: c2.id, title: c2.title, state, hits, judgment: !!c2.judgment, hint };
   });
 }
 var MARK = {
@@ -27049,8 +27070,7 @@ function renderReport(d, narrative) {
     }
   }
   L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
-  const enumerated = [...new Set(d.findings.flatMap((f) => [f.category, f.sink?.kind].filter((x) => Boolean(x))))];
-  L.push(renderCoverageMd(buildCoverage(d, enumerated)));
+  L.push(renderCoverageMd(buildCoverage(d, enumeratedKindsOf(d.findings))));
   L.push(`---`);
   L.push(`Engine: ultrasec ${d.manifest.version}. ${d.manifest.generatedNote}`);
   return L.join("\n") + "\n";

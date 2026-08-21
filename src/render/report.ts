@@ -3,7 +3,7 @@ import { BROCARD_SUMMARY, SEVERITIES, type Finding, type Narrative, type Remedia
 import { pathMermaid } from "./mermaid.js";
 import { byStr } from "../util.js";
 import { executiveSummaryMd, positivePatternsMd, suggestedFixMd, attackChainsMd, rootCausesMd, hardeningNotesMd, remediationMap } from "../narrative.js";
-import { buildCoverage, renderCoverageMd } from "../coverage.js";
+import { buildCoverage, enumeratedKindsOf, renderCoverageMd } from "../coverage.js";
 
 // The tiered Markdown report: SUMMARY (TL;DR) and REPORT — the complete audit,
 // every finding grouped by status (incl. dismissed), with the reasoning trail.
@@ -184,8 +184,12 @@ export function renderReport(d: Dossier, narrative?: Narrative): string {
   L.push(...attackChainsMd(narrative), ...rootCausesMd(narrative), ...hardeningNotesMd(narrative));
   // What the audit did NOT look at, stated in the report itself. Without it a
   // short report is indistinguishable from a thorough one that found little.
-  const enumerated = [...new Set(d.findings.flatMap((f) => [f.category, f.sink?.kind].filter((x): x is string => Boolean(x))))];
-  L.push(renderCoverageMd(buildCoverage(d, enumerated)));
+  // Share `enumeratedKindsOf` with the `coverage` command rather than
+  // re-deriving the kind set here. The hand-rolled version this replaces dropped
+  // `f.cwe`, so REPORT.md and `ultrasec coverage` disagreed on every CWE-keyed
+  // pack (Top 10, CWE Top 25) — which the comment on that helper promises can
+  // never happen.
+  L.push(renderCoverageMd(buildCoverage(d, enumeratedKindsOf(d.findings))));
   L.push(`---`);
   L.push(`Engine: ultrasec ${d.manifest.version}. ${d.manifest.generatedNote}`);
   return L.join("\n") + "\n";

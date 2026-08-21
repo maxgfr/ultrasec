@@ -92,7 +92,7 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
 ```json
 {
   "version": "1.17.0",
-  "schemaVersion": 6,
+  "schemaVersion": 8,
   "repo": "/path/to/repo",
   "languages": ["javascript"],
   "toolsRun": ["trivy", "gitleaks"],
@@ -101,6 +101,7 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   "truncation": { "candidates": 0, "total": 8, "files": false },
   "scopes": ["src/api"],
   "extraction": { "tier": "cache", "ast": true },
+  "passes": { "sinks": false, "logHygiene": true, "blame": false },
   "sbom": "sbom.cdx.json"
 }
 ```
@@ -115,6 +116,11 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   a coverage hole) from `failed`.
 - **`scopes[]`** accumulates every scope/diff that fed a merged run — this is what makes a
   map-first audit resumable across sessions.
+- **`passes`** records which opt-in passes ran (`--sinks`, `--log-hygiene`, `--blame`). Counts
+  alone cannot say it: a run with `--log-hygiene` that found nothing and a run without the flag
+  both report zero logging findings. `coverage` reads it so it never advises you to enable an
+  option you already enabled. Absent on dossiers written before schema 8 — `undefined` means
+  **unknown**, never "off".
 
 ## `TRIAGE.todo.json` → `TRIAGE.json`
 

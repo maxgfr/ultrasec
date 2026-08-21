@@ -18,7 +18,11 @@ export const VERSION = "1.36.0";
 // reach the entry line?) — ranking signals, not filters, so older dossiers rank
 // exactly as before; plus optional `brocard`, the named ground for a refutation.
 // All three additive + optional (back-compat).
-export const SCHEMA_VERSION = 7;
+// 8: manifest gained optional `passes` (which opt-in scan passes actually ran).
+// Additive + optional — older dossiers omit it, and a consumer that can't tell
+// "flag not passed" from "flag passed, zero results" falls back to the old
+// advice, byte-identical to before.
+export const SCHEMA_VERSION = 8;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -324,6 +328,20 @@ export interface Manifest {
    *  candidate missing. Additive/optional; dossiers written before this field
    *  existed omit it. */
   extraction?: { tier: "adjacent" | "env" | "cache" | "none"; ast: boolean };
+  /** Which opt-in passes this run actually performed. The counts alone cannot
+   *  say it: a run with `--log-hygiene` that found nothing and a run without the
+   *  flag both produce zero logging findings, and the coverage advice used to
+   *  tell the first user to enable an option they had already enabled.
+   *  Additive/optional — dossiers written before this field existed omit it, and
+   *  `undefined` means "unknown", never "off". */
+  passes?: {
+    /** `scan --sinks` (orphan-sink recall). */
+    sinks?: boolean;
+    /** `scan --log-hygiene` (CWE-117 taint sinks + the CWE-532 line pass). */
+    logHygiene?: boolean;
+    /** `scan --blame` (git provenance on every finding). */
+    blame?: boolean;
+  };
   /** Basename of the CycloneDX SBOM generated this run (`src/tools/sbom.ts`), a
    *  dossier deliverable in its own right and the input grype/package-checker
    *  prefer over re-walking the tree. Additive/optional; older dossiers and
