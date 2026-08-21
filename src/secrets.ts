@@ -193,9 +193,10 @@ export function isLiteralSecret(password: string): boolean {
  * both gitleaks and trufflehog missed it on a public repo where it had been in
  * history for years.
  */
-export function auditSecrets(repo: string): Finding[] {
+export function auditSecrets(repo: string, prune?: (rel: string) => boolean): Finding[] {
   const out: Finding[] = [];
   for (const wf of walk(repo)) {
+    if (prune?.(wf.rel)) continue;
     if (!TEXT_EXTS.has(extOf(wf.rel))) continue;
     const content = readText(wf.abs);
     if (!content?.includes("://")) continue;

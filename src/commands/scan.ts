@@ -10,6 +10,7 @@ import { auditAgenticWorkflows } from "../actions.js";
 import { auditWebConfig } from "../webconfig.js";
 import { auditAuthTokens } from "../authtokens.js";
 import { auditCloud } from "../cloud.js";
+import { buildPruneMatcher } from "../walk.js";
 import { auditSecrets, downgradeEncryptedAtRest } from "../secrets.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
@@ -159,26 +160,34 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // Always on — it reads only `.github/workflows/*.yml`, costs nothing when there
   // are none, and a repo that ships one of these has a live injection path that
   // no dependency scanner and no taint walk will report.
-  const agenticFindings = auditAgenticWorkflows(repo);
+  // ONE prune predicate for the whole run. `--gitignore` used to reach only the
+  // engine's own walk: the always-on auditors below call `walk(repo)` with no
+  // options at all, and the external scanners get the raw repo bind-mounted, so
+  // a scan that pruned 1.1 GB of vendored data from its taint graph still
+  // shipped 51 findings out of it. Built from the engine's own gitignore
+  // primitives so it honours nested `.gitignore` files exactly as the walk does.
+  const prune = buildPruneMatcher(repo, { gitignore, exclude });
+
+  const agenticFindings = auditAgenticWorkflows(repo, prune);
 
   // API/web misconfiguration (CORS, cookie flags, security headers, TLS
   // verification disabled, debug mode, GraphQL introspection). Always on for the
   // same reason as the agentic-CI pass: it reads the source already walked, costs
   // nothing when the shapes are absent, and reports a live class no taint walk or
   // dependency scanner will. Every finding is grounded [file:line], category `config`.
-  const webConfigFindings = auditWebConfig(repo);
+  const webConfigFindings = auditWebConfig(repo, prune);
 
   // Authentication-token weaknesses (JWT alg/none, key confusion, decode-without-
   // verify, unenforced expiry, hardcoded/weak secrets; OAuth implicit flow, loose
   // redirect_uri, missing state/PKCE; SAML signature off; weak password hashing).
   // Always on, grounded [file:line], category crypto/authz.
-  const authTokenFindings = auditAuthTokens(repo);
+  const authTokenFindings = auditAuthTokens(repo, prune);
 
   // Cloud / K8s / IaC misconfiguration (privileged containers, host namespaces,
   // wildcard IAM, public principals/storage, open ingress, instance-metadata
   // endpoints). Zero-dependency baseline that fires without checkov and folds
   // into it via the correlator when present. Grounded [file:line], category config.
-  const cloudFindings = auditCloud(repo);
+  const cloudFindings = auditCloud(repo, prune);
 
   // Credentials embedded in connection strings (`scheme://user:secret@host`),
   // including — especially — the ones whose NEIGHBOURING components are
@@ -186,7 +195,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // configuration rather than as a credential, which is how it survives review
   // and why entropy/format heuristics skip it; gitleaks and trufflehog both
   // missed exactly that on a public repo. Always on, grounded [file:line].
-  const credentialFindings = auditSecrets(repo);
+  const credentialFindings = auditSecrets(repo, prune);
 
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
@@ -205,7 +214,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const sbomResult = skipTools ? undefined : generateSbom(repo, out);
   const tool = skipTools
     ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] }
-    : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path });
+    : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path, pruned: prune });
 
   // Merge taint candidates, orphan-sink candidates, logging-hygiene candidates,
   // and tool findings (ids are disjoint by construction), then correlate the

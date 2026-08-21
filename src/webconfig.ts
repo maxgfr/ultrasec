@@ -275,9 +275,10 @@ function scanCookies(rel: string, content: string, out: Finding[]): void {
  * CORS on an internal service is a different risk from the same on a public API,
  * and only the auditor knows which this is.
  */
-export function auditWebConfig(repo: string): Finding[] {
+export function auditWebConfig(repo: string, prune?: (rel: string) => boolean): Finding[] {
   const out: Finding[] = [];
   for (const wf of walk(repo)) {
+    if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
     if (!SCAN.has(ext)) continue;
     const content = readText(wf.abs);

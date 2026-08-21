@@ -8,6 +8,32 @@ This is **not** part of the shipped skill. The auditor-facing material — what 
 covers, how findings are correlated and ranked, and how to triage what they produce — lives in
 `skills/ultrasec/references/tools.md` and `skills/ultrasec/references/supply-chain.md`.
 
+## Scope: `--gitignore` and the bind-mounted repo
+
+Docker adapters get the repo bind-mounted whole (`docker run --rm -v <repo>:/work -w /work …`),
+and no adapter is passed an exclude argument — only hadolint uses the `enumerate` seam at all. So
+scope cannot be enforced on the way in.
+
+It is enforced on the way out instead, at `finish()` in `src/tools/run.ts`: immediately after
+`relativizeFindings` — the one point every external-tool finding passes through with a
+repo-relative path, native and docker alike — `prunePaths` drops anything the walk would have
+pruned. The predicate comes from `buildPruneMatcher` (`src/walk.ts`), built on the VENDORED
+ENGINE's `parseGitignore`/`isIgnored` rather than this file's local pair, because the engine
+honours nested `.gitignore` files and the local walker reads only the root's. A filter that
+disagreed with the walker would swap one inconsistency for a subtler one.
+
+Two properties worth keeping if you touch it:
+
+- **A finding with no cited location is never pruned.** A dependency advisory keyed on a package
+  has no path to test, and losing a CVE to a path filter would be worse than the bug being fixed.
+- **The count is reported.** `ToolRunResult.note` carries `N pruned (ignored paths)` and
+  `toolStatus` reports the post-filter number, so a filtered run does not read as a quiet one.
+
+The always-on auditors (`auditAgenticWorkflows`, `auditWebConfig`, `auditAuthTokens`, `auditCloud`,
+`auditSecrets`) take the same predicate as an optional second argument. They call `walk(repo)`
+directly, which knows nothing of the scan flags.
+
+
 ## Supply-chain audit: SBOM (syft) + package-checker
 
 When `syft` is installed, `scan` generates a CycloneDX SBOM (`sbom.cdx.json`)

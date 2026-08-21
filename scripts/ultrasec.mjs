@@ -17812,6 +17812,13 @@ function relativizeFindings(findings, base) {
     path: f.path ? f.path.map((p) => relLoc(p, base)) : f.path
   }));
 }
+function prunePaths(findings, pruned) {
+  const kept = findings.filter((f) => {
+    const at = f.sink?.file ?? f.source?.file;
+    return !at || !pruned(at);
+  });
+  return { findings: kept, dropped: findings.length - kept.length };
+}
 function buildArgv(adapter, repo, target, ctx) {
   const base = adapter.argv(target, ctx);
   if (!adapter.enumerate) return base;
@@ -17879,14 +17886,16 @@ function runDocker(adapter, repo, ctx) {
   const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
   const args2 = ["run", "--rm", "--pull", "always", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
   const { stdout, failed: failed2, err: err2 } = exec("docker", args2, repo, adapter.stderr);
-  return finish(adapter, repo, stdout, failed2, err2, true);
+  return finish(adapter, repo, stdout, failed2, err2, true, ctx);
 }
 function finish(adapter, repo, stdout, failed2, err2, docker2, ctx) {
   if (failed2) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err2 ?? "no output"}` };
   try {
     const base = docker2 ? MOUNT : repo;
-    const findings = relativizeFindings(adapter.parse(stdout, repo, ctx), base);
-    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker2 ? " (docker)" : ""}` };
+    const relativized = relativizeFindings(adapter.parse(stdout, repo, ctx), base);
+    const { findings, dropped } = ctx?.pruned ? prunePaths(relativized, ctx.pruned) : { findings: relativized, dropped: 0 };
+    const note = `${findings.length} finding(s)${docker2 ? " (docker)" : ""}${dropped ? ` \xB7 ${dropped} pruned (ignored paths)` : ""}`;
+    return { name: adapter.name, ran: true, ok: true, findings, note };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };
   }
@@ -17897,7 +17906,7 @@ function runAdapter(adapter, repo, useDocker = false, ctx = {}) {
 function orchestrate(adapters, repo, opts = {}) {
   let selected = opts.which?.length ? adapters.filter((a) => opts.which.includes(a.name)) : adapters;
   if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
-  const ctx = { offline: opts.offline, sbom: opts.sbom };
+  const ctx = { offline: opts.offline, sbom: opts.sbom, pruned: opts.pruned };
   const results = [];
   const all = [];
   for (const a of selected) {
@@ -18153,6 +18162,43 @@ var DEFAULT_IGNORE_DIRS = /* @__PURE__ */ new Set([
   ".ultrasec"
 ]);
 var MAX_FILE_BYTES = 15e5;
+function buildPruneMatcher(root, opts) {
+  const excludeRes = opts.exclude?.length ? opts.exclude.map(globToRe) : void 0;
+  const rules = [];
+  if (opts.gitignore) {
+    const visit = (dir, baseRel, depth) => {
+      if (depth > GITIGNORE_MAX_DEPTH) return;
+      let entries;
+      try {
+        entries = readdirSync4(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      if (entries.some((e) => e.isFile() && e.name === ".gitignore")) {
+        try {
+          rules.push(...parseGitignore(readFileSync14(join28(dir, ".gitignore"), "utf8"), baseRel));
+        } catch {
+        }
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || DEFAULT_IGNORE_DIRS.has(e.name)) continue;
+        visit(join28(dir, e.name), baseRel ? `${baseRel}/${e.name}` : e.name, depth + 1);
+      }
+    };
+    visit(root, "", 0);
+  }
+  if (!excludeRes && !rules.length) return void 0;
+  return (rel2) => {
+    if (excludeRes?.some((re) => re.test(rel2))) return true;
+    if (!rules.length) return false;
+    let at = -1;
+    while ((at = rel2.indexOf("/", at + 1)) !== -1) {
+      if (isIgnored(rules, rel2.slice(0, at), true)) return true;
+    }
+    return isIgnored(rules, rel2, false);
+  };
+}
+var GITIGNORE_MAX_DEPTH = 8;
 function expandBraces(pattern) {
   const open = pattern.indexOf("{");
   if (open === -1) return [pattern];
@@ -20656,9 +20702,9 @@ Evidence: \`${evidence.trim().slice(0, 160)}\``,
     cwe: "CWE-1427"
   });
 }
-function auditAgenticWorkflows(repo) {
+function auditAgenticWorkflows(repo, prune) {
   const findings = [];
-  const files = walk2(repo).map((f) => f.rel).filter((rel2) => WORKFLOW.test(rel2));
+  const files = walk2(repo).map((f) => f.rel).filter((rel2) => WORKFLOW.test(rel2) && !prune?.(rel2));
   for (const rel2 of files) {
     const content = readText2(join35(repo, rel2));
     if (!content) continue;
@@ -20915,9 +20961,10 @@ function scanCookies(rel2, content, out2) {
     else if (sameSite[1]?.toLowerCase() === "none" && !hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-samesite-none-insecure"], m[0]));
   }
 }
-function auditWebConfig(repo) {
+function auditWebConfig(repo, prune) {
   const out2 = [];
   for (const wf of walk2(repo)) {
+    if (prune?.(wf.rel)) continue;
     const ext = extOf2(wf.rel);
     if (!SCAN.has(ext)) continue;
     const content = readText2(wf.abs);
@@ -21150,9 +21197,10 @@ function scanOAuthStatePkce(rel2, content, out2) {
   f.confidence = "low";
   out2.push(f);
 }
-function auditAuthTokens(repo) {
+function auditAuthTokens(repo, prune) {
   const out2 = [];
   for (const wf of walk2(repo)) {
+    if (prune?.(wf.rel)) continue;
     const ext = extOf3(wf.rel);
     if (!CODE2.has(ext)) continue;
     const content = readText2(wf.abs);
@@ -21303,9 +21351,10 @@ function isEgressRule(ls, line) {
   }
   return false;
 }
-function auditCloud(repo) {
+function auditCloud(repo, prune) {
   const out2 = [];
   for (const wf of walk2(repo)) {
+    if (prune?.(wf.rel)) continue;
     const ext = extOf4(wf.rel);
     if (!SCAN2.has(ext)) continue;
     const content = readText2(wf.abs);
@@ -21461,9 +21510,10 @@ function isLiteralSecret2(password) {
   if (/\$\{|\$\(|\{\{|%\(/.test(p)) return false;
   return true;
 }
-function auditSecrets(repo) {
+function auditSecrets(repo, prune) {
   const out2 = [];
   for (const wf of walk2(repo)) {
+    if (prune?.(wf.rel)) continue;
     if (!TEXT_EXTS.has(extOf5(wf.rel))) continue;
     const content = readText2(wf.abs);
     if (!content?.includes("://")) continue;
@@ -23414,11 +23464,12 @@ async function runScan(args2) {
   const sinksOn = flagBool(args2, "sinks");
   const sinkCand = sinksOn ? enumerateSinkCandidates(scan2, taintFindings, { maxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan2, { maxCandidates: explicitMaxCandidates }) : { findings: [], truncated: 0, total: 0 };
-  const agenticFindings = auditAgenticWorkflows(repo);
-  const webConfigFindings = auditWebConfig(repo);
-  const authTokenFindings = auditAuthTokens(repo);
-  const cloudFindings = auditCloud(repo);
-  const credentialFindings = auditSecrets(repo);
+  const prune = buildPruneMatcher(repo, { gitignore, exclude });
+  const agenticFindings = auditAgenticWorkflows(repo, prune);
+  const webConfigFindings = auditWebConfig(repo, prune);
+  const authTokenFindings = auditAuthTokens(repo, prune);
+  const cloudFindings = auditCloud(repo, prune);
+  const credentialFindings = auditSecrets(repo, prune);
   const scopedScan = !!(effectiveScope && effectiveScope.length || include?.length || exclude?.length || diffRef);
   const toolsFlag = flagStr(args2, "tools");
   const toolsAutoSkipped = scopedScan && toolsFlag === void 0 && !flagBool(args2, "no-tools");
@@ -23427,7 +23478,7 @@ async function runScan(args2) {
   const useDocker = flagBool(args2, "docker");
   const offline = flagBool(args2, "offline");
   const sbomResult = skipTools ? void 0 : generateSbom(repo, out2);
-  const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path });
+  const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path, pruned: prune });
   const merged = correlate([
     ...taintFindings,
     ...sinkCand.findings,

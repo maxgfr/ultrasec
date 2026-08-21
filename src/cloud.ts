@@ -189,9 +189,10 @@ function isEgressRule(ls: Line[], line: number): boolean {
 }
 
 /** Audit a repo for cloud / K8s / IaC misconfiguration. Returns candidates. */
-export function auditCloud(repo: string): Finding[] {
+export function auditCloud(repo: string, prune?: (rel: string) => boolean): Finding[] {
   const out: Finding[] = [];
   for (const wf of walk(repo)) {
+    if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
     if (!SCAN.has(ext)) continue;
     const content = readText(wf.abs);

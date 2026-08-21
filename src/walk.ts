@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, lstatSync, statSync, realpathSync, type Dirent } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import { byStr } from "./util.js";
+import { isIgnored as engineIsIgnored, parseGitignore as engineParseGitignore, type IgnoreRule as EngineIgnoreRule } from "./vendor/codeindex-engine.mjs";
 
 // Directories never worth scanning for a security audit (vendored code, build
 // output, VCS internals). Kept conservative + deterministic.
@@ -63,6 +64,75 @@ export interface WalkResult {
 // non-slash char), and a trailing `/` (match the dir and everything under it).
 // Anchored to the repo-relative POSIX path. `**/x` matches `x` at any depth
 // (including the root), mirroring .gitignore / Semgrep conventions.
+/** Options for `buildPruneMatcher` — the prune half of the walk options, which
+ *  is all that is meaningful for a path the walker never produced. */
+export interface PruneOptions {
+  gitignore?: boolean;
+  exclude?: string[];
+}
+
+/**
+ * One predicate for "the walk would have pruned this path", reusable by anything
+ * that produces repo-relative paths of its own — above all the external
+ * scanners, which get the raw repo bind-mounted and have never seen `--gitignore`.
+ *
+ * Built from the VENDORED ENGINE's `parseGitignore`/`isIgnored`, not from the
+ * local pair in this file, and deliberately so: the engine honours nested
+ * `.gitignore` files while the local `walkWithMeta` reads only the root's. A
+ * filter that disagreed with the walker about what is ignored would replace one
+ * inconsistency with a subtler one.
+ *
+ * Returns `undefined` when nothing would be pruned, so callers can skip the work
+ * entirely and stay byte-identical to the un-pruned path.
+ */
+export function buildPruneMatcher(root: string, opts: PruneOptions): ((rel: string) => boolean) | undefined {
+  const excludeRes = opts.exclude?.length ? opts.exclude.map(globToRe) : undefined;
+  const rules: EngineIgnoreRule[] = [];
+  if (opts.gitignore) {
+    const visit = (dir: string, baseRel: string, depth: number): void => {
+      if (depth > GITIGNORE_MAX_DEPTH) return;
+      let entries: Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return; // unreadable directory: not a reason to fail the audit
+      }
+      if (entries.some((e) => e.isFile() && e.name === ".gitignore")) {
+        try {
+          rules.push(...engineParseGitignore(readFileSync(join(dir, ".gitignore"), "utf8"), baseRel));
+        } catch {
+          /* unreadable .gitignore — the rest still applies */
+        }
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || DEFAULT_IGNORE_DIRS.has(e.name)) continue;
+        visit(join(dir, e.name), baseRel ? `${baseRel}/${e.name}` : e.name, depth + 1);
+      }
+    };
+    visit(root, "", 0);
+  }
+  if (!excludeRes && !rules.length) return undefined;
+  return (rel: string): boolean => {
+    if (excludeRes?.some((re) => re.test(rel))) return true;
+    if (!rules.length) return false;
+    // git ignores everything UNDER an ignored directory, and a `data/` rule
+    // matches the directory, not the files in it. The walker gets this for free
+    // by testing each directory as it descends and never entering an ignored
+    // one; a path-only matcher has to walk the ancestors itself. Ancestors are
+    // tested first because git will not let a negation re-include a file whose
+    // parent directory is excluded.
+    let at = -1;
+    while ((at = rel.indexOf("/", at + 1)) !== -1) {
+      if (engineIsIgnored(rules, rel.slice(0, at), true)) return true;
+    }
+    return engineIsIgnored(rules, rel, false);
+  };
+}
+
+/** How deep to look for nested `.gitignore` files. Generous — a monorepo keeps
+ *  one per package — but bounded, so a pathological tree cannot stall a scan. */
+const GITIGNORE_MAX_DEPTH = 8;
+
 /**
  * Expand brace alternation — `a/{x,y}.ts` → `["a/x.ts", "a/y.ts"]` — into the
  * plain globs `globToRe` understands. Nested braces expand recursively; an

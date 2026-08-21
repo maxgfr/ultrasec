@@ -122,7 +122,11 @@ node scripts/ultrasec.mjs scan --repo . --scope <dir> --merge --resume --out .ul
 node scripts/ultrasec.mjs scan --repo . --diff origin/main --merge --resume --out .ultrasec  # incremental: only changed files + reverse-deps
 ```
 
-`--scope`/`--include`/`--exclude`/`--max-files`/`--gitignore` prune the walk;
+`--scope`/`--include`/`--exclude`/`--max-files`/`--gitignore` prune the walk —
+and `--gitignore`/`--exclude` prune the whole run, not just the taint graph: the
+always-on config/auth/cloud detectors and the external scanners' results honour
+the same ignore set (nested `.gitignore` files included), so an ignored path
+cannot come back in through a tool that had the raw repo bind-mounted;
 `--budget quick|standard|thorough` (and `--max-candidates`/`--max-depth`)
 rank-then-cap candidates (truncation is reported, never silent); `--merge` folds a
 scoped pass into one dossier (preserving prior verdicts); `--resume` reuses a

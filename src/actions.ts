@@ -206,11 +206,11 @@ function hit(rel: string, line: number, v: ActionsVector, evidence: string): Fin
  * risk from the same workflow on a public one, and only the auditor knows which
  * this is.
  */
-export function auditAgenticWorkflows(repo: string): Finding[] {
+export function auditAgenticWorkflows(repo: string, prune?: (rel: string) => boolean): Finding[] {
   const findings: Finding[] = [];
   const files = walk(repo)
     .map((f) => f.rel)
-    .filter((rel) => WORKFLOW.test(rel));
+    .filter((rel) => WORKFLOW.test(rel) && !prune?.(rel));
 
   for (const rel of files) {
     const content = readText(join(repo, rel));

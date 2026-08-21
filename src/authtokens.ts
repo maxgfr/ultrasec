@@ -253,9 +253,10 @@ function scanOAuthStatePkce(rel: string, content: string, out: Finding[]): void 
 }
 
 /** Audit a repo for authentication-token weaknesses. Returns candidates. */
-export function auditAuthTokens(repo: string): Finding[] {
+export function auditAuthTokens(repo: string, prune?: (rel: string) => boolean): Finding[] {
   const out: Finding[] = [];
   for (const wf of walk(repo)) {
+    if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
     if (!CODE.has(ext)) continue;
     const content = readText(wf.abs);

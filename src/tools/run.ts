@@ -32,6 +32,18 @@ export interface RunContext {
    * on one id, and every citation points at a file the repo root doesn't have.
    */
   workspace?: string;
+  /**
+   * "The walk would have pruned this path." External scanners get the RAW repo
+   * bind-mounted (`docker run -v <repo>:/work`) and have never seen
+   * `--gitignore`/`--exclude`, so a scan that pruned 1.1 GB of vendored data
+   * from its own walk still shipped 51 findings out of it. Applied to results
+   * rather than to argv because no adapter takes an exclude argument and only
+   * one uses the explicit-file seam — result-side filtering is total and costs
+   * one call.
+   *
+   * Absent ⇒ nothing is pruned, byte-identical to before this field existed.
+   */
+  pruned?: (rel: string) => boolean;
 }
 
 export interface ToolAdapter {
@@ -159,6 +171,25 @@ export function relativizeFindings(findings: Finding[], base: string): Finding[]
 }
 
 /**
+ * Drop findings whose cited location the walk would have pruned. Runs right
+ * after `relativizeFindings`, the one point every external-tool finding passes
+ * through with repo-relative paths, native and docker alike.
+ *
+ * A finding is judged on the location it CITES (`sink`, else `source`). A
+ * finding with no location at all — a dependency advisory keyed on a package
+ * rather than a file — is never pruned: there is no path to test, and silently
+ * losing a CVE because a path filter had nothing to say about it would be a far
+ * worse bug than the one being fixed.
+ */
+export function prunePaths(findings: Finding[], pruned: (rel: string) => boolean): { findings: Finding[]; dropped: number } {
+  const kept = findings.filter((f) => {
+    const at = f.sink?.file ?? f.source?.file;
+    return !at || !pruned(at);
+  });
+  return { findings: kept, dropped: findings.length - kept.length };
+}
+
+/**
  * Build the args for an adapter, appending enumerated file targets when the
  * adapter scans explicit files. Returns null when enumeration yields nothing
  * (the runner then records a graceful "no target files" skip).
@@ -254,7 +285,7 @@ function runDocker(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
   const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
   const args = ["run", "--rm", "--pull", "always", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
   const { stdout, failed, err } = exec("docker", args, repo, adapter.stderr);
-  return finish(adapter, repo, stdout, failed, err, true);
+  return finish(adapter, repo, stdout, failed, err, true, ctx);
 }
 
 function finish(
@@ -270,8 +301,14 @@ function finish(
   try {
     // Normalize paths to repo-relative: strip /work (docker) or the repo dir (native).
     const base = docker ? MOUNT : repo;
-    const findings = relativizeFindings(adapter.parse(stdout, repo, ctx), base);
-    return { name: adapter.name, ran: true, ok: true, findings, note: `${findings.length} finding(s)${docker ? " (docker)" : ""}` };
+    const relativized = relativizeFindings(adapter.parse(stdout, repo, ctx), base);
+    // …then apply the SAME prune the walk applied, so `--gitignore` means one
+    // thing across the whole run. The count is reported, not swallowed: the
+    // status note has to describe what shipped, or a filtered run reads as a
+    // quiet one.
+    const { findings, dropped } = ctx?.pruned ? prunePaths(relativized, ctx.pruned) : { findings: relativized, dropped: 0 };
+    const note = `${findings.length} finding(s)${docker ? " (docker)" : ""}${dropped ? ` · ${dropped} pruned (ignored paths)` : ""}`;
+    return { name: adapter.name, ran: true, ok: true, findings, note };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${(e as Error).message}` };
   }
@@ -294,6 +331,9 @@ export interface OrchestrateOptions {
   offline?: boolean;
   /** Absolute path of a CycloneDX SBOM generated this run, if any. */
   sbom?: string;
+  /** "The walk pruned this path" — forwarded into the per-run RunContext so a
+   *  scanner's results honour `--gitignore`/`--exclude` like the walk does. */
+  pruned?: (rel: string) => boolean;
 }
 
 /**
@@ -307,7 +347,7 @@ export function orchestrate(adapters: ToolAdapter[], repo: string, opts: Orchest
   let selected = opts.which?.length ? adapters.filter((a) => opts.which!.includes(a.name)) : adapters;
   if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
 
-  const ctx: RunContext = { offline: opts.offline, sbom: opts.sbom };
+  const ctx: RunContext = { offline: opts.offline, sbom: opts.sbom, pruned: opts.pruned };
   const results: ToolRunResult[] = [];
   const all: Finding[] = [];
   for (const a of selected) {
