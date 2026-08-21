@@ -18,7 +18,9 @@ export const VERSION = "1.36.0";
 // reach the entry line?) — ranking signals, not filters, so older dossiers rank
 // exactly as before; plus optional `brocard`, the named ground for a refutation.
 // All three additive + optional (back-compat).
-// 8: manifest gained optional `passes` (which opt-in scan passes actually ran).
+// 8: manifest gained optional `passes` (which opt-in scan passes actually ran)
+// and `downgraded` (findings de-prioritized as noise-by-construction, with the
+// reason and count, so a suppressed class is never silent).
 // Additive + optional — older dossiers omit it, and a consumer that can't tell
 // "flag not passed" from "flag passed, zero results" falls back to the old
 // advice, byte-identical to before.
@@ -342,6 +344,12 @@ export interface Manifest {
     /** `scan --blame` (git provenance on every finding). */
     blame?: boolean;
   };
+  /** Findings de-prioritized as noise BY CONSTRUCTION, with the reason and how
+   *  many. The engine's rule is that nothing disappears quietly: a class that
+   *  cannot be a real finding (a secret inside a file that is ciphertext by
+   *  design) is pushed down the report, and the run still says how many and why.
+   *  Additive/optional — absent when nothing was downgraded. */
+  downgraded?: { reason: string; count: number }[];
   /** Basename of the CycloneDX SBOM generated this run (`src/tools/sbom.ts`), a
    *  dossier deliverable in its own right and the input grype/package-checker
    *  prefer over re-walking the tree. Additive/optional; older dossiers and

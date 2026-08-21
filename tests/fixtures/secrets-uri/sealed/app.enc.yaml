@@ -1,0 +1,4 @@
+db_password: ENC[AES256_GCM,data:Zm9vYmFy,iv:YmFy,tag:cXV4,type:str]
+sops:
+    kms: []
+    lastmodified: "2024-01-01T00:00:00Z"

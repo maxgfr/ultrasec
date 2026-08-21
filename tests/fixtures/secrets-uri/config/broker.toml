@@ -1,0 +1,2 @@
+[broker]
+url = "amqp://svc_ingest:R4bb1tHutch99@broker.internal:5672/prod"

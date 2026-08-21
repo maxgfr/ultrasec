@@ -10,6 +10,7 @@ import { auditAgenticWorkflows } from "../actions.js";
 import { auditWebConfig } from "../webconfig.js";
 import { auditAuthTokens } from "../authtokens.js";
 import { auditCloud } from "../cloud.js";
+import { auditSecrets, downgradeEncryptedAtRest } from "../secrets.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
 import { loadScanCache, saveScanCache } from "../cache.js";
@@ -179,6 +180,14 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // into it via the correlator when present. Grounded [file:line], category config.
   const cloudFindings = auditCloud(repo);
 
+  // Credentials embedded in connection strings (`scheme://user:secret@host`),
+  // including — especially — the ones whose NEIGHBOURING components are
+  // templated. `postgresql://$(user):<literal>@$(host)/db` reads as
+  // configuration rather than as a credential, which is how it survives review
+  // and why entropy/format heuristics skip it; gitleaks and trufflehog both
+  // missed exactly that on a public repo. Always on, grounded [file:line].
+  const credentialFindings = auditSecrets(repo);
+
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
   // pass `--tools auto` to force them.
@@ -212,13 +221,21 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...webConfigFindings,
     ...authTokenFindings,
     ...cloudFindings,
+    ...credentialFindings,
     ...tool.findings,
   ]);
+
+  // Secret findings inside files that are ciphertext BY DESIGN — SealedSecrets,
+  // SOPS, Ansible Vault, age, git-crypt. On a real k8s repo that class was 41 of
+  // the secret findings and none of them could be a leak. De-prioritized, never
+  // dropped: the count is recorded in the manifest below so a suppressed class
+  // is still something the run can account for.
+  const { findings: deNoised, downgraded: encryptedDowngrades } = downgradeEncryptedAtRest(merged, repo);
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
   const enrich = !(flagBool(args, "no-enrich") || offline);
-  const { findings: enriched, note: riskNote } = await enrichFindings(merged, { enabled: enrich, context: loadContextDoc(out) });
+  const { findings: enriched, note: riskNote } = await enrichFindings(deNoised, { enabled: enrich, context: loadContextDoc(out) });
 
   // Provenance (opt-in `--blame`/`--provenance`): deterministic git-blame author/
   // date + CODEOWNERS owner per finding — a triage signal, never a suppression
@@ -250,6 +267,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     // Which opt-in passes ran, so a later stage can distinguish "the flag was
     // never passed" from "the flag was passed and the pass found nothing".
     passes: { sinks: sinksOn, logHygiene: logHygieneOn, blame: blameOn },
+    ...(encryptedDowngrades ? { downgraded: [{ reason: "encrypted-at-rest", count: encryptedDowngrades }] } : {}),
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
     ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),
@@ -294,6 +312,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
           diff: diffNote,
           sinks: sinksOn ? sinkCand.findings.length : undefined,
           logHygiene: logHygieneOn ? hygieneCand.findings.length : undefined,
+          downgraded: fm.downgraded,
           merged: mergedNote.trim() || undefined,
         },
         null,
@@ -316,6 +335,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""}${logHygieneOn ? ` + ${hygieneCand.findings.length} log-hygiene` : ""} + ${tool.findings.length} tool this pass`,
   );
   println(`  ${riskNote}`);
+  for (const d of fm.downgraded ?? []) {
+    println(`  ${d.count} secret finding(s) de-prioritized to info — ${d.reason} (ciphertext by design; the key, not the blob, is the thing to check)`);
+  }
   if (truncation?.candidates) {
     println(
       `  ⚠️  showing top ${maxCandidates} of ${truncation.total} candidates — ${truncation.candidates} not shown. Raise --max-candidates or narrow --scope.`,

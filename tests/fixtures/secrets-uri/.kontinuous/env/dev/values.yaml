@@ -1,0 +1,6 @@
+postgres:
+  env:
+    - name: PGURL
+      value: "postgresql://$(username):$(password)@$(host):$(port)/admin"
+    - name: CACHE
+      value: "redis://user:${REDIS_PASSWORD}@cache:6379"

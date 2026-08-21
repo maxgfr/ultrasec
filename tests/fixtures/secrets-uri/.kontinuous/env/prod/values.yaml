@@ -1,0 +1,4 @@
+postgres:
+  env:
+    - name: PGURL
+      value: "postgresql://$(username):Kx7pQ2mLw9v@$(host):$(port)/admin?sslmode=require"
