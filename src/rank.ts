@@ -62,10 +62,7 @@ export function severityRank(s: Severity | undefined | null): number {
  */
 export function compareFindings(a: Finding, b: Finding): number {
   return (
-    statusRank(a.status) - statusRank(b.status) ||
-    (b.risk ?? -1) - (a.risk ?? -1) ||
-    severityRank(a.severity) - severityRank(b.severity) ||
-    byStr(a.id, b.id)
+    statusRank(a.status) - statusRank(b.status) || (b.risk ?? -1) - (a.risk ?? -1) || severityRank(a.severity) - severityRank(b.severity) || byStr(a.id, b.id)
   );
 }
 

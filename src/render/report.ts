@@ -23,7 +23,6 @@ function badgeOf(s: Severity | undefined | null): string {
   return (s && BADGE[s]) || "—";
 }
 
-
 /** Risk / EPSS / KEV / verified annotations, when present. */
 function riskTag(f: Finding): string {
   const parts: string[] = [];

@@ -109,6 +109,12 @@ class MockRunner implements AgentRunner {
         task.outPath,
         JSON.stringify(items.map((i) => ({ seedId: i.seedId, rootCause: "shared helper", variants: [], regressionRule: "- id: x" }))),
       );
+    } else if (stage === "guards") {
+      // Mark every enumerated handler `guarded` — the fixture's routes are not
+      // what this test is about, and an `unguarded` verdict would add findings
+      // that shift the counts the stage-order assertions below rely on.
+      const items = JSON.parse(readFileSync(join(task.run, "GUARDS.todo.json"), "utf8")) as { id: string }[];
+      writeFileSync(task.outPath, JSON.stringify(items.map((i) => ({ id: i.id, verdict: "guarded" }))));
     } else if (stage === "verify") {
       const items = JSON.parse(readFileSync(join(task.run, "VERIFY.todo.json"), "utf8")) as { id: string }[];
       writeFileSync(task.outPath, JSON.stringify(items.map((i) => ({ id: i.id, verdict: this.verifyVerdict }))));
@@ -159,6 +165,9 @@ describe("runPipeline — powered", () => {
       "emit:triage",
       "fill:triage",
       "apply:triage",
+      "emit:guards",
+      "fill:guards",
+      "apply:guards",
       "emit:investigate",
       "fill:investigate",
       "apply:investigate",
@@ -182,7 +191,7 @@ describe("runPipeline — powered", () => {
       "render",
     ]);
     expect(mock.calls).toContain("verify");
-    expect(res.externalCalls).toBe(9); // one per stage
+    expect(res.externalCalls).toBe(ALL_STAGES.length); // one per stage
   });
 
   it("cross-check: a high/critical disagreement on verify escalates to needs-human", () => {

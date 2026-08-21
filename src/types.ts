@@ -206,7 +206,7 @@ export function normalizeCategory(value: unknown): { category: Category; folded:
     .toLowerCase()
     .replace(/[\s_]+/g, "-");
   if ((CATEGORIES as readonly string[]).includes(key)) return { category: key as Category, folded: key !== value };
-  const alias = Object.prototype.hasOwnProperty.call(CATEGORY_ALIASES, key) ? CATEGORY_ALIASES[key] : undefined;
+  const alias = Object.hasOwn(CATEGORY_ALIASES, key) ? CATEGORY_ALIASES[key] : undefined;
   return alias ? { category: alias, folded: true } : undefined;
 }
 
@@ -599,6 +599,17 @@ export interface Manifest {
     blame?: boolean;
     /** `scan --include-tests` (test-path candidates kept at full severity). */
     includeTests?: boolean;
+    /**
+     * `ultrasec guards` (the entry-point × guard matrix) ran against this run.
+     *
+     * It is what lets `coverage` stop describing CWE-306 and CWE-862 as
+     * "judgment — not enumerated". Missing authorization has no line to
+     * taint-trace, so before the matrix nothing in the engine could reach it,
+     * and the honest coverage answer was that nobody had looked. Once the matrix
+     * has run, every request handler HAS been enumerated and the remaining
+     * question is which of them the auditor adjudicated.
+     */
+    guards?: boolean;
   };
   /** Findings de-prioritized as noise BY CONSTRUCTION, with the reason and how
    *  many. The engine's rule is that nothing disappears quietly: a class that

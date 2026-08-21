@@ -27,7 +27,12 @@ const MAX_SCAFFOLD_ENTRIES = 80;
 
 // Auth / authorization markers, across ecosystems. Recall-oriented: a match is a
 // CANDIDATE protection site for the agent to confirm, not proof a route is guarded.
-const AUTH_RE =
+//
+// Exported as `AUTH_MARKER` because the guard matrix (`guards.ts`) asks the other
+// half of the same question — which of these markers is in scope for which entry
+// point. Two copies of this vocabulary would let the context brief and the matrix
+// disagree about what a protection even looks like.
+export const AUTH_MARKER =
   /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
 
 // Dependency name → friendly framework label (package.json deps/devDeps keys).
@@ -392,7 +397,7 @@ export function buildContextScaffold(repo: string, scan: RepoScan, surface: Atta
     const lines = readText(join(repo, fileScan.rel)).split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
-      const am = AUTH_RE.exec(line);
+      const am = AUTH_MARKER.exec(line);
       if (am) authMiddleware.push({ file: fileScan.rel, line: i + 1, hint: am[0] });
       for (const rule of SANITIZERS) {
         if (!appliesTo(rule.languages, spec.id)) continue;

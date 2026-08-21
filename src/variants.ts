@@ -226,9 +226,7 @@ export function parseVariantResults(raw: string): ParseResult<VariantResult> {
   }
   if (rows.length === 0 && (arr as unknown[]).length > 0) {
     const detail = dropped.map((d) => `row ${d.index}: ${d.reason}`).join("; ");
-    throw new Error(
-      `variant results: all ${(arr as unknown[]).length} row(s) were unusable — nothing folded (fail-closed)${detail ? ` — ${detail}` : ""}`,
-    );
+    throw new Error(`variant results: all ${(arr as unknown[]).length} row(s) were unusable — nothing folded (fail-closed)${detail ? ` — ${detail}` : ""}`);
   }
   // Presence-gated, like `parseDiscoveries`: no fold ⇒ shape-identical to before.
   return { rows, dropped, ...(normalized.length ? { normalized } : {}) };
