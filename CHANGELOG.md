@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.38.0](https://github.com/maxgfr/ultrasec/compare/v1.37.0...v1.38.0) (2026-08-21)
+
+
+### Bug Fixes
+
+* **catalog:** stop three rules answering a question they were not asked ([d7981bd](https://github.com/maxgfr/ultrasec/commit/d7981bd871d92f824723f2ebcd02a0837441b659)), closes [#13](https://github.com/maxgfr/ultrasec/issues/13)
+* **check:** grade a history-scanned citation against its own commit, not HEAD ([1f3c631](https://github.com/maxgfr/ultrasec/commit/1f3c6311069ab98e420f32220032723f943079cc))
+* **context:** detect the stack from declared workspaces, not only a depth-3 walk ([cdc892b](https://github.com/maxgfr/ultrasec/commit/cdc892b472de543eb00a1d4596ecdf5697b6b969)), closes [#11](https://github.com/maxgfr/ultrasec/issues/11)
+* **context:** tell the shipped attack surface from the test harness in the brief ([d32827f](https://github.com/maxgfr/ultrasec/commit/d32827f574e240118b8aa7ed1fe92bfe3fa2466f)), closes [#12](https://github.com/maxgfr/ultrasec/issues/12)
+* **dossier:** stop reprinting the whole trust model before every candidate ([fddc785](https://github.com/maxgfr/ultrasec/commit/fddc785f36ef4e5360b6cc1961ef67ea0fc569f7)), closes [#15](https://github.com/maxgfr/ultrasec/issues/15)
+* **investigate:** fold a vulnerability-class name onto the category vocabulary ([7c9d987](https://github.com/maxgfr/ultrasec/commit/7c9d987431b7e0a892b2ea2c0a91206cd82c89a9))
+* **noise:** classify history findings too, and group the families in DOSSIER.md ([1d815a3](https://github.com/maxgfr/ultrasec/commit/1d815a32aeae9c580b0d88e5bacb97e05cba9d40)), closes [#12](https://github.com/maxgfr/ultrasec/issues/12) [#12](https://github.com/maxgfr/ultrasec/issues/12) [#17](https://github.com/maxgfr/ultrasec/issues/17)
+* **store:** stop --merge erasing the ground a refutation stands on ([537abf1](https://github.com/maxgfr/ultrasec/commit/537abf1955bcc2fce0d71dc22df21c7683033227))
+* **verify:** emit a delta worklist, and never re-decide findings in silence ([a0f382f](https://github.com/maxgfr/ultrasec/commit/a0f382f2107ab15a0a8ff3cf3c422fd1194313bd)), closes [#14](https://github.com/maxgfr/ultrasec/issues/14)
+* **verify:** make --apply idempotent instead of restating every verdict ([fbfca8b](https://github.com/maxgfr/ultrasec/commit/fbfca8ba7a1360146978209cabc4e640cf01f78c))
+
+
+### Features
+
+* **noise:** a document id is not a credential, and document the classes ([b115435](https://github.com/maxgfr/ultrasec/commit/b115435134da3e3ce174fcb193480047037b19d9)), closes [#17](https://github.com/maxgfr/ultrasec/issues/17)
+* **noise:** a line that DESCRIBES a dangerous pattern is not a vulnerable site ([0f5c9b3](https://github.com/maxgfr/ultrasec/commit/0f5c9b31916c79eb611a432059449583df8c0a71))
+* **scan:** de-prioritize noise by construction, and make the ground fillable ([3df413e](https://github.com/maxgfr/ultrasec/commit/3df413ecfd0a2f982dba3d91c55258c856848fd5)), closes [#12](https://github.com/maxgfr/ultrasec/issues/12) [#16](https://github.com/maxgfr/ultrasec/issues/16) [#17](https://github.com/maxgfr/ultrasec/issues/17)
+* **taint:** show whether the value ARRIVES, and let the reader decide ([ae50d4a](https://github.com/maxgfr/ultrasec/commit/ae50d4a19dfbdb0ab43c1fe693913c10a3b8261d)), closes [#13](https://github.com/maxgfr/ultrasec/issues/13) [#13](https://github.com/maxgfr/ultrasec/issues/13)
+
 # [1.37.0](https://github.com/maxgfr/ultrasec/compare/v1.36.0...v1.37.0) (2026-08-21)
 
 
