@@ -24,7 +24,12 @@ export const VERSION = "1.37.0";
 // Additive + optional — older dossiers omit it, and a consumer that can't tell
 // "flag not passed" from "flag passed, zero results" falls back to the old
 // advice, byte-identical to before.
-export const SCHEMA_VERSION = 8;
+// 9: findings gained optional `noise` — the noise-by-construction class a
+// finding was DEMOTED under (never dismissed): ciphertext-by-design, a taint
+// path confined to the test harness, a vendored build artifact. Additive +
+// optional; it is re-derived by every scan rather than authored, and it carries
+// a suggested refutation ground into the triage/verify worklists.
+export const SCHEMA_VERSION = 9;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -168,7 +173,10 @@ export const CATEGORY_ALIASES: Readonly<Record<string, Category>> = {
  */
 export function normalizeCategory(value: unknown): { category: Category; folded: boolean } | undefined {
   if (typeof value !== "string") return undefined;
-  const key = value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+  const key = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-");
   if ((CATEGORIES as readonly string[]).includes(key)) return { category: key as Category, folded: key !== value };
   const alias = Object.prototype.hasOwnProperty.call(CATEGORY_ALIASES, key) ? CATEGORY_ALIASES[key] : undefined;
   return alias ? { category: alias, folded: true } : undefined;
@@ -209,6 +217,36 @@ export const BROCARDS = [
 export type Brocard = (typeof BROCARDS)[number];
 
 /** One-line gloss per brocard, rendered next to a dismissal in the report. */
+/**
+ * Noise-by-construction classes: shapes where the match is REAL but the code it
+ * sits in cannot carry the risk the finding describes.
+ *
+ * Kept here with the other closed vocabularies because `Finding.noise` is part
+ * of the on-disk schema; the rules that decide membership live in `noise.ts`.
+ */
+export const NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact"] as const;
+export type NoiseClass = (typeof NOISE_CLASSES)[number];
+
+/**
+ * The named ground a dismissal on each basis stands on — all of them existing
+ * BROCARDS, never new ones.
+ *
+ * A class name says how the machine recognised the shape; a brocard says why the
+ * dismissal is sound. Adding "test-only" as a ground would conflate the two and
+ * quietly grow the vocabulary of things an auditor may assert without argument.
+ * This table is the argument, and a reviewer disagrees with a row in it.
+ */
+export const NOISE_GROUND: Readonly<Record<NoiseClass, Brocard>> = {
+  // Ciphertext in a ciphertext file is the format working as written.
+  "encrypted-at-rest": "standard-behavior",
+  // "The path is not reached in any real deployment" — a test harness is not a
+  // deployment. This is `outside-usage` almost verbatim.
+  "test-only-path": "outside-usage",
+  // A byte-identical copy of a published upstream release: no attacker can
+  // complete "with X I can Y to obtain Z" against a blob everyone already has.
+  "vendored-artifact": "no-threat-model",
+};
+
 export const BROCARD_SUMMARY: Record<Brocard, string> = {
   "no-threat-model": "no coherent attacker: the claim cannot complete “an attacker with X can Y to obtain Z”",
   "exploit-from-the-heavens": "the capability required already equals or exceeds what the exploit grants",
@@ -366,6 +404,16 @@ export interface Finding {
    * see which dismissals were argued and which were merely asserted.
    */
   brocard?: Brocard;
+  /**
+   * The noise-by-construction class this finding was DEMOTED under — never
+   * dismissed. Set by the scan's de-noising pass, not authored, and re-derived
+   * on every scan, so it needs no merge preservation.
+   *
+   * It carries a suggested refutation ground (`NOISE_GROUND`) into the triage
+   * and verify worklists, which is what lets forty identical test-harness
+   * candidates cost one argued adjudication instead of forty restatements.
+   */
+  noise?: NoiseClass;
   /** Concrete trigger path / proof-of-exploit sketch, once reasoned. */
   exploitPath?: string;
   /** Deterministic git-blame / CODEOWNERS provenance (opt-in `--blame`). Evidence only. */
@@ -472,6 +520,8 @@ export interface Manifest {
     logHygiene?: boolean;
     /** `scan --blame` (git provenance on every finding). */
     blame?: boolean;
+    /** `scan --include-tests` (test-path candidates kept at full severity). */
+    includeTests?: boolean;
   };
   /** Findings de-prioritized as noise BY CONSTRUCTION, with the reason and how
    *  many. The engine's rule is that nothing disappears quietly: a class that

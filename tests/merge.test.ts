@@ -52,9 +52,7 @@ describe("mergeDossier", () => {
     // Both were missing from the preserve-list, so a `scan --merge` erased every
     // named ground — after which `check --semantic` reported those dismissals as
     // naming no ground, blaming the auditor for the tool's own data loss.
-    const prev = dossier([
-      finding("a", { status: "dismissed", verdict: "refuted", brocard: "outside-usage", fixedIn: "abc1234" }),
-    ]);
+    const prev = dossier([finding("a", { status: "dismissed", verdict: "refuted", brocard: "outside-usage", fixedIn: "abc1234" })]);
     const next = dossier([finding("a", { status: "open" })], ["src"]);
     const a = mergeDossier(prev, next).findings.find((f) => f.id === "a")!;
     expect(a.brocard).toBe("outside-usage");

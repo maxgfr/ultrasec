@@ -205,7 +205,7 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     // into a hard failure would push adjudicators to pick a ground to get green.
     if (unargued.length > 0)
       messages.push(
-        `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", …" : ""}) — set \`brocard\` so the refutation can be reviewed: references/dismissal-brocards.md.`,
+        `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", …" : ""}) — set the verdict's \`brocard\` field so the refutation can be reviewed. A prose \`note\` is not read as a ground, however carefully argued: references/dismissal-brocards.md.`,
       );
   }
   if (ok)

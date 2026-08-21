@@ -126,7 +126,9 @@ describe("investigate --apply surfaces every refused row instead of dropping it"
     // Folded, never silently: each rewrite is named.
     expect(out).toMatch(/category "xss" folded to "taint"/);
     expect(out).toMatch(/category "dos" folded to "other"/);
-    const cats = loadDossier(run).findings.filter((f) => f.tool === "ultrasec-ai").map((f) => f.category);
+    const cats = loadDossier(run)
+      .findings.filter((f) => f.tool === "ultrasec-ai")
+      .map((f) => f.category);
     expect(cats).toContain("taint");
     expect(cats).toContain("other");
   });

@@ -56,6 +56,39 @@ describe("shard", () => {
   });
 });
 
+describe("buildWorklist — the brocard field exists in the file being filled", () => {
+  // The defect: the vocabulary was described in the Markdown brief while the
+  // JSON an adjudicator actually fills had no `brocard` key. Grounds went into
+  // `note`, and `check --semantic` reported every one as unargued — 96
+  // dismissals, 0 brocards, on the first real audit.
+  it("emits brocard: null on every item", () => {
+    const items = buildWorklist(dossier([finding("a", "high")]));
+    expect(items[0]).toHaveProperty("brocard", null);
+  });
+
+  it("carries a machine proposal for a demoted finding — without filling the verdict", () => {
+    const f = { ...finding("a", "low"), noise: "test-only-path" as const };
+    const item = buildWorklist(dossier([f]))[0]!;
+    expect(item.proposed).toEqual({
+      class: "test-only-path",
+      ground: "outside-usage",
+      why: expect.stringContaining("test path"),
+    });
+    // The whole point: a suggestion, not an adjudication.
+    expect(item.verdict).toBeNull();
+    expect(item.brocard).toBeNull();
+  });
+
+  it("offers no proposal for an ordinary finding", () => {
+    expect(buildWorklist(dossier([finding("a", "high")]))[0]!.proposed).toBeUndefined();
+  });
+
+  it("the brief says a note is not a ground", () => {
+    const md = renderWorklistMd(buildWorklist(dossier([finding("a", "high")])));
+    expect(md).toMatch(/A prose `note` is not a ground/);
+  });
+});
+
 describe("buildWorklist — delta by default", () => {
   // A needs-human finding that already carries a verdict was READ and escalated
   // by someone. One without a verdict was escalated by another stage and has

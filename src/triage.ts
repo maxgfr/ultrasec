@@ -2,6 +2,7 @@ import type { Dossier } from "./store.js";
 import type { Finding, Status } from "./types.js";
 import { isHigh } from "./verify.js";
 import { byStr } from "./util.js";
+import { proposedFor, type ProposedAdjudication } from "./noise.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 
 // The cheap quick-dismiss fast-lane (Phase 4). A compact, code-free worklist of
@@ -23,6 +24,9 @@ export interface TriageItem {
   at: string;
   /** Filled by the agent. */
   verdict: TriageVerdict | null;
+  /** Machine-proposed ground for a noise-by-construction finding. A suggestion
+   *  to accept or refuse — never a filled-in verdict. */
+  proposed?: ProposedAdjudication;
 }
 
 export interface TriageInput {
@@ -43,7 +47,12 @@ export function buildTriageWorklist(dossier: Dossier): TriageItem[] {
     .filter((f) => f.status === "open")
     .slice()
     .sort((a, b) => byStr(a.id, b.id))
-    .map((f) => ({ id: f.id, severity: f.severity, category: f.category, title: f.title, at: citedAt(f), verdict: null }));
+    .map((f) => {
+      const item: TriageItem = { id: f.id, severity: f.severity, category: f.category, title: f.title, at: citedAt(f), verdict: null };
+      const proposed = proposedFor(f);
+      if (proposed) item.proposed = proposed;
+      return item;
+    });
 }
 
 export function renderTriageMd(items: TriageItem[], context?: string): string {

@@ -1,6 +1,7 @@
 import type { Dossier } from "./store.js";
 import { BROCARDS, VERDICTS, type Brocard, type Finding, type Status, type Verdict } from "./types.js";
 import { byStr, withStageNote } from "./util.js";
+import { proposedFor, type ProposedAdjudication } from "./noise.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 
 // The adversarial verification gate. The engine emits a claim↔evidence worklist;
@@ -24,7 +25,20 @@ export interface VerifyItem {
   /** Filled by the adjudicator. */
   verdict: Verdict | null;
   note: string;
+  /**
+   * Filled by the adjudicator on a `refuted` verdict — the named ground.
+   *
+   * Present as an explicit `null` because its ABSENCE was the defect: the
+   * vocabulary was described in the Markdown brief while the JSON an adjudicator
+   * actually fills had no slot for it, so grounds were written into `note` and
+   * `check --semantic` then reported every one of them as unargued. On the first
+   * real audit that was 96 dismissals and zero brocards.
+   */
+  brocard: Brocard | null;
   exploitPath?: string;
+  /** Machine-proposed ground for a noise-by-construction finding. A suggestion
+   *  to accept or refuse — never a filled-in verdict. */
+  proposed?: ProposedAdjudication;
   /** Upstream-agent signal (e.g. deepsec revalidation verdict) — a HINT shown to
    *  the adjudicator, never auto-applied. Absent unless `priorAnalysis` exists. */
   priorSignal?: string;
@@ -109,7 +123,10 @@ export function buildWorklist(dossier: Dossier, opts: WorklistOptions = {}): Ver
         files: [...files],
         verdict: null,
         note: "",
+        brocard: null,
       };
+      const proposed = proposedFor(f);
+      if (proposed) item.proposed = proposed;
       const pa = f.priorAnalysis;
       if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
       if (reOpened(f)) item.priorVerdict = f.verdict;
@@ -144,9 +161,11 @@ export function renderWorklistMd(items: VerifyItem[], context?: string, counts?:
   L.push(`> Be skeptical, but do NOT dismiss a high/critical finding unless you can`);
   L.push(`> positively **refute** it. Uncertain ⇒ leave it for a human.`);
   L.push("");
-  L.push(`On \`refuted\`, name the ground in \`brocard\` — one of:`);
+  L.push(`On \`refuted\`, name the ground in the item's \`brocard\` field — one of:`);
   L.push(BROCARDS.map((b) => `\`${b}\``).join(" · "));
   L.push("");
+  L.push(`A prose \`note\` is not a ground: \`check --semantic\` reads \`brocard\`, and a`);
+  L.push(`carefully-argued note in the wrong field still reports as an unargued dismissal.`);
   L.push(`Not proving something is not disproving it: a refutation you cannot name a ground for`);
   L.push(`is \`unsupported\`. See references/dismissal-brocards.md.`);
   L.push("");
@@ -165,6 +184,8 @@ export function renderWorklistMd(items: VerifyItem[], context?: string, counts?:
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
     L.push(`- claim: ${it.claim}`);
     if (it.priorSignal) L.push(`- signal (not a verdict — adjudicate yourself): ${it.priorSignal}`);
+    if (it.proposed)
+      L.push(`- proposed ground \`${it.proposed.ground}\` (${it.proposed.class}) — ${it.proposed.why}. Accept it or refuse it; it is not a verdict.`);
     if (it.priorVerdict) L.push(`- **re-opened** — an earlier pass ruled \`${it.priorVerdict}\` and escalated it. Not new work.`);
     L.push("");
   }

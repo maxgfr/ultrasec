@@ -107,7 +107,9 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
     println(`    Re-verifying an escalation is legitimate; doing it by accident is not. Pass --re-verdict to accept under --strict.`);
   }
   if (strict && res.reVerdicted.length > 0 && !reVerdictOk) {
-    eprintln(`ultrasec verify --apply: ${res.reVerdicted.length} already-adjudicated finding(s) re-verdicted under --strict — pass --re-verdict if that is intended.`);
+    eprintln(
+      `ultrasec verify --apply: ${res.reVerdicted.length} already-adjudicated finding(s) re-verdicted under --strict — pass --re-verdict if that is intended.`,
+    );
     return 1;
   }
   return surfaceDropped(parsed.dropped, strict, println);

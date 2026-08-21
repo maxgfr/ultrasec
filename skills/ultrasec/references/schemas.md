@@ -173,7 +173,9 @@ the `.md` brief always describes the full worklist.
     "verdict": null, "note": "", "priorSignal": "deepsec: true-positive (signal, not a verdict)" } ]
 ```
 
-You write an array of `{id, verdict, note?, exploitPath?, brocard?}`:
+You write an array of `{id, verdict, note?, exploitPath?, brocard?}`. The emitted
+`VERIFY.todo.json` carries `verdict: null`, `note: ""` **and `brocard: null`**, so every field you
+are expected to fill is visible in the file you are filling:
 
 ```json
 [ { "id": "7e51071c4783", "verdict": "supported",
@@ -187,6 +189,14 @@ You write an array of `{id, verdict, note?, exploitPath?, brocard?}`:
 `exploit-from-the-heavens` · `outside-usage` · `standard-behavior` · `documented-behavior` ·
 `cure-worse-than-disease` · `report-not-dispositive`. It is ignored on any other verdict, and an
 unrecognized name is dropped rather than failing the fold (a typo must not cost the batch).
+
+`brocard` is the only field read as a ground. A refutation argued at length in `note` still
+reports as unargued — on the first real-world audit that was 96 dismissals, 0 brocards, because
+the worklist offered a `note` field and no `brocard` field at all. Both are now emitted.
+
+Where the engine recognised a noise class it also emits `proposed: {class, ground, why}` on the
+item — a suggestion to accept or refuse, never a filled-in verdict. A pre-filled `verdict` would
+make copying the worklist to the apply file a passing adjudication.
 
 It is optional and never blocks: `check --semantic` simply **lists** the high/critical dismissals
 that name no ground, so a reviewer can see which refutations were argued. Making it a hard gate

@@ -121,3 +121,12 @@ describe("parseTriage", () => {
     expect(() => parseTriage('[{"id":"a","verdict":"bogus"},{"verdict":"noise"}]')).toThrow(/none usable/);
   });
 });
+
+describe("triage — machine proposals ride along, never pre-filled", () => {
+  it("carries the proposed ground on a demoted finding, with verdict still null", () => {
+    const demoted = { ...f("a", "low"), noise: "vendored-artifact" as const };
+    const item = buildTriageWorklist(dossier([demoted]))[0]!;
+    expect(item.proposed).toEqual({ class: "vendored-artifact", ground: "no-threat-model", why: expect.any(String) });
+    expect(item.verdict).toBeNull();
+  });
+});
