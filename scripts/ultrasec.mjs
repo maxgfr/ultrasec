@@ -865,7 +865,7 @@ function extractReexports(rel2, content, localSymbols) {
   const lang = /\.(ts|tsx|mts|cts)$/.test(rel2) ? "typescript" : "javascript";
   const out2 = [];
   const seen = /* @__PURE__ */ new Set();
-  const lineAt = (idx) => content.slice(0, idx).split(/\r?\n/).length;
+  const lineAt2 = (idx) => content.slice(0, idx).split(/\r?\n/).length;
   const localDeclOf = /* @__PURE__ */ new Map();
   for (const s of localSymbols) if (!localDeclOf.has(s.name)) localDeclOf.set(s.name, s);
   const scanned = blankComments(content);
@@ -889,7 +889,7 @@ function extractReexports(rel2, content, localSymbols) {
         name: name2,
         kind: decl?.kind ?? "reexport",
         file: rel2,
-        line: decl ? decl.line : lineAt(partAt),
+        line: decl ? decl.line : lineAt2(partAt),
         ...decl?.endLine !== void 0 ? { endLine: decl.endLine } : {},
         signature: from ? `export { ${name2} } from "${from}"` : `export { ${name2} }`,
         exported: true,
@@ -908,7 +908,7 @@ function extractReexports(rel2, content, localSymbols) {
       name: ns ?? `* (${from})`,
       kind: ns ? "reexport" : "reexport-all",
       file: rel2,
-      line: lineAt(m.index),
+      line: lineAt2(m.index),
       signature: `export * ${ns ? `as ${ns} ` : ""}from "${from}"`,
       exported: true,
       lang
@@ -17055,7 +17055,7 @@ var BROCARDS = [
   "cure-worse-than-disease",
   "report-not-dispositive"
 ];
-var NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact"];
+var NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact", "pattern-declaration"];
 var NOISE_GROUND = {
   // Ciphertext in a ciphertext file is the format working as written.
   "encrypted-at-rest": "standard-behavior",
@@ -17064,7 +17064,12 @@ var NOISE_GROUND = {
   "test-only-path": "outside-usage",
   // A byte-identical copy of a published upstream release: no attacker can
   // complete "with X I can Y to obtain Z" against a blob everyone already has.
-  "vendored-artifact": "no-threat-model"
+  "vendored-artifact": "no-threat-model",
+  // A line that DESCRIBES a dangerous pattern is data, not an operation: no
+  // attacker completes "with X I can Y to obtain Z" against a documentation
+  // string. Security tools, WAF signature sets and lint-rule packs all trip
+  // their own rules this way.
+  "pattern-declaration": "no-threat-model"
 };
 var BROCARD_SUMMARY = {
   "no-threat-model": "no coherent attacker: the claim cannot complete \u201Can attacker with X can Y to obtain Z\u201D",
@@ -20370,7 +20375,7 @@ function classifySourceScope(symbols, sourceLine, entryLine, units) {
   return srcSymbol === enclosingSymbolName(symbols, entryLine) ? "symbol" : "file";
 }
 var LOOKBEHIND = 3;
-function sanitizersAlongPath(path, sinkKind, lineAt) {
+function sanitizersAlongPath(path, sinkKind, lineAt2) {
   const out2 = [];
   const seen = /* @__PURE__ */ new Set();
   const sink = path[path.length - 1];
@@ -20378,7 +20383,7 @@ function sanitizersAlongPath(path, sinkKind, lineAt) {
     if (line < 1) return;
     const lang = langForFile(file);
     if (!lang) return;
-    const text = lineAt(file, line);
+    const text = lineAt2(file, line);
     if (!text) return;
     for (const note of findSanitizers(lang, text, sinkKind)) {
       const key = `${file}:${line}:${note}`;
@@ -20483,7 +20488,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
   const byRel = new Map(scan2.files.map((f) => [f.rel, f]));
   const contentCache = /* @__PURE__ */ new Map();
   const sourceCache = /* @__PURE__ */ new Map();
-  const lineCache = /* @__PURE__ */ new Map();
+  const lineCache2 = /* @__PURE__ */ new Map();
   const unitCache = /* @__PURE__ */ new Map();
   const content = (rel2) => {
     let c2 = contentCache.get(rel2);
@@ -20491,8 +20496,8 @@ function enumerateTaint(scan2, graph, opts = {}) {
     return c2;
   };
   const lines5 = (rel2) => {
-    let l = lineCache.get(rel2);
-    if (!l) lineCache.set(rel2, l = content(rel2).split(/\r?\n/));
+    let l = lineCache2.get(rel2);
+    if (!l) lineCache2.set(rel2, l = content(rel2).split(/\r?\n/));
     return l;
   };
   const sourcesOf = (rel2) => {
@@ -20621,10 +20626,10 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES2;
   const taken = /* @__PURE__ */ new Set();
   for (const f of covered) if (f.sink) taken.add(`${f.sink.file}:${f.sink.line}:${f.sink.kind ?? ""}`);
-  const lineCache = /* @__PURE__ */ new Map();
+  const lineCache2 = /* @__PURE__ */ new Map();
   const lines5 = (rel2) => {
-    let l = lineCache.get(rel2);
-    if (!l) lineCache.set(rel2, l = readText2(join33(scan2.repo, rel2)).split(/\r?\n/));
+    let l = lineCache2.get(rel2);
+    if (!l) lineCache2.set(rel2, l = readText2(join33(scan2.repo, rel2)).split(/\r?\n/));
     return l;
   };
   const findings = [];
@@ -20738,10 +20743,10 @@ function enclosingSymbol2(file, line) {
 }
 function enumerateSensitiveLogCandidates(scan2, opts = {}) {
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES3;
-  const lineCache = /* @__PURE__ */ new Map();
+  const lineCache2 = /* @__PURE__ */ new Map();
   const lines5 = (rel2) => {
-    let l = lineCache.get(rel2);
-    if (!l) lineCache.set(rel2, l = readText2(join34(scan2.repo, rel2)).split(/\r?\n/));
+    let l = lineCache2.get(rel2);
+    if (!l) lineCache2.set(rel2, l = readText2(join34(scan2.repo, rel2)).split(/\r?\n/));
     return l;
   };
   const findings = [];
@@ -21766,6 +21771,28 @@ var RULES17 = [
     }
   },
   {
+    // The cited line DECLARES a dangerous pattern rather than performing one.
+    //
+    // Found by auditing ultrasec with ultrasec: `src/authtokens.ts` holds the
+    // rules that detect `alg: none` and `wantAssertionsSigned: false`, and the
+    // `note:` fields quoting those strings matched the rules describing them —
+    // two CRITICALs on a file whose entire job is to name that bug.
+    //
+    // Not specific to security tools. WAF signature sets, custom lint rules,
+    // payload corpora and security documentation all carry the pattern they
+    // warn about, and the line-regex auditors cannot tell a string from a
+    // statement.
+    id: "pattern-declaration",
+    severity: "info",
+    confidence: "low",
+    why: (f) => `de-prioritized: ${f.sink?.file}:${f.sink?.line} declares a pattern rather than performing the operation \u2014 it is a rule/metadata field, a bare regex literal, or a comment. Confirm the value is not ALSO applied somewhere \u2014 a rule file that configures the running system is both.`,
+    matches: (f, repo) => {
+      if (f.category === "dep" || !f.sink?.file) return false;
+      const line = lineAt(repo, f.sink.file, f.sink.line);
+      return !!line && (PATTERN_METADATA.test(line) || BARE_REGEX_LINE.test(line) || WHOLE_LINE_COMMENT.test(line));
+    }
+  },
+  {
     id: "vendored-artifact",
     severity: "info",
     confidence: "low",
@@ -21777,6 +21804,21 @@ var RULES17 = [
     }
   }
 ];
+var PATTERN_METADATA = /^\s*(?:re|regex|regexp|pattern|patterns|rule|rules|note|title|description|detail|remediation|example|examples|hint|advice|summary|docs?)\s*:\s*(?:\/|["'`])/;
+var WHOLE_LINE_COMMENT = /^\s*(?:\/\/|#|\*|<!--)/;
+var BARE_REGEX_LINE = /^\s*\/(?:[^/\\\n]|\\.)+\/[gimsuy]*\s*,?\s*$/;
+var lineCache = /* @__PURE__ */ new Map();
+function lineAt(repo, rel2, line) {
+  const key = `${repo}\0${rel2}`;
+  if (!lineCache.has(key)) {
+    try {
+      lineCache.set(key, readText2(join37(repo, rel2)).split(/\r?\n/));
+    } catch {
+      lineCache.set(key, void 0);
+    }
+  }
+  return lineCache.get(key)?.[line - 1];
+}
 var shapeCache = /* @__PURE__ */ new Map();
 function shapeOf(repo, rel2) {
   const key = `${repo}\0${rel2}`;
@@ -21798,7 +21840,8 @@ function proposedFor(f) {
 var PROPOSAL_WHY = {
   "encrypted-at-rest": "the file is ciphertext by design \u2014 the blob is not the secret; check the KEY is not committed too",
   "test-only-path": "every node of the path is a test path \u2014 it does not exist in the shipped artifact",
-  "vendored-artifact": "a vendored or minified upstream build artifact, byte-identical to a published release"
+  "vendored-artifact": "a vendored or minified upstream build artifact, byte-identical to a published release",
+  "pattern-declaration": "the cited line declares the pattern (rule metadata or a bare regex) rather than performing the operation"
 };
 function classifyNoise(f, repo, opts = {}) {
   if (f.verified) return void 0;
@@ -23819,7 +23862,8 @@ function loadContextDoc(run2) {
 var DOWNGRADE_ADVICE = {
   "encrypted-at-rest": "ciphertext by design; the key, not the blob, is the thing to check",
   "test-only-path": "every cited location is a test path \u2014 confirm no fixture or test route ships",
-  "vendored-artifact": "a vendored or minified build artifact \u2014 fix upstream, not here"
+  "vendored-artifact": "a vendored or minified build artifact \u2014 fix upstream, not here",
+  "pattern-declaration": "the cited line declares the pattern rather than performing it \u2014 confirm it is not also applied"
 };
 var BUDGETS = {
   quick: { maxDepth: 3, maxCandidates: 200 },
@@ -25914,10 +25958,10 @@ function check(dossier, opts = {}) {
   const floor = opts.minSeverity;
   const findings = floor ? dossier.findings.filter((f) => atLeast(f.severity, floor)) : dossier.findings;
   const dangling = [];
-  const lineCache = /* @__PURE__ */ new Map();
+  const lineCache2 = /* @__PURE__ */ new Map();
   const linesOf = (file) => {
-    if (!lineCache.has(file)) lineCache.set(file, lineCountDetailed(repo, file));
-    return lineCache.get(file);
+    if (!lineCache2.has(file)) lineCache2.set(file, lineCountDetailed(repo, file));
+    return lineCache2.get(file);
   };
   for (const f of findings) {
     if (f.status === "dismissed") continue;

@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { classifyNoise, demoteNoise } from "../src/noise.js";
 import { NOISE_GROUND, BROCARDS, type Finding } from "../src/types.js";
 
@@ -79,6 +81,68 @@ describe("vendored-artifact", () => {
 
   it("does NOT demote ordinary source", () => {
     expect(classifyNoise(finding({ category: "secret", sink: { file: "src/config.ts", line: 1 } }), FIXTURE)).toBeUndefined();
+  });
+});
+
+describe("pattern-declaration", () => {
+  // Found by auditing ultrasec with ultrasec: `src/authtokens.ts` holds the rules
+  // that detect `alg: none` and `wantAssertionsSigned: false`, and the `note:`
+  // fields quoting those strings matched the rules describing them — two
+  // CRITICALs on the file whose whole job is to name that bug.
+  function repoWith(line: string): { repo: string; f: Finding } {
+    const repo = mkdtempSync(join(tmpdir(), "usec-decl-"));
+    writeFileSync(join(repo, "rules.ts"), `const RULES = [\n${line}\n];\n`);
+    return { repo, f: finding({ category: "crypto", severity: "critical", sink: { file: "rules.ts", line: 2 } }) };
+  }
+
+  it("demotes a rule-metadata line that quotes the pattern it warns about", () => {
+    const { repo, f } = repoWith('  note: "`wantAssertionsSigned: false` accepts an unsigned assertion",');
+    expect(classifyNoise(f, repo)).toBe("pattern-declaration");
+  });
+
+  it("demotes a bare regex-literal line", () => {
+    const { repo, f } = repoWith("  /alg\\s*:\\s*['\"]none['\"]/,");
+    expect(classifyNoise(f, repo)).toBe("pattern-declaration");
+  });
+
+  it("covers the metadata property names rule packs actually use", () => {
+    for (const prop of ["re", "pattern", "description", "remediation", "example", "title"]) {
+      const { repo, f } = repoWith(`  ${prop}: "alg: none",`);
+      expect(classifyNoise(f, repo), prop).toBe("pattern-declaration");
+    }
+  });
+
+  // The false-negative guard: only the line's FIRST property counts, so real
+  // configuration is never mistaken for documentation about configuration.
+  it("demotes a whole-line comment describing the pattern", () => {
+    const { repo, f } = repoWith("  // jwt.verify(...) that never pins `algorithms` — the key-confusion enabler.");
+    expect(classifyNoise(f, repo)).toBe("pattern-declaration");
+  });
+
+  it("does NOT demote a statement that merely carries a trailing comment", () => {
+    const { repo, f } = repoWith("  rejectUnauthorized: false, // TODO");
+    expect(classifyNoise(f, repo)).toBeUndefined();
+  });
+
+  it("does NOT demote real configuration that happens to use those values", () => {
+    const { repo, f } = repoWith('  algorithms: ["none"],');
+    expect(classifyNoise(f, repo)).toBeUndefined();
+  });
+
+  it("does NOT demote a plain dangerous statement", () => {
+    const { repo, f } = repoWith("  rejectUnauthorized: false,");
+    expect(classifyNoise(f, repo)).toBeUndefined();
+  });
+
+  it("does NOT demote a dependency advisory", () => {
+    const { repo } = repoWith('  note: "alg: none",');
+    const dep = finding({ category: "dep", sink: { file: "rules.ts", line: 2 } });
+    expect(classifyNoise(dep, repo)).toBeUndefined();
+  });
+
+  it("treats an unreadable file as ordinary code, never as suppressed", () => {
+    const f = finding({ category: "crypto", sink: { file: "does-not-exist.ts", line: 1 } });
+    expect(classifyNoise(f, FIXTURE)).toBeUndefined();
   });
 });
 

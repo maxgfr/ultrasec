@@ -224,7 +224,7 @@ export type Brocard = (typeof BROCARDS)[number];
  * Kept here with the other closed vocabularies because `Finding.noise` is part
  * of the on-disk schema; the rules that decide membership live in `noise.ts`.
  */
-export const NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact"] as const;
+export const NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact", "pattern-declaration"] as const;
 export type NoiseClass = (typeof NOISE_CLASSES)[number];
 
 /**
@@ -245,6 +245,11 @@ export const NOISE_GROUND: Readonly<Record<NoiseClass, Brocard>> = {
   // A byte-identical copy of a published upstream release: no attacker can
   // complete "with X I can Y to obtain Z" against a blob everyone already has.
   "vendored-artifact": "no-threat-model",
+  // A line that DESCRIBES a dangerous pattern is data, not an operation: no
+  // attacker completes "with X I can Y to obtain Z" against a documentation
+  // string. Security tools, WAF signature sets and lint-rule packs all trip
+  // their own rules this way.
+  "pattern-declaration": "no-threat-model",
 };
 
 export const BROCARD_SUMMARY: Record<Brocard, string> = {

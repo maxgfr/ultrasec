@@ -90,6 +90,31 @@ const RULES: NoiseRule[] = [
     },
   },
   {
+    // The cited line DECLARES a dangerous pattern rather than performing one.
+    //
+    // Found by auditing ultrasec with ultrasec: `src/authtokens.ts` holds the
+    // rules that detect `alg: none` and `wantAssertionsSigned: false`, and the
+    // `note:` fields quoting those strings matched the rules describing them —
+    // two CRITICALs on a file whose entire job is to name that bug.
+    //
+    // Not specific to security tools. WAF signature sets, custom lint rules,
+    // payload corpora and security documentation all carry the pattern they
+    // warn about, and the line-regex auditors cannot tell a string from a
+    // statement.
+    id: "pattern-declaration",
+    severity: "info",
+    confidence: "low",
+    why: (f) =>
+      `de-prioritized: ${f.sink?.file}:${f.sink?.line} declares a pattern rather than performing the operation — it is a rule/metadata field, a bare regex literal, or a comment. Confirm the value is not ALSO applied somewhere — a rule file that configures the running system is both.`,
+    matches: (f, repo) => {
+      // Dep advisories key on the package; taint paths are multi-node and this
+      // asks about ONE cited line.
+      if (f.category === "dep" || !f.sink?.file) return false;
+      const line = lineAt(repo, f.sink.file, f.sink.line);
+      return !!line && (PATTERN_METADATA.test(line) || BARE_REGEX_LINE.test(line) || WHOLE_LINE_COMMENT.test(line));
+    },
+  },
+  {
     id: "vendored-artifact",
     severity: "info",
     confidence: "low",
@@ -104,6 +129,39 @@ const RULES: NoiseRule[] = [
     },
   },
 ];
+
+/**
+ * A property whose NAME says the value is rule metadata, holding a quoted string
+ * or a regex. Anchored at the start of the line, so only the line's first
+ * property counts — `note: "…"` is metadata; `algorithms: ["none"]` is config.
+ */
+const PATTERN_METADATA =
+  /^\s*(?:re|regex|regexp|pattern|patterns|rule|rules|note|title|description|detail|remediation|example|examples|hint|advice|summary|docs?)\s*:\s*(?:\/|["'`])/;
+
+/**
+ * A whole-line comment. Commented-out code is not executed and an explanatory
+ * comment is not an operation, so a detector matching one has matched prose.
+ * Anchored at the line start, so a statement with a trailing comment is
+ * untouched.
+ */
+const WHOLE_LINE_COMMENT = /^\s*(?:\/\/|#|\*|<!--)/;
+
+/** A line that is nothing but a regex literal — how rule arrays are written. */
+const BARE_REGEX_LINE = /^\s*\/(?:[^/\\\n]|\\.)+\/[gimsuy]*\s*,?\s*$/;
+
+/** One line of a repo file, or `undefined` if it cannot be read. */
+const lineCache = new Map<string, string[] | undefined>();
+function lineAt(repo: string, rel: string, line: number): string | undefined {
+  const key = `${repo}\u0000${rel}`;
+  if (!lineCache.has(key)) {
+    try {
+      lineCache.set(key, readText(join(repo, rel)).split(/\r?\n/));
+    } catch {
+      lineCache.set(key, undefined); // unreadable — treat as ordinary code
+    }
+  }
+  return lineCache.get(key)?.[line - 1];
+}
 
 /** Cached `encryptedShapeOf` — it reads the file to test the content marker. */
 const shapeCache = new Map<string, ReturnType<typeof encryptedShapeOf>>();
@@ -150,6 +208,7 @@ const PROPOSAL_WHY: Readonly<Record<NoiseClass, string>> = {
   "encrypted-at-rest": "the file is ciphertext by design — the blob is not the secret; check the KEY is not committed too",
   "test-only-path": "every node of the path is a test path — it does not exist in the shipped artifact",
   "vendored-artifact": "a vendored or minified upstream build artifact, byte-identical to a published release",
+  "pattern-declaration": "the cited line declares the pattern (rule metadata or a bare regex) rather than performing the operation",
 };
 
 export interface DemoteOptions {
