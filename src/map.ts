@@ -17,7 +17,9 @@ import { SEVERITIES, type Severity } from "./types.js";
 const SEV_WEIGHT: Record<Severity, number> = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 const MAX_SAMPLES = 8;
 /** Entry points retained per kind. Larger than MAX_SAMPLES because the context
- *  scaffold reads this list and applies its OWN (larger) cap. */
+ *  scaffold reads this list and applies its own, larger cap — an 8-per-kind cut
+ *  here was the binding constraint, and it made `context` report eight routes on
+ *  a repo with dozens. `renderMapMd` still prints MAX_SAMPLES of them. */
 const MAX_ENTRY_SAMPLES = 64;
 /**
  * What one entry point contributes to a region's rank, on the same scale as
@@ -232,12 +234,6 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
     if (fs.score > 0) fileAgg.push(fs);
   }
 
-  // Entry points are retained up to MAX_ENTRY_SAMPLES, not MAX_SAMPLES: the
-  // context scaffold flattens these into its own list and then caps at 40, so an
-  // 8-per-kind cut here was the binding constraint and it made `context` report
-  // eight routes on a repo with dozens. `renderMapMd` still prints MAX_SAMPLES
-  // of them, so MAP.md is unchanged.
-  //
   // Selected by RANK, presented by path. Sorting by filename and slicing made
   // every sample list an alphabetical PREFIX: on a monorepo whose web app lives
   // under `targets/`, its routes fell off the end of every list downstream —

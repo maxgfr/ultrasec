@@ -120,9 +120,9 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
 - **`downgraded`** counts findings de-prioritized as noise BY CONSTRUCTION, with the reason. The
   engine's rule is that nothing disappears quietly: a secret finding inside a file that is
   ciphertext by design (SealedSecret, SOPS, Ansible Vault, age, git-crypt) is pushed to `info`
-  rather than dropped, and the run still says how many and why. On a real k8s repo that was 41 of
-  the secret findings — the dominant noise class, and one that cannot be a leak. What IS worth
-  checking on such a repo is whether the decryption key is committed too.
+  rather than dropped, and the run still says how many and why. On a real k8s repo that is the
+  dominant secret-finding class, and not one of them can be a leak. What IS worth checking on such
+  a repo is whether the decryption key is committed too.
 - **`passes`** records which opt-in passes ran (`--sinks`, `--log-hygiene`, `--blame`). Counts
   alone cannot say it: a run with `--log-hygiene` that found nothing and a run without the flag
   both report zero logging findings. `coverage` reads it so it never advises you to enable an

@@ -29,10 +29,12 @@ export interface SinkRule {
    *  callees (`get`/`post`) that are only a sink as a member call (`axios.get`). */
   requireReceiver?: boolean;
   /** If set, the rule only fires in a file importing one of these module
-   *  substrings. For a technology-specific sink whose method name is generic
-   *  (`client.search` is LDAP *or* Elasticsearch), the import is what
-   *  disambiguates. Ignored when the file has no imports recorded, so the regex
-   *  extraction tier — which may not see them — never loses the rule entirely. */
+   *  substrings, matched case-INSENSITIVELY (`System.Diagnostics` matches the
+   *  `using System.Diagnostics;` an extractor records however it cases it). For
+   *  a technology-specific sink whose method name is generic (`client.search` is
+   *  LDAP *or* Elasticsearch), the import is what disambiguates. Ignored when
+   *  the file has no imports recorded, so the regex extraction tier — which may
+   *  not see them — never loses the rule entirely. */
   requireModule?: string[];
   /**
    * The callees are common enough that a bare, uncorroborated call is more
@@ -797,7 +799,10 @@ export function findSinks(
       if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) continue;
       // Technology gate. Only enforced when imports were actually extracted:
       // an empty list means we couldn't see them, not that there are none.
-      const moduleSeen = !!rule.requireModule && rule.requireModule.some((m) => specs.some((s) => s.includes(m)));
+      // `specs` is lowercased, so the needle must be too — otherwise a rule
+      // naming a capitalised module (`System.Diagnostics`, `java.lang.Runtime`)
+      // can never match and silently stops firing.
+      const moduleSeen = !!rule.requireModule && rule.requireModule.some((m) => specs.some((s) => s.includes(m.toLowerCase())));
       if (rule.requireModule && specs.length && !moduleSeen) continue;
       // Corroboration gate for `ambiguous` rules.
       let downgraded: string | undefined;

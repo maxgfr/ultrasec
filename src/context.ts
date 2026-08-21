@@ -200,9 +200,9 @@ export function buildContextScaffold(repo: string, scan: RepoScan, surface: Atta
   // while thirty separate route files got nothing.
   //
   // This is a "where to look" brief. One line per file is the granularity that
-  // serves that, and it is what lets 19 API routes fit in a 40-slot list. The
-  // true total is reported separately, so the cap is never mistaken for the
-  // whole surface.
+  // serves it, and it is what lets a monorepo's whole API surface fit in the
+  // list at all. The true total is reported separately, so the cap is never
+  // mistaken for the whole surface.
   const rank = new Map(surface.byFile.map((f) => [f.file, f.score]));
   const perFile = new Map<string, { file: string; line: number; kind: string }>();
   for (const g of surface.entryPoints) {
@@ -276,8 +276,8 @@ export function renderContextScaffoldMd(repo: string, run: string, s: ContextSca
 
   L.push(`## Entry points (untrusted input) — ${s.entryPoints.length}${s.entryPoints.length >= MAX_SCAFFOLD_ENTRIES ? "+" : ""}`);
   L.push("");
-  L.push(`_One line per file, highest attack surface first (HTTP and cross-origin kinds before env/CLI)._`);
   if (!s.entryPoints.length) L.push(`_none detected._`);
+  else L.push(`_One line per file, highest attack surface first (HTTP and cross-origin kinds before env/CLI)._`);
   for (const e of s.entryPoints) L.push(`- \`${e.file}:${e.line}\` (${e.kind})`);
   L.push("");
 

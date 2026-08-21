@@ -147,3 +147,51 @@ describe("command sinks — uncorroborated is downgraded, never dropped", () => 
     expect(cmd.downgraded).toBeUndefined();
   });
 });
+
+// ── Issue #10 (2): gating must not cost CROSS-LANGUAGE recall ────────────────
+// Splitting one `languages: ["*"]` rule into gated per-language ones is exactly
+// the kind of change that quietly loses a language. One file per real-world
+// process-execution shape, and every one of them must still be CRITICAL.
+describe("command sinks — every language's real shape still fires", () => {
+  const dir = join(import.meta.dirname, "fixtures", "command-recall");
+  const scan = scanRepo(dir);
+  const taint = enumerateTaint(scan, buildGraph(scan), { maxDepth: 8, maxCandidates: 10000 }).findings;
+  const orphan = enumerateSinkCandidates(scan, taint).findings;
+  const all = [...taint, ...orphan];
+  const criticalsIn = (file: string) => all.filter((f) => f.cwe === "CWE-78" && f.sink?.file === file && f.severity === "critical").length;
+
+  const CASES: [string, string, number][] = [
+    ["Runtime.java", "Runtime.getRuntime().exec(cmd)", 1],
+    ["Builder.java", "new ProcessBuilder(…)", 1],
+    ["cmd.rs", "Command::new(…) (std::process)", 1],
+    ["cs_proc.cs", "Process.Start(…) (System.Diagnostics)", 1],
+    ["go_cmd.go", "exec.Command(…) (os/exec)", 1],
+    ["shell.rb", "bare system(cmd)", 1],
+    ["os_system.py", "os.system / os.popen", 2],
+    ["sub_call.py", "subprocess.call / check_output", 2],
+    ["php_bare.php", "PHP's six bare builtins", 6],
+    ["js_forms.js", "cp.exec / cp.spawn / execSync / spawnSync", 4],
+  ];
+
+  for (const [file, shape, want] of CASES) {
+    it(`still flags ${shape}`, () => {
+      expect(criticalsIn(file)).toBe(want);
+    });
+  }
+});
+
+// `requireModule` needles are compared against LOWERCASED import specs, so a
+// capitalised module name never matched and its rule silently stopped firing.
+describe("requireModule matches case-insensitively", () => {
+  const cs = langForFile("a.cs")!;
+
+  it("matches a capitalised module name", () => {
+    const hits = findSinks(cs, [{ callee: "Start", receiver: "Process", line: 1 }], undefined, [{ spec: "System.Diagnostics" }]);
+    expect(hits.some((h) => h.kind === "command")).toBe(true);
+  });
+
+  it("still matches when the extractor lowercases it", () => {
+    const hits = findSinks(cs, [{ callee: "Start", receiver: "Process", line: 1 }], undefined, [{ spec: "system.diagnostics" }]);
+    expect(hits.some((h) => h.kind === "command")).toBe(true);
+  });
+});

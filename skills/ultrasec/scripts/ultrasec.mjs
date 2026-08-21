@@ -18168,73 +18168,6 @@ var DEFAULT_IGNORE_DIRS = /* @__PURE__ */ new Set([
   ".ultrasec"
 ]);
 var MAX_FILE_BYTES = 15e5;
-function buildPruneMatcher(root, opts) {
-  const excludeRes = opts.exclude?.length ? opts.exclude.map(globToRe) : void 0;
-  const rules = [];
-  if (opts.gitignore) {
-    const visit = (dir, baseRel, depth) => {
-      if (depth > GITIGNORE_MAX_DEPTH) return;
-      let entries;
-      try {
-        entries = readdirSync4(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-      if (entries.some((e) => e.isFile() && e.name === ".gitignore")) {
-        try {
-          rules.push(...parseGitignore(readFileSync14(join28(dir, ".gitignore"), "utf8"), baseRel));
-        } catch {
-        }
-      }
-      for (const e of entries) {
-        if (!e.isDirectory() || DEFAULT_IGNORE_DIRS.has(e.name)) continue;
-        visit(join28(dir, e.name), baseRel ? `${baseRel}/${e.name}` : e.name, depth + 1);
-      }
-    };
-    visit(root, "", 0);
-  }
-  if (!excludeRes && !rules.length) return void 0;
-  return (rel2) => {
-    if (excludeRes?.some((re) => re.test(rel2))) return true;
-    if (!rules.length) return false;
-    let at = -1;
-    while ((at = rel2.indexOf("/", at + 1)) !== -1) {
-      if (isIgnored(rules, rel2.slice(0, at), true)) return true;
-    }
-    return isIgnored(rules, rel2, false);
-  };
-}
-var GITIGNORE_MAX_DEPTH = 8;
-function expandBraces(pattern) {
-  const open = pattern.indexOf("{");
-  if (open === -1) return [pattern];
-  let depth = 0;
-  let close = -1;
-  for (let i2 = open; i2 < pattern.length; i2++) {
-    if (pattern[i2] === "{") depth++;
-    else if (pattern[i2] === "}" && --depth === 0) {
-      close = i2;
-      break;
-    }
-  }
-  if (close === -1) return [pattern];
-  const head = pattern.slice(0, open);
-  const tail = pattern.slice(close + 1);
-  const parts2 = [];
-  let level = 0;
-  let start2 = open + 1;
-  for (let i2 = open + 1; i2 < close; i2++) {
-    const ch = pattern[i2];
-    if (ch === "{") level++;
-    else if (ch === "}") level--;
-    else if (ch === "," && level === 0) {
-      parts2.push(pattern.slice(start2, i2));
-      start2 = i2 + 1;
-    }
-  }
-  parts2.push(pattern.slice(start2, close));
-  return parts2.flatMap((alt) => expandBraces(head + alt + tail));
-}
 function globToRe(pattern) {
   let p = pattern.replace(/^\.\//, "").replace(/\/+$/g, (m) => m ? "/" : "");
   let dirMatch = false;
@@ -18290,6 +18223,73 @@ function globToRe(pattern) {
   } catch {
     return new RegExp("^" + pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$");
   }
+}
+var GITIGNORE_MAX_DEPTH = 8;
+function buildPruneMatcher(root, opts) {
+  const excludeRes = opts.exclude?.length ? opts.exclude.map(globToRe) : void 0;
+  const rules = [];
+  if (opts.gitignore) {
+    const visit = (dir, baseRel, depth) => {
+      if (depth > GITIGNORE_MAX_DEPTH) return;
+      let entries;
+      try {
+        entries = readdirSync4(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      if (entries.some((e) => e.isFile() && e.name === ".gitignore")) {
+        try {
+          rules.push(...parseGitignore(readFileSync14(join28(dir, ".gitignore"), "utf8"), baseRel));
+        } catch {
+        }
+      }
+      for (const e of entries) {
+        if (!e.isDirectory() || DEFAULT_IGNORE_DIRS.has(e.name)) continue;
+        visit(join28(dir, e.name), baseRel ? `${baseRel}/${e.name}` : e.name, depth + 1);
+      }
+    };
+    visit(root, "", 0);
+  }
+  if (!excludeRes && !rules.length) return void 0;
+  return (rel2) => {
+    if (excludeRes?.some((re) => re.test(rel2))) return true;
+    if (!rules.length) return false;
+    let at = -1;
+    while ((at = rel2.indexOf("/", at + 1)) !== -1) {
+      if (isIgnored(rules, rel2.slice(0, at), true)) return true;
+    }
+    return isIgnored(rules, rel2, false);
+  };
+}
+function expandBraces(pattern) {
+  const open = pattern.indexOf("{");
+  if (open === -1) return [pattern];
+  let depth = 0;
+  let close = -1;
+  for (let i2 = open; i2 < pattern.length; i2++) {
+    if (pattern[i2] === "{") depth++;
+    else if (pattern[i2] === "}" && --depth === 0) {
+      close = i2;
+      break;
+    }
+  }
+  if (close === -1) return [pattern];
+  const head = pattern.slice(0, open);
+  const tail = pattern.slice(close + 1);
+  const parts2 = [];
+  let level = 0;
+  let start2 = open + 1;
+  for (let i2 = open + 1; i2 < close; i2++) {
+    const ch = pattern[i2];
+    if (ch === "{") level++;
+    else if (ch === "}") level--;
+    else if (ch === "," && level === 0) {
+      parts2.push(pattern.slice(start2, i2));
+      start2 = i2 + 1;
+    }
+  }
+  parts2.push(pattern.slice(start2, close));
+  return parts2.flatMap((alt) => expandBraces(head + alt + tail));
 }
 function literalBase(s) {
   const clean = s.replace(/^\.\//, "").replace(/\/+$/, "");
@@ -19505,7 +19505,7 @@ function findSinks(lang, calls, extraSinks, imports, localDefs) {
       if (!rule.callees.includes(c2.callee)) continue;
       if (rule.requireReceiver && !c2.receiver) continue;
       if (rule.receivers && c2.receiver && !rule.receivers.includes(c2.receiver)) continue;
-      const moduleSeen = !!rule.requireModule && rule.requireModule.some((m) => specs.some((s) => s.includes(m)));
+      const moduleSeen = !!rule.requireModule && rule.requireModule.some((m) => specs.some((s) => s.includes(m.toLowerCase())));
       if (rule.requireModule && specs.length && !moduleSeen) continue;
       let downgraded;
       if (rule.ambiguous && !(c2.receiver && rule.receivers?.includes(c2.receiver))) {
@@ -23403,8 +23403,8 @@ function renderContextScaffoldMd(repo, run2, s) {
   L.push("");
   L.push(`## Entry points (untrusted input) \u2014 ${s.entryPoints.length}${s.entryPoints.length >= MAX_SCAFFOLD_ENTRIES ? "+" : ""}`);
   L.push("");
-  L.push(`_One line per file, highest attack surface first (HTTP and cross-origin kinds before env/CLI)._`);
   if (!s.entryPoints.length) L.push(`_none detected._`);
+  else L.push(`_One line per file, highest attack surface first (HTTP and cross-origin kinds before env/CLI)._`);
   for (const e of s.entryPoints) L.push(`- \`${e.file}:${e.line}\` (${e.kind})`);
   L.push("");
   L.push(`## Auth / authorization sites (candidate protections) \u2014 ${s.authMiddleware.length}${s.authMiddleware.length >= MAX_SCAFFOLD ? "+" : ""}`);
@@ -23529,7 +23529,7 @@ async function runScan(args2) {
   const sinkCand = sinksOn ? enumerateSinkCandidates(scan2, taintFindings, { maxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan2, { maxCandidates: explicitMaxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const prune = buildPruneMatcher(repo, { gitignore, exclude });
-  step(`config, auth, cloud and credential detectors\u2026`);
+  step(`agentic-CI, config, auth, cloud and credential detectors\u2026`);
   const agenticFindings = auditAgenticWorkflows(repo, prune);
   const webConfigFindings = auditWebConfig(repo, prune);
   const authTokenFindings = auditAuthTokens(repo, prune);
@@ -23572,8 +23572,8 @@ async function runScan(args2) {
     ...credentialFindings,
     ...tool.findings
   ]);
+  step(`correlated ${merged.length} finding(s) \xB7 de-noising and ranking\u2026`);
   const { findings: deNoised, downgraded: encryptedDowngrades } = downgradeEncryptedAtRest(merged, repo);
-  step(`correlating and ranking ${merged.length} finding(s)\u2026`);
   const enrich = !(flagBool(args2, "no-enrich") || offline);
   const { findings: enriched, note: riskNote } = await enrichFindings(deNoised, { enabled: enrich, context: loadContextDoc(out2) });
   const blameOn = flagBool(args2, "blame") || flagBool(args2, "provenance");

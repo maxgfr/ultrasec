@@ -64,6 +64,75 @@ export interface WalkResult {
 // non-slash char), and a trailing `/` (match the dir and everything under it).
 // Anchored to the repo-relative POSIX path. `**/x` matches `x` at any depth
 // (including the root), mirroring .gitignore / Semgrep conventions.
+export function globToRe(pattern: string): RegExp {
+  let p = pattern.replace(/^\.\//, "").replace(/\/+$/g, (m) => (m ? "/" : "")); // collapse trailing slashes to one
+  let dirMatch = false;
+  if (p.endsWith("/")) {
+    dirMatch = true;
+    p = p.slice(0, -1);
+  }
+  let re = "";
+  let i = 0;
+  while (i < p.length) {
+    if (p.startsWith("**/", i)) {
+      re += "(?:.*/)?";
+      i += 3;
+      continue;
+    }
+    if (p.startsWith("**", i)) {
+      re += ".*";
+      i += 2;
+      continue;
+    }
+    const ch = p[i]!;
+    if (ch === "*") {
+      re += "[^/]*";
+      i++;
+    } else if (ch === "?") {
+      re += "[^/]";
+      i++;
+    } else if (ch === "[") {
+      // POSIX-style character class ([abc], [!a-z]) — translate, don't escape.
+      let j = i + 1;
+      const neg = p[j] === "!" || p[j] === "^";
+      if (neg) j++;
+      if (p[j] === "]") j++; // a ']' right after '[' (or '[!') is a literal member
+      while (j < p.length && p[j] !== "]") {
+        if (p[j] === "\\") j++; // honour an escaped char so an escaped ']' isn't the terminator
+        j++;
+      }
+      if (j >= p.length) {
+        re += "\\["; // no closing ']' → a literal '['
+        i++;
+      } else {
+        // De-escape members, then escape only what a regex class needs (\ and ]).
+        const cls = p
+          .slice(neg ? i + 2 : i + 1, j)
+          .replace(/\\(.)/g, "$1")
+          .replace(/[\\\]]/g, "\\$&");
+        re += neg ? `[^/${cls}]` : `[${cls}]`; // negated class still never matches '/'
+        i = j + 1;
+      }
+    } else {
+      re += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+      i++;
+    }
+  }
+  const body = dirMatch ? re + "(?:/.*)?" : re;
+  // Total by construction: a malformed class (e.g. a reversed range [z-a]) must
+  // never crash a scan — fall back to matching the pattern literally, like git
+  // gracefully ignoring an invalid pattern.
+  try {
+    return new RegExp("^" + body + "$");
+  } catch {
+    return new RegExp("^" + pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$");
+  }
+}
+
+/** How deep to look for nested `.gitignore` files. Generous — a monorepo keeps
+ *  one per package — but bounded, so a pathological tree cannot stall a scan. */
+const GITIGNORE_MAX_DEPTH = 8;
+
 /** Options for `buildPruneMatcher` — the prune half of the walk options, which
  *  is all that is meaningful for a path the walker never produced. */
 export interface PruneOptions {
@@ -129,10 +198,6 @@ export function buildPruneMatcher(root: string, opts: PruneOptions): ((rel: stri
   };
 }
 
-/** How deep to look for nested `.gitignore` files. Generous — a monorepo keeps
- *  one per package — but bounded, so a pathological tree cannot stall a scan. */
-const GITIGNORE_MAX_DEPTH = 8;
-
 /**
  * Expand brace alternation — `a/{x,y}.ts` → `["a/x.ts", "a/y.ts"]` — into the
  * plain globs `globToRe` understands. Nested braces expand recursively; an
@@ -172,71 +237,6 @@ export function expandBraces(pattern: string): string[] {
   }
   parts.push(pattern.slice(start, close));
   return parts.flatMap((alt) => expandBraces(head + alt + tail));
-}
-
-export function globToRe(pattern: string): RegExp {
-  let p = pattern.replace(/^\.\//, "").replace(/\/+$/g, (m) => (m ? "/" : "")); // collapse trailing slashes to one
-  let dirMatch = false;
-  if (p.endsWith("/")) {
-    dirMatch = true;
-    p = p.slice(0, -1);
-  }
-  let re = "";
-  let i = 0;
-  while (i < p.length) {
-    if (p.startsWith("**/", i)) {
-      re += "(?:.*/)?";
-      i += 3;
-      continue;
-    }
-    if (p.startsWith("**", i)) {
-      re += ".*";
-      i += 2;
-      continue;
-    }
-    const ch = p[i]!;
-    if (ch === "*") {
-      re += "[^/]*";
-      i++;
-    } else if (ch === "?") {
-      re += "[^/]";
-      i++;
-    } else if (ch === "[") {
-      // POSIX-style character class ([abc], [!a-z]) — translate, don't escape.
-      let j = i + 1;
-      const neg = p[j] === "!" || p[j] === "^";
-      if (neg) j++;
-      if (p[j] === "]") j++; // a ']' right after '[' (or '[!') is a literal member
-      while (j < p.length && p[j] !== "]") {
-        if (p[j] === "\\") j++; // honour an escaped char so an escaped ']' isn't the terminator
-        j++;
-      }
-      if (j >= p.length) {
-        re += "\\["; // no closing ']' → a literal '['
-        i++;
-      } else {
-        // De-escape members, then escape only what a regex class needs (\ and ]).
-        const cls = p
-          .slice(neg ? i + 2 : i + 1, j)
-          .replace(/\\(.)/g, "$1")
-          .replace(/[\\\]]/g, "\\$&");
-        re += neg ? `[^/${cls}]` : `[${cls}]`; // negated class still never matches '/'
-        i = j + 1;
-      }
-    } else {
-      re += ch.replace(/[.+^${}()|[\]\\]/g, "\\$&");
-      i++;
-    }
-  }
-  const body = dirMatch ? re + "(?:/.*)?" : re;
-  // Total by construction: a malformed class (e.g. a reversed range [z-a]) must
-  // never crash a scan — fall back to matching the pattern literally, like git
-  // gracefully ignoring an invalid pattern.
-  try {
-    return new RegExp("^" + body + "$");
-  } catch {
-    return new RegExp("^" + pattern.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$");
-  }
 }
 
 interface ScopeEntry {

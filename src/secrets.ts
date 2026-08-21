@@ -4,14 +4,23 @@ import type { Finding } from "./types.js";
 import { makeToolFinding } from "./tools/normalize.js";
 import { cweUrl } from "./catalog.js";
 
-// Credential findings a scanner belt gets backwards, in both directions.
+// Two credential classes a scanner belt handles badly, in opposite directions.
 //
-// Measured on a public k8s repo: 41 findings on `*.sealed-secret.yaml` — files
-// whose entire content is ciphertext BY DESIGN, which is the point of committing
-// them — and ZERO on the plaintext production Postgres password sitting in a
-// `values.yaml` next to them. The noisiest class on any real infrastructure repo
-// was the one class that cannot be a leak, and the one credential that was a
-// leak looked like a URL.
+// NOISE. On a public k8s repo, the secret scanners produced double-digit hits on
+// SealedSecret manifests — files whose entire content is ciphertext BY DESIGN,
+// which is the point of committing them. On any real infrastructure repo that is
+// the dominant secret-finding class, and not one of them can be a leak. What IS
+// worth checking there is whether the decryption key is committed too, which no
+// filename rule can tell you.
+//
+// BLIND SPOT. A credential embedded in a connection string is easy to miss when
+// the components AROUND it are templated: `scheme://$(user):hunter2@$(host)/db`
+// reads as configuration rather than as a credential, so entropy and format
+// heuristics skip the line. (The report that prompted this file cited such a
+// leak; re-checking the pinned commit, that particular password was `$(password)`
+// — templated, and correctly ignored by every scanner including this one. The
+// class is real regardless: the same pass finds a literal 16-character password
+// in that repo's `docker-compose.yml` that no scanner reported.)
 //
 // Same discipline as the rest of the engine: nothing is silently dropped. A
 // finding inside an encrypted-at-rest file is DOWNGRADED with the scheme named,
@@ -74,8 +83,8 @@ export function encryptedShapeOf(rel: string, content: string): EncryptedShape |
  *
  * NOT a filter: the finding stays, at `info`/`low` with the scheme named, and
  * the caller reports the count. Dropping them outright would leave the run
- * unable to say that 41 hits were discarded, which is the coverage dishonesty
- * this engine argues against everywhere else.
+ * unable to say how many were discarded, which is the coverage dishonesty this
+ * engine argues against everywhere else.
  */
 export function downgradeEncryptedAtRest(findings: Finding[], repo: string): { findings: Finding[]; downgraded: number } {
   const cache = new Map<string, EncryptedShape | undefined>();
@@ -186,12 +195,12 @@ export function isLiteralSecret(password: string): boolean {
 /**
  * Audit a repo for credentials embedded in connection strings.
  *
- * The one this exists for looked like
- * `postgresql://$(username):<11 literal chars>@$(host):$(port)/db` — username,
- * host and port are environment references and the password is not. Entropy and
- * format heuristics skip it because the surrounding text is plainly a template;
- * both gitleaks and trufflehog missed it on a public repo where it had been in
- * history for years.
+ * The shape that matters is `scheme://$(user):hunter2@$(host):$(port)/db` —
+ * neighbouring components templated, the password not. Partial templating is how
+ * these survive review, because the line reads as configuration rather than as a
+ * credential, and it is why entropy/format heuristics skip them. So the test is
+ * on the password segment ALONE: fully templated or placeholder-shaped stays
+ * quiet, a literal does not.
  */
 export function auditSecrets(repo: string, prune?: (rel: string) => boolean): Finding[] {
   const out: Finding[] = [];

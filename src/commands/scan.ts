@@ -180,8 +180,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // primitives so it honours nested `.gitignore` files exactly as the walk does.
   const prune = buildPruneMatcher(repo, { gitignore, exclude });
 
-  step(`config, auth, cloud and credential detectors…`);
-
+  step(`agentic-CI, config, auth, cloud and credential detectors…`);
   // Agentic CI: workflows that hand a coding agent the repo's own event data.
   // Always on — it reads only `.github/workflows/*.yml`, costs nothing when there
   // are none, and a repo that ships one of these has a live injection path that
@@ -269,6 +268,8 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...tool.findings,
   ]);
 
+  step(`correlated ${merged.length} finding(s) · de-noising and ranking…`);
+
   // Secret findings inside files that are ciphertext BY DESIGN — SealedSecrets,
   // SOPS, Ansible Vault, age, git-crypt. On a real k8s repo that class was 41 of
   // the secret findings and none of them could be a leak. De-prioritized, never
@@ -278,7 +279,6 @@ export async function runScan(args: ParsedArgs): Promise<number> {
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
-  step(`correlating and ranking ${merged.length} finding(s)…`);
   const enrich = !(flagBool(args, "no-enrich") || offline);
   const { findings: enriched, note: riskNote } = await enrichFindings(deNoised, { enabled: enrich, context: loadContextDoc(out) });
 

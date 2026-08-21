@@ -39,21 +39,22 @@ then `gitleaks`, then the language-native one for the stack (`govulncheck`, `car
 
 Two failures, in opposite directions, both measured on one public k8s repo.
 
-**Encrypted-at-rest files are the dominant noise class.** gitleaks emitted 41 "Generic API Key"
-hits on Bitnami SealedSecret ciphertext — files whose entire content is encrypted *by design*,
-which is the point of committing them. ultrasec de-prioritizes these to `info` (SealedSecret,
-SOPS, Ansible Vault, age, git-crypt, PGP, Jasypt) and records the count in `manifest.downgraded`,
-so the class is quiet without being invisible. What actually deserves attention on such a repo is
-whether the DECRYPTION KEY is committed alongside, which no filename rule can tell you.
+**Encrypted-at-rest files are the dominant noise class.** On a public k8s repo the secret scanners
+produced double-digit hits on Bitnami SealedSecret ciphertext — files whose entire content is
+encrypted *by design*, which is the point of committing them. ultrasec de-prioritizes these to
+`info` (SealedSecret, SOPS, Ansible Vault, age, git-crypt, PGP, Jasypt) and records the count in
+`manifest.downgraded`, so the class is quiet without being invisible. What actually deserves
+attention on such a repo is whether the DECRYPTION KEY is committed alongside, which no filename
+rule can tell you.
 
-**A credential can hide in plain sight by looking like configuration.** The same repo carried a
-literal production Postgres password in
-`postgresql://$(username):<literal>@$(host):$(port)/db` — username, host and port are environment
-references, the password is not. Both gitleaks and trufflehog missed it: entropy and format
-heuristics skip a string whose surroundings are plainly a template. ultrasec's own
+**A credential can hide in plain sight by looking like configuration.**
+`postgresql://$(username):hunter2@$(host):$(port)/db` — username, host and port are environment
+references, the password is not. Entropy and format heuristics skip a string whose surroundings are
+plainly a template, so this shape survives review and survives the scanners. ultrasec's own
 credential-URI pass fires on `scheme://user:secret@host` for any scheme even when neighbouring
 components are templated, and stays quiet only when the PASSWORD segment itself is a template or a
-placeholder. Partial templating is exactly how these survive review.
+placeholder — which is the right answer far more often than not, and worth remembering before you
+report one: check that the value really is a literal before calling it a leak.
 
 
 ## How it runs
