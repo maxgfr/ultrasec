@@ -242,7 +242,7 @@ whoever adjudicated it. Re-run `orchestrate` whenever a worklist changes (emissi
 | `check --semantic` fails | Candidates are still `open`. Adjudicate them, or clear the obvious ones with `triage`. |
 | `--apply` exits 2 | Fail-closed: malformed file, or no id in it matches the dossier (stale fragments). Re-emit the worklist and refill. |
 | `--apply` from a directory folded nothing | Fragment names must match the stage pattern — `*verdict*.json`, `*triage*.json`, `*revalidat*.json`, `*investigat*`/`*discover*.json`. |
-| `investigate --apply` rejected a discovery | Its `[file:line]` doesn't resolve — the anti-hallucination gate working. Get the real line and resubmit. |
+| `investigate --apply` rejected a discovery | Either its `[file:line]` doesn't resolve — the anti-hallucination gate working; get the real line and resubmit — or a field is outside its vocabulary. The reason names the field and the value. Class names (`xss`, `dos`, `disclosure`…) are folded onto `category`, not refused. |
 | First run is slow / hits the network | A cold machine downloads ~22 MB of tree-sitter grammars once (`--offline` does not suppress it). Prewarm, or set `CODEINDEX_GRAMMARS_DIR`. |
 | A scoped re-scan seems to lose findings | Use `--merge` — it preserves prior verdicts and keeps out-of-scope findings. |
 

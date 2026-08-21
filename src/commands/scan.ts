@@ -11,7 +11,8 @@ import { auditWebConfig } from "../webconfig.js";
 import { auditAuthTokens } from "../authtokens.js";
 import { auditCloud } from "../cloud.js";
 import { buildPruneMatcher } from "../walk.js";
-import { auditSecrets, downgradeEncryptedAtRest } from "../secrets.js";
+import { auditSecrets } from "../secrets.js";
+import { demoteNoise } from "../noise.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
 import { loadScanCache, saveScanCache } from "../cache.js";
@@ -26,6 +27,16 @@ import { loadContextDoc } from "../context.js";
 
 // Budget presets scale call-graph depth × candidate breadth. `standard` reproduces
 // the historical defaults (6 hops / 1000 candidates).
+/** What a reader should check before accepting each de-prioritization. Keyed by
+ *  `NoiseClass`; an unknown reason falls back to the finding's own message. */
+const DOWNGRADE_ADVICE: Record<string, string> = {
+  "encrypted-at-rest": "ciphertext by design; the key, not the blob, is the thing to check",
+  "test-only-path": "every cited location is a test path — confirm no fixture or test route ships",
+  "vendored-artifact": "a vendored or minified build artifact — fix upstream, not here",
+  "pattern-declaration": "the cited line declares the pattern rather than performing it — confirm it is not also applied",
+  "resource-identifier": "a document/resource id, not a credential — confirm the document's sharing setting",
+};
+
 const BUDGETS: Record<string, { maxDepth: number; maxCandidates: number }> = {
   quick: { maxDepth: 3, maxCandidates: 200 },
   standard: { maxDepth: 6, maxCandidates: 1000 },
@@ -270,12 +281,17 @@ export async function runScan(args: ParsedArgs): Promise<number> {
 
   step(`correlated ${merged.length} finding(s) · de-noising and ranking…`);
 
-  // Secret findings inside files that are ciphertext BY DESIGN — SealedSecrets,
-  // SOPS, Ansible Vault, age, git-crypt. On a real k8s repo that class was 41 of
-  // the secret findings and none of them could be a leak. De-prioritized, never
-  // dropped: the count is recorded in the manifest below so a suppressed class
-  // is still something the run can account for.
-  const { findings: deNoised, downgraded: encryptedDowngrades } = downgradeEncryptedAtRest(merged, repo);
+  // Noise by construction: the match is REAL, but the code it sits in cannot
+  // carry the risk described. Ciphertext in a ciphertext-by-design file
+  // (SealedSecrets, SOPS, age…), a taint path whose every node is in the test
+  // harness, an entropy hit inside a vendored tool bundle. Measured on a real
+  // Next.js monorepo: 46 of 62 taint candidates never left `__tests__`/`*.e2e`.
+  //
+  // De-prioritized, never dropped, and never auto-adjudicated — the counts land
+  // in the manifest below so a suppressed class is still something the run can
+  // account for by name.
+  const includeTests = flagBool(args, "include-tests");
+  const { findings: deNoised, downgraded: noiseDowngrades } = demoteNoise(merged, repo, { includeTests });
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
@@ -311,8 +327,8 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     extraction: extractionTier(),
     // Which opt-in passes ran, so a later stage can distinguish "the flag was
     // never passed" from "the flag was passed and the pass found nothing".
-    passes: { sinks: sinksOn, logHygiene: logHygieneOn, blame: blameOn },
-    ...(encryptedDowngrades ? { downgraded: [{ reason: "encrypted-at-rest", count: encryptedDowngrades }] } : {}),
+    passes: { sinks: sinksOn, logHygiene: logHygieneOn, blame: blameOn, includeTests },
+    ...(noiseDowngrades.length ? { downgraded: noiseDowngrades } : {}),
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
     ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),
@@ -381,8 +397,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""}${logHygieneOn ? ` + ${hygieneCand.findings.length} log-hygiene` : ""} + ${tool.findings.length} tool this pass`,
   );
   println(`  ${riskNote}`);
+  // One line per suppressed class, each naming what to check before believing
+  // it — a demotion the reader cannot interrogate is a silent filter.
   for (const d of fm.downgraded ?? []) {
-    println(`  ${d.count} secret finding(s) de-prioritized to info — ${d.reason} (ciphertext by design; the key, not the blob, is the thing to check)`);
+    println(`  ${d.count} finding(s) de-prioritized — ${d.reason}: ${DOWNGRADE_ADVICE[d.reason] ?? "see the finding's message for what was checked"}`);
   }
   if (truncation?.candidates) {
     println(

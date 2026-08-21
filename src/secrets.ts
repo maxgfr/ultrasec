@@ -78,47 +78,6 @@ export function encryptedShapeOf(rel: string, content: string): EncryptedShape |
   return undefined;
 }
 
-/**
- * De-prioritize secret findings whose location is an encrypted-at-rest file.
- *
- * NOT a filter: the finding stays, at `info`/`low` with the scheme named, and
- * the caller reports the count. Dropping them outright would leave the run
- * unable to say how many were discarded, which is the coverage dishonesty this
- * engine argues against everywhere else.
- */
-export function downgradeEncryptedAtRest(findings: Finding[], repo: string): { findings: Finding[]; downgraded: number } {
-  const cache = new Map<string, EncryptedShape | undefined>();
-  const shapeFor = (rel: string): EncryptedShape | undefined => {
-    if (cache.has(rel)) return cache.get(rel);
-    let shape: EncryptedShape | undefined;
-    try {
-      shape = encryptedShapeOf(rel, readText(join(repo, rel)));
-    } catch {
-      shape = undefined; // unreadable — treat as ordinary, never as suppressed
-    }
-    cache.set(rel, shape);
-    return shape;
-  };
-
-  let downgraded = 0;
-  const out = findings.map((f) => {
-    if (f.category !== "secret" || !f.sink?.file) return f;
-    // A scanner that VERIFIED the credential against its provider has evidence
-    // no file format can override: a live credential is live.
-    if (f.verified) return f;
-    const shape = shapeFor(f.sink.file);
-    if (!shape) return f;
-    downgraded++;
-    return {
-      ...f,
-      severity: "info" as const,
-      confidence: "low" as const,
-      message: `${f.message} — de-prioritized: ${f.sink.file} is a ${shape.label}, where ciphertext is the point of the file. Check that the ENCRYPTION KEY is not also committed, and that this really is the format it claims.`,
-    };
-  });
-  return { findings: out, downgraded };
-}
-
 // ── Credential URIs ──────────────────────────────────────────────────────────
 
 // `scheme://user:secret@host`. Deliberately scheme-agnostic — postgres, mysql,

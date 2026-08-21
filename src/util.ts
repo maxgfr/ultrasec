@@ -52,6 +52,10 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "list",
   "no-redact",
   "strict",
+  "no-context",
+  "compact",
+  "include-tests",
+  "re-verdict",
   "no-journal",
   "no-env-sources",
   "strict-scope",
@@ -182,6 +186,33 @@ export function shortHash(input: string, len = 12): string {
 /** Deterministic string compare (locale-independent), for stable ordering. */
 export function byStr(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0;
+}
+
+// ── Finding message stage notes ──────────────────────────────────────────────
+// `verify --apply` and `revalidate --apply` each append a trailing block to a
+// finding's `message`. Both used to append unconditionally, so re-applying the
+// same file grew the message every time — on a real audit run every one of 265
+// findings carried a duplicated block, one carried four, and that is what
+// inflated REPORT.md to 413 KB. An apply must be idempotent: folding the same
+// verdicts twice has to leave the dossier byte-identical.
+
+/** Stage labels allowed to append a trailing note block to a finding message. */
+const STAGE_LABELS = ["Verdict", "Revalidation"] as const;
+const STAGE_SPLIT = new RegExp(`\\n\\n(?=(?:${STAGE_LABELS.join("|")}) \\()`);
+
+/**
+ * Append `stage`'s note to a finding message, REPLACING that stage's previous
+ * note rather than stacking a second copy.
+ *
+ * Other stages' blocks are preserved: a revalidation note must survive a
+ * re-verify, and a verdict note must survive a re-revalidation. Within one
+ * stage it is last-wins, which is what makes a repeated `--apply` a no-op.
+ */
+export function withStageNote(message: string, stage: (typeof STAGE_LABELS)[number], label: string, note?: string): string {
+  // parts[0] is the text before the first stage block; every later part IS one.
+  const parts = message.split(STAGE_SPLIT);
+  const kept = parts.filter((part, i) => i === 0 || !part.startsWith(`${stage} (`));
+  return `${kept.join("\n\n")}\n\n${stage} (${label})${note ? `: ${note}` : ""}`;
 }
 
 // ── Output sink ──────────────────────────────────────────────────────────────

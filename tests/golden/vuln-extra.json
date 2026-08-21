@@ -76,6 +76,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "filter"
+        ]
+      },
       "message": "Intra-file candidate: http input at src/app.js:6 may reach the nosql sink find() at src/app.js:7 through 1 hop(s). Tainted data shaped into a NoSQL query object/operator ($where, $ne, $gt …). Coerce types and reject operator keys (mongo-sanitize); never pass a raw request object as a filter. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [
@@ -124,6 +129,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "filter"
+        ]
+      },
       "message": "Cross-file candidate: http input at src/app.js:6 may reach the nosql sink find() at src/db.js:5 through 2 hop(s). Tainted data shaped into a NoSQL query object/operator ($where, $ne, $gt …). Coerce types and reject operator keys (mongo-sanitize); never pass a raw request object as a filter. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

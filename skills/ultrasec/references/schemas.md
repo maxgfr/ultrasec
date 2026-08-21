@@ -18,11 +18,23 @@ Two rules apply to everything below:
 |---|---|
 | `severity` | `critical` · `high` · `medium` · `low` · `info` |
 | `confidence` | `high` · `medium` · `low` |
-| `category` | `taint` · `sast` · `dep` · `secret` · `config` · `authz` · `crypto` · `logs` · `privacy` · `other` |
+| `category` | `taint` · `sast` · `dep` · `secret` · `config` · `authz` · `crypto` · `logs` · `privacy` · `other` (a vulnerability-class name is folded — see below) |
 | `status` | `open` · `confirmed` · `needs-human` · `dismissed` |
 | verify `verdict` | `supported` · `partial` · `unsupported` · `refuted` |
 | triage `verdict` | `noise` · `keep` |
 | revalidate `verdict` | `still-valid` · `fixed` · `false-positive` · `uncertain` |
+
+`category` records **how** a finding was surfaced, not what class of bug it is. An auditor filing
+a discovery naturally writes the class — `xss`, `ssrf`, `idor`, `dos`, `disclosure`,
+`input-validation` — so those are accepted as **aliases** and folded onto the vocabulary, with
+every rewrite reported (`↷ row 3: category "xss" folded to "taint"`). Anything that is untrusted
+input reaching a dangerous operation folds to `taint`; `idor`/`csrf`/`access-control` to `authz`;
+classes that assert no data flow (`dos`, `disclosure`, `robustness`, `business-logic`) to `other`.
+A name nothing maps to is still refused, and names the accepted set.
+
+This is not cosmetic. Before it, `investigate --apply` refused every one of those names and
+exited 0 — on the first real audit that silently dropped 11 of 12 manual findings, in the one
+stage that exists to carry the classes the engine cannot enumerate.
 
 **How a verdict becomes a status** (`nextStatus`, shared by every adjudicating stage — this is
 the conservative gate, and it is the same code for manual, powered and fan-out runs):
@@ -83,6 +95,10 @@ Written by `scan`/`import`, rewritten by every `--apply`. The dossier's core rec
 | `verified` | secret findings only: a scanner actively confirmed the credential is live. Treat a `true` as an incident, not a finding. |
 | `provenance` | `{author?, commit?, date?, owner?}` from `--blame`. Evidence only — never a suppression rule. |
 | `fixedIn` | commit recorded by `revalidate --apply` on a `fixed` verdict. |
+| `brocard` | the named ground for a `refuted` verdict (see the list below). Optional and never blocking, but it is the ONLY field `check --semantic` reads as a ground — a refutation argued in `note` still reports as unargued. |
+| `noise` | the noise-by-construction class the finding was DEMOTED under (never dismissed). Engine-set, re-derived every scan. See below. |
+| `flow` | `{assigned?, tainted?}` — for an assignment sink the value assigned, plus the bindings the def-use walk followed. Evidence for the **Reachability evidence** block; the engine never acts on it. Note the walk is PER FILE, so on a cross-file path the assigned value is a parameter and "no tracked binding" is expected, not suspicious. |
+| `atCommit` | set when the finding came from a scan of git HISTORY: the commit its `file:line` belongs to. `check` resolves the citation against THAT tree, so a secret in a file since deleted is still graded — and a fabricated path still fails. |
 | `priorAnalysis` | `{tool, reasoning?, mitigationsChecked?, revalidationVerdict?}` ingested from an upstream agent. A **signal**, never a status. |
 
 ## `manifest.json` — run metadata (read this every run)
@@ -117,7 +133,28 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   a coverage hole) from `failed`.
 - **`scopes[]`** accumulates every scope/diff that fed a merged run — this is what makes a
   map-first audit resumable across sessions.
-- **`downgraded`** counts findings de-prioritized as noise BY CONSTRUCTION, with the reason. The
+- **`downgraded`** counts findings de-prioritized as noise BY CONSTRUCTION, one row per class
+  (`{reason, count}`). The classes, and the ground each one proposes:
+
+  | class | what it claims | ground |
+  |---|---|---|
+  | `encrypted-at-rest` | ciphertext in a file that is ciphertext by design (SealedSecret, SOPS, Ansible Vault, age, git-crypt) | `standard-behavior` |
+  | `test-only-path` | EVERY node of the path is a test path, so the flow is not in the shipped artifact | `outside-usage` |
+  | `vendored-artifact` | a vendored or minified upstream build artifact, not this repo's source | `no-threat-model` |
+  | `pattern-declaration` | the cited line DECLARES the pattern — rule metadata, a bare regex, a comment — rather than performing it | `no-threat-model` |
+  | `resource-identifier` | the value addresses a document (a spreadsheet/folder/project id), it is not a way in | `no-threat-model` |
+
+  Demotion is **not adjudication**: it sets severity and confidence, never `status`, `verdict` or
+  `brocard`. What it does is state the severity honestly, which is what makes the finding eligible
+  for `triage` — the cheap lane that clears low/medium/info in one pass. Each class carries a
+  caveat naming what to check before believing it (an encrypted file whose KEY is also committed
+  is a real leak; a rule file that also configures the running system is both).
+
+  The worklists carry `proposed: {class, ground, why}` on such an item and a `## Proposed noise
+  classes` block naming each class once with its members — reading, never verdicts. `verdict` stays
+  `null`: a pre-filled one would make copying the worklist to the apply file a passing adjudication.
+
+  The
   engine's rule is that nothing disappears quietly: a secret finding inside a file that is
   ciphertext by design (SealedSecret, SOPS, Ansible Vault, age, git-crypt) is pushed to `info`
   rather than dropped, and the run still says how many and why. On a real k8s repo that is the
@@ -161,7 +198,9 @@ the `.md` brief always describes the full worklist.
     "verdict": null, "note": "", "priorSignal": "deepsec: true-positive (signal, not a verdict)" } ]
 ```
 
-You write an array of `{id, verdict, note?, exploitPath?, brocard?}`:
+You write an array of `{id, verdict, note?, exploitPath?, brocard?}`. The emitted
+`VERIFY.todo.json` carries `verdict: null`, `note: ""` **and `brocard: null`**, so every field you
+are expected to fill is visible in the file you are filling:
 
 ```json
 [ { "id": "7e51071c4783", "verdict": "supported",
@@ -175,6 +214,14 @@ You write an array of `{id, verdict, note?, exploitPath?, brocard?}`:
 `exploit-from-the-heavens` · `outside-usage` · `standard-behavior` · `documented-behavior` ·
 `cure-worse-than-disease` · `report-not-dispositive`. It is ignored on any other verdict, and an
 unrecognized name is dropped rather than failing the fold (a typo must not cost the batch).
+
+`brocard` is the only field read as a ground. A refutation argued at length in `note` still
+reports as unargued — on the first real-world audit that was 96 dismissals, 0 brocards, because
+the worklist offered a `note` field and no `brocard` field at all. Both are now emitted.
+
+Where the engine recognised a noise class it also emits `proposed: {class, ground, why}` on the
+item — a suggestion to accept or refuse, never a filled-in verdict. A pre-filled `verdict` would
+make copying the worklist to the apply file a passing adjudication.
 
 It is optional and never blocks: `check --semantic` simply **lists** the high/critical dismissals
 that name no ground, so a reviewer can see which refutations were argued. Making it a hard gate

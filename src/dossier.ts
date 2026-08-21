@@ -20,6 +20,73 @@ function excerpt(repo: string, step: PathStep, ctx = 3): string {
   return out.join("\n");
 }
 
+/**
+ * What the engine saw about whether the tainted value ACTUALLY ARRIVES — stated,
+ * not acted on.
+ *
+ * Enumeration closes a path on "a source at or above the sink line in the same
+ * file". That is co-location, and it is why a literal `script.src = "https://…"`
+ * could be reported as DOM XSS. The engine already computed the answer — the
+ * def-use walk knows which bindings it was following and whether any of them
+ * reach the sink line — and then buried it in a prose footnote that neither the
+ * dossier nor the worklist showed.
+ *
+ * It is surfaced here rather than turned into a rule because tightening
+ * enumeration mechanically would trade recall on DOM XSS, which is exactly where
+ * this repo's real bugs were. Reading two lines of evidence is cheap; a missed
+ * stored XSS is not.
+ */
+function reachabilityEvidence(f: Finding): string[] {
+  const scope = f.sourceScope;
+  const flow = f.flow;
+  if (!scope && !f.dataflow && !flow) return [];
+
+  const L: string[] = [`## Reachability evidence`, `_What the engine saw. It did not decide — that is this dossier's question._`, ""];
+
+  if (scope)
+    L.push(
+      `- **source scope**: \`${scope}\`${
+        scope === "symbol"
+          ? " — the source is in the SAME function as the line that closed the path. Strongest tier."
+          : scope === "module"
+            ? " — same module scope, different function. Verify the value is actually passed."
+            : " — a DIFFERENT function of the same file. This is CO-LOCATION only: the engine has not shown the value travels."
+      }`,
+    );
+
+  if (f.dataflow)
+    L.push(
+      `- **def-use**: \`${f.dataflow}\`${
+        f.dataflow === "linked" ? " — a binding from the source is mentioned at the sink line." : " — NO binding from the source is mentioned at the sink line."
+      }`,
+    );
+  else if (flow?.tainted?.length)
+    L.push(`- **def-use**: undecidable — the walk could not follow the value (used inline, or rebound through state it cannot see).`);
+
+  if (flow?.tainted?.length) L.push(`- **bindings tracked from the source**: ${flow.tainted.map((n) => `\`${n}\``).join(", ")}`);
+
+  if (flow?.assigned) {
+    const uses = (flow.tainted ?? []).filter((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(flow.assigned!));
+    L.push(`- **value assigned at the sink**: \`${flow.assigned.length > 160 ? `${flow.assigned.slice(0, 160)}…` : flow.assigned}\``);
+    // The def-use walk is PER FILE. On a cross-file path the sink's value is a
+    // parameter, so "no tracked binding" is the expected reading of a genuine
+    // flow — the domxss bench fixture is exactly that shape. Saying "nothing
+    // tainted arrives" there would push the reader away from a true positive,
+    // which is worse than showing no evidence at all.
+    const crossFile = new Set((f.path ?? []).map((p) => p.file)).size > 1;
+    L.push(
+      uses.length
+        ? `  - a tracked binding (${uses.map((n) => `\`${n}\``).join(", ")}) appears in it — there IS an edge into the attribute.`
+        : crossFile
+          ? `  - no tracked binding appears in it, which is EXPECTED here: the path crosses files, so the assigned value is a parameter and the def-use walk (per-file) cannot follow it. Read the path above to decide whether the caller's value reaches this attribute.`
+          : `  - **no tracked binding appears in it**, and the whole path is in ONE file — so the walk could have followed it and did not. Either the value arrives through state this walk cannot see, or nothing tainted arrives here at all. Decide which before rating it.`,
+    );
+  }
+
+  L.push("");
+  return L;
+}
+
 export function renderFindingDossier(repo: string, graph: Graph, f: Finding, context?: string): string {
   const L: string[] = [];
   L.push(`# ${f.id} — ${f.title}`);
@@ -38,6 +105,7 @@ export function renderFindingDossier(repo: string, graph: Graph, f: Finding, con
     L.push(context);
     L.push("");
   }
+  L.push(...reachabilityEvidence(f));
   L.push(`## What to decide`);
   L.push(f.message);
   L.push("");

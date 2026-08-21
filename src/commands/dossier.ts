@@ -1,10 +1,10 @@
 import { resolve } from "node:path";
-import { flagStr, println, eprintln, type ParsedArgs } from "../util.js";
+import { flagBool, flagStr, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { renderFindingDossier } from "../dossier.js";
-import { loadContextDoc } from "../context.js";
+import { compactContextDoc, loadContextDoc } from "../context.js";
 
-// `ultrasec dossier <finding-id> [--run .ultrasec] [--repo <dir>]`
+// `ultrasec dossier <finding-id> [--run .ultrasec] [--repo <dir>] [--compact|--no-context]`
 // Print the grounding packet (real code + cross-file path + neighbours) for one
 // finding — the evidence an adjudicating subagent reads.
 export function runDossier(args: ParsedArgs): number {
@@ -30,6 +30,16 @@ export function runDossier(args: ParsedArgs): number {
   }
 
   const repo = flagStr(args, "repo") ?? d.manifest.repo;
-  println(renderFindingDossier(repo, d.graph, f, loadContextDoc(run)));
+  // Serial adjudication is the normal way this command is used — dozens of
+  // invocations in a row — and reprinting the whole trust model each time buries
+  // the path and the code being scrolled for. `--no-context` drops it outright;
+  // `--compact` keeps the sections that bear on reachability and severity.
+  //
+  // Deliberately NOT "print it once per session": `dossier` is in
+  // READ_ONLY_COMMANDS so a fan-out subagent stays a non-writer, and remembering
+  // across invocations would need a marker file in the run dir.
+  const context = flagBool(args, "no-context") ? undefined : loadContextDoc(run);
+  const shown = context && flagBool(args, "compact") ? (compactContextDoc(context) ?? context) : context;
+  println(renderFindingDossier(repo, d.graph, f, shown));
   return 0;
 }

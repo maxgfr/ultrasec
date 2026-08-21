@@ -12,7 +12,9 @@
       "src/report.js:5"
     ],
     "verdict": null,
-    "note": ""
+    "note": "",
+    "brocard": null,
+    "reachability": "scope symbol · def-use linked"
   },
   {
     "id": "54b733703450",
@@ -27,7 +29,9 @@
       "src/db.js:6"
     ],
     "verdict": null,
-    "note": ""
+    "note": "",
+    "brocard": null,
+    "reachability": "scope symbol · def-use linked"
   },
   {
     "id": "9b0bcc91ea6a",
@@ -41,6 +45,8 @@
       "src/server.js:20"
     ],
     "verdict": null,
-    "note": ""
+    "note": "",
+    "brocard": null,
+    "reachability": "scope symbol · def-use linked"
   }
 ]

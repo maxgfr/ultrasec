@@ -74,9 +74,11 @@ the flow is **real and exploitable**, and set a verdict:
 > Be skeptical, but do NOT dismiss a high/critical finding unless you can
 > positively **refute** it. Uncertain ⇒ leave it for a human.
 
-On \`refuted\`, name the ground in \`brocard\` — one of:
+On \`refuted\`, name the ground in the item's \`brocard\` field — one of:
 \`no-threat-model\` · \`exploit-from-the-heavens\` · \`outside-usage\` · \`standard-behavior\` · \`documented-behavior\` · \`cure-worse-than-disease\` · \`report-not-dispositive\`
 
+A prose \`note\` is not a ground: \`check --semantic\` reads \`brocard\`, and a
+carefully-argued note in the wrong field still reports as an unargued dismissal.
 Not proving something is not disproving it: a refutation you cannot name a ground for
 is \`unsupported\`. See references/dismissal-brocards.md.
 
@@ -112,7 +114,8 @@ exports[`verify command — byte-identical output (Phase 0 harness refactor guar
       "src/db.js:6"
     ],
     "verdict": null,
-    "note": ""
+    "note": "",
+    "brocard": null
   },
   {
     "id": "c",
@@ -126,7 +129,8 @@ exports[`verify command — byte-identical output (Phase 0 harness refactor guar
       "src/db.js:6"
     ],
     "verdict": null,
-    "note": ""
+    "note": "",
+    "brocard": null
   }
 ]"
 `;
@@ -143,9 +147,11 @@ the flow is **real and exploitable**, and set a verdict:
 > Be skeptical, but do NOT dismiss a high/critical finding unless you can
 > positively **refute** it. Uncertain ⇒ leave it for a human.
 
-On \`refuted\`, name the ground in \`brocard\` — one of:
+On \`refuted\`, name the ground in the item's \`brocard\` field — one of:
 \`no-threat-model\` · \`exploit-from-the-heavens\` · \`outside-usage\` · \`standard-behavior\` · \`documented-behavior\` · \`cure-worse-than-disease\` · \`report-not-dispositive\`
 
+A prose \`note\` is not a ground: \`check --semantic\` reads \`brocard\`, and a
+carefully-argued note in the wrong field still reports as an unargued dismissal.
 Not proving something is not disproving it: a refutation you cannot name a ground for
 is \`unsupported\`. See references/dismissal-brocards.md.
 
@@ -176,7 +182,8 @@ exports[`verify command — byte-identical output (Phase 0 harness refactor guar
       "src/db.js:6"
     ],
     "verdict": null,
-    "note": ""
+    "note": "",
+    "brocard": null
   },
   {
     "id": "b",
@@ -190,7 +197,8 @@ exports[`verify command — byte-identical output (Phase 0 harness refactor guar
       "src/db.js:6"
     ],
     "verdict": null,
-    "note": ""
+    "note": "",
+    "brocard": null
   }
 ]"
 `;

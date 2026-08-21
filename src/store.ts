@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { mergeGraphs, type Graph } from "./graph.js";
 import { byStr } from "./util.js";
 import { SEVERITIES, type Finding, type Manifest, type Severity } from "./types.js";
+import { proposedFor, renderProposalSummary } from "./noise.js";
 
 // The on-disk audit dossier — the hand-off between the deterministic engine and
 // the AI. Plain JSON + a Markdown index, so it is reviewable and diffable.
@@ -40,6 +41,37 @@ export function writeDossier(outDir: string, d: Dossier): void {
  *    re-scan must never delete what it didn't look at.
  * Idempotent and order-independent (findings keyed by content-hash id).
  */
+/**
+ * Carry a prior adjudication onto a freshly-scanned finding, keeping `next`'s
+ * deterministic fields (severity, path, risk).
+ *
+ * Every field an adjudicator AUTHORS has to be listed here, and the list used to
+ * be written out twice — here and in `import`. Both copies named
+ * status/verdict/exploitPath/confidence/message and both omitted `brocard` and
+ * `fixedIn`, so a `scan --merge` silently erased the named ground of every
+ * refutation and the commit a fix was folded in at. `check --semantic` then
+ * reported those dismissals as naming no ground, which is the audit trail
+ * accusing the auditor of the tool's own data loss.
+ *
+ * One function, one list: a new authored field is added once and both callers
+ * get it.
+ */
+export function preserveAdjudication(next: Finding, old: Finding): Finding {
+  const merged: Finding = {
+    ...next,
+    status: old.status,
+    verdict: old.verdict,
+    exploitPath: old.exploitPath,
+    confidence: old.confidence,
+    message: old.message,
+  };
+  // Optional authored fields: only set when present, so a merge never
+  // introduces an explicit `undefined` the JSON round-trip would drop anyway.
+  if (old.brocard) merged.brocard = old.brocard;
+  if (old.fixedIn) merged.fixedIn = old.fixedIn;
+  return merged;
+}
+
 export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
   const byId = new Map<string, Finding>();
   for (const f of prev.findings) byId.set(f.id, f);
@@ -47,14 +79,7 @@ export function mergeDossier(prev: Dossier, next: Dossier): Dossier {
     const old = byId.get(f.id);
     if (old && old.status !== "open") {
       // preserve adjudication; keep `next`'s deterministic fields (severity/path/risk).
-      byId.set(f.id, {
-        ...f,
-        status: old.status,
-        verdict: old.verdict,
-        exploitPath: old.exploitPath,
-        confidence: old.confidence,
-        message: old.message,
-      });
+      byId.set(f.id, preserveAdjudication(f, old));
     } else {
       byId.set(f.id, f);
     }
@@ -190,6 +215,15 @@ export function renderDossierMd(d: Dossier): string {
     L.push(`_No candidate findings._`);
     return L.join("\n") + "\n";
   }
+
+  // The de-noised families, named once each before the per-candidate list.
+  // Presence-gated, so a run with no demotions renders byte-identically.
+  //
+  // Without it the reader meets 46 separate "untrusted input reaches query()"
+  // entries and has to infer, one at a time, that they are the same test
+  // harness. Naming the class once — with its ground and its members — is the
+  // whole of the grouping this design does: reading, never verdicts.
+  L.push(...renderProposalSummary(findings.map((f) => ({ id: f.id, proposed: proposedFor(f) }))));
 
   L.push(`## Candidates`);
   L.push("");

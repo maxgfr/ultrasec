@@ -34,6 +34,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "name"
+        ]
+      },
       "message": "Intra-file candidate: http input at routes.py:7 may reach the deserialize sink load() at routes.py:8 through 1 hop(s). Tainted data deserialized into objects. Use a safe loader (yaml.safe_load, JSON) and never unpickle untrusted input. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [
@@ -82,6 +87,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "name"
+        ]
+      },
       "message": "Cross-file candidate: http input at routes.py:7 may reach the reflect sink import_module() at sink.py:6 through 2 hop(s). Tainted data selecting a class, module, method or attribute by name. Map the input through an explicit allow-list of permitted targets instead of resolving it dynamically. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

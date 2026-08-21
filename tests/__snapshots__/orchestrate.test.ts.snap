@@ -14,7 +14,7 @@ conservative folds; only wall-clock differs. Fan-out is an optimization, not a r
 | Phase | Worklist | Status | Produce it with |
 |---|---|---|---|
 | adjudicate | \`<RUN>/findings.json\` | ready (1 item(s)) | \`node <ENGINE> scan --repo <REPO> --out <RUN>\` |
-| verify | \`<RUN>/VERIFY.todo.json\` | ready (2 item(s)) | \`node <ENGINE> verify --run <RUN>\` |
+| verify | \`<RUN>/VERIFY.todo.json\` | ready (1 item(s)) | \`node <ENGINE> verify --run <RUN>\` |
 | revalidate | \`<RUN>/REVALIDATE.todo.json\` | ready (2 item(s)) | \`node <ENGINE> revalidate --run <RUN>\` |
 | investigate | \`<RUN>/INVESTIGATE.todo.json\` | ready (1 item(s)) | \`node <ENGINE> investigate --run <RUN>\` |
 

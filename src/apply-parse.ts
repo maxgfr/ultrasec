@@ -21,10 +21,21 @@ export interface DroppedRow {
   file?: string;
 }
 
-/** What every `--apply` parser returns: what it kept, and what it refused. */
+/** One row the parser kept, but had to rewrite to a canonical value. */
+export interface NormalizedRow {
+  /** 0-based position in the source array. */
+  index: number;
+  /** Names the field, the value received, and what it became. */
+  note: string;
+}
+
+/** What every `--apply` parser returns: what it kept, what it refused, and what
+ *  it had to rewrite. A silent rewrite is its own kind of data loss, so a fold
+ *  is reported next to the drops rather than absorbed. */
 export interface ParseResult<T> {
   rows: T[];
   dropped: DroppedRow[];
+  normalized?: NormalizedRow[];
 }
 
 /**
@@ -76,6 +87,11 @@ export function requireUsable<T>(result: ParseResult<T>, sourceLength: number, r
     throw new Error(`${sourceLength} row(s), none usable — each needs ${requirement} (fail-closed)${detail ? ` — ${detail}` : ""}`);
   }
   return result;
+}
+
+/** Human-readable lines for the folded rows — reported, never silent. */
+export function formatNormalized(normalized: readonly NormalizedRow[]): string[] {
+  return normalized.map((n) => `  ↷ row ${n.index}: ${n.note}`);
 }
 
 /** Human-readable lines for the dropped rows, in the style of the existing `✗ rejected` output. */

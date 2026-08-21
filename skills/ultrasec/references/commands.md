@@ -207,8 +207,19 @@ still exits 2, listing every rejection at once.
 `verify` additionally takes `--shards n --shard i`, which writes `VERIFY.todo.<i>.json` (the
 `.md` brief always covers the full worklist). Never let a subagent run `verify --shards` — each
 shard invocation **writes** into the run dir, and the orchestrator must stay the only writer.
-`verify` re-emits `needs-human` findings as well as `open` ones, so a second pass picks up what
-an earlier one escalated. `investigate` accepts the focus flags (`--scope`/`--include`/
+`verify` emits a **delta**: `open` findings, plus any `needs-human` one that carries no verdict
+(escalated by another stage, never actually ruled on). A `needs-human` finding an earlier pass
+*did* adjudicate is withheld until you pass `--all`, and comes back carrying its `priorVerdict` so
+it cannot be mistaken for new work. The header names how many were withheld.
+
+That default is a behaviour change with a body count: the worklist used to re-emit every
+non-terminal finding, so a batch meant to cover 11 new discoveries arrived holding 171 rows, and
+filling it in flipped 160 already-argued advisories to `supported` in a single apply. Re-visiting
+an escalation is legitimate — it is why the re-emission exists — but it has to be asked for.
+
+`--apply` lists every verdict that **changes** a finding already ruled on (`⚠ N verdict(s)
+CHANGED an already-adjudicated finding`). Re-applying the same verdict is a silent no-op. Under
+`--strict` a change fails the fold unless `--re-verdict` says it was intended. `investigate` accepts the focus flags (`--scope`/`--include`/
 `--exclude`/`--max-files`/`--gitignore`); `investigate` and `revalidate` accept `--repo`.
 
 ## Report

@@ -40,6 +40,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "pref"
+        ]
+      },
       "message": "Cross-file candidate: http input at routes.java:5 may reach the trustboundary sink setAttribute() at sink.java:7 through 2 hop(s). Untrusted request data stored in session/servlet-context state. Everything downstream reads it as trusted. Validate and normalize BEFORE it crosses, and store a parsed value (an id, an enum) rather than the raw string. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

@@ -24,7 +24,16 @@ export const VERSION = "1.37.0";
 // Additive + optional — older dossiers omit it, and a consumer that can't tell
 // "flag not passed" from "flag passed, zero results" falls back to the old
 // advice, byte-identical to before.
-export const SCHEMA_VERSION = 8;
+// 9: findings gained optional `flow` (the assigned value at an assignment sink
+// plus the bindings the def-use walk followed — evidence for the adjudicator,
+// never acted on by the engine), optional `atCommit` (the commit a history-scanned citation
+// belongs to, so the gate resolves it against that tree rather than HEAD) and
+// optional `noise` — the noise-by-construction class a
+// finding was DEMOTED under (never dismissed): ciphertext-by-design, a taint
+// path confined to the test harness, a vendored build artifact. Additive +
+// optional; it is re-derived by every scan rather than authored, and it carries
+// a suggested refutation ground into the triage/verify worklists.
+export const SCHEMA_VERSION = 9;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -44,6 +53,138 @@ export type Confidence = (typeof CONFIDENCES)[number];
 // "logs" or "secret", as the vocabulary previously forced, distorts the report.
 export const CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "privacy", "other"] as const;
 export type Category = (typeof CATEGORIES)[number];
+
+/**
+ * Vulnerability-class names an auditor reaches for, folded onto the closed
+ * `CATEGORIES` vocabulary above.
+ *
+ * `category` records HOW a finding was surfaced. An auditor filing a discovery
+ * names WHAT the bug is — "xss", "ssrf", "idor", "disclosure" — and every one of
+ * those was refused. On the first real audit that cost 11 of 12 manual findings:
+ * `investigate` is the documented route for exactly the classes the engine
+ * cannot enumerate (sanitizer bypasses, business logic, privacy), and the door
+ * it offers them is a vocabulary that does not contain their names. The command
+ * exited 0 while dropping them.
+ *
+ * A closed vocabulary is still right for storage — `category` keys dedup
+ * (`dedupKey`), correlation and ASVS coverage scoring, so it cannot be free
+ * text. The fix is to accept the names at the door and fold them, reporting what
+ * each one became rather than refusing the row.
+ *
+ * Mappings follow how the ENGINE files the same shape: everything that is
+ * "untrusted input reaches a dangerous operation" is `taint`, because that is
+ * what the catalog's own sink kinds produce. Classes that assert no data-flow
+ * (`dos`, `disclosure`, `robustness`) go to `other` rather than borrowing a
+ * flow they have not shown.
+ */
+export const CATEGORY_ALIASES: Readonly<Record<string, Category>> = {
+  // Untrusted input reaching a dangerous operation — the engine's `taint` shape.
+  xss: "taint",
+  "dom-xss": "taint",
+  "stored-xss": "taint",
+  "reflected-xss": "taint",
+  ssrf: "taint",
+  sqli: "taint",
+  "sql-injection": "taint",
+  "nosql-injection": "taint",
+  injection: "taint",
+  "command-injection": "taint",
+  "code-injection": "taint",
+  rce: "taint",
+  "path-traversal": "taint",
+  "directory-traversal": "taint",
+  lfi: "taint",
+  rfi: "taint",
+  ssti: "taint",
+  xxe: "taint",
+  "prototype-pollution": "taint",
+  "open-redirect": "taint",
+  "header-injection": "taint",
+  "crlf-injection": "taint",
+  "response-splitting": "taint",
+  "input-validation": "taint",
+  validation: "taint",
+  deserialization: "taint",
+  "insecure-deserialization": "taint",
+  "mass-assignment": "taint",
+  "ldap-injection": "taint",
+  "xpath-injection": "taint",
+  "csv-injection": "taint",
+  "prompt-injection": "taint",
+  redos: "taint",
+  // Missing or wrong authorization.
+  idor: "authz",
+  "access-control": "authz",
+  "broken-access-control": "authz",
+  authorization: "authz",
+  authentication: "authz",
+  authn: "authz",
+  "privilege-escalation": "authz",
+  csrf: "authz",
+  // Cryptography.
+  "weak-crypto": "crypto",
+  cryptography: "crypto",
+  tls: "crypto",
+  // Credentials.
+  credentials: "secret",
+  "hardcoded-secret": "secret",
+  "credential-leak": "secret",
+  // Deployment / hardening / third-party code.
+  misconfiguration: "config",
+  hardening: "config",
+  "security-headers": "config",
+  cors: "config",
+  csp: "config",
+  iac: "config",
+  dependency: "dep",
+  "vulnerable-dependency": "dep",
+  cve: "dep",
+  advisory: "dep",
+  "supply-chain": "dep",
+  logging: "logs",
+  "log-injection": "logs",
+  // Personal data.
+  gdpr: "privacy",
+  rgpd: "privacy",
+  pii: "privacy",
+  "data-protection": "privacy",
+  tracking: "privacy",
+  consent: "privacy",
+  // Real classes with no data-flow claim and no better home.
+  dos: "other",
+  "denial-of-service": "other",
+  "resource-exhaustion": "other",
+  disclosure: "other",
+  "information-disclosure": "other",
+  "info-leak": "other",
+  "error-handling": "other",
+  robustness: "other",
+  abuse: "other",
+  "rate-limit": "other",
+  "rate-limiting": "other",
+  "business-logic": "other",
+  race: "other",
+  "race-condition": "other",
+};
+
+/**
+ * Resolve a submitted category to a member of `CATEGORIES`, or `undefined` when
+ * nothing sensible maps. Case- and separator-insensitive, so `"SQL Injection"`,
+ * `"sql_injection"` and `"sql-injection"` all land the same way.
+ *
+ * Returns the canonical value AND whether it was folded, because a silent
+ * rewrite is its own kind of data loss — the caller reports every fold.
+ */
+export function normalizeCategory(value: unknown): { category: Category; folded: boolean } | undefined {
+  if (typeof value !== "string") return undefined;
+  const key = value
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_]+/g, "-");
+  if ((CATEGORIES as readonly string[]).includes(key)) return { category: key as Category, folded: key !== value };
+  const alias = Object.prototype.hasOwnProperty.call(CATEGORY_ALIASES, key) ? CATEGORY_ALIASES[key] : undefined;
+  return alias ? { category: alias, folded: true } : undefined;
+}
 
 // Lifecycle of a finding through the conservative verify gate. A candidate is
 // `open` until adjudicated; a true positive becomes `confirmed`; a proven false
@@ -80,6 +221,46 @@ export const BROCARDS = [
 export type Brocard = (typeof BROCARDS)[number];
 
 /** One-line gloss per brocard, rendered next to a dismissal in the report. */
+/**
+ * Noise-by-construction classes: shapes where the match is REAL but the code it
+ * sits in cannot carry the risk the finding describes.
+ *
+ * Kept here with the other closed vocabularies because `Finding.noise` is part
+ * of the on-disk schema; the rules that decide membership live in `noise.ts`.
+ */
+export const NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact", "pattern-declaration", "resource-identifier"] as const;
+export type NoiseClass = (typeof NOISE_CLASSES)[number];
+
+/**
+ * The named ground a dismissal on each basis stands on — all of them existing
+ * BROCARDS, never new ones.
+ *
+ * A class name says how the machine recognised the shape; a brocard says why the
+ * dismissal is sound. Adding "test-only" as a ground would conflate the two and
+ * quietly grow the vocabulary of things an auditor may assert without argument.
+ * This table is the argument, and a reviewer disagrees with a row in it.
+ */
+export const NOISE_GROUND: Readonly<Record<NoiseClass, Brocard>> = {
+  // Ciphertext in a ciphertext file is the format working as written.
+  "encrypted-at-rest": "standard-behavior",
+  // "The path is not reached in any real deployment" — a test harness is not a
+  // deployment. This is `outside-usage` almost verbatim.
+  "test-only-path": "outside-usage",
+  // A byte-identical copy of a published upstream release: no attacker can
+  // complete "with X I can Y to obtain Z" against a blob everyone already has.
+  "vendored-artifact": "no-threat-model",
+  // A line that DESCRIBES a dangerous pattern is data, not an operation: no
+  // attacker completes "with X I can Y to obtain Z" against a documentation
+  // string. Security tools, WAF signature sets and lint-rule packs all trip
+  // their own rules this way.
+  "pattern-declaration": "no-threat-model",
+  // The value names a DOCUMENT, not a way in. Possessing a spreadsheet id is not
+  // possessing access to it — the sharing setting is, and that is not in the
+  // repo. `exploit-from-the-heavens` would be wrong (it is not that the
+  // attacker needs too much); the claim simply has no attacker story as written.
+  "resource-identifier": "no-threat-model",
+};
+
 export const BROCARD_SUMMARY: Record<Brocard, string> = {
   "no-threat-model": "no coherent attacker: the claim cannot complete “an attacker with X can Y to obtain Z”",
   "exploit-from-the-heavens": "the capability required already equals or exceeds what the exploit grants",
@@ -237,6 +418,49 @@ export interface Finding {
    * see which dismissals were argued and which were merely asserted.
    */
   brocard?: Brocard;
+  /**
+   * What the engine knows about whether the tainted value actually ARRIVES at
+   * the sink — laid out for the adjudicator instead of acted on.
+   *
+   * Enumeration closes a path on "a source at or above the sink line in the same
+   * file", which is co-location. Tightening that mechanically would trade recall
+   * on DOM XSS, the class where real bugs live, to remove noise. So the engine
+   * states what it saw — the value assigned at an assignment sink, and the names
+   * the def-use walk was following — and the reader decides. That is the
+   * division of labour this tool is built on: the engine enumerates and
+   * evidences, the reasoning is not its job.
+   */
+  flow?: {
+    /** For an assignment sink, the text of the assigned value. */
+    assigned?: string;
+    /** The bindings the def-use walk tracked from the source. */
+    tainted?: string[];
+  };
+  /**
+   * The commit the cited location belongs to, when the finding came from a scan
+   * of git HISTORY rather than of the working tree.
+   *
+   * gitleaks `detect` reads every commit, which is the coverage that catches a
+   * credential added and later deleted — and it means the cited `file:line` need
+   * not exist at HEAD at all. Without this the citation gate read those as
+   * dangling ("hallucinated or stale") and FAILED, on any repo that ever deleted
+   * a file: 20 of them on the first real audit, none of them invented.
+   *
+   * Engine-set only, from the scanner's own output. Never author-set, so it
+   * cannot be used to walk a made-up citation past the gate — and the gate does
+   * not skip the check, it resolves it against THIS commit instead.
+   */
+  atCommit?: string;
+  /**
+   * The noise-by-construction class this finding was DEMOTED under — never
+   * dismissed. Set by the scan's de-noising pass, not authored, and re-derived
+   * on every scan, so it needs no merge preservation.
+   *
+   * It carries a suggested refutation ground (`NOISE_GROUND`) into the triage
+   * and verify worklists, which is what lets forty identical test-harness
+   * candidates cost one argued adjudication instead of forty restatements.
+   */
+  noise?: NoiseClass;
   /** Concrete trigger path / proof-of-exploit sketch, once reasoned. */
   exploitPath?: string;
   /** Deterministic git-blame / CODEOWNERS provenance (opt-in `--blame`). Evidence only. */
@@ -343,6 +567,8 @@ export interface Manifest {
     logHygiene?: boolean;
     /** `scan --blame` (git provenance on every finding). */
     blame?: boolean;
+    /** `scan --include-tests` (test-path candidates kept at full severity). */
+    includeTests?: boolean;
   };
   /** Findings de-prioritized as noise BY CONSTRUCTION, with the reason and how
    *  many. The engine's rule is that nothing disappears quietly: a class that

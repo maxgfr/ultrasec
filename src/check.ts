@@ -3,6 +3,7 @@ import { join, resolve, sep } from "node:path";
 import type { Dossier } from "./store.js";
 import { SEVERITIES, type CodeLoc, type Finding, type Severity } from "./types.js";
 import { byStr } from "./util.js";
+import { lineCountAtCommit } from "./git.js";
 
 // The exit gate. Grounding (default): every cited [file:line] must resolve in the
 // repo — a hallucinated or stale location fails the audit (the same
@@ -27,6 +28,9 @@ export interface CheckResult {
   gated: number; // findings considered after --min-severity
   /** High/critical dismissals that name no ground for the refutation (see BROCARDS). */
   unarguedDismissals: string[];
+  /** Citations resolved against a HISTORICAL commit rather than HEAD — a secret
+   *  in a file that has since been deleted. Reported, never a failure. */
+  historical: number;
   messages: string[];
 }
 
@@ -146,6 +150,7 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     return lineCache.get(file)!;
   };
 
+  let historical = 0;
   for (const f of findings) {
     // Dismissed findings need not resolve (the code may have been the false lead).
     if (f.status === "dismissed") continue;
@@ -153,6 +158,23 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
       // External references (absolute dependency paths, etc.) aren't repo
       // citations — don't grade or read them.
       if (!insideRepo(repo, loc.file)) continue;
+      // A finding from a scan of git HISTORY cites a file AT A COMMIT, which
+      // need not exist at HEAD. gitleaks reads every commit — that is the
+      // coverage that catches a credential added and later deleted, and it made
+      // the gate fail on any repo that ever deleted a file: 20 dangling
+      // citations on the first real audit, not one of them invented.
+      //
+      // Not skipped — resolved against the tree it actually belongs to. That is
+      // a STRONGER check than HEAD, because a fabricated path fails there too.
+      if (f.atCommit) {
+        const at = lineCountAtCommit(repo, f.atCommit, loc.file);
+        if (at === null)
+          dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `file not found at ${f.atCommit.slice(0, 8)} (the commit the scanner cited)` });
+        else if (loc.line !== 0 && (loc.line < 1 || loc.line > at))
+          dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range at ${f.atCommit.slice(0, 8)} (file had ${at} lines)` });
+        else historical++;
+        continue;
+      }
       const lc = linesOf(loc.file);
       if (lc.status === "missing") dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
       // Distinct from "not found": the citation resolves to a real path the
@@ -192,6 +214,12 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     ok = false;
     messages.push(`${dangling.length} dangling citation(s) — a cited [file:line] does not resolve (hallucinated or stale).`);
   }
+  // Never silent: a citation graded against a different tree is a fact the reader
+  // needs, or "grounding OK" quietly means something narrower than it says.
+  if (historical > 0)
+    messages.push(
+      `${historical} citation(s) resolved against the commit that introduced them, not HEAD — history-scanned secrets in files since deleted. Still graded, just against the right tree.`,
+    );
   if (opts.semantic) {
     if (unadjudicated > 0) {
       ok = false;
@@ -205,11 +233,11 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     // into a hard failure would push adjudicators to pick a ground to get green.
     if (unargued.length > 0)
       messages.push(
-        `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", …" : ""}) — set \`brocard\` so the refutation can be reviewed: references/dismissal-brocards.md.`,
+        `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", …" : ""}) — set the verdict's \`brocard\` field so the refutation can be reviewed. A prose \`note\` is not read as a ground, however carefully argued: references/dismissal-brocards.md.`,
       );
   }
   if (ok)
     messages.push(`grounding OK${opts.semantic ? " · audit adjudicated" : ""} — ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
 
-  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, unarguedDismissals: unargued, messages };
+  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, unarguedDismissals: unargued, historical, messages };
 }

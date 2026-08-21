@@ -352,15 +352,33 @@ function mentions(line: string, name: string): boolean {
  * "looked and did not find it", never "could not look".
  */
 export function traceDefUse(lines: string[], sourceLine: number, sourceMatch: string, entryLine: number): Dataflow | undefined {
-  if (sourceLine > entryLine) return undefined;
+  return traceDefUseDetail(lines, sourceLine, sourceMatch, entryLine).verdict;
+}
+
+/**
+ * As `traceDefUse`, but also returns the NAMES the walk was following.
+ *
+ * The verdict alone says "the bound value is not mentioned at the sink"; the
+ * names say WHICH value should have arrived, which is what turns the signal from
+ * a hint into something an adjudicator can check against the code in front of
+ * them. Surfaced in the dossier, never acted on by the engine.
+ */
+export function traceDefUseDetail(
+  lines: string[],
+  sourceLine: number,
+  sourceMatch: string,
+  entryLine: number,
+): { verdict: Dataflow | undefined; tainted: string[] } {
+  const none = { verdict: undefined, tainted: [] as string[] };
+  if (sourceLine > entryLine) return none;
   const srcText = lines[sourceLine - 1] ?? "";
-  if (sourceLine === entryLine) return "linked"; // the source expression is ON the line
+  if (sourceLine === entryLine) return { verdict: "linked", tainted: [] }; // the source expression is ON the line
 
   const at = srcText.indexOf(sourceMatch);
   const op = bindingOperatorBefore(srcText, at < 0 ? srcText.length : at);
-  if (op < 0) return undefined; // used inline, nothing to follow
+  if (op < 0) return none; // used inline, nothing to follow
   const tainted = new Set(boundNames(srcText.slice(0, op)));
-  if (!tainted.size) return undefined;
+  if (!tainted.size) return none;
 
   for (let l = sourceLine + 1; l < entryLine; l++) {
     const text = lines[l - 1] ?? "";
@@ -371,5 +389,6 @@ export function traceDefUse(lines: string[], sourceLine: number, sourceMatch: st
   }
 
   const target = lines[entryLine - 1] ?? "";
-  return [...tainted].some((n) => mentions(target, n)) ? "linked" : "unlinked";
+  const names = [...tainted].sort();
+  return { verdict: names.some((n) => mentions(target, n)) ? "linked" : "unlinked", tainted: names };
 }

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
-import { auditSecrets, downgradeEncryptedAtRest, encryptedShapeOf, isLiteralSecret } from "../src/secrets.js";
+import { auditSecrets, encryptedShapeOf, isLiteralSecret } from "../src/secrets.js";
 import type { Finding } from "../src/types.js";
 
 // Issue #10 (defect 3). Measured on a public k8s repo: 41 secret findings on
@@ -86,7 +86,9 @@ describe("isLiteralSecret", () => {
   });
 });
 
-describe("encrypted-at-rest findings are de-prioritized, never dropped", () => {
+// The shape PREDICATE lives here; what the engine DOES with it (demote, count,
+// never drop) is `demoteNoise` and is covered in noise.test.ts.
+describe("encrypted-at-rest shapes are recognised by name and by content marker", () => {
   it("recognises SealedSecret by filename and by kind", () => {
     expect(encryptedShapeOf("sealed/db.sealed-secret.yaml", "")!.id).toBe("sealed-secret");
     expect(encryptedShapeOf("anything.yaml", "apiVersion: v1\nkind: SealedSecret\n")!.id).toBe("sealed-secret");
@@ -100,34 +102,5 @@ describe("encrypted-at-rest findings are de-prioritized, never dropped", () => {
 
   it("leaves an ordinary file alone", () => {
     expect(encryptedShapeOf("values.yaml", "password: hunter2\n")).toBeUndefined();
-  });
-
-  it("downgrades to info and counts, rather than filtering", () => {
-    const input = [secret("sealed/db.sealed-secret.yaml"), secret("sealed/app.enc.yaml"), secret(".kontinuous/env/prod/values.yaml")];
-    const { findings, downgraded } = downgradeEncryptedAtRest(input, FIXTURE);
-    expect(downgraded).toBe(2);
-    // Nothing disappears — the report is re-ordered, not shortened.
-    expect(findings.length).toBe(3);
-    const sealed = findings.filter((f) => f.sink!.file.startsWith("sealed/"));
-    expect(sealed.every((f) => f.severity === "info")).toBe(true);
-    expect(sealed.every((f) => f.confidence === "low")).toBe(true);
-    expect(sealed.every((f) => /ciphertext is the point of the file/.test(f.message))).toBe(true);
-    // The real one is untouched.
-    expect(findings.find((f) => f.sink!.file.endsWith("prod/values.yaml"))!.severity).toBe("high");
-  });
-
-  it("never downgrades a credential a scanner VERIFIED as live", () => {
-    // A live credential is live, whatever the file format claims to be.
-    const input = [secret("sealed/db.sealed-secret.yaml", { verified: true })];
-    const { findings, downgraded } = downgradeEncryptedAtRest(input, FIXTURE);
-    expect(downgraded).toBe(0);
-    expect(findings[0]!.severity).toBe("high");
-  });
-
-  it("leaves non-secret findings alone wherever they sit", () => {
-    const input = [secret("sealed/db.sealed-secret.yaml", { category: "config", severity: "medium" })];
-    const { findings, downgraded } = downgradeEncryptedAtRest(input, FIXTURE);
-    expect(downgraded).toBe(0);
-    expect(findings[0]!.severity).toBe("medium");
   });
 });

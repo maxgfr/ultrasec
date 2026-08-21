@@ -55,15 +55,19 @@ Emit `INVESTIGATE.json` — an array of:
            { "file": "src/x.js", "line": 42, "why": "reads any user's record" }] }
 ```
 
-`category` is one of `taint`/`sast`/`dep`/`secret`/`config`/`authz`/`crypto`/`logs`/`other`;
-`severity` critical…info. Cite **resolvable `[file:line]`** for the primary location and every
+`category` is one of `taint`/`sast`/`dep`/`secret`/`config`/`authz`/`crypto`/`logs`/`privacy`/
+`other` — and a vulnerability-class name (`xss`, `ssrf`, `idor`, `dos`, `disclosure`,
+`input-validation`…) is accepted and folded onto it, with the rewrite reported. `severity`
+critical…info. `line: 0` cites the whole file. Cite **resolvable `[file:line]`** for the primary location and every
 path step. Full field reference: [schemas.md](schemas.md).
 
 Choosing a `category` when it isn't obvious: anything about *who may* (IDOR, missing authz, mass
 assignment, privilege escalation) is `authz`; key/hash/randomness/comparison misuse is `crypto`;
 business logic, race conditions and feature abuse are `other`; a multi-hop data flow you traced
-by hand is `taint`. The category groups the report — it never affects the gate, so don't
-agonize.
+by hand is `taint`; personal-data handling is `privacy`. The category never affects the gate, so
+don't agonize — but it is not purely cosmetic either: it keys deduplication, cross-tool
+correlation and ASVS coverage scoring, which is why the vocabulary stays closed and class names
+are folded rather than stored.
 
 ## 3. Apply (ingest)
 

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync, rmSync, openSync, closeSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { execFileSync } from "node:child_process";
 import type { Dossier } from "../src/store.js";
 import type { Finding } from "../src/types.js";
 import { check, countNewlines, lineCountDetailed, lineCount } from "../src/check.js";
@@ -299,5 +300,82 @@ describe("check — lineCount streaming (IMPORTANT 3)", () => {
       expect(r.dangling[0]!.reason).toMatch(/unreadable/);
       rmSync(repoDir, { recursive: true, force: true });
     });
+  });
+});
+
+describe("history-scanned citations are graded against their own commit", () => {
+  // gitleaks `detect` reads every commit, so a secret in a file deleted since
+  // cites a path that does not exist at HEAD. The gate used to call that
+  // "hallucinated or stale" and FAIL — 20 of them on the first real audit, not
+  // one invented. It must still be GRADED, just against the right tree.
+  function repo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "usec-hist-"));
+    const git = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { stdio: "ignore" });
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeFileSync(join(dir, "gone.js"), "line1\nline2\nconst KEY = 'AKIA123';\n");
+    git("add", "-A");
+    git("commit", "-qm", "add");
+    const sha = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    rmSync(join(dir, "gone.js"));
+    git("add", "-A");
+    git("commit", "-qm", "delete");
+    writeFileSync(join(dir, "kept.js"), "x\n");
+    return `${dir}\u0000${sha}`;
+  }
+
+  function secret(over: Partial<Finding>): Finding {
+    return {
+      id: "s1",
+      category: "secret",
+      title: "Hardcoded secret",
+      severity: "high",
+      confidence: "low",
+      message: "m",
+      tool: "gitleaks",
+      status: "open",
+      ...over,
+    };
+  }
+
+  it("passes when the cited line exists at the cited commit, and says so", () => {
+    const [dir, sha] = repo().split("\u0000") as [string, string];
+    const d = dossier([secret({ sink: { file: "gone.js", line: 3 }, atCommit: sha })]);
+    const r = check(d, { repo: dir });
+    expect(r.dangling).toEqual([]);
+    expect(r.ok).toBe(true);
+    expect(r.historical).toBe(1);
+    expect(r.messages.join(" ")).toMatch(/resolved against the commit that introduced them/);
+  });
+
+  it("STILL fails a fabricated path — the commit is a different tree, not an exemption", () => {
+    const [dir, sha] = repo().split("\u0000") as [string, string];
+    const d = dossier([secret({ sink: { file: "never-existed.js", line: 1 }, atCommit: sha })]);
+    const r = check(d, { repo: dir });
+    expect(r.ok).toBe(false);
+    expect(r.dangling[0]!.reason).toMatch(/file not found at/);
+  });
+
+  it("STILL fails a line past the end of the file at that commit", () => {
+    const [dir, sha] = repo().split("\u0000") as [string, string];
+    const d = dossier([secret({ sink: { file: "gone.js", line: 999 }, atCommit: sha })]);
+    const r = check(d, { repo: dir });
+    expect(r.ok).toBe(false);
+    expect(r.dangling[0]!.reason).toMatch(/line out of range at/);
+  });
+
+  it("refuses a commit that is not a sha, rather than shelling it out", () => {
+    const [dir] = repo().split("\u0000") as [string, string];
+    const d = dossier([secret({ sink: { file: "gone.js", line: 3 }, atCommit: "HEAD --output=/tmp/pwn" })]);
+    expect(check(d, { repo: dir }).ok).toBe(false);
+  });
+
+  it("a finding with no atCommit is graded against HEAD exactly as before", () => {
+    const [dir] = repo().split("\u0000") as [string, string];
+    const d = dossier([secret({ sink: { file: "gone.js", line: 3 } })]);
+    const r = check(d, { repo: dir });
+    expect(r.ok).toBe(false);
+    expect(r.historical).toBe(0);
   });
 });

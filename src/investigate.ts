@@ -1,5 +1,5 @@
 import type { Dossier } from "./store.js";
-import { CATEGORIES, SEVERITIES, type Category, type Finding, type Severity } from "./types.js";
+import { CATEGORIES, SEVERITIES, normalizeCategory, type Category, type Finding, type Severity } from "./types.js";
 import type { AttackSurface } from "./map.js";
 import type { Graph } from "./graph.js";
 import { neighbors } from "./neighbors.js";
@@ -7,7 +7,7 @@ import { makeToolFinding } from "./tools/normalize.js";
 import { insideRepo, lineCount } from "./check.js";
 import { byStr } from "./util.js";
 import { leadsForRegion } from "./assumptions.js";
-import { badField, coerceRows, notInVocabulary, requireUsable, type DroppedRow, type ParseResult } from "./apply-parse.js";
+import { badField, coerceRows, describeValue, notInVocabulary, requireUsable, type DroppedRow, type NormalizedRow, type ParseResult } from "./apply-parse.js";
 
 // The agentic-discovery stage (Phase 5). The deterministic engine can't enumerate
 // authorization/IDOR, business-logic, or subtle multi-hop flows — so it emits a
@@ -260,6 +260,7 @@ export function parseDiscoveries(raw: string): ParseResult<Discovery> {
   const arr = coerceRows(JSON.parse(raw) as unknown, ["discoveries"], "discoveries");
   const rows: Discovery[] = [];
   const dropped: DroppedRow[] = [];
+  const normalized: NormalizedRow[] = [];
   const drop = (index: number, reason: string) => dropped.push({ index, reason });
 
   for (const [index, raw] of (arr as any[]).entries()) {
@@ -274,8 +275,12 @@ export function parseDiscoveries(raw: string): ParseResult<Discovery> {
     for (const field of ["title", "message", "file"] as const) {
       if (typeof d[field] !== "string") bad.push(badField(field, d[field], "a string"));
     }
-    if (!Number.isInteger(d.line) || d.line < 1) bad.push(badField("line", d.line, "an integer ≥ 1"));
-    if (!(CATEGORIES as readonly string[]).includes(d.category)) bad.push(notInVocabulary("category", d.category, CATEGORIES));
+    // `line: 0` is the documented whole-file citation (schemas.md) that
+    // config/IaC findings normalize to, and `check` already special-cases it.
+    // Rejecting it here refused a legitimate shape the format defines.
+    if (!Number.isInteger(d.line) || d.line < 0) bad.push(badField("line", d.line, "an integer ≥ 0 (0 = the whole file)"));
+    const cat = normalizeCategory(d.category);
+    if (!cat) bad.push(`${notInVocabulary("category", d.category, CATEGORIES)} (nor a known alias — see CATEGORY_ALIASES)`);
     if (!(SEVERITIES as readonly string[]).includes(d.severity)) bad.push(notInVocabulary("severity", d.severity, SEVERITIES));
     if (bad.length) {
       drop(index, bad.join(", "));
@@ -286,9 +291,10 @@ export function parseDiscoveries(raw: string): ParseResult<Discovery> {
           .filter((p: any) => p && typeof p.file === "string" && Number.isInteger(p.line) && p.line >= 1)
           .map((p: any) => ({ file: p.file, line: p.line, why: typeof p.why === "string" ? p.why : "" }))
       : undefined;
+    if (cat!.folded) normalized.push({ index, note: `category ${describeValue(d.category)} folded to "${cat!.category}"` });
     rows.push({
       title: d.title,
-      category: d.category as Category,
+      category: cat!.category,
       severity: d.severity as Severity,
       ...(typeof d.cwe === "string" ? { cwe: d.cwe } : {}),
       message: d.message,
@@ -299,8 +305,9 @@ export function parseDiscoveries(raw: string): ParseResult<Discovery> {
   }
 
   return requireUsable(
-    { rows, dropped },
+    // Presence-gated: no fold ⇒ the result is shape-identical to before.
+    { rows, dropped, ...(normalized.length ? { normalized } : {}) },
     (arr as any[]).length,
-    `title/message/file (strings), line ≥ 1, a category among ${CATEGORIES.join("|")} and a severity among ${SEVERITIES.join("|")}`,
+    `title/message/file (strings), line ≥ 0, a category among ${CATEGORIES.join("|")} (aliases accepted) and a severity among ${SEVERITIES.join("|")}`,
   );
 }

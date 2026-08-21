@@ -48,6 +48,25 @@ describe("mergeDossier", () => {
     expect(a.message).toContain("Verdict (supported)");
   });
 
+  it("preserves the refutation ground and the fix commit across a re-scan", () => {
+    // Both were missing from the preserve-list, so a `scan --merge` erased every
+    // named ground — after which `check --semantic` reported those dismissals as
+    // naming no ground, blaming the auditor for the tool's own data loss.
+    const prev = dossier([finding("a", { status: "dismissed", verdict: "refuted", brocard: "outside-usage", fixedIn: "abc1234" })]);
+    const next = dossier([finding("a", { status: "open" })], ["src"]);
+    const a = mergeDossier(prev, next).findings.find((f) => f.id === "a")!;
+    expect(a.brocard).toBe("outside-usage");
+    expect(a.fixedIn).toBe("abc1234");
+  });
+
+  it("does not invent a brocard on a finding that never had one", () => {
+    const prev = dossier([finding("a", { status: "dismissed", verdict: "refuted" })]);
+    const next = dossier([finding("a", { status: "open" })], ["src"]);
+    const a = mergeDossier(prev, next).findings.find((f) => f.id === "a")!;
+    expect(a.brocard).toBeUndefined();
+    expect("brocard" in a).toBe(false);
+  });
+
   it("appends genuinely new findings", () => {
     const prev = dossier([finding("a")]);
     const next = dossier([finding("b", { severity: "critical" })], ["src/api"]);

@@ -217,6 +217,29 @@ export const SINKS: SinkRule[] = [
     note: "Tainted data evaluated as code. Almost never safe; verify the argument is a constant.",
   },
   {
+    // BEFORE the `path` rule, which also claims `open`.
+    //
+    // `window.open(url)` is navigation, not a filesystem read, but the path rule
+    // lists `open` with no `receivers`, and the receiver check in `findSinks` is
+    // written `if (rule.receivers && c.receiver && …)` — inert when a rule
+    // declares no receivers. So `window.open` matched CWE-22 "Path traversal /
+    // archive extraction (zip-slip)" at HIGH, and the `break` on first match
+    // stopped any better rule from ever seeing it. Observed on a real repo
+    // opening a legifrance.gouv.fr tab with a fixed host and URLSearchParams.
+    //
+    // Routed to CWE-601 instead: if the host IS attacker-controlled the bug is
+    // an open redirect / tabnabbing, which is the question worth asking.
+    kind: "redirect",
+    cwe: "CWE-601",
+    severity: "medium",
+    languages: ["javascript"],
+    callees: ["open"],
+    receivers: ["window", "globalThis", "self", "top", "parent"],
+    requireReceiver: true,
+    title: "Open redirect / reverse tabnabbing via window.open",
+    note: "Tainted data used as a navigation target. Allow-list the destination host (or permit only relative paths), and keep `noopener,noreferrer` on the feature string.",
+  },
+  {
     kind: "path",
     cwe: "CWE-22",
     severity: "high",
@@ -602,6 +625,21 @@ export interface TextSinkRule {
   severity: Severity;
   languages: string[];
   re: RegExp;
+  /**
+   * Require the ASSIGNED VALUE to be something other than a constant.
+   *
+   * These rules match a line, and reachability is closed by "a source at or
+   * above the sink line in the same file" — so `script.src = "https://…"`, a
+   * bare string literal, was reported as DOM XSS because an unrelated
+   * `location.hash` read appeared earlier in the file. A constant cannot carry
+   * tainted data, whatever else the function does.
+   *
+   * Set ONLY on the dot-assignment rules. It must never go on the framework rule
+   * (`v-html="expr"`, `[innerHTML]="expr"`), where the quotes delimit an HTML
+   * attribute and its CONTENTS are the expression — treating that as a literal
+   * would silently drop real template XSS.
+   */
+  requiresDynamicValue?: boolean;
   /** What to show as the "callee" in the finding title. */
   label: string;
   title: string;
@@ -615,6 +653,7 @@ export const TEXT_SINKS: TextSinkRule[] = [
     severity: "high",
     languages: ["javascript"],
     re: /\.\s*(?:innerHTML|outerHTML)\s*(?:\+)?=(?!=)/,
+    requiresDynamicValue: true,
     label: "innerHTML",
     title: "DOM XSS (HTML sink)",
     note: "Tainted data assigned to innerHTML/outerHTML executes any markup it contains. Assign via textContent, or sanitize with DOMPurify and a Trusted Types policy.",
@@ -635,11 +674,33 @@ export const TEXT_SINKS: TextSinkRule[] = [
     severity: "medium",
     languages: ["javascript"],
     re: /\.\s*(?:src|href|action|formaction|srcdoc)\s*=(?!=)/,
+    requiresDynamicValue: true,
     label: "URL attribute",
     title: "DOM XSS via a URL attribute",
     note: "Tainted data assigned to src/href executes when the scheme is `javascript:` or `data:`. Allow-list the scheme before assigning.",
   },
 ];
+
+/** A string or template literal with nothing interpolated into it. */
+const PURE_QUOTED = /^(['"])(?:\\.|(?!\1)[^\\])*\1$/;
+
+/**
+ * Is the value assigned on this line a compile-time constant?
+ *
+ * `rhs` is everything after the matched `=`. Anything this cannot positively
+ * prove constant is treated as dynamic — a value continued on the next line, a
+ * concatenation, an identifier, an interpolated template. Recall is the default;
+ * only a literal it can see in full is dropped.
+ */
+export function isConstantAssignment(rhs: string): boolean {
+  const v = rhs
+    .trim()
+    .replace(/[;,]\s*$/, "")
+    .trim();
+  if (!v) return false; // value is on the next line — cannot tell, so keep it
+  if (v.startsWith("`") && v.endsWith("`") && v.length >= 2) return !v.includes("${");
+  return PURE_QUOTED.test(v);
+}
 
 export function findTextSinks(lang: LangSpec, content: string): SinkHit[] {
   const out: SinkHit[] = [];
@@ -648,8 +709,28 @@ export function findTextSinks(lang: LangSpec, content: string): SinkHit[] {
     const line = lines[i]!;
     for (const rule of TEXT_SINKS) {
       if (!appliesTo(rule.languages, lang.id)) continue;
-      if (!rule.re.test(line)) continue;
-      out.push({ line: i + 1, callee: rule.label, kind: rule.kind, cwe: rule.cwe, severity: rule.severity, title: rule.title, note: rule.note });
+      const m = rule.re.exec(line);
+      if (!m) continue;
+      // The match ends just past the `=`, so the remainder of the line is the
+      // assigned value.
+      const rhs = rule.requiresDynamicValue
+        ? line
+            .slice(m.index + m[0].length)
+            .trim()
+            .replace(/[;,]\s*$/, "")
+            .trim()
+        : undefined;
+      if (rule.requiresDynamicValue && isConstantAssignment(line.slice(m.index + m[0].length))) continue;
+      out.push({
+        line: i + 1,
+        callee: rule.label,
+        kind: rule.kind,
+        cwe: rule.cwe,
+        severity: rule.severity,
+        title: rule.title,
+        note: rule.note,
+        ...(rhs ? { assigned: rhs } : {}),
+      });
       break; // first matching rule wins, as with call sinks
     }
   }
@@ -742,6 +823,19 @@ export interface SinkHit {
   severity: Severity;
   title: string;
   note: string;
+  /**
+   * For an ASSIGNMENT sink (`el.innerHTML = …`, `script.src = …`), the text of
+   * the assigned value.
+   *
+   * This is the evidence #13 asked for — "require a real flow edge into the
+   * sink's attribute". The engine does NOT decide it: reachability here is
+   * closed by "a source at or above the sink line in the same file", which is
+   * co-location, and tightening that mechanically would trade recall on DOM XSS,
+   * the class where real bugs actually live. So the value is surfaced instead,
+   * next to the names the def-use walk was tracking, and the adjudicator can see
+   * in one line whether anything tainted arrives.
+   */
+  assigned?: string;
   /** Why this hit was reported below its catalog severity — set when an
    *  `ambiguous` rule matched a bare call the extractor could not corroborate.
    *  Absent on every ordinary hit, so consumers that ignore it behave exactly as
@@ -1173,13 +1267,31 @@ export interface SanitizerRule {
   languages: string[];
   re: RegExp;
   note: string;
+  /**
+   * The pattern is only evidence when it appears ON a sink line of this kind —
+   * it says something about THAT statement, not about the file.
+   *
+   * `findSanitizers` always has a sink kind, so the distinction never mattered
+   * there. The CONTEXT scaffold has no sink: it runs the catalog over every line
+   * of every file to answer "which sanitizers does this project use?", and a
+   * rule like the SQL placeholder test ("does this query look parameterized?")
+   * answers that question with `foo?: string`, `key: value` and `@scope/pkg` —
+   * 3% of every TypeScript line in a real repo.
+   */
+  sinkLineOnly?: boolean;
 }
 
 export const SANITIZERS: SanitizerRule[] = [
-  { kind: "sql", languages: ["*"], re: /\?|\$\d+|:\w+|%s|@\w+/, note: "looks parameterized (placeholder present)" },
+  // Placeholder shapes: meaningful ON a query line, meaningless anywhere else —
+  // `?`, `:name` and `@scope` are ordinary TypeScript punctuation.
+  { kind: "sql", languages: ["*"], re: /\?|\$\d+|:\w+|%s|@\w+/, note: "looks parameterized (placeholder present)", sinkLineOnly: true },
   { kind: "command", languages: ["*"], re: /\bexecFile\b|\bexecvp?\b|shlex\.quote|escapeshellarg/, note: "argv-array / quoting present" },
   { kind: "path", languages: ["*"], re: /\bbasename\b|\brealpath\b|secure_filename|path\.resolve|startsWith\(/, note: "path-confinement helper present" },
-  { kind: "xss", languages: ["*"], re: /\bescape(?:Html)?\b|sanitize|DOMPurify|bleach|markupsafe|escapeHTML/, note: "escaping/sanitizer present" },
+  // `escape(?:Html)?\b` could not match the camelCase family (`escapeAttrValue`),
+  // and nothing looked for the `xss` library at all — so on a repo whose only
+  // HTML sanitizer is `xssWrapper` wrapping `xss@1.0.15`, the brief that exists
+  // to answer "which sanitizers does this project use?" named none of it.
+  { kind: "xss", languages: ["*"], re: /\bescape[A-Z]?\w*\b|sanitize|DOMPurify|bleach|markupsafe|\bxss[A-Za-z]*\b/, note: "escaping/sanitizer present" },
   { kind: "deserialize", languages: ["*"], re: /safe_load|safeLoad|JSON\.parse/, note: "safe loader present" },
   { kind: "nosql", languages: ["*"], re: /mongo-?[sS]anitize|sanitizeFilter|\$eq\b/, note: "operator-stripping sanitizer present" },
   {
@@ -1216,7 +1328,13 @@ export const SANITIZERS: SanitizerRule[] = [
     re: /\bALLOWED\b|allowlist|allowList|\bin\s+\{|\bMap\s*\(|hasOwnProperty|\bdict\s*\[/,
     note: "allow-list lookup present",
   },
-  { kind: "xpath", languages: ["*"], re: /setXPathVariable|XPathVariableResolver|\bbindVariable\b|\$\w+/, note: "XPath variable binding present" },
+  {
+    kind: "xpath",
+    languages: ["*"],
+    re: /setXPathVariable|XPathVariableResolver|\bbindVariable\b|\$\w+/,
+    note: "XPath variable binding present",
+    sinkLineOnly: true,
+  },
   {
     kind: "massassign",
     languages: ["*"],

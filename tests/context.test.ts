@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanRepo } from "../src/scan.js";
 import { buildAttackSurface } from "../src/map.js";
-import { buildContextScaffold, loadContextDoc } from "../src/context.js";
+import { buildContextScaffold, loadContextDoc, compactContextDoc } from "../src/context.js";
 import { renderFindingDossier } from "../src/dossier.js";
 import type { Finding } from "../src/types.js";
 import type { Graph } from "../src/graph.js";
@@ -31,6 +32,37 @@ describe("buildContextScaffold", () => {
 
   it("captures the parameterized-query sanitizer in db.js", () => {
     expect(s.sanitizers.some((x) => x.file === "src/db.js" && x.kind === "sql")).toBe(true);
+  });
+
+  it("reports the placeholder rule only where a SQL sink actually is", () => {
+    // `?`, `:name` and `@scope` are ordinary TypeScript punctuation. Matching
+    // them anywhere made 3% of every line an "SQL sanitizer" — and because that
+    // rule is first in the catalog and the loop breaks, it also shadowed every
+    // real sanitizer behind it. On a real audit all 40 slots went to
+    // `.husky/`, `lighthouserc.cjs` and `app/a…`, and the repo's only HTML
+    // sanitizer never appeared.
+    const sql = s.sanitizers.filter((x) => x.kind === "sql");
+    for (const hit of sql) {
+      const line = readFileSync(join(FIXTURE, hit.file), "utf8").split(/\r?\n/)[hit.line - 1]!;
+      expect(line, `${hit.file}:${hit.line}`).toMatch(/query|execute|prepare/i);
+    }
+  });
+
+  it("keeps the real sanitizer when the cap bites, instead of an alphabetical prefix", () => {
+    // The defect, reproduced: 60 alphabetically-early files matching only the
+    // generic type-coercion rule, and the project's ACTUAL sanitizer in a file
+    // sorting last. A path-sorted `slice(0, 40)` returns a prefix, not a sample,
+    // so on a real audit all 40 slots went to `.husky/`, `lighthouserc.cjs` and
+    // `app/a…` while the repo's only HTML sanitizer — the subject of two of its
+    // five high findings — never appeared at all.
+    const repo = mkdtempSync(join(tmpdir(), "usec-sanitizer-"));
+    for (let i = 0; i < 60; i++) {
+      writeFileSync(join(repo, `aaa${String(i).padStart(3, "0")}.js`), `const n = parseInt(process.argv[2], 10);\nmodule.exports = n;\n`);
+    }
+    writeFileSync(join(repo, "zzz-sanitizer.js"), `const DOMPurify = require("dompurify");\nmodule.exports = (h) => DOMPurify.sanitize(h);\n`);
+
+    const sanitizers = scaffoldOf(repo).sanitizers;
+    expect(sanitizers.some((x) => x.file === "zzz-sanitizer.js")).toBe(true);
   });
 
   it("infers an HTTP trust boundary and an auth note", () => {
@@ -93,5 +125,126 @@ describe("renderFindingDossier — CONTEXT.md injection (back-compat)", () => {
     expect(out).toContain(ctx);
     // the section sits before the decision prompt
     expect(out.indexOf("## Project context")).toBeLessThan(out.indexOf("## What to decide"));
+  });
+});
+
+describe("compactContextDoc — the adjudication-bearing sections only", () => {
+  // Shaped like the CONTEXT.md a real audit produced: purpose and stack take
+  // most of the document, and `dossier` reprinted all of it before every one of
+  // dozens of candidates.
+  const DOC = [
+    "# CONTEXT — app",
+    "## Purpose",
+    "Public site for looking up employment law.",
+    "## Stack",
+    "Next.js 16 App Router, react 19, Elasticsearch v8.",
+    "## Trust model / boundaries",
+    "1. Anonymous visitor → query/body of the API routes. NOT trusted.",
+    "## Hunt list (STRIDE par frontière)",
+    "- Boundary 1: Elasticsearch DSL injection, CPU DoS on `q`.",
+    "## Exposure: Internet-facing production",
+    "## Criticality: high — official public service",
+  ].join("\n");
+
+  it("keeps what bears on reachability and severity", () => {
+    const out = compactContextDoc(DOC)!;
+    expect(out).toContain("Hunt list");
+    expect(out).toContain("Exposure");
+    expect(out).toContain("Criticality");
+    expect(out).toContain("Trust model");
+  });
+
+  it("drops the inventory an adjudicator does not re-read per candidate", () => {
+    const out = compactContextDoc(DOC)!;
+    expect(out).not.toContain("Next.js 16 App Router");
+    expect(out).not.toContain("Public site for looking up");
+    expect(out.length).toBeLessThan(DOC.length);
+  });
+
+  it("returns undefined on an unrecognised layout, so the caller keeps the whole document", () => {
+    // Losing the threat model silently would be far worse than printing it.
+    expect(compactContextDoc("# CONTEXT\n\nJust prose, no headings.\n")).toBeUndefined();
+  });
+});
+
+describe("renderFindingDossier — reachability evidence, stated not decided", () => {
+  // #13's third ask was "require a real flow edge into the sink's attribute".
+  // The engine does not enforce it: enumeration closes a path on co-location,
+  // and tightening that mechanically trades recall on DOM XSS — the class where
+  // real bugs live. So it SHOWS whether there is an edge, and the adjudicator
+  // can require one.
+  const graph: Graph = { files: [], edges: [], symbolDefs: {} };
+
+  function f(over: Partial<Finding>): Finding {
+    return {
+      id: "x",
+      category: "taint",
+      title: "DOM XSS",
+      severity: "medium",
+      confidence: "low",
+      message: "m",
+      tool: "ultrasec",
+      status: "open",
+      sink: { file: "a.js", line: 7 },
+      ...over,
+    };
+  }
+
+  it("says CO-LOCATION when the whole path is one file and nothing tracked arrives", () => {
+    const md = renderFindingDossier(
+      FIXTURE,
+      graph,
+      f({
+        sourceScope: "file",
+        dataflow: "unlinked",
+        flow: { assigned: "unrelated", tainted: ["frag"] },
+        path: [
+          { file: "a.js", line: 3, why: "source" },
+          { file: "a.js", line: 7, why: "sink" },
+        ],
+      }),
+    );
+    expect(md).toContain("## Reachability evidence");
+    expect(md).toContain("CO-LOCATION only");
+    expect(md).toContain("the walk could have followed it and did not");
+  });
+
+  // The case that stops this evidence misleading. A cross-file flow legitimately
+  // shows "no tracked binding" because the walk is per-file and the assigned
+  // value is a parameter — the domxss bench fixture is exactly that, and it is a
+  // TRUE positive.
+  it("says EXPECTED when the path crosses files, instead of pointing away from a real flow", () => {
+    const md = renderFindingDossier(
+      FIXTURE,
+      graph,
+      f({
+        sourceScope: "symbol",
+        dataflow: "linked",
+        flow: { assigned: "html", tainted: ["frag"] },
+        path: [
+          { file: "routes.js", line: 3, why: "source" },
+          { file: "sink.js", line: 7, why: "sink" },
+        ],
+      }),
+    );
+    expect(md).toContain("EXPECTED here");
+    expect(md).not.toContain("the walk could have followed it and did not");
+  });
+
+  it("confirms an edge when a tracked binding IS in the assigned value", () => {
+    const md = renderFindingDossier(
+      FIXTURE,
+      graph,
+      f({
+        sourceScope: "symbol",
+        flow: { assigned: "frag + suffix", tainted: ["frag"] },
+        path: [{ file: "a.js", line: 3, why: "source" }],
+      }),
+    );
+    expect(md).toContain("there IS an edge into the attribute");
+  });
+
+  it("omits the whole block when the engine has nothing to say", () => {
+    expect(renderFindingDossier(FIXTURE, graph, f({}))).not.toContain("Reachability evidence");
   });
 });

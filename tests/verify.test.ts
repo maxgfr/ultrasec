@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Dossier } from "../src/store.js";
 import type { Finding, Severity } from "../src/types.js";
-import { buildWorklist, shard, applyVerdicts, parseVerdicts, renderWorklistMd } from "../src/verify.js";
+import { buildWorklist, shard, applyVerdicts, parseVerdicts, renderWorklistMd, worklistCounts } from "../src/verify.js";
 
 function finding(id: string, severity: Severity, status: Finding["status"] = "open"): Finding {
   return {
@@ -56,6 +56,100 @@ describe("shard", () => {
   });
 });
 
+describe("buildWorklist — the brocard field exists in the file being filled", () => {
+  // The defect: the vocabulary was described in the Markdown brief while the
+  // JSON an adjudicator actually fills had no `brocard` key. Grounds went into
+  // `note`, and `check --semantic` reported every one as unargued — 96
+  // dismissals, 0 brocards, on the first real audit.
+  it("emits brocard: null on every item", () => {
+    const items = buildWorklist(dossier([finding("a", "high")]));
+    expect(items[0]).toHaveProperty("brocard", null);
+  });
+
+  it("carries a machine proposal for a demoted finding — without filling the verdict", () => {
+    const f = { ...finding("a", "low"), noise: "test-only-path" as const };
+    const item = buildWorklist(dossier([f]))[0]!;
+    expect(item.proposed).toEqual({
+      class: "test-only-path",
+      ground: "outside-usage",
+      why: expect.stringContaining("test path"),
+    });
+    // The whole point: a suggestion, not an adjudication.
+    expect(item.verdict).toBeNull();
+    expect(item.brocard).toBeNull();
+  });
+
+  it("offers no proposal for an ordinary finding", () => {
+    expect(buildWorklist(dossier([finding("a", "high")]))[0]!.proposed).toBeUndefined();
+  });
+
+  it("the brief says a note is not a ground", () => {
+    const md = renderWorklistMd(buildWorklist(dossier([finding("a", "high")])));
+    expect(md).toMatch(/A prose `note` is not a ground/);
+  });
+});
+
+describe("buildWorklist — delta by default", () => {
+  // A needs-human finding that already carries a verdict was READ and escalated
+  // by someone. One without a verdict was escalated by another stage and has
+  // never been ruled on — so it is still new work.
+  function adjudicated(id: string): Finding {
+    return { ...finding(id, "high", "needs-human"), verdict: "partial" };
+  }
+
+  it("withholds findings an earlier pass already adjudicated", () => {
+    const d = dossier([finding("a", "high"), adjudicated("b"), finding("c", "high", "needs-human")]);
+    expect(buildWorklist(d).map((i) => i.id)).toEqual(["a", "c"]);
+    expect(worklistCounts(d)).toEqual({ fresh: 2, reOpened: 0, withheld: 1 });
+  });
+
+  it("--all re-opens them, carrying the prior verdict so they read as not-new", () => {
+    const d = dossier([finding("a", "high"), adjudicated("b")]);
+    const items = buildWorklist(d, { all: true });
+    expect(items.map((i) => i.id)).toEqual(["a", "b"]);
+    expect(items.find((i) => i.id === "b")!.priorVerdict).toBe("partial");
+    expect(items.find((i) => i.id === "a")!.priorVerdict).toBeUndefined();
+    expect(worklistCounts(d, { all: true })).toEqual({ fresh: 1, reOpened: 1, withheld: 0 });
+  });
+
+  it("the brief names what was withheld and the flag that shows it", () => {
+    const d = dossier([finding("a", "high"), adjudicated("b")]);
+    const md = renderWorklistMd(buildWorklist(d), undefined, worklistCounts(d));
+    expect(md).toContain("1 already adjudicated as needs-human and NOT shown");
+    expect(md).toContain("--all");
+  });
+
+  it("says nothing extra when there is nothing withheld (output unchanged)", () => {
+    const d = dossier([finding("a", "high")]);
+    const md = renderWorklistMd(buildWorklist(d), undefined, worklistCounts(d));
+    expect(md).not.toContain("--all");
+    expect(md).toBe(renderWorklistMd(buildWorklist(d)));
+  });
+});
+
+describe("applyVerdicts — re-verdict guardrail", () => {
+  it("reports a verdict that CHANGES an already-adjudicated finding", () => {
+    const prev = { ...finding("a", "high", "dismissed"), verdict: "refuted" as const };
+    const r = applyVerdicts(dossier([prev]), [{ id: "a", verdict: "supported" }]);
+    expect(r.reVerdicted).toEqual([{ id: "a", from: "refuted", to: "supported", wasStatus: "dismissed" }]);
+  });
+
+  it("stays quiet when the same verdict is re-applied (idempotent re-fold)", () => {
+    const prev = { ...finding("a", "high", "dismissed"), verdict: "refuted" as const };
+    expect(applyVerdicts(dossier([prev]), [{ id: "a", verdict: "refuted" }]).reVerdicted).toEqual([]);
+  });
+
+  it("stays quiet on a genuinely open finding — first adjudication is not a re-verdict", () => {
+    expect(applyVerdicts(dossier([finding("a", "high")]), [{ id: "a", verdict: "refuted" }]).reVerdicted).toEqual([]);
+  });
+
+  it("still APPLIES the change — this reports, it does not block", () => {
+    const prev = { ...finding("a", "high", "dismissed"), verdict: "refuted" as const };
+    const r = applyVerdicts(dossier([prev]), [{ id: "a", verdict: "supported" }]);
+    expect(r.findings[0]!.status).toBe("confirmed");
+  });
+});
+
 describe("applyVerdicts — conservative policy", () => {
   it("supported → confirmed (confidence raised)", () => {
     const r = applyVerdicts(dossier([finding("a", "high")]), [{ id: "a", verdict: "supported", exploitPath: "POST /x" }]);
@@ -84,6 +178,37 @@ describe("applyVerdicts — conservative policy", () => {
   it("partial → needs-human", () => {
     const r = applyVerdicts(dossier([finding("a", "medium")]), [{ id: "a", verdict: "partial" }]);
     expect(r.findings[0]!.status).toBe("needs-human");
+  });
+});
+
+describe("applyVerdicts — idempotent message folding", () => {
+  // Applying the same verdicts file twice used to append a second
+  // "Verdict (...)" block every time. On a real run all 265 findings carried a
+  // duplicate and one carried four, which is what inflated REPORT.md.
+  it("re-applying the same verdict leaves the message byte-identical", () => {
+    const rows = [{ id: "a", verdict: "refuted" as const, note: "test-only path" }];
+    const once = applyVerdicts(dossier([finding("a", "high")]), rows);
+    const twice = applyVerdicts({ ...dossier([]), findings: once.findings }, rows);
+    expect(twice.findings[0]!.message).toBe(once.findings[0]!.message);
+    expect(twice.findings[0]!.message.match(/\n\nVerdict \(/g)).toHaveLength(1);
+  });
+
+  it("a CHANGED verdict replaces the previous block instead of stacking", () => {
+    const first = applyVerdicts(dossier([finding("a", "high")]), [{ id: "a", verdict: "refuted", note: "first" }]);
+    const second = applyVerdicts({ ...dossier([]), findings: first.findings }, [{ id: "a", verdict: "supported", note: "second" }]);
+    const msg = second.findings[0]!.message;
+    expect(msg.match(/\n\nVerdict \(/g)).toHaveLength(1);
+    expect(msg).toContain("Verdict (supported): second");
+    expect(msg).not.toContain("first");
+    expect(msg.startsWith("candidate")).toBe(true);
+  });
+
+  it("preserves another stage's note — a revalidation survives a re-verify", () => {
+    const f = finding("a", "high");
+    f.message = "candidate\n\nRevalidation (still-valid): re-confirmed at HEAD";
+    const r = applyVerdicts(dossier([f]), [{ id: "a", verdict: "refuted", note: "ground" }]);
+    expect(r.findings[0]!.message).toContain("Revalidation (still-valid): re-confirmed at HEAD");
+    expect(r.findings[0]!.message).toContain("Verdict (refuted): ground");
   });
 });
 

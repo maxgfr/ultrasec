@@ -40,6 +40,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "email"
+        ]
+      },
       "message": "Cross-file candidate: http input at routes.js:3 may reach the random sink random() at sink.js:3 through 2 hop(s). Only a finding when the value becomes a token, key, session id, password-reset link or nonce — for a shuffle or a jitter it is nothing. Read what it is used for, then require a CSPRNG (crypto.randomBytes / secrets / SecureRandom). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

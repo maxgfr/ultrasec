@@ -181,7 +181,7 @@ means stopping and doing the step it replaced.
 | "I can't find the caller, so it's unreachable" | Dynamic dispatch, DI and framework routing are invisible to the graph | `unsupported`, not `refuted` (brocard 3) |
 | "There's a validator on the line, so it's fine" | A validator that checks the wrong property protects nothing | Read what it actually rejects |
 | "It's behind auth, so it's low" | An authenticated user is an attacker in most threat models | Brocard 2 — check what the precondition really costs |
-| "Too many candidates to read them all" | The count is a budgeting problem, not an evidence problem | `triage`, `--strict-scope`, `--min-severity` — then read what's left |
+| "Too many candidates to read them all" | The count is a budgeting problem, not an evidence problem | `triage`, `--min-severity`, and the **Reachability evidence** block in each dossier (scope tier · def-use · does anything tainted reach the assigned value) — then read what's left. `--strict-scope` is the blunt version: it discards the whole `file` tier rather than letting you judge it. |
 
 ## After the batch: look for chains
 

@@ -40,6 +40,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "user"
+        ]
+      },
       "message": "Cross-file candidate: http input at routes.js:3 may reach the xpath sink selectNodes() at sink.js:5 through 2 hop(s). Tainted data concatenated into an XPath expression. Use variable binding (XPathVariableResolver / parameterised XPath); escaping quotes by hand is not sufficient. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

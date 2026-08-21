@@ -73,7 +73,10 @@ COMMANDS
   paths      List candidate cross-file source→sink chains.
              Flags: --run · --kind <k> · --severity <s> · --json.
   dossier    Print the grounding packet for one finding (real code + neighbours).
-             The id may be a unique PREFIX. Flags: <finding-id> · --run · --repo.
+             The id may be a unique PREFIX. CONTEXT.md is reprinted before each
+             finding: --compact keeps only the hunt-list/exposure/criticality
+             sections, --no-context drops it. Flags: <finding-id> · --run ·
+             --repo · --compact · --no-context.
   triage     Fast, code-free first pass over OPEN candidates: emit / apply
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
              it is ignored (kept open for verify). Flags: --run · --apply · --json.
@@ -82,6 +85,10 @@ COMMANDS
              VERIFY.todo.<i>.json (the .md brief always covers the FULL worklist).
              --apply takes a file, a comma-list, or a DIRECTORY (picks up every
              *verdict*.json, sorted) and fails closed if every fragment is stale.
+             The worklist is a DELTA: findings an earlier pass already adjudicated
+             as needs-human are withheld until --all. --apply reports any verdict
+             that changes an already-adjudicated finding; under --strict that
+             fails unless --re-verdict is passed.
              Flags: --run · --shards · --shard · --apply · --json.
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]

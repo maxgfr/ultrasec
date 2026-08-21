@@ -40,6 +40,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "input"
+        ]
+      },
       "message": "Cross-file candidate: http input at routes.js:3 may reach the path sink readFileSync() at sink.js:3 through 2 hop(s). Tainted data used as a filesystem path, or an archive extracted without validating entry names (zip-slip). Confine to a base dir (basename/realpath + allow-list) and reject entries that escape it. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

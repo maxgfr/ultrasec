@@ -40,6 +40,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "pref"
+        ]
+      },
       "message": "Cross-file candidate: http input at routes.java:6 may reach the cookie sink addCookie() at sink.java:8 through 2 hop(s). A cookie carrying request-derived data. Verify Secure (never sent in clear), HttpOnly (unreadable from script) and SameSite are set — and that the value is not sensitive in the first place. The engine cannot see the flags; read them in the dossier. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

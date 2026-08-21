@@ -38,6 +38,9 @@ interface RunOpts {
   /** Adjudicate via a real `verify --apply`: "some" leaves one candidate open; "all" leaves none. */
   confirm?: "some" | "all";
   verify?: boolean;
+  /** Emit the verify worklist with `--all`, re-opening findings an earlier pass
+   *  already adjudicated as needs-human (the worklist is a delta by default). */
+  verifyAll?: boolean;
   revalidate?: boolean;
   investigate?: boolean;
 }
@@ -81,7 +84,7 @@ async function makeRun(opts: RunOpts = {}): Promise<string> {
     expect(await engine("verify", "--apply", p, "--run", run)).toBe(0);
   }
 
-  if (opts.verify) expect(await engine("verify", "--run", run)).toBe(0);
+  if (opts.verify) expect(await engine("verify", "--run", run, ...(opts.verifyAll ? ["--all"] : []))).toBe(0);
   if (opts.revalidate) expect(await engine("revalidate", "--run", run, "--repo", REPO)).toBe(0);
   if (opts.investigate) expect(await engine("investigate", "--run", run, "--repo", REPO)).toBe(0);
   return run;
@@ -117,8 +120,11 @@ describe("orchestrate — listPhases", () => {
     const run = await fullRun();
     const phases = listPhases(run, ENGINE);
     // Fixture: 3 taint candidates; confirm "some" ⇒ 1 confirmed · 1 needs-human · 1 open.
+    // verify is a DELTA: the needs-human one was already adjudicated (`partial`),
+    // so it is withheld until `--all` — the open candidate is the only new work.
+    // revalidate still sees it, which is where an escalation belongs next.
     expect(phases[0]).toMatchObject({ name: "adjudicate", ready: true, items: 1 });
-    expect(phases[1]).toMatchObject({ name: "verify", ready: true, items: 2 }); // open + needs-human
+    expect(phases[1]).toMatchObject({ name: "verify", ready: true, items: 1 }); // open only (delta)
     expect(phases[2]).toMatchObject({ name: "revalidate", ready: true, items: 2 }); // confirmed + needs-human
     expect(phases[3]).toMatchObject({ name: "investigate", ready: true, items: 1 }); // one region: src
     for (const p of phases) expect(isAbsolute(p.worklist)).toBe(true);
@@ -239,8 +245,10 @@ describe("orchestrate — emitted workflow", () => {
 
   it("an empty worklist is skipped with a notice, not emitted", async () => {
     // confirm "all" leaves zero OPEN candidates (adjudicate empty) but one
-    // pending needs-human, so the verify worklist emitted afterwards is non-empty.
-    const run = await makeRun({ scan: true, confirm: "all", verify: true });
+    // pending needs-human. That one was already adjudicated, so the delta
+    // worklist withholds it — `--all` is what an operator passes to re-open it,
+    // and it is what keeps the verify worklist non-empty here.
+    const run = await makeRun({ scan: true, confirm: "all", verify: true, verifyAll: true });
     const res = orchestrateRun(run, ENGINE);
     expect(res.exitCode).toBe(0);
     expect(existsSync(wf(run, "adjudicate"))).toBe(false);

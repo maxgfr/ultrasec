@@ -152,7 +152,12 @@ Two per-candidate fields say how much that co-occurrence is worth, and neither f
   e.g. a middleware) · `file` (source in a *different* function of the same file — co-location and
   nothing more). Recovered from the code's block structure, not the symbol table, because the case
   that matters most has no symbols: an Express router extracts **zero** of them, every handler
-  being an anonymous arrow. `scan --strict-scope` drops the `file` tier when you want a shorter queue.
+  being an anonymous arrow. `scan --strict-scope` drops the `file` tier when you want a shorter
+  queue — but prefer READING the evidence over dropping it: every dossier now carries a
+  **Reachability evidence** block stating the scope tier, the def-use verdict, the bindings the
+  walk followed, and (for an assignment sink) whether any of them appear in the assigned value.
+  That answers the same question per candidate instead of discarding a whole tier, and a value
+  *can* travel between two functions through module state.
 - **`dataflow`** — `linked` (a def-use walk still sees the source's bound value at the sink) ·
   `unlinked` (it looked and the binding is never mentioned again) · *absent* (undecidable — inline
   use, an object, a template). **Absent is not `unlinked`**: only claim the value fails to arrive

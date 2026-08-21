@@ -1,9 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { scanRepo } from "../src/scan.js";
 import { buildGraph } from "../src/graph.js";
 import { buildAttackSurface } from "../src/map.js";
-import { buildContextScaffold } from "../src/context.js";
+import { buildContextScaffold, renderContextScaffoldMd } from "../src/context.js";
 import { buildInvestigateWorklist } from "../src/investigate.js";
 import { findRouteEntryPoints } from "../src/catalog.js";
 import { expandBraces } from "../src/walk.js";
@@ -152,5 +154,72 @@ describe("expandBraces", () => {
   it("leaves a pattern without braces, and an unbalanced one, alone", () => {
     expect(expandBraces("**/x.ts")).toEqual(["**/x.ts"]);
     expect(expandBraces("**/{x.ts")).toEqual(["**/{x.ts"]);
+  });
+});
+
+describe("framework detection follows DECLARED workspaces, not just a bounded walk", () => {
+  // `findManifestDirs` stops at MANIFEST_MAX_DEPTH and knows nothing about
+  // membership, so a workspace declared deeper than the walk reaches was
+  // invisible — the repo reported "frameworks: none detected" while its whole
+  // attack surface was the app in it.
+  it("finds a manifest below the walk's depth cap when a workspace declares it", () => {
+    const repo = mkdtempSync(join(tmpdir(), "usec-deep-ws-"));
+    const deep = join(repo, "apps", "group", "services", "web");
+    mkdirSync(deep, { recursive: true });
+    writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "root", private: true, workspaces: ["apps/group/services/*"] }));
+    writeFileSync(join(deep, "package.json"), JSON.stringify({ name: "web", dependencies: { next: "16.0.0", react: "19.0.0" } }));
+
+    const scan = scanRepo(repo);
+    const s = buildContextScaffold(repo, scan, buildAttackSurface(scan));
+    expect(s.frameworks).toContain("next.js");
+    expect(s.frameworks).toContain("react");
+  });
+
+  it("still finds a manifest that belongs to no declared workspace", () => {
+    // Union, not replacement: losing a real manifest to be principled would be a
+    // worse bug than the one being fixed.
+    const repo = mkdtempSync(join(tmpdir(), "usec-no-ws-"));
+    mkdirSync(join(repo, "web"), { recursive: true });
+    writeFileSync(join(repo, "web", "package.json"), JSON.stringify({ name: "web", dependencies: { express: "4.0.0" } }));
+
+    const scan = scanRepo(repo);
+    expect(buildContextScaffold(repo, scan, buildAttackSurface(scan)).frameworks).toContain("express");
+  });
+});
+
+describe("the entry-point brief distinguishes the harness from the shipped artifact", () => {
+  // #12's actual title: test files indexed as entry points. They are ranked
+  // below production so they lose the cap first, and marked so a reader scanning
+  // seventy paths can tell one from a route at a glance.
+  function repo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "usec-ep-"));
+    mkdirSync(join(dir, "src", "__tests__"), { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "x", dependencies: { express: "4" } }));
+    writeFileSync(join(dir, "src", "server.js"), "app.get('/u', (req, res) => res.send(req.query.id));\n");
+    writeFileSync(join(dir, "src", "__tests__", "server.test.js"), "it('x', () => { const q = req.query.id; });\n");
+    return dir;
+  }
+
+  it("marks a test-path entry point and leaves a production one unmarked", () => {
+    const dir = repo();
+    const scan = scanRepo(dir);
+    const scaffold = buildContextScaffold(dir, scan, buildAttackSurface(scan));
+    const md = renderContextScaffoldMd(dir, join(dir, ".ultrasec"), scaffold);
+
+    const testLine = md.split("\n").find((l) => l.includes("server.test.js"));
+    const prodLine = md.split("\n").find((l) => l.includes("src/server.js"));
+    expect(testLine, "test entry point should be listed").toBeDefined();
+    expect(testLine).toContain("test harness");
+    expect(prodLine).toBeDefined();
+    expect(prodLine).not.toContain("test harness");
+  });
+
+  it("ranks production ahead of the harness so the cap drops tests first", () => {
+    const dir = repo();
+    const scan = scanRepo(dir);
+    const eps = buildContextScaffold(dir, scan, buildAttackSurface(scan)).entryPoints;
+    // Presentation is path-sorted; the RANK is what survives a cap, so assert
+    // the production file is present rather than an ordering of the output.
+    expect(eps.some((e) => e.file === "src/server.js")).toBe(true);
   });
 });
