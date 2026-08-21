@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { findManifestDirs, readText } from "./walk.js";
-import { detectWorkspaces } from "./vendor/codeindex-engine.mjs";
+import { detectWorkspaces, isTestPath } from "./vendor/codeindex-engine.mjs";
 import { langForFile, type LangSpec } from "./lang.js";
 import { SANITIZERS, findSinks, findTextSinks } from "./catalog.js";
 import type { RepoScan } from "./scan.js";
@@ -362,7 +362,17 @@ export function buildContextScaffold(repo: string, scan: RepoScan, surface: Atta
   const entryPoints = [...perFile.values()]
     .sort(
       (a, b) =>
-        // Kind first: in a capped brief, an HTTP route earns its slot ahead of
+        // PRODUCTION first. This brief answers "where does untrusted input enter
+        // the shipped artifact?", and a test harness is not the artifact — a
+        // route mounted only by jest presumes an attacker who already runs the
+        // suite. Measured: 19 of 77 slots on a real monorepo went to
+        // `__tests__/*.test.ts` and `src/e2e/*.e2e.ts`, ranked level with the
+        // production routes they were crowding out.
+        //
+        // Ranked, never dropped: with room to spare they still appear, below the
+        // real surface. `--include-tests` is for auditing the suite itself.
+        (isTestPath(a.file) ? 1 : 0) - (isTestPath(b.file) ? 1 : 0) ||
+        // Kind next: in a capped brief, an HTTP route earns its slot ahead of
         // an environment read, which presumes a much narrower attacker.
         entryWeight(b.kind) - entryWeight(a.kind) ||
         (rank.get(b.file) ?? 0) - (rank.get(a.file) ?? 0) ||
@@ -449,7 +459,11 @@ export function renderContextScaffoldMd(repo: string, run: string, s: ContextSca
   L.push("");
   if (!s.entryPoints.length) L.push(`_none detected._`);
   else L.push(`_One line per file, highest attack surface first (HTTP and cross-origin kinds before env/CLI)._`);
-  for (const e of s.entryPoints) L.push(`- \`${e.file}:${e.line}\` (${e.kind})`);
+  // Marked, not hidden. A test harness is not the shipped artifact, and a reader
+  // scanning seventy paths cannot tell one from a route at a glance — which is
+  // how `__tests__/service.test.ts` came to sit in a brief titled "entry points
+  // (untrusted input)".
+  for (const e of s.entryPoints) L.push(`- \`${e.file}:${e.line}\` (${e.kind})${isTestPath(e.file) ? " — **test harness**, not the shipped artifact" : ""}`);
   L.push("");
 
   L.push(`## Auth / authorization sites (candidate protections) — ${s.authMiddleware.length}${s.authMiddleware.length >= MAX_SCAFFOLD ? "+" : ""}`);

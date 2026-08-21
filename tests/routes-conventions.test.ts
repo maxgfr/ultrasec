@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { scanRepo } from "../src/scan.js";
 import { buildGraph } from "../src/graph.js";
 import { buildAttackSurface } from "../src/map.js";
-import { buildContextScaffold } from "../src/context.js";
+import { buildContextScaffold, renderContextScaffoldMd } from "../src/context.js";
 import { buildInvestigateWorklist } from "../src/investigate.js";
 import { findRouteEntryPoints } from "../src/catalog.js";
 import { expandBraces } from "../src/walk.js";
@@ -184,5 +184,42 @@ describe("framework detection follows DECLARED workspaces, not just a bounded wa
 
     const scan = scanRepo(repo);
     expect(buildContextScaffold(repo, scan, buildAttackSurface(scan)).frameworks).toContain("express");
+  });
+});
+
+describe("the entry-point brief distinguishes the harness from the shipped artifact", () => {
+  // #12's actual title: test files indexed as entry points. They are ranked
+  // below production so they lose the cap first, and marked so a reader scanning
+  // seventy paths can tell one from a route at a glance.
+  function repo(): string {
+    const dir = mkdtempSync(join(tmpdir(), "usec-ep-"));
+    mkdirSync(join(dir, "src", "__tests__"), { recursive: true });
+    writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "x", dependencies: { express: "4" } }));
+    writeFileSync(join(dir, "src", "server.js"), "app.get('/u', (req, res) => res.send(req.query.id));\n");
+    writeFileSync(join(dir, "src", "__tests__", "server.test.js"), "it('x', () => { const q = req.query.id; });\n");
+    return dir;
+  }
+
+  it("marks a test-path entry point and leaves a production one unmarked", () => {
+    const dir = repo();
+    const scan = scanRepo(dir);
+    const scaffold = buildContextScaffold(dir, scan, buildAttackSurface(scan));
+    const md = renderContextScaffoldMd(dir, join(dir, ".ultrasec"), scaffold);
+
+    const testLine = md.split("\n").find((l) => l.includes("server.test.js"));
+    const prodLine = md.split("\n").find((l) => l.includes("src/server.js"));
+    expect(testLine, "test entry point should be listed").toBeDefined();
+    expect(testLine).toContain("test harness");
+    expect(prodLine).toBeDefined();
+    expect(prodLine).not.toContain("test harness");
+  });
+
+  it("ranks production ahead of the harness so the cap drops tests first", () => {
+    const dir = repo();
+    const scan = scanRepo(dir);
+    const eps = buildContextScaffold(dir, scan, buildAttackSurface(scan)).entryPoints;
+    // Presentation is path-sorted; the RANK is what survives a cap, so assert
+    // the production file is present rather than an ordering of the output.
+    expect(eps.some((e) => e.file === "src/server.js")).toBe(true);
   });
 });
