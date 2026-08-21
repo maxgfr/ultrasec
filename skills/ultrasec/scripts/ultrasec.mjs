@@ -17055,7 +17055,7 @@ var BROCARDS = [
   "cure-worse-than-disease",
   "report-not-dispositive"
 ];
-var NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact", "pattern-declaration"];
+var NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact", "pattern-declaration", "resource-identifier"];
 var NOISE_GROUND = {
   // Ciphertext in a ciphertext file is the format working as written.
   "encrypted-at-rest": "standard-behavior",
@@ -17069,7 +17069,12 @@ var NOISE_GROUND = {
   // attacker completes "with X I can Y to obtain Z" against a documentation
   // string. Security tools, WAF signature sets and lint-rule packs all trip
   // their own rules this way.
-  "pattern-declaration": "no-threat-model"
+  "pattern-declaration": "no-threat-model",
+  // The value names a DOCUMENT, not a way in. Possessing a spreadsheet id is not
+  // possessing access to it — the sharing setting is, and that is not in the
+  // repo. `exploit-from-the-heavens` would be wrong (it is not that the
+  // attacker needs too much); the claim simply has no attacker story as written.
+  "resource-identifier": "no-threat-model"
 };
 var BROCARD_SUMMARY = {
   "no-threat-model": "no coherent attacker: the claim cannot complete \u201Can attacker with X can Y to obtain Z\u201D",
@@ -21772,6 +21777,30 @@ var RULES17 = [
     }
   },
   {
+    // The flagged value is a RESOURCE identifier, not a credential.
+    //
+    // `const SPREADSHEET_KEY = "1a2b…"` is a Google Sheets document id. gitleaks
+    // rates it a "Generic API Key" on entropy — helped along by the word KEY in
+    // the name — but holding a document id is not holding access to the
+    // document: the sharing setting is, and that is not in the repo. Seven of
+    // the 37 false positives on the first real audit were exactly this.
+    //
+    // The claim here is narrow and checkable: the NAME says what the value is.
+    // It is deliberately NOT the claim "this document is public", which nothing
+    // in the repo can establish — so the message asks for that check rather than
+    // making it, and the finding is demoted to `low`, not `info`.
+    id: "resource-identifier",
+    severity: "low",
+    confidence: "low",
+    why: (f) => `de-prioritized: ${f.sink?.file}:${f.sink?.line} assigns a resource/document identifier, not a credential \u2014 possessing the id is not possessing access. CHECK the document's sharing setting and whether its contents are sensitive; that is not knowable from this repo.`,
+    matches: (f, repo) => {
+      if (f.category !== "secret" || !f.sink?.file) return false;
+      const line = lineAt(repo, f.sink.file, f.sink.line);
+      if (!line) return false;
+      return RESOURCE_NAME.test(line) && !CREDENTIAL_SHAPE.test(line);
+    }
+  },
+  {
     // The cited line DECLARES a dangerous pattern rather than performing one.
     //
     // Found by auditing ultrasec with ultrasec: `src/authtokens.ts` holds the
@@ -21806,6 +21835,8 @@ var RULES17 = [
   }
 ];
 var PATTERN_METADATA = /^\s*(?:re|regex|regexp|pattern|patterns|rule|rules|note|title|description|detail|remediation|example|examples|hint|advice|summary|docs?)\s*:\s*(?:\/|["'`])/;
+var RESOURCE_NAME = /\b(?:SPREADSHEET|SHEET|WORKSHEET|DOC|DOCUMENT|FOLDER|DRIVE|DATASET|CALENDAR|PROJECT|BUCKET|WORKSPACE|CHANNEL|TENANT|ORG|GROUP)[_-]?(?:KEY|ID|GID|UUID|SLUG)\b/i;
+var CREDENTIAL_SHAPE = /-----BEGIN|\beyJ[A-Za-z0-9_-]{10,}|\bAKIA[0-9A-Z]{12,}|\b(?:sk|rk)-[A-Za-z0-9]{16,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[baprs]-|\bAIza[0-9A-Za-z_-]{30,}/;
 var WHOLE_LINE_COMMENT = /^\s*(?:\/\/|#|\*|<!--)/;
 var BARE_REGEX_LINE = /^\s*\/(?:[^/\\\n]|\\.)+\/[gimsuy]*\s*,?\s*$/;
 var lineCache = /* @__PURE__ */ new Map();
@@ -21869,7 +21900,8 @@ var PROPOSAL_WHY = {
   "encrypted-at-rest": "the file is ciphertext by design \u2014 the blob is not the secret; check the KEY is not committed too",
   "test-only-path": "every node of the path is a test path \u2014 it does not exist in the shipped artifact",
   "vendored-artifact": "a vendored or minified upstream build artifact, byte-identical to a published release",
-  "pattern-declaration": "the cited line declares the pattern (rule metadata or a bare regex) rather than performing the operation"
+  "pattern-declaration": "the cited line declares the pattern (rule metadata or a bare regex) rather than performing the operation",
+  "resource-identifier": "the value addresses a document, it is not a credential \u2014 but confirm the document's sharing setting, which this repo cannot tell you"
 };
 function classifyNoise(f, repo, opts = {}) {
   if (f.verified) return void 0;
@@ -23915,7 +23947,8 @@ var DOWNGRADE_ADVICE = {
   "encrypted-at-rest": "ciphertext by design; the key, not the blob, is the thing to check",
   "test-only-path": "every cited location is a test path \u2014 confirm no fixture or test route ships",
   "vendored-artifact": "a vendored or minified build artifact \u2014 fix upstream, not here",
-  "pattern-declaration": "the cited line declares the pattern rather than performing it \u2014 confirm it is not also applied"
+  "pattern-declaration": "the cited line declares the pattern rather than performing it \u2014 confirm it is not also applied",
+  "resource-identifier": "a document/resource id, not a credential \u2014 confirm the document's sharing setting"
 };
 var BUDGETS = {
   quick: { maxDepth: 3, maxCandidates: 200 },

@@ -146,6 +146,62 @@ describe("pattern-declaration", () => {
   });
 });
 
+describe("resource-identifier", () => {
+  // `const SPREADSHEET_KEY = "1a2b…"` is a Google Sheets document id. gitleaks
+  // rates it a Generic API Key on entropy — helped by the word KEY in the name —
+  // but holding a document id is not holding access to the document. Seven of
+  // the 37 false positives on the first real audit were exactly this.
+  function repoWith(line: string) {
+    const repo = mkdtempSync(join(tmpdir(), "usec-resid-"));
+    writeFileSync(join(repo, "cfg.js"), `// header\n${line}\n`);
+    return { repo, f: finding({ category: "secret", severity: "high", sink: { file: "cfg.js", line: 2 } }) };
+  }
+
+  it("demotes a document id whose NAME says what it is", () => {
+    const { repo, f } = repoWith('const SPREADSHEET_KEY = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms";');
+    expect(classifyNoise(f, repo)).toBe("resource-identifier");
+  });
+
+  it("covers the resource-id names that actually occur", () => {
+    for (const name of ["SHEET_ID", "DOCUMENT_ID", "FOLDER_ID", "PROJECT_ID", "BUCKET_ID", "CALENDAR_ID"]) {
+      const { repo, f } = repoWith(`const ${name} = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74Og";`);
+      expect(classifyNoise(f, repo), name).toBe("resource-identifier");
+    }
+  });
+
+  // The two guards that make the claim narrow enough to be true.
+  it("does NOT demote on the word KEY alone — that is what made gitleaks fire", () => {
+    const { repo, f } = repoWith('const API_KEY = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74Og";');
+    expect(classifyNoise(f, repo)).toBeUndefined();
+  });
+
+  it("does NOT demote a real credential in a badly-named variable", () => {
+    for (const value of [
+      "-----BEGIN RSA PRIVATE KEY-----",
+      "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9",
+      "AKIAIOSFODNN7EXAMPLE",
+      "ghp_16C7e42F292c6912E7710c838347Ae178B4a",
+      "AIzaSyD-1234567890abcdefghijklmnopqrstuv",
+    ]) {
+      const { repo, f } = repoWith(`const SPREADSHEET_KEY = "${value}";`);
+      expect(classifyNoise(f, repo), value.slice(0, 12)).toBeUndefined();
+    }
+  });
+
+  it("only applies to secret findings", () => {
+    const { repo } = repoWith('const SHEET_ID = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74Og";');
+    const taint = finding({ category: "taint", sink: { file: "cfg.js", line: 2 } });
+    expect(classifyNoise(taint, repo)).toBeUndefined();
+  });
+
+  it("lands at low, not info — it still deserves a glance", () => {
+    const { repo, f } = repoWith('const SHEET_ID = "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74Og";');
+    const out = demoteNoise([f], repo).findings[0]!;
+    expect(out.severity).toBe("low");
+    expect(out.message).toMatch(/CHECK the document's sharing setting/);
+  });
+});
+
 describe("verified credentials are never demoted", () => {
   // A live credential is live, whatever the file it sits in claims to be.
   it("overrides every class", () => {

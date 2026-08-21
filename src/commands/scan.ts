@@ -34,6 +34,7 @@ const DOWNGRADE_ADVICE: Record<string, string> = {
   "test-only-path": "every cited location is a test path — confirm no fixture or test route ships",
   "vendored-artifact": "a vendored or minified build artifact — fix upstream, not here",
   "pattern-declaration": "the cited line declares the pattern rather than performing it — confirm it is not also applied",
+  "resource-identifier": "a document/resource id, not a credential — confirm the document's sharing setting",
 };
 
 const BUDGETS: Record<string, { maxDepth: number; maxCandidates: number }> = {

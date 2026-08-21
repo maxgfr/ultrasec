@@ -226,7 +226,7 @@ export type Brocard = (typeof BROCARDS)[number];
  * Kept here with the other closed vocabularies because `Finding.noise` is part
  * of the on-disk schema; the rules that decide membership live in `noise.ts`.
  */
-export const NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact", "pattern-declaration"] as const;
+export const NOISE_CLASSES = ["encrypted-at-rest", "test-only-path", "vendored-artifact", "pattern-declaration", "resource-identifier"] as const;
 export type NoiseClass = (typeof NOISE_CLASSES)[number];
 
 /**
@@ -252,6 +252,11 @@ export const NOISE_GROUND: Readonly<Record<NoiseClass, Brocard>> = {
   // string. Security tools, WAF signature sets and lint-rule packs all trip
   // their own rules this way.
   "pattern-declaration": "no-threat-model",
+  // The value names a DOCUMENT, not a way in. Possessing a spreadsheet id is not
+  // possessing access to it — the sharing setting is, and that is not in the
+  // repo. `exploit-from-the-heavens` would be wrong (it is not that the
+  // attacker needs too much); the claim simply has no attacker story as written.
+  "resource-identifier": "no-threat-model",
 };
 
 export const BROCARD_SUMMARY: Record<Brocard, string> = {

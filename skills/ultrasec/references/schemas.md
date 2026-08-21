@@ -95,6 +95,9 @@ Written by `scan`/`import`, rewritten by every `--apply`. The dossier's core rec
 | `verified` | secret findings only: a scanner actively confirmed the credential is live. Treat a `true` as an incident, not a finding. |
 | `provenance` | `{author?, commit?, date?, owner?}` from `--blame`. Evidence only — never a suppression rule. |
 | `fixedIn` | commit recorded by `revalidate --apply` on a `fixed` verdict. |
+| `brocard` | the named ground for a `refuted` verdict (see the list below). Optional and never blocking, but it is the ONLY field `check --semantic` reads as a ground — a refutation argued in `note` still reports as unargued. |
+| `noise` | the noise-by-construction class the finding was DEMOTED under (never dismissed). Engine-set, re-derived every scan. See below. |
+| `atCommit` | set when the finding came from a scan of git HISTORY: the commit its `file:line` belongs to. `check` resolves the citation against THAT tree, so a secret in a file since deleted is still graded — and a fabricated path still fails. |
 | `priorAnalysis` | `{tool, reasoning?, mitigationsChecked?, revalidationVerdict?}` ingested from an upstream agent. A **signal**, never a status. |
 
 ## `manifest.json` — run metadata (read this every run)
@@ -129,7 +132,28 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   a coverage hole) from `failed`.
 - **`scopes[]`** accumulates every scope/diff that fed a merged run — this is what makes a
   map-first audit resumable across sessions.
-- **`downgraded`** counts findings de-prioritized as noise BY CONSTRUCTION, with the reason. The
+- **`downgraded`** counts findings de-prioritized as noise BY CONSTRUCTION, one row per class
+  (`{reason, count}`). The classes, and the ground each one proposes:
+
+  | class | what it claims | ground |
+  |---|---|---|
+  | `encrypted-at-rest` | ciphertext in a file that is ciphertext by design (SealedSecret, SOPS, Ansible Vault, age, git-crypt) | `standard-behavior` |
+  | `test-only-path` | EVERY node of the path is a test path, so the flow is not in the shipped artifact | `outside-usage` |
+  | `vendored-artifact` | a vendored or minified upstream build artifact, not this repo's source | `no-threat-model` |
+  | `pattern-declaration` | the cited line DECLARES the pattern — rule metadata, a bare regex, a comment — rather than performing it | `no-threat-model` |
+  | `resource-identifier` | the value addresses a document (a spreadsheet/folder/project id), it is not a way in | `no-threat-model` |
+
+  Demotion is **not adjudication**: it sets severity and confidence, never `status`, `verdict` or
+  `brocard`. What it does is state the severity honestly, which is what makes the finding eligible
+  for `triage` — the cheap lane that clears low/medium/info in one pass. Each class carries a
+  caveat naming what to check before believing it (an encrypted file whose KEY is also committed
+  is a real leak; a rule file that also configures the running system is both).
+
+  The worklists carry `proposed: {class, ground, why}` on such an item and a `## Proposed noise
+  classes` block naming each class once with its members — reading, never verdicts. `verdict` stays
+  `null`: a pre-filled one would make copying the worklist to the apply file a passing adjudication.
+
+  The
   engine's rule is that nothing disappears quietly: a secret finding inside a file that is
   ciphertext by design (SealedSecret, SOPS, Ansible Vault, age, git-crypt) is pushed to `info`
   rather than dropped, and the run still says how many and why. On a real k8s repo that is the
