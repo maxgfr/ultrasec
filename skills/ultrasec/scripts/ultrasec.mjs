@@ -16978,6 +16978,7 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "help",
   "version",
   "json",
+  "quiet",
   "offline",
   "no-enrich",
   "no-tools",
@@ -17909,8 +17910,13 @@ function orchestrate(adapters, repo, opts = {}) {
   const ctx = { offline: opts.offline, sbom: opts.sbom, pruned: opts.pruned };
   const results = [];
   const all = [];
-  for (const a of selected) {
+  const total = selected.length;
+  for (let i2 = 0; i2 < total; i2++) {
+    const a = selected[i2];
+    opts.onProgress?.({ tool: a.name, index: i2 + 1, total });
+    const started = Date.now();
     const r = runAdapter(a, repo, opts.useDocker, ctx);
+    opts.onProgress?.({ tool: a.name, index: i2 + 1, total, result: r, ms: Date.now() - started });
     results.push(r);
     all.push(...r.findings);
   }
@@ -23451,20 +23457,30 @@ async function runScan(args2) {
     }
     effectiveScope = [...scope ?? [], ...targets];
   }
+  const quiet = flagBool(args2, "quiet");
+  const step = (msg) => {
+    if (!quiet) eprintln(`ultrasec \xB7 ${msg}`);
+  };
+  const secs = (ms) => ms >= 1e3 ? ` in ${Math.round(ms / 1e3)}s` : "";
   const scanOpts = { scope: effectiveScope, include, exclude, maxFiles, gitignore };
   const resume = flagBool(args2, "resume");
   const cache = resume ? loadScanCache(out2) : void 0;
+  step(`walking ${repo}${cache ? " (resuming from cache)" : ""}\u2026`);
   const scan2 = cache ? scanRepoCached(repo, scanOpts, cache) : scanRepo2(repo, scanOpts);
+  step(`${scan2.files.length} file(s) scanned \xB7 building the link-graph\u2026`);
   const graph = buildGraph2(scan2);
   const logHygieneOn = flagBool(args2, "log-hygiene");
   const excludeEnvSources = flagBool(args2, "no-env-sources");
   const strictScope = flagBool(args2, "strict-scope");
+  step(`enumerating source\u2192sink taint paths\u2026`);
   const taint = enumerateTaint(scan2, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn, excludeEnvSources, strictScope });
   const taintFindings = taint.findings;
+  step(`${taintFindings.length} taint candidate(s)`);
   const sinksOn = flagBool(args2, "sinks");
   const sinkCand = sinksOn ? enumerateSinkCandidates(scan2, taintFindings, { maxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan2, { maxCandidates: explicitMaxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const prune = buildPruneMatcher(repo, { gitignore, exclude });
+  step(`config, auth, cloud and credential detectors\u2026`);
   const agenticFindings = auditAgenticWorkflows(repo, prune);
   const webConfigFindings = auditWebConfig(repo, prune);
   const authTokenFindings = auditAuthTokens(repo, prune);
@@ -23478,7 +23494,24 @@ async function runScan(args2) {
   const useDocker = flagBool(args2, "docker");
   const offline = flagBool(args2, "offline");
   const sbomResult = skipTools ? void 0 : generateSbom(repo, out2);
-  const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path, pruned: prune });
+  if (skipTools) step(`external scanners skipped`);
+  const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, {
+    which,
+    useDocker,
+    offline,
+    sbom: sbomResult?.path,
+    pruned: prune,
+    // Adapters run serially, so this is a running commentary, not a bar.
+    // Naming the tool that is currently blocking is the whole point: when a
+    // scan sits silent for twenty minutes, the last line printed is what
+    // tells you it is trufflehog walking git history rather than a hang.
+    onProgress: (e) => {
+      const at = `[${e.index}/${e.total}] ${e.tool}`;
+      if (!e.result) return step(`${at} \u2026`);
+      const mark = !e.result.ran ? "\u21B7" : e.result.ok ? "\u2713" : "\u2717";
+      step(`${at} ${mark} ${e.result.note}${secs(e.ms ?? 0)}`);
+    }
+  });
   const merged = correlate([
     ...taintFindings,
     ...sinkCand.findings,
@@ -23491,6 +23524,7 @@ async function runScan(args2) {
     ...tool.findings
   ]);
   const { findings: deNoised, downgraded: encryptedDowngrades } = downgradeEncryptedAtRest(merged, repo);
+  step(`correlating and ranking ${merged.length} finding(s)\u2026`);
   const enrich = !(flagBool(args2, "no-enrich") || offline);
   const { findings: enriched, note: riskNote } = await enrichFindings(deNoised, { enabled: enrich, context: loadContextDoc(out2) });
   const blameOn = flagBool(args2, "blame") || flagBool(args2, "provenance");
@@ -23533,6 +23567,7 @@ async function runScan(args2) {
       );
     }
   }
+  step(`writing the dossier to ${out2}\u2026`);
   writeDossier(out2, final);
   if (cache) saveScanCache(out2, cache);
   const fm = final.manifest;
@@ -30566,7 +30601,8 @@ COMMANDS
              function of the same file) \xB7 --no-env-sources (drop env-rooted flows) \xB7
              --scope/--include/--exclude/--max-files/--gitignore (focus) \xB7
              --budget quick|standard|thorough \xB7 --max-candidates \xB7 --max-depth \xB7
-             --diff <ref>/--since <commit> \xB7 --merge \xB7 --resume (incremental) \xB7 --json.
+             --diff <ref>/--since <commit> \xB7 --merge \xB7 --resume (incremental) \xB7
+             --quiet (mute the stderr progress stream) \xB7 --json.
   import     Ingest an upstream AI scanner's exported findings (deepsec) into the
              dossier: map \u2192 correlate \u2192 risk-rank \u2192 fold in (preserving verdicts).
              ultrasec never runs it \u2014 data ingest only. Flags: <findings.json>|--file \xB7

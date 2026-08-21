@@ -41,7 +41,8 @@ COMMANDS
              function of the same file) · --no-env-sources (drop env-rooted flows) ·
              --scope/--include/--exclude/--max-files/--gitignore (focus) ·
              --budget quick|standard|thorough · --max-candidates · --max-depth ·
-             --diff <ref>/--since <commit> · --merge · --resume (incremental) · --json.
+             --diff <ref>/--since <commit> · --merge · --resume (incremental) ·
+             --quiet (mute the stderr progress stream) · --json.
   import     Ingest an upstream AI scanner's exported findings (deepsec) into the
              dossier: map → correlate → risk-rank → fold in (preserving verdicts).
              ultrasec never runs it — data ingest only. Flags: <findings.json>|--file ·

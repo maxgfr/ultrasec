@@ -59,7 +59,7 @@ Writes `CONTEXT.scaffold.json` + `CONTEXT.todo.md`. See
 The mechanical pass: walk → link-graph → cross-file taint candidates → external scanners →
 cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 
-**Output** `--out` (default `.ultrasec`) · `--json`
+**Output** `--out` (default `.ultrasec`) · `--json` · `--quiet`
 **Tools** `--tools auto|none|<a,b>` (default `auto`) · `--no-tools` (= `--tools none`) ·
 `--docker` · `--offline` / `--no-enrich`
 **Focus** `--scope` · `--include` · `--exclude` · `--max-files` · `--gitignore`
@@ -67,6 +67,13 @@ cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 **Incremental** `--diff <ref>` / `--since <commit>` · `--merge` · `--resume`
 **Recall & provenance** `--sinks` · `--log-hygiene` · `--blame` (alias `--provenance`) ·
 `--no-env-sources` · `--strict-scope`
+
+**Progress goes to stderr, and is on by default.** A line per stage, and per external scanner
+started and finished, with its result and elapsed time. Adapters run serially and one of them can
+spend twenty minutes walking git history, so without it a thorough scan is indistinguishable from
+a hang. It never touches stdout — `--json` output and every line the command prints at the end are
+byte-identical with or without it — and `--quiet` mutes it. If a scan seems stuck, the last line
+printed names the tool that is blocking.
 
 `--no-env-sources` drops candidates whose SOURCE is an environment read (`process.env`,
 `os.getenv`). Those model configuration injection, which is real, but presume the operator of the

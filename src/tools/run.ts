@@ -324,6 +324,26 @@ export interface OrchestrateResult {
   results: ToolRunResult[];
 }
 
+/**
+ * One adapter's lifecycle, reported as it happens. Emitted twice per adapter —
+ * once with no `result` when it starts, once with one when it finishes.
+ *
+ * A callback rather than a print, so `src/tools/` stays free of the output sink
+ * (nothing in here imports `util.ts`, and the MCP server's stdout carries
+ * JSON-RPC frames that a stray line would corrupt). The caller decides where it
+ * goes.
+ */
+export interface ToolProgress {
+  tool: string;
+  /** 1-based position in this run's adapter list. */
+  index: number;
+  total: number;
+  /** Present on completion only. */
+  result?: ToolRunResult;
+  /** Wall-clock milliseconds the adapter took. Completion only. */
+  ms?: number;
+}
+
 export interface OrchestrateOptions {
   which?: string[];
   useDocker?: boolean;
@@ -334,6 +354,10 @@ export interface OrchestrateOptions {
   /** "The walk pruned this path" — forwarded into the per-run RunContext so a
    *  scanner's results honour `--gitignore`/`--exclude` like the walk does. */
   pruned?: (rel: string) => boolean;
+  /** Called as each adapter starts and finishes. Adapters run SERIALLY, and one
+   *  of them can take twenty minutes walking git history, so without this a scan
+   *  is indistinguishable from a hang. */
+  onProgress?: (e: ToolProgress) => void;
 }
 
 /**
@@ -350,8 +374,13 @@ export function orchestrate(adapters: ToolAdapter[], repo: string, opts: Orchest
   const ctx: RunContext = { offline: opts.offline, sbom: opts.sbom, pruned: opts.pruned };
   const results: ToolRunResult[] = [];
   const all: Finding[] = [];
-  for (const a of selected) {
+  const total = selected.length;
+  for (let i = 0; i < total; i++) {
+    const a = selected[i]!;
+    opts.onProgress?.({ tool: a.name, index: i + 1, total });
+    const started = Date.now();
     const r = runAdapter(a, repo, opts.useDocker, ctx);
+    opts.onProgress?.({ tool: a.name, index: i + 1, total, result: r, ms: Date.now() - started });
     results.push(r);
     all.push(...r.findings);
   }

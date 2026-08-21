@@ -29,6 +29,7 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "help",
   "version",
   "json",
+  "quiet",
   "offline",
   "no-enrich",
   "no-tools",

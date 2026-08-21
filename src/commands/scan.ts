@@ -120,10 +120,24 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     effectiveScope = [...(scope ?? []), ...targets];
   }
 
+  // Live progress. A thorough scan is minutes of silence today — one adapter can
+  // spend twenty of them walking git history — and the only way to tell "running"
+  // from "hung" was `docker ps`. It goes to STDERR, so stdout (including
+  // `--json`) stays byte-identical for anything parsing this command, and it goes
+  // through `eprintln` rather than `process.stderr` directly so the MCP server's
+  // capture and `--report`'s tee keep working.
+  const quiet = flagBool(args, "quiet");
+  const step = (msg: string): void => {
+    if (!quiet) eprintln(`ultrasec · ${msg}`);
+  };
+  const secs = (ms: number): string => (ms >= 1000 ? ` in ${Math.round(ms / 1000)}s` : "");
+
   const scanOpts = { scope: effectiveScope, include, exclude, maxFiles, gitignore };
   const resume = flagBool(args, "resume");
   const cache = resume ? loadScanCache(out) : undefined;
+  step(`walking ${repo}${cache ? " (resuming from cache)" : ""}…`);
   const scan = cache ? scanRepoCached(repo, scanOpts, cache) : scanRepo(repo, scanOpts);
+  step(`${scan.files.length} file(s) scanned · building the link-graph…`);
   const graph = buildGraph(scan);
   // Logging hygiene (opt-in `--log-hygiene`, CWE-117 + CWE-532): unions LOG_SINKS
   // into the taint sink catalog for this run only — default false keeps the
@@ -136,8 +150,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // of the same file. Opt-in for the same reason as above — co-location is weak
   // evidence, not zero evidence (a value can travel through module state).
   const strictScope = flagBool(args, "strict-scope");
+  step(`enumerating source→sink taint paths…`);
   const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn, excludeEnvSources, strictScope });
   const taintFindings = taint.findings;
+  step(`${taintFindings.length} taint candidate(s)`);
 
   // Orphan-sink recall (opt-in `--sinks`): dangerous sinks the source-gated taint
   // BFS can't connect to a source still warrant a look. Emitted as low-confidence
@@ -156,10 +172,6 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ? enumerateSensitiveLogCandidates(scan, { maxCandidates: explicitMaxCandidates })
     : { findings: [] as Finding[], truncated: 0, total: 0 };
 
-  // Agentic CI: workflows that hand a coding agent the repo's own event data.
-  // Always on — it reads only `.github/workflows/*.yml`, costs nothing when there
-  // are none, and a repo that ships one of these has a live injection path that
-  // no dependency scanner and no taint walk will report.
   // ONE prune predicate for the whole run. `--gitignore` used to reach only the
   // engine's own walk: the always-on auditors below call `walk(repo)` with no
   // options at all, and the external scanners get the raw repo bind-mounted, so
@@ -168,6 +180,12 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // primitives so it honours nested `.gitignore` files exactly as the walk does.
   const prune = buildPruneMatcher(repo, { gitignore, exclude });
 
+  step(`config, auth, cloud and credential detectors…`);
+
+  // Agentic CI: workflows that hand a coding agent the repo's own event data.
+  // Always on — it reads only `.github/workflows/*.yml`, costs nothing when there
+  // are none, and a repo that ships one of these has a live injection path that
+  // no dependency scanner and no taint walk will report.
   const agenticFindings = auditAgenticWorkflows(repo, prune);
 
   // API/web misconfiguration (CORS, cookie flags, security headers, TLS
@@ -212,9 +230,26 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // (grype's `sbom:` mode, package-checker's `--source`) — skipped right along
   // with the adapters when tools aren't going to run this pass.
   const sbomResult = skipTools ? undefined : generateSbom(repo, out);
+  if (skipTools) step(`external scanners skipped`);
   const tool = skipTools
     ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] }
-    : orchestrate(ADAPTERS, repo, { which, useDocker, offline, sbom: sbomResult?.path, pruned: prune });
+    : orchestrate(ADAPTERS, repo, {
+        which,
+        useDocker,
+        offline,
+        sbom: sbomResult?.path,
+        pruned: prune,
+        // Adapters run serially, so this is a running commentary, not a bar.
+        // Naming the tool that is currently blocking is the whole point: when a
+        // scan sits silent for twenty minutes, the last line printed is what
+        // tells you it is trufflehog walking git history rather than a hang.
+        onProgress: (e) => {
+          const at = `[${e.index}/${e.total}] ${e.tool}`;
+          if (!e.result) return step(`${at} …`);
+          const mark = !e.result.ran ? "↷" : e.result.ok ? "✓" : "✗";
+          step(`${at} ${mark} ${e.result.note}${secs(e.ms ?? 0)}`);
+        },
+      });
 
   // Merge taint candidates, orphan-sink candidates, logging-hygiene candidates,
   // and tool findings (ids are disjoint by construction), then correlate the
@@ -243,6 +278,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
+  step(`correlating and ranking ${merged.length} finding(s)…`);
   const enrich = !(flagBool(args, "no-enrich") || offline);
   const { findings: enriched, note: riskNote } = await enrichFindings(deNoised, { enabled: enrich, context: loadContextDoc(out) });
 
@@ -297,6 +333,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
       );
     }
   }
+  step(`writing the dossier to ${out}…`);
   writeDossier(out, final);
   if (cache) saveScanCache(out, cache);
 
