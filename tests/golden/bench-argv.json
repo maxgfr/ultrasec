@@ -7,6 +7,7 @@
       "title": "Argument injection: execFile() sink (no source path found)",
       "severity": "high",
       "confidence": "low",
+      "reachability": "unproven",
       "sink": {
         "file": "safe.js",
         "line": 4,
@@ -19,7 +20,7 @@
         "https://cwe.mitre.org/data/definitions/88.html"
       ],
       "status": "open",
-      "risk": 48
+      "risk": 34
     },
     {
       "id": "efe5bcbafd7b",

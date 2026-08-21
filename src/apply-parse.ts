@@ -11,6 +11,8 @@
 // Parsers now return every row they refused, with the field and the value that
 // caused it, and the commands surface those alongside the ingest counters.
 
+import { CATEGORIES, SEVERITIES, normalizeCategory, type Category, type Severity } from "./types.js";
+
 /** One row the parser refused, and why. */
 export interface DroppedRow {
   /** 0-based position in the source array — how the author finds the row. */
@@ -152,4 +154,96 @@ export function parseIdVerdictRows<V extends string, T>(
   }
 
   return requireUsable({ rows, dropped }, arr.length, `a string "id" and a "verdict" among ${opts.verdicts.join("|")}`);
+}
+
+// ── The Discovery row ───────────────────────────────────────────────────────
+//
+// One agent-authored finding, as `investigate --apply` and `variants --apply`
+// both submit it.
+//
+// This validation lived inline in `investigate.ts`, and `variants.ts` had none
+// at all: it cast `v.variants as Discovery[]` — a TYPE assertion, erased at
+// runtime — and handed the result straight to `ingestDiscoveries`. On the first
+// real audit that meant `variants --apply` threw on a row with no `title`, then
+// ingested eleven rows carrying `category: null, severity: null`, which
+// corrupted the manifest's severity histogram and finally made `render` throw.
+// The fail-closed promise held on one stage and not on its neighbour.
+//
+// So the row validator lives HERE, beside the other shared apply primitives,
+// and both stages call it. A third stage that ingests discoveries gets it right
+// for free instead of getting it wrong in a new way.
+
+/** One agent-authored finding, with its vocabulary fields already canonical. */
+export interface DiscoveryRow {
+  title: string;
+  category: Category;
+  severity: Severity;
+  cwe?: string;
+  message: string;
+  file: string;
+  line: number;
+  path?: { file: string; line: number; why: string }[];
+}
+
+/** Kept (`row`, plus a `note` when a value was rewritten), or refused (`reason`). */
+export interface DiscoveryRowResult {
+  row?: DiscoveryRow;
+  reason?: string;
+  note?: string;
+}
+
+/** What a Discovery row must carry — the `requireUsable` requirement string. */
+export const DISCOVERY_REQUIREMENT = `title/message/file (strings), line ≥ 0, a category among ${CATEGORIES.join(
+  "|",
+)} (aliases accepted) and a severity among ${SEVERITIES.join("|")}`;
+
+/**
+ * Validate one Discovery row.
+ *
+ * Every offending field is reported at once: fixing a discovery one error per
+ * run is exactly the friction that made silent drops tolerable in the first
+ * place.
+ */
+export function parseDiscoveryRow(raw: unknown): DiscoveryRowResult {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { reason: badField("row", raw, "an object") };
+  const d = raw as Record<string, unknown>;
+
+  const bad: string[] = [];
+  for (const field of ["title", "message", "file"] as const) {
+    if (typeof d[field] !== "string" || !(d[field] as string).length) bad.push(badField(field, d[field], "a non-empty string"));
+  }
+  // `line: 0` is the documented whole-file citation (schemas.md) that config/IaC
+  // findings normalize to, and `check` already special-cases it. Rejecting it
+  // here refused a legitimate shape the format defines.
+  if (!Number.isInteger(d.line) || (d.line as number) < 0) bad.push(badField("line", d.line, "an integer ≥ 0 (0 = the whole file)"));
+  const cat = normalizeCategory(d.category as string);
+  if (!cat) bad.push(`${notInVocabulary("category", d.category, CATEGORIES)} (nor a known alias — see CATEGORY_ALIASES)`);
+  if (!(SEVERITIES as readonly string[]).includes(d.severity as string)) bad.push(notInVocabulary("severity", d.severity, SEVERITIES));
+  if (bad.length) return { reason: bad.join(", ") };
+
+  const path = Array.isArray(d.path)
+    ? (d.path as unknown[])
+        .filter((p) => {
+          const s = p as { file?: unknown; line?: unknown } | null;
+          return !!s && typeof s === "object" && typeof s.file === "string" && Number.isInteger(s.line) && (s.line as number) >= 1;
+        })
+        .map((p) => {
+          const s = p as { file: string; line: number; why?: unknown };
+          return { file: s.file, line: s.line, why: typeof s.why === "string" ? s.why : "" };
+        })
+    : undefined;
+
+  return {
+    row: {
+      title: d.title as string,
+      category: cat!.category,
+      severity: d.severity as Severity,
+      ...(typeof d.cwe === "string" ? { cwe: d.cwe } : {}),
+      message: d.message as string,
+      file: d.file as string,
+      line: d.line as number,
+      ...(path && path.length ? { path } : {}),
+    },
+    ...(cat!.folded ? { note: `category ${describeValue(d.category)} folded to "${cat!.category}"` } : {}),
+  };
 }

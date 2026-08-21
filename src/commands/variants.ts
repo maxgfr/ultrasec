@@ -47,7 +47,7 @@ export function runVariants(args: ParsedArgs): number {
     }
 
     const discoveries = parsed.rows.flatMap((r) => r.variants ?? []);
-    const res = ingestDiscoveries(dossier, discoveries, repo);
+    const res = ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run) });
     persistFindings(run, dossier, res.findings);
 
     // The audit stops being a document here: a finding is fixed once, a rule

@@ -119,7 +119,7 @@ const STAGES: Record<StageName, StageDef> = {
       emitWorklist(run, f, regions, renderInvestigateMd(regions, loadContextDoc(run)));
       return { worklist: join(run, f.md), outName: "INVESTIGATE.json" };
     },
-    applyPure: (repo, _run, dossier, raw) => ingestDiscoveries(dossier, rowsOf("investigate", parseDiscoveries(raw)), repo).findings,
+    applyPure: (repo, run, dossier, raw) => ingestDiscoveries(dossier, rowsOf("investigate", parseDiscoveries(raw)), repo, { context: loadContextDoc(run) }).findings,
     instruction: (repo, run, worklist, outPath) =>
       `Read the investigation worklist at ${worklist}. Find issues the deterministic engine can't (authz/IDOR, business logic, multi-hop) and write grounded Discovery[] {title,category,severity,cwe?,message,file,line,path?} to ${outPath}. Cite resolvable [file:line]. ${UNTRUSTED}`,
   },
@@ -156,11 +156,12 @@ const STAGES: Record<StageName, StageDef> = {
       emitWorklist(run, f, items, renderVariantsMd(items, loadContextDoc(run)));
       return { worklist: join(run, f.md), outName: "VARIANTS.json" };
     },
-    applyPure: (repo, _run, dossier, raw) =>
+    applyPure: (repo, run, dossier, raw) =>
       ingestDiscoveries(
         dossier,
         rowsOf("variants", parseVariantResults(raw)).flatMap((r) => r.variants ?? []),
         repo,
+        { context: loadContextDoc(run) },
       ).findings,
     afterApply(run, raw) {
       const rules = renderRegressionRules(rowsOf("variants", parseVariantResults(raw)));

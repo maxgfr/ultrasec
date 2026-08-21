@@ -422,7 +422,7 @@ function renderProbeMd(r: ProbeReport): string {
   for (const f of bySev) L.push(`| ${f.severity} | ${f.area} | ${f.title} | \`${f.grounding}\` | ${f.cwe ?? "—"} |`);
   L.push("");
   for (const f of bySev) {
-    L.push(`### ${f.severity.toUpperCase()} — ${f.title}`);
+    L.push(`### ${String(f.severity ?? "—").toUpperCase()} — ${f.title}`);
     L.push(`- grounding: \`${f.grounding}\`${f.cwe ? ` · ${f.cwe}` : ""}`);
     L.push(`- ${f.message}`);
     L.push("");

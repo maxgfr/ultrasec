@@ -1,7 +1,7 @@
 import { locationsLine, toolStatusLines, type Dossier } from "../store.js";
 import { BROCARD_SUMMARY, SEVERITIES, type Finding, type Narrative, type Remediation, type Severity } from "../types.js";
 import { pathMermaid } from "./mermaid.js";
-import { byStr } from "../util.js";
+import { sortFindings } from "../rank.js";
 import { executiveSummaryMd, positivePatternsMd, suggestedFixMd, attackChainsMd, rootCausesMd, hardeningNotesMd, remediationMap } from "../narrative.js";
 import { buildCoverage, enumeratedKindsOf, renderCoverageMd } from "../coverage.js";
 
@@ -16,15 +16,13 @@ const BADGE: Record<Severity, string> = {
   info: "⬜ INFO",
 };
 
-function sevRank(s: Severity): number {
-  return SEVERITIES.indexOf(s);
+/** The severity badge, or a dash. A bare `BADGE[f.severity]` on a malformed
+ *  finding interpolated the literal string "undefined" into the report — the
+ *  Markdown twin of the TypeError the HTML renderer threw on the same run. */
+function badgeOf(s: Severity | undefined | null): string {
+  return (s && BADGE[s]) || "—";
 }
 
-// Primary sort key is the composite risk score (EPSS/KEV-aware); severity then
-// id break ties and order pre-enrichment dossiers sensibly.
-function sortFindings(fs: Finding[]): Finding[] {
-  return fs.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
-}
 
 /** Risk / EPSS / KEV / verified annotations, when present. */
 function riskTag(f: Finding): string {
@@ -94,19 +92,19 @@ export function renderSummary(d: Dossier, narrative?: Narrative): string {
   };
   if (confirmed.length) {
     L.push(`## Confirmed (${confirmed.length})`);
-    for (const f of confirmed) L.push(`- ${BADGE[f.severity]} **${f.title}** — ${pathLine(f)}${tail(f)}`);
+    for (const f of confirmed) L.push(`- ${badgeOf(f.severity)} **${f.title}** — ${pathLine(f)}${tail(f)}`);
     L.push("");
   }
   if (needs.length) {
     L.push(`## Needs human review (${needs.length})`);
-    for (const f of needs) L.push(`- ${BADGE[f.severity]} ${f.title} — ${pathLine(f)}${tail(f)}`);
+    for (const f of needs) L.push(`- ${badgeOf(f.severity)} ${f.title} — ${pathLine(f)}${tail(f)}`);
   }
   return L.join("\n") + "\n";
 }
 
 function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Remediation } = {}): string {
   const L: string[] = [];
-  L.push(`### ${BADGE[f.severity]} ${f.title}`);
+  L.push(`### ${badgeOf(f.severity)} ${f.title}`);
   L.push("");
   const src = sourcesTag(f);
   L.push(

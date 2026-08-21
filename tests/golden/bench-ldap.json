@@ -54,6 +54,7 @@
       "title": "LDAP injection: search() sink (no source path found)",
       "severity": "high",
       "confidence": "low",
+      "reachability": "unproven",
       "sink": {
         "file": "safe.js",
         "line": 2,
@@ -66,7 +67,7 @@
         "https://cwe.mitre.org/data/definitions/90.html"
       ],
       "status": "open",
-      "risk": 48
+      "risk": 34
     }
   ],
   "graph": {

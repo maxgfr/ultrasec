@@ -27,6 +27,30 @@ function severityRank(s: Severity): number {
 }
 
 /**
+ * The severity ceiling for a sink nothing connects to a source.
+ *
+ * An orphan sink is a real dangerous callee with an unproven path to it. The
+ * catalog severity answers "how bad if an attacker reaches this", and shipping
+ * that number unchanged answered a question nobody asked: on the first large
+ * audit, 182 orphan sinks were emitted — 11 of them `critical` — and **not one
+ * survived adjudication**. Meanwhile the confirmed findings sat below them.
+ *
+ * `high` rather than `medium`: an orphan `exec()` in a request handler is still
+ * the first thing to read on the page, and demoting the whole class to medium
+ * would trade one miscalibration for its mirror image. The point is that it
+ * cannot outrank a CONFIRMED critical, and with `reachability: "unproven"`
+ * damping the risk score it no longer does.
+ *
+ * The floor never promotes: a `low` sink stays `low`.
+ */
+const ORPHAN_SEVERITY_CEILING: Severity = "high";
+
+/** The lower of the two severities — a ceiling never promotes a finding. */
+function cappedAt(current: Severity, ceiling: Severity): Severity {
+  return severityRank(current) >= severityRank(ceiling) ? current : ceiling;
+}
+
+/**
  * Orphan-sink recall layer. `enumerateTaint` only emits a finding when a
  * dangerous sink can be connected BACK to an untrusted source through the
  * call-graph (`findSinks` is source-gated). A sink the summary graph can't
@@ -85,8 +109,13 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
         category: "sast",
         cwe: sink.cwe,
         title: `${sink.title}: ${sink.callee}() sink (no source path found)`,
-        severity: sink.severity,
+        severity: cappedAt(sink.severity, ORPHAN_SEVERITY_CEILING),
         confidence: "low",
+        // Says out loud what `confidence: low` only implied, and what the
+        // ranking now acts on: nothing in this run puts an attacker on this
+        // line. An auditor who finds the path the summary graph missed confirms
+        // it and the severity comes back with the evidence.
+        reachability: "unproven",
         sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbolName(file.symbols, sink.line) },
         message:
           `Dangerous ${sink.kind} sink ${sink.callee}() at ${file.rel}:${sink.line} that the cross-file taint pass ` +

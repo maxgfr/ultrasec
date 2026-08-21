@@ -143,6 +143,19 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
    */
   const linksTo = (from: string, to: string): boolean => linkedTo.get(from)?.has(to) === true || (byRel.get(from)?.imports.length ?? 0) === 0;
 
+  /**
+   * Whether a hop between two files is even possible: same language, or no hop.
+   *
+   * Unlike `linksTo`, an unknown language is NOT permissive. Absent imports mean
+   * "could not see"; a file the engine cannot classify is not evidence that a
+   * Python module calls a TypeScript one.
+   */
+  const sameLanguage = (a: string, b: string): boolean => {
+    const la = langForFile(a)?.id;
+    const lb = langForFile(b)?.id;
+    return !!la && la === lb;
+  };
+
   const findings: Finding[] = [];
   const emitted = new Set<string>();
 
@@ -291,10 +304,21 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
         // than on in-repo edges matters: a file importing only framework
         // packages has zero in-repo edges, and that is evidence the hop is a
         // guess, not evidence that we failed to look.
+        //
+        // CROSS-LANGUAGE NAMES are the same coincidence one step further out,
+        // and the ambiguity gate above does not catch them: it only fires when
+        // the name has MORE than one definition, so a name defined exactly once
+        // — in another language — hopped with no link check at all. That is how
+        // an `analysis/*.py` source reached an `ApiClient.ts` sink on the first
+        // large audit: one definition, no ambiguity, no gate, and a `high`
+        // rating on a call no runtime can make. A hop between languages is
+        // refused outright rather than link-checked, because no import relation
+        // could make it true either.
         const ambiguous = Array.isArray(defs) && defs.length > 1;
         const callerList = graph.callersBySymbol?.[fr.sym];
         for (const caller of Array.isArray(callerList) ? callerList : []) {
           if (caller.file === fr.file) continue;
+          if (!sameLanguage(caller.file, fr.file)) continue;
           if (ambiguous && !linksTo(caller.file, fr.file)) continue;
           const key = `${caller.file}#${caller.symbol ?? caller.line}`;
           if (visited.has(key)) continue;

@@ -1,14 +1,35 @@
 import type { Dossier } from "../store.js";
 import { SEVERITIES, type Finding, type Narrative, type Remediation, type Severity } from "../types.js";
-import { byStr } from "../util.js";
+import { sortFindings } from "../rank.js";
 import { AI_DISCLAIMER, hasNarrativeContent, remediationMap } from "../narrative.js";
 
 // A single self-contained index.html — embedded CSS, no external assets, no JS
 // required. The cross-file path renders as offline boxes-and-arrows so it works
 // without a network (Mermaid source still lives in the Markdown report).
 
-function esc(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+// A report is the one artifact that must survive a malformed finding.
+//
+// `render` used to throw `TypeError: Cannot read properties of null (reading
+// 'toUpperCase')` on a finding whose `severity` was null, and an auditor with a
+// finished, adjudicated run could not produce a report at all until the rows
+// were hand-patched. The validators upstream now make that finding
+// unconstructible; these fallbacks mean that if one ever appears again it costs
+// a dash in one cell, not the document.
+const MISSING = "—";
+
+function esc(s: string | undefined | null): string {
+  if (s === undefined || s === null) return MISSING;
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+/** The severity's display label, or a dash — never a crash. */
+function sevLabel(s: Severity | undefined | null): string {
+  return s ? String(s).toUpperCase() : MISSING;
+}
+
+/** The severity's colour, falling back to the neutral `info` slate. */
+function sevColor(s: Severity | undefined | null): string {
+  return (s && SEV_COLOR[s]) || SEV_COLOR.info;
 }
 
 const SEV_COLOR: Record<Severity, string> = {
@@ -19,8 +40,11 @@ const SEV_COLOR: Record<Severity, string> = {
   info: "#64748b",
 };
 
-function sevRank(s: Severity): number {
-  return SEVERITIES.indexOf(s);
+/** Rank, with an unknown severity sorted LAST rather than first — `indexOf`
+ *  returns -1, which would put a malformed finding above every critical. */
+function sevRank(s: Severity | undefined | null): number {
+  const at = SEVERITIES.indexOf(s as Severity);
+  return at === -1 ? SEVERITIES.length : at;
 }
 
 function badge(text: string, color: string): string {
@@ -67,11 +91,11 @@ function findingHtml(f: Finding, rem?: Remediation): string {
     .join(" · ");
   return `
   <section class="finding" id="${esc(f.id)}">
-    <h3>${badge(f.severity.toUpperCase(), SEV_COLOR[f.severity])} ${esc(f.title)}</h3>
+    <h3>${badge(sevLabel(f.severity), sevColor(f.severity))} ${esc(f.title)}</h3>
     <div class="meta">
       <code>${esc(f.id)}</code>
       ${f.cwe ? `· ${esc(f.cwe)}` : ""} · ${esc(f.category)}
-      · status ${badge(f.status, f.status === "confirmed" ? "#b91c1c" : f.status === "needs-human" ? "#b45309" : f.status === "dismissed" ? "#64748b" : "#475569")}
+      · status ${badge(f.status ?? MISSING, f.status === "confirmed" ? "#b91c1c" : f.status === "needs-human" ? "#b45309" : f.status === "dismissed" ? "#64748b" : "#475569")}
       · confidence ${esc(f.confidence)}
       ${f.verdict ? `· verdict ${esc(f.verdict)}` : ""}
       ${sourcesHtml(f)}
@@ -143,7 +167,7 @@ function aiCss(narrative?: Narrative): string {
 
 export function renderHtml(d: Dossier, narrative?: Narrative): string {
   const c = d.manifest.counts.bySeverity;
-  const fs = d.findings.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || sevRank(a.severity) - sevRank(b.severity) || byStr(a.id, b.id));
+  const fs = sortFindings(d.findings);
   const shown = fs.filter((f) => f.status !== "dismissed");
   const dismissed = fs.filter((f) => f.status === "dismissed");
   const rem = remediationMap(narrative);

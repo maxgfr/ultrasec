@@ -1,7 +1,7 @@
 import type { Dossier } from "./store.js";
 import type { Finding } from "./types.js";
 import { byStr } from "./util.js";
-import { coerceRows, type DroppedRow, type ParseResult } from "./apply-parse.js";
+import { coerceRows, parseDiscoveryRow, type DroppedRow, type NormalizedRow, type ParseResult } from "./apply-parse.js";
 import type { Discovery } from "./investigate.js";
 
 // The variant-analysis stage. Every stage before it asks "is THIS candidate
@@ -188,6 +188,7 @@ export function parseVariantResults(raw: string): ParseResult<VariantResult> {
   const arr = coerceRows(JSON.parse(raw) as unknown, ["variants", "results"], "variant results");
   const rows: VariantResult[] = [];
   const dropped: DroppedRow[] = [];
+  const normalized: NormalizedRow[] = [];
 
   for (const [index, entry] of (arr as unknown[]).entries()) {
     const v = entry as Record<string, unknown>;
@@ -199,7 +200,22 @@ export function parseVariantResults(raw: string): ParseResult<VariantResult> {
       dropped.push({ index, reason: "missing seedId (which confirmed finding is this a hunt for?)" });
       continue;
     }
-    const variants = Array.isArray(v.variants) ? (v.variants as Discovery[]) : [];
+    // Validate each variant with the SAME row parser `investigate --apply` uses.
+    // This line used to read `v.variants as Discovery[]` — a type assertion,
+    // erased at runtime — so a malformed variant reached `ingestDiscoveries`
+    // unchecked. The variants a hunt returns are discoveries; they earn the same
+    // gate, and a refused one is reported with its seed and its position rather
+    // than crashing the fold.
+    const variants: Discovery[] = [];
+    for (const [at, candidate] of (Array.isArray(v.variants) ? (v.variants as unknown[]) : []).entries()) {
+      const parsed = parseDiscoveryRow(candidate);
+      if (!parsed.row) {
+        dropped.push({ index, reason: `variants[${at}] (seed ${v.seedId}): ${parsed.reason}` });
+        continue;
+      }
+      if (parsed.note) normalized.push({ index, note: `variants[${at}] (seed ${v.seedId}): ${parsed.note}` });
+      variants.push(parsed.row);
+    }
     rows.push({
       seedId: v.seedId,
       rootCause: typeof v.rootCause === "string" ? v.rootCause : undefined,
@@ -209,9 +225,13 @@ export function parseVariantResults(raw: string): ParseResult<VariantResult> {
     });
   }
   if (rows.length === 0 && (arr as unknown[]).length > 0) {
-    throw new Error(`variant results: all ${(arr as unknown[]).length} row(s) were unusable — nothing folded (fail-closed)`);
+    const detail = dropped.map((d) => `row ${d.index}: ${d.reason}`).join("; ");
+    throw new Error(
+      `variant results: all ${(arr as unknown[]).length} row(s) were unusable — nothing folded (fail-closed)${detail ? ` — ${detail}` : ""}`,
+    );
   }
-  return { rows, dropped };
+  // Presence-gated, like `parseDiscoveries`: no fold ⇒ shape-identical to before.
+  return { rows, dropped, ...(normalized.length ? { normalized } : {}) };
 }
 
 /**
