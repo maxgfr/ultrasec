@@ -158,7 +158,17 @@ describe("command sinks — every language's real shape still fires", () => {
   const taint = enumerateTaint(scan, buildGraph(scan), { maxDepth: 8, maxCandidates: 10000 }).findings;
   const orphan = enumerateSinkCandidates(scan, taint).findings;
   const all = [...taint, ...orphan];
-  const criticalsIn = (file: string) => all.filter((f) => f.cwe === "CWE-78" && f.sink?.file === file && f.severity === "critical").length;
+  // RECALL is what this describe block guards: every language's real
+  // process-execution shape must still be enumerated as CWE-78.
+  //
+  // It used to count `severity === "critical"` as a proxy for that, which
+  // silently coupled it to a second question — how a command sink is RATED. Two
+  // of these fixtures (`cmd.rs`, `cs_proc.cs`) have no source reaching the sink,
+  // so they arrive as orphan candidates, and orphan candidates are now capped at
+  // `high` with `reachability: "unproven"`. Recall was unchanged; the proxy
+  // broke. Counting the findings themselves asks the question the block is named
+  // for, and the calibration is asserted separately just below.
+  const commandSinksIn = (file: string) => all.filter((f) => f.cwe === "CWE-78" && f.sink?.file === file).length;
 
   const CASES: [string, string, number][] = [
     ["Runtime.java", "Runtime.getRuntime().exec(cmd)", 1],
@@ -175,9 +185,28 @@ describe("command sinks — every language's real shape still fires", () => {
 
   for (const [file, shape, want] of CASES) {
     it(`still flags ${shape}`, () => {
-      expect(criticalsIn(file)).toBe(want);
+      expect(commandSinksIn(file)).toBe(want);
     });
   }
+
+  // The other half of the old assertion, stated as its own rule: a command sink
+  // the taint pass CONNECTED to a source keeps the catalog's critical rating.
+  // Demoting those would be a real regression, and counting findings alone would
+  // not notice it.
+  it("keeps a source-linked command sink at critical", () => {
+    const linked = taint.filter((f) => f.cwe === "CWE-78");
+    expect(linked.length).toBeGreaterThan(0);
+    expect(linked.every((f) => f.severity === "critical")).toBe(true);
+  });
+
+  // …and a sink with no source path is capped and says so, instead of opening
+  // the report at `critical` on the strength of a callee name.
+  it("caps an orphan command sink at high and marks it unproven", () => {
+    const orphans = orphan.filter((f) => f.cwe === "CWE-78");
+    expect(orphans.length).toBeGreaterThan(0);
+    expect(orphans.every((f) => f.severity === "high")).toBe(true);
+    expect(orphans.every((f) => f.reachability === "unproven")).toBe(true);
+  });
 });
 
 // `requireModule` needles are compared against LOWERCASED import specs, so a

@@ -41,7 +41,23 @@ import { NOISE_CLASSES, NOISE_GROUND, type Brocard, type Confidence, type Findin
 // manifest to account for.
 
 /** Tool bundles and third-party trees committed as build artifacts. */
-const VENDORED_DIR = /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules)\//i;
+/**
+ * A path that is not this repo's source.
+ *
+ * Deliberately the same vocabulary as the walker's `DEFAULT_IGNORE_DIRS`, plus
+ * the package-manager and Python trees that only ever appear in a scanner's
+ * output. It used to list five directories where the walker skipped seventeen,
+ * so the two disagreed about what "vendored" means — and `.venv/` and `.next/`,
+ * which between them accounted for 541 findings on one audit, fell in the gap.
+ *
+ * This is the belt to the prune matcher's braces. `buildPruneMatcher` now drops
+ * these paths from scanner output before they ever become findings; a finding
+ * that still arrives with such a path (an `--include-vendored` run, a scanner
+ * reporting a location the matcher could not parse) is demoted rather than
+ * ranked.
+ */
+const VENDORED_DIR =
+  /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules|\.pnpm|bower_components|site-packages|\.venv|venv|__pycache__|\.tox|dist|build|out|target|coverage|\.next|\.nuxt|\.svelte-kit|\.turbo|\.gradle)\//i;
 const MINIFIED = /\.min\.(js|mjs|cjs|css)$/i;
 
 interface NoiseRule {

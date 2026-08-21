@@ -1,13 +1,23 @@
 import type { Dossier } from "./store.js";
-import { CATEGORIES, SEVERITIES, normalizeCategory, type Category, type Finding, type Severity } from "./types.js";
+import type { Finding } from "./types.js";
 import type { AttackSurface } from "./map.js";
 import type { Graph } from "./graph.js";
 import { neighbors } from "./neighbors.js";
 import { makeToolFinding } from "./tools/normalize.js";
+import { deploymentFacts, scoreFinding } from "./tools/scoring.js";
 import { insideRepo, lineCount } from "./check.js";
 import { byStr } from "./util.js";
 import { leadsForRegion } from "./assumptions.js";
-import { badField, coerceRows, describeValue, notInVocabulary, requireUsable, type DroppedRow, type NormalizedRow, type ParseResult } from "./apply-parse.js";
+import {
+  DISCOVERY_REQUIREMENT,
+  coerceRows,
+  parseDiscoveryRow,
+  requireUsable,
+  type DiscoveryRow,
+  type DroppedRow,
+  type NormalizedRow,
+  type ParseResult,
+} from "./apply-parse.js";
 
 // The agentic-discovery stage (Phase 5). The deterministic engine can't enumerate
 // authorization/IDOR, business-logic, or subtle multi-hop flows — so it emits a
@@ -151,16 +161,14 @@ export function renderInvestigateMd(regions: InvestigateRegion[], context?: stri
   return L.join("\n") + "\n";
 }
 
-export interface Discovery {
-  title: string;
-  category: Category;
-  severity: Severity;
-  cwe?: string;
-  message: string;
-  file: string;
-  line: number;
-  path?: { file: string; line: number; why: string }[];
-}
+/**
+ * One agent-authored finding.
+ *
+ * Defined in `apply-parse.ts` beside the validator that enforces it, and
+ * re-exported here because this is the stage that named it. `variants.ts`
+ * imports it from here and gets the same shape — and, now, the same validation.
+ */
+export type Discovery = DiscoveryRow;
 
 export interface IngestResult {
   findings: Finding[];
@@ -177,8 +185,15 @@ function locOf(f: Finding): string {
   return "";
 }
 
-function dedupKey(category: string, ident: string, where: string): string {
-  return `${category}::${ident.trim().toLowerCase()}::${where}`;
+/**
+ * `ident` is tolerated as possibly-absent on purpose. Every caller now passes a
+ * validated row, but this function is one `??` away from a crash that took a
+ * whole audit's report down once already (`variants --apply` handed it a row
+ * with neither `cwe` nor `title`). A dedup key derived from an empty ident is a
+ * worse key; it is not a stack trace.
+ */
+function dedupKey(category: string, ident: string | undefined, where: string): string {
+  return `${category}::${(ident ?? "").trim().toLowerCase()}::${where}`;
 }
 
 /** Reject a discovery whose primary or any path citation doesn't resolve in the
@@ -199,8 +214,17 @@ function citationProblem(repo: string, d: Discovery): string | null {
  * existing dossier by (category, cwe|title, file:line): a match folds `ultrasec-ai`
  * into that finding's `sources` instead of adding a duplicate. Out-of-range
  * citations are rejected before folding. Stable, content-derived ids.
+ *
+ * `opts.context` is the run's CONTEXT.md, and it is what makes an ingested
+ * finding RANKABLE. Every renderer sorts on `risk`, `makeToolFinding` does not
+ * set one, and nothing scored these findings afterwards — so agent discoveries
+ * sorted below every scanner hit in the run, including the ones that had already
+ * been refuted. They now get the same `severity ⊕ exposure ⊕ criticality` score
+ * the scan gives everything else. Omitting the context is still valid: the score
+ * then falls back to severity alone, which is what a run with no CONTEXT.md gets.
  */
-export function ingestDiscoveries(dossier: Dossier, discoveries: Discovery[], repo: string): IngestResult {
+export function ingestDiscoveries(dossier: Dossier, discoveries: Discovery[], repo: string, opts: { context?: string } = {}): IngestResult {
+  const deployment = deploymentFacts(opts.context);
   const result = new Map<string, Finding>();
   const idByKey = new Map<string, string>();
   for (const f of dossier.findings) {
@@ -240,6 +264,7 @@ export function ingestDiscoveries(dossier: Dossier, discoveries: Discovery[], re
       confidence: "low", // AI-discovered + unverified — recall-oriented, adjudicate it
     });
     if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: p.why }));
+    f.risk = scoreFinding(f, deployment);
     result.set(f.id, f);
     idByKey.set(key, f.id);
     ingested++;
@@ -263,51 +288,20 @@ export function parseDiscoveries(raw: string): ParseResult<Discovery> {
   const normalized: NormalizedRow[] = [];
   const drop = (index: number, reason: string) => dropped.push({ index, reason });
 
-  for (const [index, raw] of (arr as any[]).entries()) {
-    const d = raw;
-    if (!d || typeof d !== "object") {
-      drop(index, badField("row", d, "an object"));
+  for (const [index, raw] of arr.entries()) {
+    const parsed = parseDiscoveryRow(raw);
+    if (!parsed.row) {
+      drop(index, parsed.reason!);
       continue;
     }
-    // Report every bad field at once: fixing a discovery one error per run is
-    // exactly the friction that made silent drops tolerable in the first place.
-    const bad: string[] = [];
-    for (const field of ["title", "message", "file"] as const) {
-      if (typeof d[field] !== "string") bad.push(badField(field, d[field], "a string"));
-    }
-    // `line: 0` is the documented whole-file citation (schemas.md) that
-    // config/IaC findings normalize to, and `check` already special-cases it.
-    // Rejecting it here refused a legitimate shape the format defines.
-    if (!Number.isInteger(d.line) || d.line < 0) bad.push(badField("line", d.line, "an integer ≥ 0 (0 = the whole file)"));
-    const cat = normalizeCategory(d.category);
-    if (!cat) bad.push(`${notInVocabulary("category", d.category, CATEGORIES)} (nor a known alias — see CATEGORY_ALIASES)`);
-    if (!(SEVERITIES as readonly string[]).includes(d.severity)) bad.push(notInVocabulary("severity", d.severity, SEVERITIES));
-    if (bad.length) {
-      drop(index, bad.join(", "));
-      continue;
-    }
-    const path = Array.isArray(d.path)
-      ? d.path
-          .filter((p: any) => p && typeof p.file === "string" && Number.isInteger(p.line) && p.line >= 1)
-          .map((p: any) => ({ file: p.file, line: p.line, why: typeof p.why === "string" ? p.why : "" }))
-      : undefined;
-    if (cat!.folded) normalized.push({ index, note: `category ${describeValue(d.category)} folded to "${cat!.category}"` });
-    rows.push({
-      title: d.title,
-      category: cat!.category,
-      severity: d.severity as Severity,
-      ...(typeof d.cwe === "string" ? { cwe: d.cwe } : {}),
-      message: d.message,
-      file: d.file,
-      line: d.line,
-      ...(path && path.length ? { path } : {}),
-    });
+    if (parsed.note) normalized.push({ index, note: parsed.note });
+    rows.push(parsed.row);
   }
 
   return requireUsable(
     // Presence-gated: no fold ⇒ the result is shape-identical to before.
     { rows, dropped, ...(normalized.length ? { normalized } : {}) },
-    (arr as any[]).length,
-    `title/message/file (strings), line ≥ 0, a category among ${CATEGORIES.join("|")} (aliases accepted) and a severity among ${SEVERITIES.join("|")}`,
+    arr.length,
+    DISCOVERY_REQUIREMENT,
   );
 }

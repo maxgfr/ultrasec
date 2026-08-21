@@ -26,5 +26,11 @@
     "logHygiene": false,
     "blame": false,
     "includeTests": false
+  },
+  "reachability": {
+    "toolchain": 0,
+    "sources": [
+      "package.json"
+    ]
   }
 }

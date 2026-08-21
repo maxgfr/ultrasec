@@ -36,7 +36,7 @@ export function runInvestigate(args: ParsedArgs): number {
       return 2;
     }
     const strict = flagBool(args, "strict");
-    const res = ingestDiscoveries(dossier, parsed.rows, repo);
+    const res = ingestDiscoveries(dossier, parsed.rows, repo, { context: loadContextDoc(run) });
     persistFindings(run, dossier, res.findings);
 
     if (flagBool(args, "json")) {

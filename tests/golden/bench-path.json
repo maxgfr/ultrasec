@@ -60,6 +60,7 @@
       "title": "Path traversal / archive extraction (zip-slip): readFileSync() sink (no source path found)",
       "severity": "high",
       "confidence": "low",
+      "reachability": "unproven",
       "sink": {
         "file": "safe.js",
         "line": 3,
@@ -72,7 +73,7 @@
         "https://cwe.mitre.org/data/definitions/22.html"
       ],
       "status": "open",
-      "risk": 48
+      "risk": 34
     }
   ],
   "graph": {

@@ -37,7 +37,7 @@ function depIds(f: Finding): string[] {
   const ids = new Set<string>();
   if (f.cve) ids.add(f.cve.toUpperCase());
   for (const a of f.aliases ?? []) ids.add(a.toUpperCase());
-  if (!ids.size) ids.add(f.title.toUpperCase()); // last resort: title identity
+  if (!ids.size) ids.add(String(f.title ?? "").toUpperCase()); // last resort: title identity
   return [...ids];
 }
 

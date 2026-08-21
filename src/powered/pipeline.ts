@@ -19,6 +19,7 @@ import { buildWorklist, renderWorklistMd, applyVerdicts, parseVerdicts } from ".
 import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../revalidate.js";
 import { buildAssumptionWorklist, renderAssumptionsMd, parseAssumptionResults, renderAssumptionMap, unenforced, LEADS_FILE } from "../assumptions.js";
 import { buildVariantWorklist, renderVariantsMd, parseVariantResults, renderRegressionRules } from "../variants.js";
+import { buildGuardMatrix, renderGuardsMd, parseGuardVerdicts, guardDiscovery } from "../guards.js";
 import { buildNarrativeWorklist, renderNarrativeWorklistMd, parseNarrative, mergeNarrative, hasNarrativeContent } from "../narrative.js";
 import { buildImplementWorklist, renderImplementMd, loadNarrative } from "../implement.js";
 import type { AgentRunner } from "./agent.js";
@@ -33,7 +34,7 @@ import { eprintln } from "../util.js";
 // Canonical order. `assumptions` runs BEFORE the hunt (its leads feed
 // `investigate`) and `variants` AFTER adjudication (its seeds are confirmed
 // findings), so neither can be slotted in arbitrarily.
-export const ALL_STAGES = ["context", "assumptions", "triage", "investigate", "verify", "revalidate", "variants", "narrative", "implement"] as const;
+export const ALL_STAGES = ["context", "assumptions", "triage", "guards", "investigate", "verify", "revalidate", "variants", "narrative", "implement"] as const;
 export type StageName = (typeof ALL_STAGES)[number];
 
 interface StageDef {
@@ -111,6 +112,32 @@ const STAGES: Record<StageName, StageDef> = {
     instruction: (repo, run, worklist, outPath) =>
       `Read the triage worklist at ${worklist}. For each OPEN candidate decide noise|keep and write a JSON array of {id, verdict} to ${outPath}. 'noise' only for clear false positives. ${UNTRUSTED}`,
   },
+  // Before `investigate`, because it tells `investigate` where to look: an
+  // unguarded handler is the highest-value region in any repo, and the audit
+  // that motivated this stage sent its investigation to five regions that
+  // contained none of the app's routes at all.
+  guards: {
+    crossCheckable: false,
+    emit(repo, run) {
+      const rows = buildGuardMatrix(scanRepo(repo));
+      const f = stageFiles("GUARDS");
+      emitWorklist(run, f, rows, renderGuardsMd(rows, loadContextDoc(run)));
+      return { worklist: join(run, f.md), outName: "GUARDS.json" };
+    },
+    applyPure: (repo, run, dossier, raw) => {
+      const byId = new Map(buildGuardMatrix(scanRepo(repo)).map((r) => [r.id, r]));
+      const discoveries = rowsOf("guards", parseGuardVerdicts(raw))
+        .filter((r) => r.verdict === "unguarded")
+        .map((r) => {
+          const at = byId.get(r.id);
+          return at ? guardDiscovery(at, r.note) : undefined;
+        })
+        .filter((d): d is NonNullable<typeof d> => !!d);
+      return ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run) }).findings;
+    },
+    instruction: (repo, run, worklist, outPath) =>
+      `Read the guard matrix at ${worklist}. It lists every handler that reads request data and the auth/authorization markers visible in its scope. For each row READ THE HANDLER and decide guarded|unguarded|intentionally-public, writing a JSON array of {id, verdict, note} to ${outPath}. A marker in scope is a CANDIDATE — confirm it runs before the object is touched and that it checks authorization, not just authentication. A route can also be protected by middleware or an ingress rule this pass cannot see. ${UNTRUSTED}`,
+  },
   investigate: {
     crossCheckable: false,
     emit(repo, run, dossier) {
@@ -119,7 +146,8 @@ const STAGES: Record<StageName, StageDef> = {
       emitWorklist(run, f, regions, renderInvestigateMd(regions, loadContextDoc(run)));
       return { worklist: join(run, f.md), outName: "INVESTIGATE.json" };
     },
-    applyPure: (repo, _run, dossier, raw) => ingestDiscoveries(dossier, rowsOf("investigate", parseDiscoveries(raw)), repo).findings,
+    applyPure: (repo, run, dossier, raw) =>
+      ingestDiscoveries(dossier, rowsOf("investigate", parseDiscoveries(raw)), repo, { context: loadContextDoc(run) }).findings,
     instruction: (repo, run, worklist, outPath) =>
       `Read the investigation worklist at ${worklist}. Find issues the deterministic engine can't (authz/IDOR, business logic, multi-hop) and write grounded Discovery[] {title,category,severity,cwe?,message,file,line,path?} to ${outPath}. Cite resolvable [file:line]. ${UNTRUSTED}`,
   },
@@ -156,11 +184,12 @@ const STAGES: Record<StageName, StageDef> = {
       emitWorklist(run, f, items, renderVariantsMd(items, loadContextDoc(run)));
       return { worklist: join(run, f.md), outName: "VARIANTS.json" };
     },
-    applyPure: (repo, _run, dossier, raw) =>
+    applyPure: (repo, run, dossier, raw) =>
       ingestDiscoveries(
         dossier,
         rowsOf("variants", parseVariantResults(raw)).flatMap((r) => r.variants ?? []),
         repo,
+        { context: loadContextDoc(run) },
       ).findings,
     afterApply(run, raw) {
       const rules = renderRegressionRules(rowsOf("variants", parseVariantResults(raw)));

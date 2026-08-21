@@ -171,12 +171,13 @@ Twelve read tools. `ultrasec_map` is the cheap way in:
 | `ultrasec_paths` | The candidate source→sink chains — the audit's work-queue |
 | `ultrasec_dossier` | One finding's real code + call graph, for judging it |
 | `ultrasec_graph` | Links in/out of a file or symbol, when a path has gaps |
-| `ultrasec_triage` | Noise/keep worklist — the cheap first pass |
+| `ultrasec_triage` | Noise/keep worklist — the cheap first pass, grouped by repeated title |
+| `ultrasec_guards` | Entry point × auth guard — the handlers nothing checks (the vuln that is an *absence*) |
 | `ultrasec_verify` | The adversarial pass: try to refute each finding |
 | `ultrasec_investigate` | Where to look for authz/IDOR, business logic, crypto, races |
 | `ultrasec_revalidate` | Still valid / fixed / false positive, against current code |
 | `ultrasec_check` | The anti-hallucination gate: every `[file:line]` must resolve |
-| `ultrasec_render` | SUMMARY.md + REPORT.md + self-contained HTML |
+| `ultrasec_render` | SUMMARY.md (one screen) + REPORT.md + a navigable, self-contained HTML report |
 | `ultrasec_tools` | Which external scanners are installed on this machine |
 | `ultrasec_read` | A file, or a line range, from the repo or the run |
 

@@ -161,6 +161,7 @@
       "title": "SQL injection: query() sink (no source path found)",
       "severity": "high",
       "confidence": "low",
+      "reachability": "unproven",
       "sink": {
         "file": "src/db.js",
         "line": 11,
@@ -173,7 +174,7 @@
         "https://cwe.mitre.org/data/definitions/89.html"
       ],
       "status": "open",
-      "risk": 48
+      "risk": 34
     }
   ],
   "graph": {

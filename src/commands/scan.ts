@@ -24,6 +24,7 @@ import { ADAPTERS } from "../tools/index.js";
 import { writeDossier, loadDossier, mergeDossier, countBySeverity, type Dossier } from "../store.js";
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest } from "../types.js";
 import { loadContextDoc } from "../context.js";
+import { classifyDependencyReachability } from "../reachability.js";
 
 // Budget presets scale call-graph depth × candidate breadth. `standard` reproduces
 // the historical defaults (6 hops / 1000 candidates).
@@ -189,7 +190,13 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // a scan that pruned 1.1 GB of vendored data from its taint graph still
   // shipped 51 findings out of it. Built from the engine's own gitignore
   // primitives so it honours nested `.gitignore` files exactly as the walk does.
-  const prune = buildPruneMatcher(repo, { gitignore, exclude });
+  //
+  // It also applies `DEFAULT_IGNORE_DIRS` unconditionally, because the walk
+  // always has: a scanner reporting from `node_modules/` or `.venv/` is
+  // reporting on code this audit's own taint pass never read.
+  // `--include-vendored` is the way to mean it.
+  const includeVendored = flagBool(args, "include-vendored");
+  const prune = buildPruneMatcher(repo, { gitignore, exclude, includeVendored });
 
   step(`agentic-CI, config, auth, cloud and credential detectors…`);
   // Agentic CI: workflows that hand a coding agent the repo's own event data.
@@ -293,10 +300,17 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const includeTests = flagBool(args, "include-tests");
   const { findings: deNoised, downgraded: noiseDowngrades } = demoteNoise(merged, repo, { includeTests });
 
+  // Which dependency advisories are about code that ships, and which about the
+  // toolchain that builds it. Must run BEFORE enrichment: `reachability` damps
+  // the composite risk, and a score computed without it would rank a build-only
+  // CVE beside a runtime one — which is what put four toolchain advisories in
+  // the top severity tier of the first large audit.
+  const { findings: reachabilityMarked, toolchain: toolchainCount, sources: reachabilitySources } = classifyDependencyReachability(deNoised, repo);
+
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
   const enrich = !(flagBool(args, "no-enrich") || offline);
-  const { findings: enriched, note: riskNote } = await enrichFindings(deNoised, { enabled: enrich, context: loadContextDoc(out) });
+  const { findings: enriched, note: riskNote } = await enrichFindings(reachabilityMarked, { enabled: enrich, context: loadContextDoc(out) });
 
   // Provenance (opt-in `--blame`/`--provenance`): deterministic git-blame author/
   // date + CODEOWNERS owner per finding — a triage signal, never a suppression
@@ -329,6 +343,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     // never passed" from "the flag was passed and the pass found nothing".
     passes: { sinks: sinksOn, logHygiene: logHygieneOn, blame: blameOn, includeTests },
     ...(noiseDowngrades.length ? { downgraded: noiseDowngrades } : {}),
+    // What the reachability pass could actually see. A damped score has to be
+    // accountable: without this, "toolchain: 0" reads the same whether there
+    // were no build-only advisories or no lockfile to tell.
+    ...(reachabilitySources.length ? { reachability: { toolchain: toolchainCount, sources: reachabilitySources } } : {}),
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
     ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),
@@ -397,6 +415,13 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""}${logHygieneOn ? ` + ${hygieneCand.findings.length} log-hygiene` : ""} + ${tool.findings.length} tool this pass`,
   );
   println(`  ${riskNote}`);
+  if (fm.reachability) {
+    const { toolchain, sources } = fm.reachability;
+    println(
+      `  reachability: ${toolchain} dependency advisory(ies) marked build-only (from ${sources.join(", ")})` +
+        `${sources.includes("package-lock.json") || sources.includes("npm-shrinkwrap.json") ? "" : " — direct devDependencies only; a transitive dev-only package stays unmarked"}`,
+    );
+  }
   // One line per suppressed class, each naming what to check before believing
   // it — a demotion the reader cannot interrogate is a silent filter.
   for (const d of fm.downgraded ?? []) {

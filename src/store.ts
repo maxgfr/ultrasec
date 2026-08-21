@@ -4,6 +4,7 @@ import { mergeGraphs, type Graph } from "./graph.js";
 import { byStr } from "./util.js";
 import { SEVERITIES, type Finding, type Manifest, type Severity } from "./types.js";
 import { proposedFor, renderProposalSummary } from "./noise.js";
+import { sortFindings } from "./rank.js";
 
 // The on-disk audit dossier — the hand-off between the deterministic engine and
 // the AI. Plain JSON + a Markdown index, so it is reviewable and diffable.
@@ -17,9 +18,22 @@ export function emptySeverityCounts(): Record<Severity, number> {
   return { critical: 0, high: 0, medium: 0, low: 0, info: 0 };
 }
 
+/**
+ * The severity histogram the manifest publishes.
+ *
+ * Guarded against a severity outside the vocabulary. `c[f.severity]++` on an
+ * unknown key silently grows the record — a run that ingested eleven findings
+ * with `severity: null` shipped a manifest reading `{"null": NaN}` alongside
+ * five buckets that were eleven short, and announced a total that matched
+ * neither. `makeToolFinding` now refuses such a finding at the door; this is the
+ * second lock, because a corrupted count is a lie the whole report repeats and
+ * no gate was checking it.
+ */
 export function countBySeverity(findings: Finding[]): Record<Severity, number> {
   const c = emptySeverityCounts();
-  for (const f of findings) c[f.severity]++;
+  for (const f of findings) {
+    if (Object.hasOwn(c, f.severity)) c[f.severity]++;
+  }
   return c;
 }
 
@@ -227,8 +241,11 @@ export function renderDossierMd(d: Dossier): string {
 
   L.push(`## Candidates`);
   L.push("");
-  // Highest composite risk first so the AI adjudicates what matters most early.
-  const ordered = findings.slice().sort((a, b) => (b.risk ?? -1) - (a.risk ?? -1) || SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity));
+  // What the audit has DECIDED first, then highest composite risk, so the AI
+  // adjudicates what matters most early and never re-reads its own refutations
+  // ahead of what it confirmed. One comparator for the dossier, the Markdown
+  // report and the HTML — see `rank.ts` for why they must not drift apart.
+  const ordered = sortFindings(findings);
   for (const f of ordered) {
     L.push(`### ${f.id} — ${severityBadge(f.severity)} ${f.title}`);
     L.push("");

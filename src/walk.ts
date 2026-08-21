@@ -138,6 +138,22 @@ const GITIGNORE_MAX_DEPTH = 8;
 export interface PruneOptions {
   gitignore?: boolean;
   exclude?: string[];
+  /** Audit the vendored/build trees too (`scan --include-vendored`). Off by
+   *  default; on, `DEFAULT_IGNORE_DIRS` stops pruning scanner output. */
+  includeVendored?: boolean;
+}
+
+/** `node_modules/…`, `x/.venv/…`, `targets/app/.next/…` — any path with an
+ *  always-ignored directory anywhere in it. Built from `DEFAULT_IGNORE_DIRS` so
+ *  the walker and the scanner filter can never disagree about what counts. */
+function underIgnoredDir(rel: string): boolean {
+  let at = 0;
+  for (;;) {
+    const next = rel.indexOf("/", at);
+    if (next === -1) return false; // the last segment is the file itself
+    if (DEFAULT_IGNORE_DIRS.has(rel.slice(at, next))) return true;
+    at = next + 1;
+  }
 }
 
 /**
@@ -151,11 +167,26 @@ export interface PruneOptions {
  * filter that disagreed with the walker about what is ignored would replace one
  * inconsistency with a subtler one.
  *
- * Returns `undefined` when nothing would be pruned, so callers can skip the work
- * entirely and stay byte-identical to the un-pruned path.
+ * `DEFAULT_IGNORE_DIRS` ALWAYS applies, with or without `--gitignore`.
+ *
+ * That set is not "what git ignores" — it is "what is not this repo's source",
+ * and the walker has always skipped it unconditionally. The scanner filter did
+ * not, so the two halves of one scan disagreed: the taint pass never looked
+ * inside `node_modules/` or `.venv/`, while bandit, semgrep and gitleaks
+ * reported freely from both. On the first large audit that was 561 of 1366
+ * findings — 41 % of the whole run — of which 559 were refuted; bandit produced
+ * 519 findings and 518 of them were inside a vendored tree. `--gitignore` did
+ * not help, because `.next/` is not in that repo's `.gitignore` at all.
+ *
+ * `--include-vendored` turns it off, for the real case of auditing a vendored
+ * blob on purpose.
+ *
+ * Returns `undefined` only when nothing at all would be pruned, so callers can
+ * skip the work entirely.
  */
 export function buildPruneMatcher(root: string, opts: PruneOptions): ((rel: string) => boolean) | undefined {
   const excludeRes = opts.exclude?.length ? opts.exclude.map(globToRe) : undefined;
+  const vendored = !opts.includeVendored;
   const rules: EngineIgnoreRule[] = [];
   if (opts.gitignore) {
     const visit = (dir: string, baseRel: string, depth: number): void => {
@@ -180,8 +211,9 @@ export function buildPruneMatcher(root: string, opts: PruneOptions): ((rel: stri
     };
     visit(root, "", 0);
   }
-  if (!excludeRes && !rules.length) return undefined;
+  if (!excludeRes && !rules.length && !vendored) return undefined;
   return (rel: string): boolean => {
+    if (vendored && underIgnoredDir(rel)) return true;
     if (excludeRes?.some((re) => re.test(rel))) return true;
     if (!rules.length) return false;
     // git ignores everything UNDER an ignored directory, and a `data/` rule

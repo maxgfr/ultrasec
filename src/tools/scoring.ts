@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "no
 import { gunzipSync } from "node:zlib";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { SEVERITIES, type Finding, type Severity } from "../types.js";
+import { SEVERITIES, type Finding, type Reachability, type Severity } from "../types.js";
 
 // Deterministic vulnerability-prioritization layer. ultrasec's scanners answer
 // "is this CVE present?"; they do not answer "how urgent is it?". This folds two
@@ -43,12 +43,35 @@ export const CRITICALITIES = ["crown-jewel", "standard", "peripheral"] as const;
 export type Criticality = (typeof CRITICALITIES)[number];
 const CRITICALITY_WEIGHT: Record<Criticality, number> = { "crown-jewel": 1.0, standard: 0.6, peripheral: 0.3 };
 
+/**
+ * How much a finding's score is damped for not being on a live path.
+ *
+ * Measured need: on the first large audit the top of the ranking was 66 % noise,
+ * and two families explained it — 182 orphan sinks (a dangerous callee with no
+ * source path, of which zero survived adjudication) and build-only CVEs at EPSS
+ * ~1 % scored as `critical`. Severity answered "how bad if reachable" and
+ * nothing answered "is it reachable".
+ *
+ * Applied AFTER the KEV floor on purpose, so it can lower it: a KEV-listed CVE
+ * in a devDependency is real and worth fixing, but it is not the thing to read
+ * first, and a hard 95 said it was. An ABSENT reachability damps by 1.0 — every
+ * stored score and every existing ordering is unchanged on a dossier that
+ * carries no reachability, which is the only honest way to add a factor to a
+ * ranking people already trust.
+ */
+const REACHABILITY_DAMP: Record<Reachability, number> = {
+  runtime: 1.0,
+  unproven: 0.7,
+  toolchain: 0.55,
+};
+
 export interface RiskInput {
   severity: Severity;
   epss?: number; // [0,1]
   kev?: boolean;
   exposure?: Exposure;
   criticality?: Criticality;
+  reachability?: Reachability;
 }
 
 /**
@@ -62,10 +85,13 @@ export interface RiskInput {
  * every stored score, every calibration test and every report ordering is
  * unchanged on a run with no CONTEXT.md, which is the only way to add a factor
  * to a ranking people already trust.
+ *
+ * `reachability`, when the run established one, damps the result — see
+ * `REACHABILITY_DAMP`. Absent ⇒ no change.
  */
-export function riskScore({ severity, epss, kev, exposure, criticality }: RiskInput): number {
+export function riskScore({ severity, epss, kev, exposure, criticality, reachability }: RiskInput): number {
   const e = Math.min(Math.max(epss ?? 0, 0), 1);
-  const sev = SEVERITY_WEIGHT[severity];
+  const sev = SEVERITY_WEIGHT[severity] ?? SEVERITY_WEIGHT.info;
   let base: number;
   if (exposure === undefined && criticality === undefined) {
     base = 0.6 * sev + 0.4 * e;
@@ -78,7 +104,29 @@ export function riskScore({ severity, epss, kev, exposure, criticality }: RiskIn
   }
   let score = Math.round(100 * base);
   if (kev) score = Math.max(score, 95);
+  if (reachability) score = Math.round(score * REACHABILITY_DAMP[reachability]);
   return Math.min(Math.max(score, 0), 100);
+}
+
+/**
+ * The composite risk for one finding, from what the finding already carries.
+ *
+ * The same call `applyEnrichment` makes, exposed so the stages that ingest a
+ * finding AFTER the scan can make it too. They could not before, and the
+ * consequence was severe and invisible: `makeToolFinding` never sets `risk`, so
+ * every discovery folded in by `investigate --apply` and `variants --apply` had
+ * `risk: undefined`, and every renderer sorts on `(b.risk ?? -1)`. On the first
+ * large audit that put all 24 agent-authored findings at ranks 1343-1366 of
+ * 1366 — including the three confirmed criticals — while lockfile CVEs opened
+ * the report. The most precise producer in the run (96 % confirmed) was ranked
+ * last because it arrived late.
+ *
+ * EPSS/KEV are not re-fetched here: a discovery is a code finding, not a CVE, so
+ * severity ⊕ deployment is the whole input. A discovery that DOES carry a `cve`
+ * gets its feed enrichment on the next `scan --merge`.
+ */
+export function scoreFinding(f: Finding, deployment: { exposure?: Exposure; criticality?: Criticality } = {}): number {
+  return riskScore({ severity: f.severity, epss: f.epss, kev: f.kev, reachability: f.reachability, ...deployment });
 }
 
 /** Read `Exposure:` / `Criticality:` out of the agent-authored CONTEXT.md. */
@@ -152,7 +200,7 @@ export function applyEnrichment(findings: Finding[], feeds: Feeds, deployment: {
         if (d) out.kevDateAdded = d;
       }
     }
-    out.risk = riskScore({ severity: out.severity, epss: out.epss, kev: out.kev, ...deployment });
+    out.risk = scoreFinding(out, deployment);
     return out;
   });
 }

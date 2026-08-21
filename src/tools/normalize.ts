@@ -1,5 +1,5 @@
 import { shortHash } from "../util.js";
-import type { Category, Confidence, Finding, Severity } from "../types.js";
+import { CATEGORIES, SEVERITIES, type Category, type Confidence, type Finding, type Severity } from "../types.js";
 
 // Helpers shared by every tool adapter: map a tool's severity vocabulary onto
 // ultrasec's, and assemble a normalized Finding with a stable, content-derived id
@@ -85,7 +85,31 @@ export function cvesIn(...inputs: unknown[]): string[] {
   return [...out];
 }
 
+/**
+ * The last gate before a value outside the closed vocabulary becomes a Finding.
+ *
+ * `category` and `severity` used to be copied through unconditionally, so a
+ * caller that skipped validation wrote `severity: null` into `findings.json`.
+ * From there it corrupted the manifest's histogram (`countBySeverity`), sorted
+ * above `critical` in every ranked list, and threw in the HTML renderer. The
+ * type system said it could not happen; the type system is erased at runtime.
+ *
+ * Throwing is right here rather than coercing: every caller either validates
+ * upstream (`parseDiscoveryRow`) or maps a scanner's own vocabulary
+ * (`normalizeSeverity`), so reaching this line means a real bug, and a silent
+ * `"medium"` would hide it.
+ */
+function requireVocabulary(i: ToolFindingInput): void {
+  if (!(CATEGORIES as readonly string[]).includes(i.category)) {
+    throw new Error(`makeToolFinding: category ${JSON.stringify(i.category)} is not one of ${CATEGORIES.join("|")} (tool ${i.tool}, ident ${i.ident})`);
+  }
+  if (!(SEVERITIES as readonly string[]).includes(i.severity)) {
+    throw new Error(`makeToolFinding: severity ${JSON.stringify(i.severity)} is not one of ${SEVERITIES.join("|")} (tool ${i.tool}, ident ${i.ident})`);
+  }
+}
+
 export function makeToolFinding(i: ToolFindingInput): Finding {
+  requireVocabulary(i);
   // The version is part of the identity for dep findings: the same advisory at
   // the same lockfile is one finding PER installed version pre-correlation (the
   // correlator then merges them into one with `locations[]`). Version-less

@@ -19,3 +19,8 @@ The data layer already knows how to do this correctly — db.getUserSafe (src/db
 - 🟥 CRITICAL **OS command injection: untrusted input reaches execSync()** — `src/server.js:18` → `src/server.js:19` → `src/report.js:5` (CWE-78) · risk 60
 - 🟧 HIGH **SQL injection: untrusted input reaches query()** — `src/server.js:10` → `src/server.js:11` → `src/db.js:6` (CWE-89) · risk 48
 
+## Coverage caveat
+
+**12 of 13** categories were NOT examined: Architecture & threat modelling · Authentication · Session management · Access control · Stored cryptography · Error handling & logging · Data protection & privacy · Communications · Business logic · Files & resources · API & web service · Configuration & supply chain.
+
+This is a gap in the audit, not a clean bill of health. Full matrix in REPORT.md.

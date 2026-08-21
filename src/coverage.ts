@@ -346,7 +346,16 @@ const CWE_TOP25_2023: AsvsCategory[] = [
     judgment: true,
     hint: "Upload type/size/AV policy — partly path, mostly judgment.",
   },
-  { id: "11", title: "CWE-862 Missing authorization", kinds: ["authz", "CWE-862"], judgment: true, hint: "Routes with no guard — investigate lens." },
+  {
+    id: "11",
+    title: "CWE-862 Missing authorization",
+    kinds: ["authz", "CWE-862"],
+    judgment: true,
+    hint: "Routes with no guard — run `ultrasec guards` to enumerate them, then the investigate lens.",
+    requiresPass: "guards",
+    hintWhenRan:
+      "`ultrasec guards` enumerated every request handler and its visible guards — the remaining question is whether each guard binds the CALLER to the OBJECT (investigate lens).",
+  },
   { id: "12", title: "CWE-476 NULL pointer dereference", kinds: ["CWE-476"], judgment: true, hint: "Not enumerated." },
   { id: "13", title: "CWE-287 Improper authentication", kinds: ["authz", "CWE-287", "CWE-347"], judgment: true, hint: "JWT/session verification correctness." },
   { id: "14", title: "CWE-190 Integer overflow", kinds: ["CWE-190"], judgment: true, hint: "Not enumerated." },
@@ -360,7 +369,10 @@ const CWE_TOP25_2023: AsvsCategory[] = [
     title: "CWE-306 Missing authentication for critical function",
     kinds: ["authz", "CWE-306"],
     judgment: true,
-    hint: "Sensitive endpoints with no auth — investigate.",
+    hint: "Sensitive endpoints with no auth — run `ultrasec guards` to enumerate every handler and the guards visible in its scope.",
+    requiresPass: "guards",
+    hintWhenRan:
+      "`ultrasec guards` ran: every request handler is enumerated with its visible guards. An `unguarded` row that nobody adjudicated is still an open question.",
   },
   { id: "21", title: "CWE-362 Race condition", kinds: ["CWE-362"], judgment: true, hint: "TOCTOU/balance races — not enumerated; investigate lens." },
   { id: "22", title: "CWE-269 Improper privilege management", kinds: ["authz", "CWE-269"], judgment: true, hint: "Privilege escalation paths — investigate." },
@@ -450,13 +462,39 @@ const MARK: Record<CoverageState, string> = {
   unexamined: "⬜ **not examined**",
 };
 
-export function renderCoverageMd(rows: CoverageRow[], standardTitle: string = "OWASP ASVS"): string {
+/**
+ * Scanners that were supposed to run and did not, phrased as the coverage loss
+ * they are.
+ *
+ * `toolStatus` has always recorded this, in the manifest, where a reader has to
+ * go looking. On the first large audit three of nine scanners died — all three
+ * on docker — and one of them was checkov, so the run had NO infrastructure-
+ * as-code coverage at all. The single worst finding of that audit lived in a
+ * Kubernetes SQL file. The report never said the pass was missing, and a short
+ * IaC section read exactly like a clean one.
+ */
+function failedToolLines(dossier?: Dossier): string[] {
+  const failed = (dossier?.manifest.toolStatus ?? []).filter((s) => s.status === "failed");
+  if (!failed.length) return [];
+  return [
+    `### Scanners that failed (${failed.length})`,
+    "",
+    `Each of these is a hole in the table above, not a category with nothing in it. Re-run them`,
+    `before treating any row they feed as examined.`,
+    "",
+    ...failed.map((s) => `- **${s.name}** — ${s.note ?? "run failed"}`),
+    "",
+  ];
+}
+
+export function renderCoverageMd(rows: CoverageRow[], standardTitle: string = "OWASP ASVS", dossier?: Dossier): string {
   const unexamined = rows.filter((r) => r.state === "unexamined");
   const judgment = rows.filter((r) => r.judgment && r.state !== "examined");
   const L: string[] = [`## Coverage (${standardTitle})`, ""];
   L.push(`What this audit looked at, and what it did not. A category marked **not examined** is not`);
   L.push(`a clean bill of health — it is a gap in the audit, and it belongs in the report.`);
   L.push("");
+  L.push(...failedToolLines(dossier));
   L.push(`| | category | state | findings |`);
   L.push(`|---|---|---|---|`);
   for (const r of rows) L.push(`| ${r.id} | ${r.title} | ${MARK[r.state]} | ${r.hits || "—"} |`);

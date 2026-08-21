@@ -1,6 +1,7 @@
 import type { RepoScan } from "./scan.js";
 import { enclosingSymbolName } from "./scan.js";
 import { buildFileResolver } from "./resolve.js";
+import { langForFile } from "./lang.js";
 import { buildRawCallerIndex } from "./vendor/codeindex-engine.mjs";
 import { byStr } from "./util.js";
 
@@ -48,6 +49,21 @@ function add(map: Map<string, Edge>, e: Edge): void {
   else map.set(k, { ...e });
 }
 
+/**
+ * Whether two repo files belong to the same language, and so could be in the
+ * same call graph at all.
+ *
+ * `langForFile` returns `undefined` for an extension outside the 15 the engine
+ * knows. Two unknowns are treated as NOT the same language: without a language
+ * there is no evidence the call is possible, and this gate exists to require
+ * evidence.
+ */
+function sameLanguage(a: string, b: string): boolean {
+  const la = langForFile(a)?.id;
+  const lb = langForFile(b)?.id;
+  return !!la && la === lb;
+}
+
 /** Build the cross-file link-graph (import + resolved call edges). Deterministic. */
 export function buildGraph(scan: RepoScan): Graph {
   const fileSet = new Set(scan.files.map((f) => f.rel));
@@ -80,6 +96,21 @@ export function buildGraph(scan: RepoScan): Graph {
       if (!targets || targets.size !== 1) continue; // ambiguous or undefined -> skip
       const to = [...targets][0]!;
       if (to === f.rel) continue; // intra-file call, not a cross-file edge
+      // …and it has to be a call the runtime could actually make.
+      //
+      // `defs` is a global index keyed by NAME ONLY. It does not know which
+      // language defined the symbol, so a Python module calling `run(x)` linked
+      // to a TypeScript file exporting `run` — and the taint walk then reported
+      // a cross-file flow from an `analysis/*.py` source to an `ApiClient.ts`
+      // sink. Five such candidates shipped on the first large audit, rated
+      // `high`, every one impossible: those two files are not in the same
+      // process and neither can call the other.
+      //
+      // A shared name across languages is a coincidence, not an edge. Where a
+      // real cross-language boundary exists it is a subprocess, an HTTP call or
+      // an FFI binding — none of which is a `call` edge, and all of which the
+      // catalog already models as sinks.
+      if (!sameLanguage(f.rel, to)) continue;
       // The caller attribution uses the SAME endLine-aware enclosing helper the raw
       // caller index uses for its hops (enclosingSymbolName), so a call edge's
       // fromSymbol matches the caller-index site for that same {file, line}.

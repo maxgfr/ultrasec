@@ -13,6 +13,7 @@ import { runPaths } from "./paths.js";
 import { runVerify } from "./verify.js";
 import { runRevalidate } from "./revalidate.js";
 import { runVariants } from "./variants.js";
+import { runGuards } from "./guards.js";
 import { runAssumptions } from "./assumptions.js";
 import { runCoverage } from "./coverage.js";
 import { runNarrative } from "./narrative.js";
@@ -50,6 +51,7 @@ export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
   investigate: runInvestigate,
   revalidate: runRevalidate,
   variants: runVariants,
+  guards: runGuards,
   assumptions: runAssumptions,
   coverage: runCoverage,
   narrative: runNarrative,
