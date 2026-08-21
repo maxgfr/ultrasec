@@ -22,6 +22,14 @@ const scan = scanRepo(FIXTURE);
 const surface = buildAttackSurface(scan);
 const scaffold = buildContextScaffold(FIXTURE, scan, surface);
 const entryFiles = new Set(scaffold.entryPoints.map((e) => e.file));
+/** Every entry-point line the SURFACE recorded for a file (the scaffold is a
+ *  capped, one-line-per-file brief and cannot answer this). */
+const routeLines = (file: string): number[] =>
+  surface.entryPoints
+    .flatMap((g) => g.samples)
+    .filter((e) => e.file === file)
+    .map((e) => e.line)
+    .sort((a, b) => a - b);
 
 describe("framework detection reads every manifest, not just the root's", () => {
   it("detects next.js from a workspace package's package.json", () => {
@@ -45,16 +53,16 @@ describe("entry points by convention — across ecosystems", () => {
   });
 
   it("finds App-Router verb exports", () => {
-    const lines = scaffold.entryPoints.filter((e) => e.file === "services/web/app/api/users/route.ts").map((e) => e.line);
-    expect(lines).toContain(3); // export async function GET
-    expect(lines).toContain(7); // export async function DELETE
+    // The SURFACE carries every site; the scaffold below is a capped brief that
+    // lists each file once, so both verbs have to be checked here.
+    expect(routeLines("services/web/app/api/users/route.ts")).toEqual([3, 7]); // GET, DELETE
+    expect(entryFiles.has("services/web/app/api/users/route.ts")).toBe(true);
   });
 
   it("does NOT report a route module's private helper as an endpoint", () => {
     // `function helper()` at :11 is not exported — a verb-export rule, not the
     // catch-all, applies to App-Router files precisely so this stays quiet.
-    const lines = scaffold.entryPoints.filter((e) => e.file === "services/web/app/api/users/route.ts").map((e) => e.line);
-    expect(lines).not.toContain(11);
+    expect(routeLines("services/web/app/api/users/route.ts")).not.toContain(11);
   });
 
   it("finds a Rails controller action, a serverless handler and a web-root PHP script", () => {
@@ -72,9 +80,23 @@ describe("entry points by convention — across ecosystems", () => {
 
   it("emits at most one entry point per line when two conventions overlap", () => {
     const seen = new Set<string>();
+    for (const g of surface.entryPoints) {
+      for (const e of g.samples) {
+        const key = `${e.file}:${e.line}:${e.kind}`;
+        expect(seen.has(key), `duplicate entry point at ${key}`).toBe(false);
+        seen.add(key);
+      }
+    }
+  });
+
+  it("lists each file once per kind in the capped brief", () => {
+    // The brief answers "which files take untrusted input?" before "how many
+    // times does this one file take it?" — otherwise one busy module eats the
+    // budget and forty separate route files get nothing.
+    const seen = new Set<string>();
     for (const e of scaffold.entryPoints) {
-      const key = `${e.file}:${e.line}`;
-      expect(seen.has(key), `duplicate entry point at ${key}`).toBe(false);
+      const key = `${e.file}\u0000${e.kind}`;
+      expect(seen.has(key), `${e.file} listed twice for kind ${e.kind}`).toBe(false);
       seen.add(key);
     }
   });

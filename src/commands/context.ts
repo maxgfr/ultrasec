@@ -28,14 +28,21 @@ export function runContext(args: ParsedArgs): number {
   };
 
   let scaffold: ReturnType<typeof buildContextScaffold>;
+  let totalSources = 0;
   try {
     const scan = scanRepo(repo, scanOpts);
     const surface = buildAttackSurface(scan);
+    totalSources = surface.totals.sources;
     scaffold = buildContextScaffold(repo, scan, surface);
   } catch (e) {
     eprintln(`ultrasec context: ${(e as Error).message}`);
     return 2;
   }
+  // The scaffold list is CAPPED and one-line-per-file. Printing its length alone
+  // presented a bounded brief as the whole surface — which is how a repo with 19
+  // API routes could read as having three.
+  const shown = scaffold.entryPoints.length;
+  const entryNote = shown < totalSources ? `${shown} file(s) shown of ${totalSources} site(s)` : `${shown}`;
 
   mkdirSync(out, { recursive: true });
   writeFileSync(join(out, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
@@ -48,7 +55,7 @@ export function runContext(args: ParsedArgs): number {
   println(`ultrasec context → ${out}`);
   println(`  ${join(out, "CONTEXT.scaffold.json")}  ·  ${join(out, "CONTEXT.todo.md")}`);
   println(
-    `  frameworks: ${scaffold.frameworks.join(", ") || "—"}  ·  entry points: ${scaffold.entryPoints.length}  ·  auth sites: ${scaffold.authMiddleware.length}  ·  sanitizers: ${scaffold.sanitizers.length}`,
+    `  frameworks: ${scaffold.frameworks.join(", ") || "—"}  ·  entry points: ${entryNote}  ·  auth sites: ${scaffold.authMiddleware.length}  ·  sanitizers: ${scaffold.sanitizers.length}`,
   );
   println(`  next: author ${join(out, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` — it's injected into every dossier.`);
   return 0;

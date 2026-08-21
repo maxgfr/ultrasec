@@ -19,14 +19,35 @@ const MAX_SAMPLES = 8;
 /** Entry points retained per kind. Larger than MAX_SAMPLES because the context
  *  scaffold reads this list and applies its OWN (larger) cap. */
 const MAX_ENTRY_SAMPLES = 64;
-/** What one entry point contributes to a region's rank, on the same scale as
- *  SEV_WEIGHT. The score used to count sinks ONLY, so a directory full of
- *  internet-reachable routes and no local sink scored 0 and sorted last — which
- *  is how a batch-job directory came to outrank an entire authenticated web
- *  surface in the `investigate` worklist. Between a `high` sink (3) and a
- *  `critical` one (4), because reachability is the thing that turns a sink into
- *  a bug and an entry point is where reachability starts. */
-const ENTRY_WEIGHT = 3;
+/**
+ * What one entry point contributes to a region's rank, on the same scale as
+ * SEV_WEIGHT, by KIND.
+ *
+ * The score used to count sinks ONLY, so a directory full of internet-reachable
+ * routes and no local sink scored 0 and sorted last — which is how a batch-job
+ * directory came to outrank an entire authenticated web surface in the
+ * `investigate` worklist.
+ *
+ * The kinds are not interchangeable, either. An HTTP route is reachable by
+ * anyone; an environment read presumes the operator of the deployment is the
+ * attacker, which is a real threat model but a much narrower one — it is why
+ * `--no-env-sources` exists. Ranking them equally let configuration reads crowd
+ * out routes in a capped list. HTTP and the cross-origin kinds sit between a
+ * `high` sink (3) and a `critical` one (4); env/cli sit at the bottom.
+ */
+export const ENTRY_WEIGHT: Record<string, number> = {
+  http: 3,
+  ws: 3,
+  dom: 2,
+  postmessage: 2,
+  llm: 2,
+  stdin: 1,
+  cli: 1,
+  env: 1,
+};
+/** Kinds not in the table are unknown, not harmless — rank them with `cli`. */
+export const DEFAULT_ENTRY_WEIGHT = 1;
+export const entryWeight = (kind: string): number => ENTRY_WEIGHT[kind] ?? DEFAULT_ENTRY_WEIGHT;
 
 export interface EntryPoint {
   file: string;
@@ -130,6 +151,35 @@ export function regionKeyer(repo: string): (rel: string) => string {
   return (rel) => dirs.find((d) => rel.startsWith(`${d}/`)) ?? topDir(rel);
 }
 
+/**
+ * Re-order so every file's FIRST entry point comes before any file's second, its
+ * second before any third, and so on — preserving the incoming rank within each
+ * round.
+ *
+ * A capped list should answer "which files take untrusted input?" before it
+ * answers "how many times does this one file take it?". Ranked alone, a single
+ * server module with forty `req.` reads consumed most of the budget while forty
+ * separate route files, each with one, got nothing — so the cap decided breadth
+ * by accident. This makes N slots cover up to N distinct files.
+ */
+function breadthFirstByFile(ranked: EntryPoint[]): EntryPoint[] {
+  const rounds = new Map<string, EntryPoint[]>();
+  for (const e of ranked) (rounds.get(e.file) ?? rounds.set(e.file, []).get(e.file)!).push(e);
+  const out: EntryPoint[] = [];
+  for (let i = 0; out.length < ranked.length; i++) {
+    let anyThisRound = false;
+    for (const list of rounds.values()) {
+      const at = list[i];
+      if (at) {
+        out.push(at);
+        anyThisRound = true;
+      }
+    }
+    if (!anyThisRound) break; // total: every file exhausted
+  }
+  return out;
+}
+
 /** Build the attack-surface map. `coveredScopes` marks targets a prior run handled. */
 export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = []): AttackSurface {
   const covered = new Set(coveredScopes);
@@ -157,9 +207,10 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
       totalSources++;
       la.sources++;
       da.sources++;
-      da.score += ENTRY_WEIGHT;
+      const w = entryWeight(s.kind);
+      da.score += w;
       fs.sources++;
-      fs.score += ENTRY_WEIGHT;
+      fs.score += w;
       const arr = entryByKind.get(s.kind) ?? entryByKind.set(s.kind, []).get(s.kind)!;
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
@@ -186,11 +237,20 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
   // 8-per-kind cut here was the binding constraint and it made `context` report
   // eight routes on a repo with dozens. `renderMapMd` still prints MAX_SAMPLES
   // of them, so MAP.md is unchanged.
+  //
+  // Selected by RANK, presented by path. Sorting by filename and slicing made
+  // every sample list an alphabetical PREFIX: on a monorepo whose web app lives
+  // under `targets/`, its routes fell off the end of every list downstream —
+  // and detecting MORE of them made it worse, because the extra hits pushed the
+  // cap further up the alphabet.
+  const fileScore = new Map(fileAgg.map((f) => [f.file, f.score]));
+  const bySurfaceThenPath = (a: EntryPoint, b: EntryPoint) =>
+    (fileScore.get(b.file) ?? 0) - (fileScore.get(a.file) ?? 0) || byStr(a.file, b.file) || a.line - b.line;
   const entryPoints: EntryGroup[] = [...entryByKind.entries()]
     .sort((a, b) => byStr(a[0], b[0]))
     .map(([kind, eps]) => {
-      const sorted = eps.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
-      return { kind, count: sorted.length, samples: sorted.slice(0, MAX_ENTRY_SAMPLES) };
+      const kept = breadthFirstByFile(eps.sort(bySurfaceThenPath)).slice(0, MAX_ENTRY_SAMPLES);
+      return { kind, count: eps.length, samples: kept.sort((a, b) => byStr(a.file, b.file) || a.line - b.line) };
     });
 
   const sinks = [...sinkByKind.values()].sort(

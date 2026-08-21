@@ -18,6 +18,11 @@ Writes `CONTEXT.scaffold.json` (frameworks, entry points, auth-middleware candid
 inferred trust boundaries — shape in [schemas.md](schemas.md)) and `CONTEXT.todo.md`. The
 scaffold is deterministic pattern-matching: it tells you where to look, not what's true.
 
+`entryPoints` is a **capped brief**, not the surface: one line per file, ranked by attack surface
+(HTTP and cross-origin kinds before env/CLI reads, which presume a much narrower attacker). The CLI
+prints `N file(s) shown of M site(s)` whenever it is showing a subset — read that number before
+concluding the app has a small entry surface.
+
 `frameworks` is read from **every** manifest in the tree, not just the root's — a monorepo keeps
 its dependencies in the workspace packages. An empty list on a repo that plainly has a web
 framework means the manifest is somewhere the bounded walk didn't reach (more than three levels

@@ -19868,7 +19868,18 @@ function findSanitizers(lang, line, sinkKind) {
 var SEV_WEIGHT = { critical: 4, high: 3, medium: 2, low: 1, info: 0 };
 var MAX_SAMPLES = 8;
 var MAX_ENTRY_SAMPLES = 64;
-var ENTRY_WEIGHT = 3;
+var ENTRY_WEIGHT = {
+  http: 3,
+  ws: 3,
+  dom: 2,
+  postmessage: 2,
+  llm: 2,
+  stdin: 1,
+  cli: 1,
+  env: 1
+};
+var DEFAULT_ENTRY_WEIGHT = 1;
+var entryWeight = (kind) => ENTRY_WEIGHT[kind] ?? DEFAULT_ENTRY_WEIGHT;
 function topDir(rel2) {
   const i2 = rel2.indexOf("/");
   return i2 === -1 ? "." : rel2.slice(0, i2);
@@ -19881,6 +19892,23 @@ function regionKeyer(repo) {
   }
   if (!dirs.length) return topDir;
   return (rel2) => dirs.find((d) => rel2.startsWith(`${d}/`)) ?? topDir(rel2);
+}
+function breadthFirstByFile(ranked) {
+  const rounds = /* @__PURE__ */ new Map();
+  for (const e of ranked) (rounds.get(e.file) ?? rounds.set(e.file, []).get(e.file)).push(e);
+  const out2 = [];
+  for (let i2 = 0; out2.length < ranked.length; i2++) {
+    let anyThisRound = false;
+    for (const list of rounds.values()) {
+      const at = list[i2];
+      if (at) {
+        out2.push(at);
+        anyThisRound = true;
+      }
+    }
+    if (!anyThisRound) break;
+  }
+  return out2;
 }
 function buildAttackSurface(scan2, coveredScopes = []) {
   const covered = new Set(coveredScopes);
@@ -19906,9 +19934,10 @@ function buildAttackSurface(scan2, coveredScopes = []) {
       totalSources++;
       la.sources++;
       da.sources++;
-      da.score += ENTRY_WEIGHT;
+      const w = entryWeight(s.kind);
+      da.score += w;
       fs2.sources++;
-      fs2.score += ENTRY_WEIGHT;
+      fs2.score += w;
       const arr = entryByKind.get(s.kind) ?? entryByKind.set(s.kind, []).get(s.kind);
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
@@ -19925,9 +19954,11 @@ function buildAttackSurface(scan2, coveredScopes = []) {
     }
     if (fs2.score > 0) fileAgg.push(fs2);
   }
+  const fileScore = new Map(fileAgg.map((f) => [f.file, f.score]));
+  const bySurfaceThenPath = (a, b) => (fileScore.get(b.file) ?? 0) - (fileScore.get(a.file) ?? 0) || byStr2(a.file, b.file) || a.line - b.line;
   const entryPoints = [...entryByKind.entries()].sort((a, b) => byStr2(a[0], b[0])).map(([kind, eps]) => {
-    const sorted = eps.sort((a, b) => byStr2(a.file, b.file) || a.line - b.line);
-    return { kind, count: sorted.length, samples: sorted.slice(0, MAX_ENTRY_SAMPLES) };
+    const kept = breadthFirstByFile(eps.sort(bySurfaceThenPath)).slice(0, MAX_ENTRY_SAMPLES);
+    return { kind, count: eps.length, samples: kept.sort((a, b) => byStr2(a.file, b.file) || a.line - b.line) };
   });
   const sinks = [...sinkByKind.values()].sort(
     (a, b) => SEVERITIES2.indexOf(a.severity) - SEVERITIES2.indexOf(b.severity) || b.count - a.count || byStr2(a.kind, b.kind)
@@ -23184,6 +23215,7 @@ var ADAPTERS = [
 import { existsSync as existsSync22, readFileSync as readFileSync21 } from "fs";
 import { join as join46 } from "path";
 var MAX_SCAFFOLD = 40;
+var MAX_SCAFFOLD_ENTRIES = 80;
 var AUTH_RE = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
 var JS_FRAMEWORKS = {
   express: "express",
@@ -23310,7 +23342,22 @@ function inferTrustBoundaries(surface, authCount) {
 }
 function buildContextScaffold(repo, scan2, surface) {
   const frameworks = detectFrameworks(repo);
-  const entryPoints = surface.entryPoints.flatMap((g) => g.samples.map((s) => ({ file: s.file, line: s.line, kind: s.kind }))).sort((a, b) => byStr2(a.file, b.file) || a.line - b.line || byStr2(a.kind, b.kind)).slice(0, MAX_SCAFFOLD);
+  const rank = new Map(surface.byFile.map((f) => [f.file, f.score]));
+  const perFile = /* @__PURE__ */ new Map();
+  for (const g of surface.entryPoints) {
+    for (const s of g.samples) {
+      const key = `${s.file}\0${s.kind}`;
+      const seen = perFile.get(key);
+      if (!seen || s.line < seen.line) perFile.set(key, { file: s.file, line: s.line, kind: s.kind });
+    }
+  }
+  const entryPoints = [...perFile.values()].sort(
+    (a, b) => (
+      // Kind first: in a capped brief, an HTTP route earns its slot ahead of
+      // an environment read, which presumes a much narrower attacker.
+      entryWeight(b.kind) - entryWeight(a.kind) || (rank.get(b.file) ?? 0) - (rank.get(a.file) ?? 0) || byStr2(a.file, b.file) || a.line - b.line || byStr2(a.kind, b.kind)
+    )
+  ).slice(0, MAX_SCAFFOLD_ENTRIES).sort((a, b) => byStr2(a.file, b.file) || a.line - b.line || byStr2(a.kind, b.kind));
   const authMiddleware = [];
   const sanitizers = [];
   for (const fileScan of scan2.files) {
@@ -23354,7 +23401,9 @@ function renderContextScaffoldMd(repo, run2, s) {
   L.push(`## Detected frameworks`);
   L.push(s.frameworks.length ? s.frameworks.map((f) => `\`${f}\``).join(", ") : "_none detected \u2014 confirm the stack manually._");
   L.push("");
-  L.push(`## Entry points (untrusted input) \u2014 ${s.entryPoints.length}${s.entryPoints.length >= MAX_SCAFFOLD ? "+" : ""}`);
+  L.push(`## Entry points (untrusted input) \u2014 ${s.entryPoints.length}${s.entryPoints.length >= MAX_SCAFFOLD_ENTRIES ? "+" : ""}`);
+  L.push("");
+  L.push(`_One line per file, highest attack surface first (HTTP and cross-origin kinds before env/CLI)._`);
   if (!s.entryPoints.length) L.push(`_none detected._`);
   for (const e of s.entryPoints) L.push(`- \`${e.file}:${e.line}\` (${e.kind})`);
   L.push("");
@@ -23650,14 +23699,18 @@ function runContext(args2) {
     gitignore: flagBool(args2, "gitignore")
   };
   let scaffold;
+  let totalSources = 0;
   try {
     const scan2 = scanRepo2(repo, scanOpts);
     const surface = buildAttackSurface(scan2);
+    totalSources = surface.totals.sources;
     scaffold = buildContextScaffold(repo, scan2, surface);
   } catch (e) {
     eprintln(`ultrasec context: ${e.message}`);
     return 2;
   }
+  const shown = scaffold.entryPoints.length;
+  const entryNote = shown < totalSources ? `${shown} file(s) shown of ${totalSources} site(s)` : `${shown}`;
   mkdirSync11(out2, { recursive: true });
   writeFileSync12(join48(out2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
   writeFileSync12(join48(out2, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out2, scaffold));
@@ -23668,7 +23721,7 @@ function runContext(args2) {
   println(`ultrasec context \u2192 ${out2}`);
   println(`  ${join48(out2, "CONTEXT.scaffold.json")}  \xB7  ${join48(out2, "CONTEXT.todo.md")}`);
   println(
-    `  frameworks: ${scaffold.frameworks.join(", ") || "\u2014"}  \xB7  entry points: ${scaffold.entryPoints.length}  \xB7  auth sites: ${scaffold.authMiddleware.length}  \xB7  sanitizers: ${scaffold.sanitizers.length}`
+    `  frameworks: ${scaffold.frameworks.join(", ") || "\u2014"}  \xB7  entry points: ${entryNote}  \xB7  auth sites: ${scaffold.authMiddleware.length}  \xB7  sanitizers: ${scaffold.sanitizers.length}`
   );
   println(`  next: author ${join48(out2, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` \u2014 it's injected into every dossier.`);
   return 0;

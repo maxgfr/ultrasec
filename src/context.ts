@@ -5,6 +5,7 @@ import { langForFile } from "./lang.js";
 import { SANITIZERS } from "./catalog.js";
 import type { RepoScan } from "./scan.js";
 import type { AttackSurface } from "./map.js";
+import { entryWeight } from "./map.js";
 import type { ContextScaffold } from "./types.js";
 import { byStr } from "./util.js";
 
@@ -17,7 +18,11 @@ import { byStr } from "./util.js";
 // it never gates or changes a verdict (same discipline as `--blame` provenance).
 
 // Cap each scaffold list so the output stays bounded + deterministic on huge repos.
+// The entry-point list gets a larger budget than the others: it now carries one
+// line per FILE rather than per line-hit, so each slot is worth far more, and a
+// monorepo's HTTP surface spread over five workspaces does not fit in forty.
 const MAX_SCAFFOLD = 40;
+const MAX_SCAFFOLD_ENTRIES = 80;
 
 // Auth / authorization markers, across ecosystems. Recall-oriented: a match is a
 // CANDIDATE protection site for the agent to confirm, not proof a route is guarded.
@@ -184,10 +189,42 @@ function inferTrustBoundaries(surface: AttackSurface, authCount: number): string
 export function buildContextScaffold(repo: string, scan: RepoScan, surface: AttackSurface): ContextScaffold {
   const frameworks = detectFrameworks(repo);
 
-  const entryPoints = surface.entryPoints
-    .flatMap((g) => g.samples.map((s) => ({ file: s.file, line: s.line, kind: s.kind })))
-    .sort((a, b) => byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind))
-    .slice(0, MAX_SCAFFOLD);
+  // ONE entry point per (file, kind), selected by rank, presented by path.
+  //
+  // Two things were wrong with taking the first MAX_SCAFFOLD of a
+  // filename-sorted list. It was an alphabetical PREFIX rather than a sample, so
+  // on a monorepo whose web app lives under `targets/` every route in it fell
+  // off the end — and detecting MORE routes made that worse, because the extra
+  // hits pushed the cap further up the alphabet. And the budget was spent per
+  // LINE, so one busy server file with thirty `req.` reads consumed most of it
+  // while thirty separate route files got nothing.
+  //
+  // This is a "where to look" brief. One line per file is the granularity that
+  // serves that, and it is what lets 19 API routes fit in a 40-slot list. The
+  // true total is reported separately, so the cap is never mistaken for the
+  // whole surface.
+  const rank = new Map(surface.byFile.map((f) => [f.file, f.score]));
+  const perFile = new Map<string, { file: string; line: number; kind: string }>();
+  for (const g of surface.entryPoints) {
+    for (const s of g.samples) {
+      const key = `${s.file}\u0000${s.kind}`;
+      const seen = perFile.get(key);
+      if (!seen || s.line < seen.line) perFile.set(key, { file: s.file, line: s.line, kind: s.kind });
+    }
+  }
+  const entryPoints = [...perFile.values()]
+    .sort(
+      (a, b) =>
+        // Kind first: in a capped brief, an HTTP route earns its slot ahead of
+        // an environment read, which presumes a much narrower attacker.
+        entryWeight(b.kind) - entryWeight(a.kind) ||
+        (rank.get(b.file) ?? 0) - (rank.get(a.file) ?? 0) ||
+        byStr(a.file, b.file) ||
+        a.line - b.line ||
+        byStr(a.kind, b.kind),
+    )
+    .slice(0, MAX_SCAFFOLD_ENTRIES)
+    .sort((a, b) => byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind));
 
   const authMiddleware: { file: string; line: number; hint: string }[] = [];
   const sanitizers: { file: string; line: number; kind: string }[] = [];
@@ -237,7 +274,9 @@ export function renderContextScaffoldMd(repo: string, run: string, s: ContextSca
   L.push(s.frameworks.length ? s.frameworks.map((f) => `\`${f}\``).join(", ") : "_none detected — confirm the stack manually._");
   L.push("");
 
-  L.push(`## Entry points (untrusted input) — ${s.entryPoints.length}${s.entryPoints.length >= MAX_SCAFFOLD ? "+" : ""}`);
+  L.push(`## Entry points (untrusted input) — ${s.entryPoints.length}${s.entryPoints.length >= MAX_SCAFFOLD_ENTRIES ? "+" : ""}`);
+  L.push("");
+  L.push(`_One line per file, highest attack surface first (HTTP and cross-origin kinds before env/CLI)._`);
   if (!s.entryPoints.length) L.push(`_none detected._`);
   for (const e of s.entryPoints) L.push(`- \`${e.file}:${e.line}\` (${e.kind})`);
   L.push("");
