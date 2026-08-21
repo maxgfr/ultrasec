@@ -1,6 +1,6 @@
 import type { Dossier } from "./store.js";
 import { BROCARDS, VERDICTS, type Brocard, type Finding, type Status, type Verdict } from "./types.js";
-import { byStr } from "./util.js";
+import { byStr, withStageNote } from "./util.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 
 // The adversarial verification gate. The engine emits a claim↔evidence worklist;
@@ -180,7 +180,7 @@ export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): Apply
     if (v.exploitPath) next.exploitPath = v.exploitPath;
     // Only meaningful on a refutation: it names the ground the dismissal stands on.
     if (v.brocard && v.verdict === "refuted") next.brocard = v.brocard;
-    if (v.note) next.message = `${f.message}\n\nVerdict (${v.verdict}): ${v.note}`;
+    if (v.note) next.message = withStageNote(f.message, "Verdict", v.verdict, v.note);
     return next;
   });
 

@@ -17094,6 +17094,15 @@ function shortHash2(input, len = 12) {
 function byStr2(a, b) {
   return a < b ? -1 : a > b ? 1 : 0;
 }
+var STAGE_LABELS = ["Verdict", "Revalidation"];
+var STAGE_SPLIT = new RegExp(`\\n\\n(?=(?:${STAGE_LABELS.join("|")}) \\()`);
+function withStageNote(message, stage, label, note) {
+  const parts2 = message.split(STAGE_SPLIT);
+  const kept = parts2.filter((part, i2) => i2 === 0 || !part.startsWith(`${stage} (`));
+  return `${kept.join("\n\n")}
+
+${stage} (${label})${note ? `: ${note}` : ""}`;
+}
 var outputSink = new AsyncLocalStorage();
 function eprintln(msg) {
   const sink = outputSink.getStore();
@@ -25301,9 +25310,7 @@ function applyVerdicts(dossier, verdicts) {
     };
     if (v.exploitPath) next.exploitPath = v.exploitPath;
     if (v.brocard && v.verdict === "refuted") next.brocard = v.brocard;
-    if (v.note) next.message = `${f.message}
-
-Verdict (${v.verdict}): ${v.note}`;
+    if (v.note) next.message = withStageNote(f.message, "Verdict", v.verdict, v.note);
     return next;
   });
   return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored };
@@ -26172,9 +26179,7 @@ function applyRevalidations(dossier, inputs, opts = {}) {
   const fixedInById = opts.fixedInById ?? /* @__PURE__ */ new Map();
   let applied = 0, stillValid = 0, fixed = 0, dismissed = 0, needsHuman = 0;
   const flagged = [];
-  const withNote = (f, label, note) => `${f.message}
-
-Revalidation (${label})${note ? `: ${note}` : ""}`;
+  const withNote = (f, label, note) => withStageNote(f.message, "Revalidation", label, note);
   const findings = dossier.findings.map((f) => {
     const v = byId.get(f.id);
     if (!v || !inScope(f)) return f;

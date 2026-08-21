@@ -1,7 +1,7 @@
 import type { Dossier } from "./store.js";
 import type { Finding, Status } from "./types.js";
 import { isHigh } from "./verify.js";
-import { byStr } from "./util.js";
+import { byStr, withStageNote } from "./util.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 import { fileExistsAtHead, lineContentAtHead, lineLastChanged, fileRenamedTo, logSince, type LineChange } from "./git.js";
 
@@ -170,7 +170,7 @@ export function applyRevalidations(dossier: Dossier, inputs: RevalidationInput[]
     needsHuman = 0;
   const flagged: ApplyRevalResult["flagged"] = [];
 
-  const withNote = (f: Finding, label: string, note?: string): string => `${f.message}\n\nRevalidation (${label})${note ? `: ${note}` : ""}`;
+  const withNote = (f: Finding, label: string, note?: string): string => withStageNote(f.message, "Revalidation", label, note);
 
   const findings = dossier.findings.map((f) => {
     const v = byId.get(f.id);

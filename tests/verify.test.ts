@@ -87,6 +87,37 @@ describe("applyVerdicts — conservative policy", () => {
   });
 });
 
+describe("applyVerdicts — idempotent message folding", () => {
+  // Applying the same verdicts file twice used to append a second
+  // "Verdict (...)" block every time. On a real run all 265 findings carried a
+  // duplicate and one carried four, which is what inflated REPORT.md.
+  it("re-applying the same verdict leaves the message byte-identical", () => {
+    const rows = [{ id: "a", verdict: "refuted" as const, note: "test-only path" }];
+    const once = applyVerdicts(dossier([finding("a", "high")]), rows);
+    const twice = applyVerdicts({ ...dossier([]), findings: once.findings }, rows);
+    expect(twice.findings[0]!.message).toBe(once.findings[0]!.message);
+    expect(twice.findings[0]!.message.match(/\n\nVerdict \(/g)).toHaveLength(1);
+  });
+
+  it("a CHANGED verdict replaces the previous block instead of stacking", () => {
+    const first = applyVerdicts(dossier([finding("a", "high")]), [{ id: "a", verdict: "refuted", note: "first" }]);
+    const second = applyVerdicts({ ...dossier([]), findings: first.findings }, [{ id: "a", verdict: "supported", note: "second" }]);
+    const msg = second.findings[0]!.message;
+    expect(msg.match(/\n\nVerdict \(/g)).toHaveLength(1);
+    expect(msg).toContain("Verdict (supported): second");
+    expect(msg).not.toContain("first");
+    expect(msg.startsWith("candidate")).toBe(true);
+  });
+
+  it("preserves another stage's note — a revalidation survives a re-verify", () => {
+    const f = finding("a", "high");
+    f.message = "candidate\n\nRevalidation (still-valid): re-confirmed at HEAD";
+    const r = applyVerdicts(dossier([f]), [{ id: "a", verdict: "refuted", note: "ground" }]);
+    expect(r.findings[0]!.message).toContain("Revalidation (still-valid): re-confirmed at HEAD");
+    expect(r.findings[0]!.message).toContain("Verdict (refuted): ground");
+  });
+});
+
 describe("priorAnalysis signal (deepsec revalidation) — shown, never auto-applied", () => {
   function withPrior(): Finding {
     const f = finding("a", "high");
