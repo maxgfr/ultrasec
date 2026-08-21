@@ -28,6 +28,10 @@ export interface VerifyItem {
   /** Upstream-agent signal (e.g. deepsec revalidation verdict) — a HINT shown to
    *  the adjudicator, never auto-applied. Absent unless `priorAnalysis` exists. */
   priorSignal?: string;
+  /** Set only on a RE-OPENED item (`--all`): the verdict an earlier pass already
+   *  recorded before escalating it to needs-human. Its presence is what tells the
+   *  adjudicator this row is not new work. */
+  priorVerdict?: Verdict;
 }
 
 export interface VerdictInput {
@@ -39,13 +43,55 @@ export interface VerdictInput {
   brocard?: Brocard;
 }
 
+/**
+ * A `needs-human` finding that ALREADY carries a verdict was adjudicated by an
+ * earlier pass — someone read it and escalated it deliberately. One that does
+ * not was escalated by some other stage and has never been ruled on.
+ *
+ * That distinction is the whole of the delta: it is the only "already
+ * adjudicated" marker the dossier holds (there is no timestamp and no verdict
+ * history), and it is enough.
+ */
+function reOpened(f: Finding): boolean {
+  return f.status === "needs-human" && f.verdict !== undefined;
+}
+
 /** Findings still needing adjudication (open or previously needs-human). */
 function pending(findings: Finding[]): Finding[] {
   return findings.filter((f) => f.status === "open" || f.status === "needs-human");
 }
 
-export function buildWorklist(dossier: Dossier): VerifyItem[] {
+export interface WorklistOptions {
+  /**
+   * Re-emit findings an earlier pass already adjudicated as `needs-human`.
+   *
+   * Off by default, and that default is a behaviour change with a body count.
+   * The worklist used to re-emit every non-terminal finding unconditionally, so
+   * a batch meant to cover 11 new discoveries arrived holding 171 rows; filling
+   * it in flipped 160 already-argued advisories to `supported` in one apply.
+   * Re-visiting an escalation is legitimate — it is why the re-emission exists —
+   * but it has to be asked for.
+   */
+  all?: boolean;
+}
+
+/** How the worklist was composed, for the header and the CLI summary. */
+export interface WorklistCounts {
+  fresh: number;
+  reOpened: number;
+  /** Re-opened items withheld because `--all` was not passed. */
+  withheld: number;
+}
+
+export function worklistCounts(dossier: Dossier, opts: WorklistOptions = {}): WorklistCounts {
+  const p = pending(dossier.findings);
+  const re = p.filter(reOpened).length;
+  return { fresh: p.length - re, reOpened: opts.all ? re : 0, withheld: opts.all ? 0 : re };
+}
+
+export function buildWorklist(dossier: Dossier, opts: WorklistOptions = {}): VerifyItem[] {
   return pending(dossier.findings)
+    .filter((f) => opts.all || !reOpened(f))
     .slice()
     .sort((a, b) => byStr(a.id, b.id))
     .map((f) => {
@@ -66,6 +112,7 @@ export function buildWorklist(dossier: Dossier): VerifyItem[] {
       };
       const pa = f.priorAnalysis;
       if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
+      if (reOpened(f)) item.priorVerdict = f.verdict;
       return item;
     });
 }
@@ -75,10 +122,19 @@ export function shard<T>(items: T[], n: number, i: number): T[] {
   return items.filter((_, idx) => idx % n === i);
 }
 
-export function renderWorklistMd(items: VerifyItem[], context?: string): string {
+export function renderWorklistMd(items: VerifyItem[], context?: string, counts?: WorklistCounts): string {
   const L: string[] = [];
   L.push(`# ultrasec verification worklist (${items.length})`);
   L.push("");
+  // Say what this batch IS. A worklist that silently mixes new candidates with
+  // findings someone already argued over reads as pure delta, and gets filled in
+  // as one — which is how 160 adjudicated advisories were re-verdicted at once.
+  if (counts && (counts.reOpened || counts.withheld)) {
+    if (counts.withheld)
+      L.push(`**${counts.fresh} new** · ${counts.withheld} already adjudicated as needs-human and NOT shown — pass \`--all\` to re-open them.`);
+    else L.push(`**${counts.fresh} new** · ${counts.reOpened} re-opened (already adjudicated once; each carries its \`priorVerdict\`).`);
+    L.push("");
+  }
   L.push(`For each item: open the cited code (\`ultrasec dossier <id>\`), decide whether`);
   L.push(`the flow is **real and exploitable**, and set a verdict:`);
   L.push(`\`supported\` · \`partial\` · \`unsupported\` · \`refuted\` (+ a short note, and an`);
@@ -109,6 +165,7 @@ export function renderWorklistMd(items: VerifyItem[], context?: string): string 
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
     L.push(`- claim: ${it.claim}`);
     if (it.priorSignal) L.push(`- signal (not a verdict — adjudicate yourself): ${it.priorSignal}`);
+    if (it.priorVerdict) L.push(`- **re-opened** — an earlier pass ruled \`${it.priorVerdict}\` and escalated it. Not new work.`);
     L.push("");
   }
   return L.join("\n") + "\n";
@@ -124,6 +181,15 @@ export interface ApplyResult {
   keptForHuman: { id: string; verdict: Verdict; severity: string }[];
   /** Stale verdicts: ids that resolve to no finding (sorted) — reported, never silently dropped. */
   ignored: string[];
+  /**
+   * Verdicts that CHANGED a finding an earlier pass had already ruled on.
+   *
+   * Re-applying the same verdict is a no-op and stays quiet; this is only the
+   * rows that moved someone's existing judgement. Surfaced so a batch can never
+   * re-decide 160 findings without saying so, and gated behind `--re-verdict`
+   * under `--strict`.
+   */
+  reVerdicted: { id: string; from: Verdict | undefined; to: Verdict; wasStatus: Status }[];
 }
 
 /** Critical/high — the tier the conservative policy refuses to auto-dismiss on
@@ -161,11 +227,16 @@ export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): Apply
     needsHuman = 0,
     applied = 0;
   const keptForHuman: ApplyResult["keptForHuman"] = [];
+  const reVerdicted: ApplyResult["reVerdicted"] = [];
 
   const findings = dossier.findings.map((f) => {
     const v = byId.get(f.id);
     if (!v) return f;
     applied++;
+    // Already ruled on, and this row rules differently. `status !== "open"` is
+    // the marker; an unchanged verdict is left quiet so a re-apply of the same
+    // file reports nothing.
+    if (f.status !== "open" && f.verdict !== v.verdict) reVerdicted.push({ id: f.id, from: f.verdict, to: v.verdict, wasStatus: f.status });
     const status = nextStatus(v.verdict, f.severity);
     if (v.verdict === "unsupported" && isHigh(f.severity)) keptForHuman.push({ id: f.id, verdict: v.verdict, severity: f.severity });
     if (status === "confirmed") confirmed++;
@@ -184,7 +255,8 @@ export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): Apply
     return next;
   });
 
-  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored };
+  reVerdicted.sort((a, b) => byStr(a.id, b.id));
+  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored, reVerdicted };
 }
 
 /**

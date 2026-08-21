@@ -17001,6 +17001,7 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "list",
   "no-redact",
   "strict",
+  "re-verdict",
   "no-journal",
   "no-env-sources",
   "strict-scope",
@@ -25210,11 +25211,19 @@ function parseIdVerdictRows(raw, opts) {
 }
 
 // src/verify.ts
+function reOpened(f) {
+  return f.status === "needs-human" && f.verdict !== void 0;
+}
 function pending(findings) {
   return findings.filter((f) => f.status === "open" || f.status === "needs-human");
 }
-function buildWorklist(dossier) {
-  return pending(dossier.findings).slice().sort((a, b) => byStr2(a.id, b.id)).map((f) => {
+function worklistCounts(dossier, opts = {}) {
+  const p = pending(dossier.findings);
+  const re = p.filter(reOpened).length;
+  return { fresh: p.length - re, reOpened: opts.all ? re : 0, withheld: opts.all ? 0 : re };
+}
+function buildWorklist(dossier, opts = {}) {
+  return pending(dossier.findings).filter((f) => opts.all || !reOpened(f)).slice().sort((a, b) => byStr2(a.id, b.id)).map((f) => {
     const files = /* @__PURE__ */ new Set();
     for (const p of f.path ?? []) files.add(`${p.file}:${p.line}`);
     if (f.sink) files.add(`${f.sink.file}:${f.sink.line}`);
@@ -25232,16 +25241,23 @@ function buildWorklist(dossier) {
     };
     const pa = f.priorAnalysis;
     if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
+    if (reOpened(f)) item.priorVerdict = f.verdict;
     return item;
   });
 }
 function shard(items, n, i2) {
   return items.filter((_, idx) => idx % n === i2);
 }
-function renderWorklistMd(items, context) {
+function renderWorklistMd(items, context, counts) {
   const L = [];
   L.push(`# ultrasec verification worklist (${items.length})`);
   L.push("");
+  if (counts && (counts.reOpened || counts.withheld)) {
+    if (counts.withheld)
+      L.push(`**${counts.fresh} new** \xB7 ${counts.withheld} already adjudicated as needs-human and NOT shown \u2014 pass \`--all\` to re-open them.`);
+    else L.push(`**${counts.fresh} new** \xB7 ${counts.reOpened} re-opened (already adjudicated once; each carries its \`priorVerdict\`).`);
+    L.push("");
+  }
   L.push(`For each item: open the cited code (\`ultrasec dossier <id>\`), decide whether`);
   L.push(`the flow is **real and exploitable**, and set a verdict:`);
   L.push(`\`supported\` \xB7 \`partial\` \xB7 \`unsupported\` \xB7 \`refuted\` (+ a short note, and an`);
@@ -25270,6 +25286,7 @@ function renderWorklistMd(items, context) {
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
     L.push(`- claim: ${it.claim}`);
     if (it.priorSignal) L.push(`- signal (not a verdict \u2014 adjudicate yourself): ${it.priorSignal}`);
+    if (it.priorVerdict) L.push(`- **re-opened** \u2014 an earlier pass ruled \`${it.priorVerdict}\` and escalated it. Not new work.`);
     L.push("");
   }
   return L.join("\n") + "\n";
@@ -25299,10 +25316,12 @@ function applyVerdicts(dossier, verdicts) {
   const ignored = [...byId.keys()].filter((id) => !known.has(id)).sort(byStr2);
   let confirmed = 0, dismissed = 0, needsHuman = 0, applied = 0;
   const keptForHuman = [];
+  const reVerdicted = [];
   const findings = dossier.findings.map((f) => {
     const v = byId.get(f.id);
     if (!v) return f;
     applied++;
+    if (f.status !== "open" && f.verdict !== v.verdict) reVerdicted.push({ id: f.id, from: f.verdict, to: v.verdict, wasStatus: f.status });
     const status = nextStatus(v.verdict, f.severity);
     if (v.verdict === "unsupported" && isHigh(f.severity)) keptForHuman.push({ id: f.id, verdict: v.verdict, severity: f.severity });
     if (status === "confirmed") confirmed++;
@@ -25319,7 +25338,8 @@ function applyVerdicts(dossier, verdicts) {
     if (v.note) next.message = withStageNote(f.message, "Verdict", v.verdict, v.note);
     return next;
   });
-  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored };
+  reVerdicted.sort((a, b) => byStr2(a.id, b.id));
+  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored, reVerdicted };
 }
 function parseVerdicts(raw) {
   return parseIdVerdictRows(raw, {
@@ -26041,17 +26061,21 @@ function runVerify(args2) {
   }
   const applyPath = flagStr(args2, "apply");
   if (applyPath) return applyMode(run2, dossier, applyPath, args2);
-  let items = buildWorklist(dossier);
+  const all = flagBool(args2, "all");
+  const counts = worklistCounts(dossier, { all });
+  let items = buildWorklist(dossier, { all });
   const shards = Number(flagStr(args2, "shards") ?? "0") || 0;
   const shardIdx = Number(flagStr(args2, "shard") ?? "0") || 0;
   if (shards > 1) items = shard(items, shards, shardIdx);
   const files = shards > 1 ? { todo: `VERIFY.todo.${shardIdx}.json`, md: "VERIFY.md" } : stageFiles("VERIFY");
-  const todoPath = emitWorklist(run2, files, items, renderWorklistMd(buildWorklist(dossier), loadContextDoc(run2)));
+  const todoPath = emitWorklist(run2, files, items, renderWorklistMd(buildWorklist(dossier, { all }), loadContextDoc(run2), counts));
   if (flagBool(args2, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
   println(`ultrasec verify \u2192 ${todoPath} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
+  if (counts.withheld) println(`  ${counts.fresh} new \xB7 ${counts.withheld} already adjudicated as needs-human, not shown \u2014 pass --all to re-open them`);
+  else if (counts.reOpened) println(`  ${counts.fresh} new \xB7 ${counts.reOpened} re-opened (--all)`);
   println(`  adjudicate each (\`ultrasec dossier <id> --run ${run2}\`), save verdicts.json, then:`);
   println(`  ultrasec verify --apply verdicts.json --run ${run2}`);
   return 0;
@@ -26065,6 +26089,7 @@ function applyMode(run2, dossier, applyPath, args2) {
     return 2;
   }
   const strict = flagBool(args2, "strict");
+  const reVerdictOk = flagBool(args2, "re-verdict");
   const res = applyVerdicts(dossier, parsed.rows);
   if (res.applied === 0 && res.ignored.length > 0) {
     eprintln(
@@ -26083,13 +26108,14 @@ function applyMode(run2, dossier, applyPath, args2) {
           needsHuman: res.needsHuman,
           keptForHuman: res.keptForHuman,
           ignored: res.ignored,
+          reVerdicted: res.reVerdicted,
           dropped: parsed.dropped
         },
         null,
         2
       )
     );
-    return strict && parsed.dropped.length > 0 ? 1 : 0;
+    return strict && (parsed.dropped.length > 0 || res.reVerdicted.length > 0 && !reVerdictOk) ? 1 : 0;
   }
   println(`ultrasec verify --apply \u2192 updated ${join56(run2, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
@@ -26097,6 +26123,16 @@ function applyMode(run2, dossier, applyPath, args2) {
   if (res.keptForHuman.length) {
     println(`  kept for human (high-severity, only 'unsupported' \u2014 not auto-dismissed):`);
     for (const k of res.keptForHuman) println(`    - ${k.id} [${k.severity}]`);
+  }
+  if (res.reVerdicted.length) {
+    println(`  \u26A0 ${res.reVerdicted.length} verdict(s) CHANGED an already-adjudicated finding:`);
+    for (const r of res.reVerdicted.slice(0, 10)) println(`    - ${r.id} [${r.wasStatus}] ${r.from ?? "(none)"} \u2192 ${r.to}`);
+    if (res.reVerdicted.length > 10) println(`    \u2026 and ${res.reVerdicted.length - 10} more`);
+    println(`    Re-verifying an escalation is legitimate; doing it by accident is not. Pass --re-verdict to accept under --strict.`);
+  }
+  if (strict && res.reVerdicted.length > 0 && !reVerdictOk) {
+    eprintln(`ultrasec verify --apply: ${res.reVerdicted.length} already-adjudicated finding(s) re-verdicted under --strict \u2014 pass --re-verdict if that is intended.`);
+    return 1;
   }
   return surfaceDropped(parsed.dropped, strict, println);
 }
@@ -30706,6 +30742,10 @@ COMMANDS
              VERIFY.todo.<i>.json (the .md brief always covers the FULL worklist).
              --apply takes a file, a comma-list, or a DIRECTORY (picks up every
              *verdict*.json, sorted) and fails closed if every fragment is stale.
+             The worklist is a DELTA: findings an earlier pass already adjudicated
+             as needs-human are withheld until --all. --apply reports any verdict
+             that changes an already-adjudicated finding; under --strict that
+             fails unless --re-verdict is passed.
              Flags: --run \xB7 --shards \xB7 --shard \xB7 --apply \xB7 --json.
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]

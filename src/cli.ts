@@ -82,6 +82,10 @@ COMMANDS
              VERIFY.todo.<i>.json (the .md brief always covers the FULL worklist).
              --apply takes a file, a comma-list, or a DIRECTORY (picks up every
              *verdict*.json, sorted) and fails closed if every fragment is stale.
+             The worklist is a DELTA: findings an earlier pass already adjudicated
+             as needs-human are withheld until --all. --apply reports any verdict
+             that changes an already-adjudicated finding; under --strict that
+             fails unless --re-verdict is passed.
              Flags: --run · --shards · --shard · --apply · --json.
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Dossier } from "../src/store.js";
 import type { Finding, Severity } from "../src/types.js";
-import { buildWorklist, shard, applyVerdicts, parseVerdicts, renderWorklistMd } from "../src/verify.js";
+import { buildWorklist, shard, applyVerdicts, parseVerdicts, renderWorklistMd, worklistCounts } from "../src/verify.js";
 
 function finding(id: string, severity: Severity, status: Finding["status"] = "open"): Finding {
   return {
@@ -53,6 +53,67 @@ describe("shard", () => {
     expect(s0).toEqual([1, 3, 5]);
     expect(s1).toEqual([2, 4]);
     expect([...s0, ...s1].sort()).toEqual(items);
+  });
+});
+
+describe("buildWorklist — delta by default", () => {
+  // A needs-human finding that already carries a verdict was READ and escalated
+  // by someone. One without a verdict was escalated by another stage and has
+  // never been ruled on — so it is still new work.
+  function adjudicated(id: string): Finding {
+    return { ...finding(id, "high", "needs-human"), verdict: "partial" };
+  }
+
+  it("withholds findings an earlier pass already adjudicated", () => {
+    const d = dossier([finding("a", "high"), adjudicated("b"), finding("c", "high", "needs-human")]);
+    expect(buildWorklist(d).map((i) => i.id)).toEqual(["a", "c"]);
+    expect(worklistCounts(d)).toEqual({ fresh: 2, reOpened: 0, withheld: 1 });
+  });
+
+  it("--all re-opens them, carrying the prior verdict so they read as not-new", () => {
+    const d = dossier([finding("a", "high"), adjudicated("b")]);
+    const items = buildWorklist(d, { all: true });
+    expect(items.map((i) => i.id)).toEqual(["a", "b"]);
+    expect(items.find((i) => i.id === "b")!.priorVerdict).toBe("partial");
+    expect(items.find((i) => i.id === "a")!.priorVerdict).toBeUndefined();
+    expect(worklistCounts(d, { all: true })).toEqual({ fresh: 1, reOpened: 1, withheld: 0 });
+  });
+
+  it("the brief names what was withheld and the flag that shows it", () => {
+    const d = dossier([finding("a", "high"), adjudicated("b")]);
+    const md = renderWorklistMd(buildWorklist(d), undefined, worklistCounts(d));
+    expect(md).toContain("1 already adjudicated as needs-human and NOT shown");
+    expect(md).toContain("--all");
+  });
+
+  it("says nothing extra when there is nothing withheld (output unchanged)", () => {
+    const d = dossier([finding("a", "high")]);
+    const md = renderWorklistMd(buildWorklist(d), undefined, worklistCounts(d));
+    expect(md).not.toContain("--all");
+    expect(md).toBe(renderWorklistMd(buildWorklist(d)));
+  });
+});
+
+describe("applyVerdicts — re-verdict guardrail", () => {
+  it("reports a verdict that CHANGES an already-adjudicated finding", () => {
+    const prev = { ...finding("a", "high", "dismissed"), verdict: "refuted" as const };
+    const r = applyVerdicts(dossier([prev]), [{ id: "a", verdict: "supported" }]);
+    expect(r.reVerdicted).toEqual([{ id: "a", from: "refuted", to: "supported", wasStatus: "dismissed" }]);
+  });
+
+  it("stays quiet when the same verdict is re-applied (idempotent re-fold)", () => {
+    const prev = { ...finding("a", "high", "dismissed"), verdict: "refuted" as const };
+    expect(applyVerdicts(dossier([prev]), [{ id: "a", verdict: "refuted" }]).reVerdicted).toEqual([]);
+  });
+
+  it("stays quiet on a genuinely open finding — first adjudication is not a re-verdict", () => {
+    expect(applyVerdicts(dossier([finding("a", "high")]), [{ id: "a", verdict: "refuted" }]).reVerdicted).toEqual([]);
+  });
+
+  it("still APPLIES the change — this reports, it does not block", () => {
+    const prev = { ...finding("a", "high", "dismissed"), verdict: "refuted" as const };
+    const r = applyVerdicts(dossier([prev]), [{ id: "a", verdict: "supported" }]);
+    expect(r.findings[0]!.status).toBe("confirmed");
   });
 });
 
