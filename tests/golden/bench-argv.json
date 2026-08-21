@@ -1,48 +1,6 @@
 {
   "findings": [
     {
-      "id": "7e2316b4b749",
-      "category": "taint",
-      "cwe": "CWE-78",
-      "title": "OS command injection: untrusted input reaches run()",
-      "severity": "critical",
-      "confidence": "low",
-      "source": {
-        "file": "routes.js",
-        "line": 3,
-        "kind": "http"
-      },
-      "sink": {
-        "file": "routes.js",
-        "line": 4,
-        "kind": "command",
-        "symbol": "handler"
-      },
-      "path": [
-        {
-          "file": "routes.js",
-          "line": 3,
-          "symbol": "handler",
-          "why": "untrusted input (http): req.query"
-        },
-        {
-          "file": "routes.js",
-          "line": 4,
-          "symbol": "handler",
-          "why": "command sink: run()"
-        }
-      ],
-      "sourceScope": "symbol",
-      "dataflow": "linked",
-      "message": "Intra-file candidate: http input at routes.js:3 may reach the command sink run() at routes.js:4 through 1 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
-      "tool": "ultrasec",
-      "references": [
-        "https://cwe.mitre.org/data/definitions/78.html"
-      ],
-      "status": "open",
-      "risk": 60
-    },
-    {
       "id": "c92481946489",
       "category": "sast",
       "cwe": "CWE-88",

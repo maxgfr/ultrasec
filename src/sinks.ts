@@ -1,9 +1,9 @@
 import { join } from "node:path";
 import { readText } from "./walk.js";
 import type { RepoScan } from "./scan.js";
-import { enclosingSymbolName } from "./scan.js";
+import { enclosingSymbolName, localDefNames } from "./scan.js";
 import { langForFile } from "./lang.js";
-import { findSinks, findSanitizers, cweUrl } from "./catalog.js";
+import { findSinks, findSanitizers, cweUrl, UNRESOLVED_RECEIVER } from "./catalog.js";
 import { shortHash, byStr } from "./util.js";
 import { SEVERITIES, type Finding, type Severity } from "./types.js";
 
@@ -62,7 +62,7 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
   for (const file of scan.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls, undefined, file.imports)) {
+    for (const sink of findSinks(lang, file.calls, undefined, file.imports, localDefNames(file.symbols))) {
       const key = `${file.rel}:${sink.line}:${sink.kind}`;
       if (taken.has(key)) continue; // covered by taint, or already emitted this pass
       taken.add(key);
@@ -72,6 +72,13 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
       const note = sanitizers.length
         ? ` A possible sanitizer is present on the line (${sanitizers.join("; ")}) — confirm it neutralizes any untrusted input.`
         : "";
+      // Same caveat the taint pass carries: an `ambiguous` rule matched by name
+      // alone, with nothing to corroborate that this callee is what the rule
+      // means. Worth a glance, not a headline.
+      const receiverNote =
+        sink.downgraded === UNRESOLVED_RECEIVER
+          ? ` [${UNRESOLVED_RECEIVER}] Matched by NAME only — no receiver resolved and no corroborating import was visible, so \`${sink.callee}\` may not be a ${sink.kind} call at all.`
+          : "";
 
       findings.push({
         id: shortHash(`sink:${file.rel}:${sink.line}:${sink.kind}`),
@@ -85,7 +92,7 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
           `Dangerous ${sink.kind} sink ${sink.callee}() at ${file.rel}:${sink.line} that the cross-file taint pass ` +
           `could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a ` +
           `path the summary call-graph misses (framework dispatch, dynamic call, config). ` +
-          `${sink.note}${note} Confirm whether attacker-controlled data can reach it before trusting it.`,
+          `${sink.note}${note}${receiverNote} Confirm whether attacker-controlled data can reach it before trusting it.`,
         tool: "ultrasec",
         references: [cweUrl(sink.cwe)],
         status: "open",

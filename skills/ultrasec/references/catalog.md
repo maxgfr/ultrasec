@@ -11,7 +11,7 @@ you a glance; a missed flow is a missed bug.
 |------|-----|----------|-----------------|
 | sql | CWE-89 | high | `query`, `execute`, `raw`, `executemany` · JDBC/JPA: `prepareStatement`, `prepareCall`, `executeUpdate`, `addBatch`, `createQuery` |
 | nosql | CWE-943 | high | `db.find`, `collection.findOne`, `mapReduce`, `aggregate` (receiver-gated) |
-| command | CWE-78 | critical | `exec`, `execSync`, `spawn`, `system`, `popen`, `Popen`, `shell_exec`, `ProcessBuilder`, `Runtime.getRuntime` |
+| command | CWE-78 | critical | `execSync`, `spawnSync`, `popen`, `Popen`, `shell_exec`, `passthru`, `proc_open`, `ProcessBuilder`, `Runtime.getRuntime` · plus `exec`/`spawn`/`run` **corroborated** (see below) |
 | code | CWE-94 | high | `eval`, `Function`, `runInThisContext`, `compile` |
 | ssti | CWE-1336 | high | `from_string`, `renderString`, `Template`, `compileString` |
 | path | CWE-22 | high | `readFile`, `writeFile`, `sendFile`, `open` · JVM/C# constructors: `new File`, `FileInputStream`, `newBufferedReader` · zip-slip: `extractall`, `extract`, `unzip` |
@@ -43,6 +43,24 @@ traversal and weak crypto — the self-written fixtures had all scored 100% and 
 [../../../docs/BENCHMARK.md](../../../docs/BENCHMARK.md).
 
 Three of these deserve a word.
+
+**`exec` and `run` are corroborated before they fire.** They are among the most reused identifiers
+in programming, and the extractor reports a receiver only when it is a plain identifier — so
+`/(LEGIARTI\w+)/.exec(url)`, `pool.exec()` and a genuinely bare `exec()` all reach the matcher
+looking the same. A single name-matching rule therefore rated `RegExp.prototype.exec` as CRITICAL
+OS command injection; on a repo that parses legal-document ids with regexes that was 11 of 17
+criticals, plus a 12th on an application `run()` declared 68 lines above its own call site.
+
+So the ambiguous names now need corroboration — a known receiver (`child_process.exec`,
+`subprocess.run`, `exec.Command`) or a process-module import (`child_process`, `execa`, `shelljs`,
+`subprocess`, `os/exec`, `std::process`), which is what catches `from subprocess import run`. A
+callee the file **declares itself** never matches: shadowing is a language rule, and it outranks
+the import. PHP keeps firing bare, because PHP's process builtins have no receiver to resolve.
+
+When the extractor could not see imports **at all** — the regex tier — the candidate is not
+dropped, it is reported at **medium** carrying `unresolved-receiver` in its message. A critical we
+cannot substantiate is worse than a medium we can revisit; silently losing a real sink because
+tree-sitter was missing would be worse than both.
 
 **`argv` (CWE-88) exists because the `command` sanitizer hint is only half a defence.** Moving off a
 shell string onto an argv array kills metacharacter injection and nothing else: an attacker who

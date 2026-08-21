@@ -1,10 +1,10 @@
 import { join } from "node:path";
 import { readText } from "./walk.js";
 import type { RepoScan } from "./scan.js";
-import { enclosingSymbolName } from "./scan.js";
+import { enclosingSymbolName, localDefNames } from "./scan.js";
 import type { Graph } from "./graph.js";
 import { langForFile } from "./lang.js";
-import { findSinks, findSources, findTextSinks, cweUrl, LOG_SINKS, type SinkHit, type SourceHit } from "./catalog.js";
+import { findSinks, findSources, findTextSinks, cweUrl, LOG_SINKS, UNRESOLVED_RECEIVER, type SinkHit, type SourceHit } from "./catalog.js";
 import { buildUnitMap, classifySourceScope, sanitizersAlongPath, scopeRank, traceDefUse, type UnitMap } from "./dataflow.js";
 import { shortHash, byStr } from "./util.js";
 import { SEVERITIES, type Finding, type PathStep, type Severity, type SourceScope } from "./types.js";
@@ -192,6 +192,13 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
       dataflow === "unlinked"
         ? " The value bound at the source is not mentioned again at the sink — it may travel through state this walk cannot see, or not at all."
         : "";
+    // An `ambiguous` catalog rule that nothing corroborated. Say so in the
+    // message rather than only in the severity, so the adjudicator knows which
+    // question to answer first: is this callee even the thing the rule names?
+    const receiverNote =
+      sink.downgraded === UNRESOLVED_RECEIVER
+        ? ` [${UNRESOLVED_RECEIVER}] The callee \`${sink.callee}\` was matched by NAME only — no receiver resolved and no corroborating import was visible, so this may not be a ${sink.kind} call at all. Rated below the catalog severity until you confirm what it resolves to.`
+        : "";
 
     findings.push({
       id,
@@ -208,7 +215,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
       message:
         `${crossFile ? "Cross-file" : "Intra-file"} candidate: ${srcHit.kind} input at ${srcStep.file}:${srcStep.line} ` +
         `may reach the ${sink.kind} sink ${calleeLabel(sink)} at ${sinkFile}:${sink.line} through ${path.length - 1} hop(s). ` +
-        `${sink.note}${note}${flowNote} Heuristic — verify the data actually reaches the sink unsanitized before trusting it.`,
+        `${sink.note}${note}${flowNote}${receiverNote} Heuristic — verify the data actually reaches the sink unsanitized before trusting it.`,
       tool: "ultrasec",
       references: [cweUrl(sink.cwe)],
       status: "open",
@@ -222,7 +229,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     // Call sinks plus ASSIGNMENT sinks. `el.innerHTML = x` is the commonest DOM
     // XSS shape in the wild and is not a call at all, so a call-only catalog
     // could never see it.
-    const sinkHits = [...findSinks(lang, file.calls, extraSinks, file.imports), ...findTextSinks(lang, content(file.rel))];
+    const sinkHits = [...findSinks(lang, file.calls, extraSinks, file.imports, localDefNames(file.symbols)), ...findTextSinks(lang, content(file.rel))];
 
     for (const sink of sinkHits) {
       const sinkSym = enclosingSymbolName(file.symbols, sink.line);

@@ -18080,6 +18080,12 @@ function toEngineOptions(repo, opts) {
   };
 }
 var REFERENCE_KINDS8 = /* @__PURE__ */ new Set(["reexport", "reexport-all", "default"]);
+var CALLABLE_KINDS = /* @__PURE__ */ new Set(["function", "method", "def", "getter", "setter", "macro"]);
+function localDefNames(symbols) {
+  const names = /* @__PURE__ */ new Set();
+  for (const s of symbols) if (CALLABLE_KINDS.has(s.kind)) names.add(s.name);
+  return names;
+}
 function enclosingSymbolName(symbols, line) {
   let best;
   for (const s of symbols) {
@@ -18785,30 +18791,99 @@ var SINKS = [
     title: "SQL injection",
     note: "Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query."
   },
+  // -- OS command injection (CWE-78) -----------------------------------------
+  // Split into an unambiguous rule plus per-language gated ones, because the two
+  // names carrying most of the weight here -- `exec` and `run` -- are among the
+  // most reused identifiers in programming. A single `languages: ["*"]` rule
+  // with a `receivers` hint could not tell `child_process.exec(cmd)` from
+  // `/(LEGIARTI\w+)/.exec(url)`: the extractor reports a receiver only when it
+  // is a plain identifier (`readReceiver`), so a regex literal, a call chain and
+  // a genuinely bare call all reach `findSinks` looking identical. Measured on a
+  // real repo that parses legal-document ids with regexes, that produced 11
+  // false CRITICALs out of 17, plus a 12th on an application `run()` defined 68
+  // lines above its own call site.
+  //
+  // So the ambiguous names must be CORROBORATED before firing -- by a known
+  // receiver or by a process-module import (`ambiguous: true`, see `findSinks`)
+  // -- and a callee the file DEFINES itself never matches the catalog at all
+  // (`localDefs`). The unambiguous names below keep firing everywhere, bare
+  // included, because nothing else is called `shell_exec` or `execSync`.
   {
     kind: "command",
     cwe: "CWE-78",
     severity: "critical",
     languages: ["*"],
-    callees: [
-      "exec",
-      "execSync",
-      "spawn",
-      "spawnSync",
-      "system",
-      "popen",
-      "Popen",
-      "shell_exec",
-      "passthru",
-      "proc_open",
-      "check_output",
-      "check_call",
-      "call",
-      "run",
-      "ProcessBuilder",
-      "getRuntime"
-    ],
-    receivers: ["child_process", "subprocess", "os", "Runtime", "shell", "getRuntime", "runtime"],
+    // Names that mean process execution and nothing else, in every language that
+    // has them: the `*Sync` forms, PHP's builtins, and `popen`/`Popen`.
+    callees: ["execSync", "spawnSync", "shell_exec", "passthru", "proc_open", "popen", "Popen", "check_output", "check_call", "ProcessBuilder", "getRuntime"],
+    receivers: ["child_process", "childProcess", "cp", "subprocess", "os", "Runtime", "shell", "shelljs", "getRuntime", "runtime"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell."
+  },
+  {
+    // JS/TS: `exec`/`spawn` are process execution only when they come from a
+    // process module. `RegExp.prototype.exec`, redux-saga's `spawn` and any
+    // number of `pool.exec`/`db.exec` helpers share the names.
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["javascript"],
+    callees: ["exec", "spawn"],
+    ambiguous: true,
+    receivers: ["child_process", "childProcess", "cp", "shell", "shelljs", "execa", "sh", "zx"],
+    requireModule: ["child_process", "execa", "shelljs", "cross-spawn", "node-pty", "zx", "sudo-prompt", "shell-exec"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell."
+  },
+  {
+    // Python: `subprocess.run/call` and `os.system/popen`. Bare `run`/`call` are
+    // ordinary application verbs, so the import is what makes them a sink --
+    // which is also what catches `from subprocess import run`.
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["python"],
+    callees: ["run", "call", "system"],
+    ambiguous: true,
+    receivers: ["subprocess", "os", "commands", "sp"],
+    requireModule: ["subprocess", "os", "pexpect", "invoke", "plumbum"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell."
+  },
+  {
+    // PHP has no receiver for its process builtins and no other meaning for
+    // these names -- the same allowed bare-callee exception `error_log` carries
+    // in LOG_SINKS. The rest of PHP's family is covered by the unambiguous rule
+    // above; this adds bare `exec` and `system`.
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["php"],
+    callees: ["exec", "system"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell."
+  },
+  {
+    // Compiled/other languages: `system` is unambiguous there (C, Ruby, Perl),
+    // while `exec`/`spawn`/`run` need the Command/Runtime receiver or the
+    // process module.
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["ruby", "c_cpp", "lua"],
+    callees: ["system"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell."
+  },
+  {
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["ruby", "go", "rust", "java", "kotlin", "scala", "csharp", "c_cpp", "elixir", "swift"],
+    callees: ["exec", "spawn", "run", "Command", "output", "Start"],
+    ambiguous: true,
+    receivers: ["Runtime", "runtime", "exec", "Kernel", "Open3", "Process", "Command", "os", "shell", "System"],
+    requireModule: ["os/exec", "std::process", "java.lang.Runtime", "open3", "System.Diagnostics"],
     title: "OS command injection",
     note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell."
   },
@@ -19335,26 +19410,39 @@ var LOG_SINKS = [
     note: "Untrusted data written to a log without newline/CRLF stripping \u2014 verify neutralization; typically low severity."
   }
 ];
-function findSinks(lang, calls, extraSinks, imports) {
+var UNRESOLVED_SEVERITY = "medium";
+var UNRESOLVED_RECEIVER = "unresolved-receiver";
+function findSinks(lang, calls, extraSinks, imports, localDefs) {
   const rules = extraSinks && extraSinks.length ? [...SINKS, ...extraSinks] : SINKS;
   const out2 = [];
   const specs = (imports ?? []).map((i2) => i2.spec.toLowerCase());
   for (const c2 of calls) {
+    const shadowed = !c2.receiver && localDefs?.has(c2.callee) === true;
     for (const rule of rules) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (!rule.callees.includes(c2.callee)) continue;
       if (rule.requireReceiver && !c2.receiver) continue;
       if (rule.receivers && c2.receiver && !rule.receivers.includes(c2.receiver)) continue;
-      if (rule.requireModule && specs.length && !rule.requireModule.some((m) => specs.some((s) => s.includes(m)))) continue;
+      const moduleSeen = !!rule.requireModule && rule.requireModule.some((m) => specs.some((s) => s.includes(m)));
+      if (rule.requireModule && specs.length && !moduleSeen) continue;
+      let downgraded;
+      if (rule.ambiguous && !(c2.receiver && rule.receivers?.includes(c2.receiver))) {
+        if (shadowed) continue;
+        if (!moduleSeen) {
+          if (specs.length) continue;
+          downgraded = UNRESOLVED_RECEIVER;
+        }
+      }
       out2.push({
         line: c2.line,
         callee: c2.callee,
         receiver: c2.receiver,
         kind: rule.kind,
         cwe: rule.cwe,
-        severity: rule.severity,
+        severity: downgraded ? UNRESOLVED_SEVERITY : rule.severity,
         title: rule.title,
-        note: rule.note
+        note: rule.note,
+        ...downgraded ? { downgraded } : {}
       });
       break;
     }
@@ -19627,7 +19715,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
       const arr = entryByKind.get(s.kind) ?? entryByKind.set(s.kind, []).get(s.kind);
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
-    for (const sink of findSinks(lang, f.calls, void 0, f.imports)) {
+    for (const sink of findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols))) {
       totalSinks++;
       la.sinks++;
       da.sinks++;
@@ -20047,6 +20135,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
     const crossFile2 = new Set(path.map((p) => p.file)).size > 1;
     const note = sanitizers.length ? ` Possible sanitizer along the path \u2014 ${sanitizers.map((s) => `${s.file}:${s.line} (${s.note})`).join("; ")} \u2014 confirm it actually neutralizes this flow.` : "";
     const flowNote = dataflow === "unlinked" ? " The value bound at the source is not mentioned again at the sink \u2014 it may travel through state this walk cannot see, or not at all." : "";
+    const receiverNote = sink.downgraded === UNRESOLVED_RECEIVER ? ` [${UNRESOLVED_RECEIVER}] The callee \`${sink.callee}\` was matched by NAME only \u2014 no receiver resolved and no corroborating import was visible, so this may not be a ${sink.kind} call at all. Rated below the catalog severity until you confirm what it resolves to.` : "";
     findings.push({
       id,
       category: "taint",
@@ -20060,7 +20149,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
       path,
       sourceScope,
       ...dataflow ? { dataflow } : {},
-      message: `${crossFile2 ? "Cross-file" : "Intra-file"} candidate: ${srcHit.kind} input at ${srcStep.file}:${srcStep.line} may reach the ${sink.kind} sink ${calleeLabel(sink)} at ${sinkFile}:${sink.line} through ${path.length - 1} hop(s). ${sink.note}${note}${flowNote} Heuristic \u2014 verify the data actually reaches the sink unsanitized before trusting it.`,
+      message: `${crossFile2 ? "Cross-file" : "Intra-file"} candidate: ${srcHit.kind} input at ${srcStep.file}:${srcStep.line} may reach the ${sink.kind} sink ${calleeLabel(sink)} at ${sinkFile}:${sink.line} through ${path.length - 1} hop(s). ${sink.note}${note}${flowNote}${receiverNote} Heuristic \u2014 verify the data actually reaches the sink unsanitized before trusting it.`,
       tool: "ultrasec",
       references: [cweUrl(sink.cwe)],
       status: "open"
@@ -20069,7 +20158,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    const sinkHits = [...findSinks(lang, file.calls, extraSinks, file.imports), ...findTextSinks(lang, content(file.rel))];
+    const sinkHits = [...findSinks(lang, file.calls, extraSinks, file.imports, localDefNames(file.symbols)), ...findTextSinks(lang, content(file.rel))];
     for (const sink of sinkHits) {
       const sinkSym = enclosingSymbolName(file.symbols, sink.line);
       const sinkStep = {
@@ -20136,13 +20225,14 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls, void 0, file.imports)) {
+    for (const sink of findSinks(lang, file.calls, void 0, file.imports, localDefNames(file.symbols))) {
       const key = `${file.rel}:${sink.line}:${sink.kind}`;
       if (taken.has(key)) continue;
       taken.add(key);
       const sinkLine = lines5(file.rel)[sink.line - 1] ?? "";
       const sanitizers = findSanitizers(lang, sinkLine, sink.kind);
       const note = sanitizers.length ? ` A possible sanitizer is present on the line (${sanitizers.join("; ")}) \u2014 confirm it neutralizes any untrusted input.` : "";
+      const receiverNote = sink.downgraded === UNRESOLVED_RECEIVER ? ` [${UNRESOLVED_RECEIVER}] Matched by NAME only \u2014 no receiver resolved and no corroborating import was visible, so \`${sink.callee}\` may not be a ${sink.kind} call at all.` : "";
       findings.push({
         id: shortHash2(`sink:${file.rel}:${sink.line}:${sink.kind}`),
         category: "sast",
@@ -20151,7 +20241,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
         severity: sink.severity,
         confidence: "low",
         sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbolName(file.symbols, sink.line) },
-        message: `Dangerous ${sink.kind} sink ${sink.callee}() at ${file.rel}:${sink.line} that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look \u2014 the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). ${sink.note}${note} Confirm whether attacker-controlled data can reach it before trusting it.`,
+        message: `Dangerous ${sink.kind} sink ${sink.callee}() at ${file.rel}:${sink.line} that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look \u2014 the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). ${sink.note}${note}${receiverNote} Confirm whether attacker-controlled data can reach it before trusting it.`,
         tool: "ultrasec",
         references: [cweUrl(sink.cwe)],
         status: "open"
@@ -20252,7 +20342,7 @@ function enumerateSensitiveLogCandidates(scan2, opts = {}) {
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls, LOG_SINKS, file.imports)) {
+    for (const sink of findSinks(lang, file.calls, LOG_SINKS, file.imports, localDefNames(file.symbols))) {
       if (sink.kind !== "log") continue;
       const raw = lines5(file.rel)[sink.line - 1] ?? "";
       const nameHit = SENSITIVE_NAME_RE.test(raw);
@@ -25025,7 +25115,7 @@ function buildAssumptionWorklist(scan2) {
     if (!lang) continue;
     const text = readText2(join53(scan2.repo, f.rel));
     const sources = findSources(lang, text).length;
-    const sinks = findSinks(lang, f.calls, void 0, f.imports).length;
+    const sinks = findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols)).length;
     if (!sources && !sinks) continue;
     const why = sources && sinks ? "reads untrusted input AND performs a dangerous operation" : sources ? "reads untrusted input" : "performs a dangerous operation";
     const named = f.symbols.filter((s) => s.name).slice(0, 12);

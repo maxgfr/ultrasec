@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { readText } from "./walk.js";
 import type { RepoScan } from "./scan.js";
+import { localDefNames } from "./scan.js";
 import { langForFile } from "./lang.js";
 import { findSinks, findSources } from "./catalog.js";
 import { byStr } from "./util.js";
@@ -99,7 +100,7 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
 
-    for (const sink of findSinks(lang, f.calls, undefined, f.imports)) {
+    for (const sink of findSinks(lang, f.calls, undefined, f.imports, localDefNames(f.symbols))) {
       totalSinks++;
       la.sinks++;
       da.sinks++;

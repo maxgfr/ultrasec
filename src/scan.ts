@@ -98,6 +98,30 @@ function toEngineOptions(repo: string, opts: ScanOptions): EngineScanOptions {
  *  byte-identical to what `buildRawCallerIndex` records for the same site. */
 const REFERENCE_KINDS: ReadonlySet<string> = new Set(["reexport", "reexport-all", "default"]);
 
+/** Symbol kinds that declare a CALLABLE the file owns. Deliberately an
+ *  allow-list, and deliberately without `const`/`let`/`var`: the engine reports
+ *  `const spawn = require("child_process").spawn` as a `const` symbol named
+ *  `spawn`, and treating that as a local definition would silence a real
+ *  command-injection sink. A `const` holding an arrow function is therefore
+ *  missed by this gate — the safe direction to be wrong in. */
+const CALLABLE_KINDS: ReadonlySet<string> = new Set(["function", "method", "def", "getter", "setter", "macro"]);
+
+/**
+ * The callables a file defines itself, for `findSinks`'s local-definition gate.
+ *
+ * A bare call to a name the file declares resolves to that declaration, whatever
+ * the sink catalog thinks the name means: an application `run()` declared 68
+ * lines above its own call site is not `subprocess.run`, and rating it CRITICAL
+ * CWE-78 sends the adjudicator to the wrong question. Member calls are untouched
+ * — `child_process.exec` is still `child_process.exec` in a file that happens to
+ * define its own `exec`.
+ */
+export function localDefNames(symbols: Sym[]): Set<string> {
+  const names = new Set<string>();
+  for (const s of symbols) if (CALLABLE_KINDS.has(s.kind)) names.add(s.name);
+  return names;
+}
+
 /**
  * The symbol enclosing `line` — the definition ultrasec attributes a call site or
  * a sink/source seed to. IDENTICAL to the engine's `enclosingAmong` (src/callers.ts,

@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import type { RepoScan } from "./scan.js";
+import { localDefNames } from "./scan.js";
 import { readText } from "./walk.js";
 import { langForFile } from "./lang.js";
 import { findSinks, findSources } from "./catalog.js";
@@ -71,7 +72,7 @@ export function buildAssumptionWorklist(scan: RepoScan): AssumptionItem[] {
     if (!lang) continue;
     const text = readText(join(scan.repo, f.rel));
     const sources = findSources(lang, text).length;
-    const sinks = findSinks(lang, f.calls, undefined, f.imports).length;
+    const sinks = findSinks(lang, f.calls, undefined, f.imports, localDefNames(f.symbols)).length;
     if (!sources && !sinks) continue; // nothing untrusted and nothing dangerous
 
     const why =

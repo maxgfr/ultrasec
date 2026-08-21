@@ -10,6 +10,7 @@
 import { join } from "node:path";
 import { readText } from "../walk.js";
 import type { RepoScan, FileScan } from "../scan.js";
+import { localDefNames } from "../scan.js";
 import { langForFile } from "../lang.js";
 import { findSinks, LOG_SINKS, cweUrl } from "../catalog.js";
 import { shortHash, byStr } from "../util.js";
@@ -71,7 +72,7 @@ export function enumerateSensitiveLogCandidates(scan: RepoScan, opts: SensitiveL
     const lang = langForFile(file.rel);
     if (!lang) continue;
 
-    for (const sink of findSinks(lang, file.calls, LOG_SINKS, file.imports)) {
+    for (const sink of findSinks(lang, file.calls, LOG_SINKS, file.imports, localDefNames(file.symbols))) {
       if (sink.kind !== "log") continue; // a default-catalog match on this call, not a log sink
 
       const raw = lines(file.rel)[sink.line - 1] ?? "";

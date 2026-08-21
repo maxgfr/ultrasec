@@ -33,6 +33,20 @@ export interface SinkRule {
    *  disambiguates. Ignored when the file has no imports recorded, so the regex
    *  extraction tier — which may not see them — never loses the rule entirely. */
   requireModule?: string[];
+  /**
+   * The callees are common enough that a bare, uncorroborated call is more
+   * likely to be something else entirely (`exec` is `RegExp.prototype.exec` far
+   * more often than it is `child_process.exec`). Corroboration is a receiver
+   * from `receivers`, or an import matching `requireModule`.
+   *
+   * Uncorroborated, the hit is NOT simply dropped — that would trade one silent
+   * failure for another. It is dropped only when imports were actually
+   * extracted and none matched (positive evidence that this is a different
+   * `exec`). When the extractor could not see imports at all — the regex tier —
+   * the hit survives, DOWNGRADED (`SinkHit.downgraded`), because a critical
+   * we cannot substantiate is worse than a medium we can revisit.
+   */
+  ambiguous?: boolean;
   title: string;
   note: string;
 }
@@ -67,30 +81,99 @@ export const SINKS: SinkRule[] = [
     title: "SQL injection",
     note: "Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query.",
   },
+  // -- OS command injection (CWE-78) -----------------------------------------
+  // Split into an unambiguous rule plus per-language gated ones, because the two
+  // names carrying most of the weight here -- `exec` and `run` -- are among the
+  // most reused identifiers in programming. A single `languages: ["*"]` rule
+  // with a `receivers` hint could not tell `child_process.exec(cmd)` from
+  // `/(LEGIARTI\w+)/.exec(url)`: the extractor reports a receiver only when it
+  // is a plain identifier (`readReceiver`), so a regex literal, a call chain and
+  // a genuinely bare call all reach `findSinks` looking identical. Measured on a
+  // real repo that parses legal-document ids with regexes, that produced 11
+  // false CRITICALs out of 17, plus a 12th on an application `run()` defined 68
+  // lines above its own call site.
+  //
+  // So the ambiguous names must be CORROBORATED before firing -- by a known
+  // receiver or by a process-module import (`ambiguous: true`, see `findSinks`)
+  // -- and a callee the file DEFINES itself never matches the catalog at all
+  // (`localDefs`). The unambiguous names below keep firing everywhere, bare
+  // included, because nothing else is called `shell_exec` or `execSync`.
   {
     kind: "command",
     cwe: "CWE-78",
     severity: "critical",
     languages: ["*"],
-    callees: [
-      "exec",
-      "execSync",
-      "spawn",
-      "spawnSync",
-      "system",
-      "popen",
-      "Popen",
-      "shell_exec",
-      "passthru",
-      "proc_open",
-      "check_output",
-      "check_call",
-      "call",
-      "run",
-      "ProcessBuilder",
-      "getRuntime",
-    ],
-    receivers: ["child_process", "subprocess", "os", "Runtime", "shell", "getRuntime", "runtime"],
+    // Names that mean process execution and nothing else, in every language that
+    // has them: the `*Sync` forms, PHP's builtins, and `popen`/`Popen`.
+    callees: ["execSync", "spawnSync", "shell_exec", "passthru", "proc_open", "popen", "Popen", "check_output", "check_call", "ProcessBuilder", "getRuntime"],
+    receivers: ["child_process", "childProcess", "cp", "subprocess", "os", "Runtime", "shell", "shelljs", "getRuntime", "runtime"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell.",
+  },
+  {
+    // JS/TS: `exec`/`spawn` are process execution only when they come from a
+    // process module. `RegExp.prototype.exec`, redux-saga's `spawn` and any
+    // number of `pool.exec`/`db.exec` helpers share the names.
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["javascript"],
+    callees: ["exec", "spawn"],
+    ambiguous: true,
+    receivers: ["child_process", "childProcess", "cp", "shell", "shelljs", "execa", "sh", "zx"],
+    requireModule: ["child_process", "execa", "shelljs", "cross-spawn", "node-pty", "zx", "sudo-prompt", "shell-exec"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell.",
+  },
+  {
+    // Python: `subprocess.run/call` and `os.system/popen`. Bare `run`/`call` are
+    // ordinary application verbs, so the import is what makes them a sink --
+    // which is also what catches `from subprocess import run`.
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["python"],
+    callees: ["run", "call", "system"],
+    ambiguous: true,
+    receivers: ["subprocess", "os", "commands", "sp"],
+    requireModule: ["subprocess", "os", "pexpect", "invoke", "plumbum"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell.",
+  },
+  {
+    // PHP has no receiver for its process builtins and no other meaning for
+    // these names -- the same allowed bare-callee exception `error_log` carries
+    // in LOG_SINKS. The rest of PHP's family is covered by the unambiguous rule
+    // above; this adds bare `exec` and `system`.
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["php"],
+    callees: ["exec", "system"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell.",
+  },
+  {
+    // Compiled/other languages: `system` is unambiguous there (C, Ruby, Perl),
+    // while `exec`/`spawn`/`run` need the Command/Runtime receiver or the
+    // process module.
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["ruby", "c_cpp", "lua"],
+    callees: ["system"],
+    title: "OS command injection",
+    note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell.",
+  },
+  {
+    kind: "command",
+    cwe: "CWE-78",
+    severity: "critical",
+    languages: ["ruby", "go", "rust", "java", "kotlin", "scala", "csharp", "c_cpp", "elixir", "swift"],
+    callees: ["exec", "spawn", "run", "Command", "output", "Start"],
+    ambiguous: true,
+    receivers: ["Runtime", "runtime", "exec", "Kernel", "Open3", "Process", "Command", "os", "shell", "System"],
+    requireModule: ["os/exec", "std::process", "java.lang.Runtime", "open3", "System.Diagnostics"],
     title: "OS command injection",
     note: "Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell.",
   },
@@ -656,18 +739,51 @@ export interface SinkHit {
   severity: Severity;
   title: string;
   note: string;
+  /** Why this hit was reported below its catalog severity — set when an
+   *  `ambiguous` rule matched a bare call the extractor could not corroborate.
+   *  Absent on every ordinary hit, so consumers that ignore it behave exactly as
+   *  before this field existed. */
+  downgraded?: string;
 }
+
+/** Severity an `ambiguous` rule falls back to when nothing corroborated it. A
+ *  candidate worth a second look, not a headline. */
+const UNRESOLVED_SEVERITY: Severity = "medium";
+export const UNRESOLVED_RECEIVER = "unresolved-receiver";
 
 /**
  * @param extraSinks Additional rules unioned in for this call ONLY (e.g.
  * `LOG_SINKS` under `scan --log-hygiene`). Omitted/empty ⇒ matches exactly
  * `SINKS`, byte-identical to before this param existed.
+ * @param imports The file's import specifiers, for `requireModule` and for
+ * corroborating an `ambiguous` rule.
+ * @param localDefs Callables the file DEFINES itself. A receiver-less call to
+ * one of them is that function, not the catalog's — an application `run()`
+ * declared 68 lines above its call site is not `subprocess.run`. Consulted by
+ * `ambiguous` rules only (see the gate below for why). Omitted ⇒ no
+ * local-definition gate, byte-identical to before this param existed.
  */
-export function findSinks(lang: LangSpec, calls: Call[], extraSinks?: SinkRule[], imports?: readonly { spec: string }[]): SinkHit[] {
+export function findSinks(
+  lang: LangSpec,
+  calls: Call[],
+  extraSinks?: SinkRule[],
+  imports?: readonly { spec: string }[],
+  localDefs?: ReadonlySet<string>,
+): SinkHit[] {
   const rules = extraSinks && extraSinks.length ? [...SINKS, ...extraSinks] : SINKS;
   const out: SinkHit[] = [];
   const specs = (imports ?? []).map((i) => i.spec.toLowerCase());
   for (const c of calls) {
+    // A call to a name this file defines resolves to that definition, whatever
+    // the catalog thinks the name means. Applied to `ambiguous` rules only, and
+    // for a reason worth stating: "no receiver" does NOT mean "bare call". The
+    // extractor reports a receiver only when it is a plain identifier, so
+    // `client.collection("users").find(filter)` — a chained call — arrives here
+    // receiver-less too. Gating every rule on local definitions therefore
+    // silenced a real NoSQL sink in a data-access wrapper that named its own
+    // function `find`. Ambiguous rules already require corroboration; this is
+    // one more piece of it, and the only place the trade is worth making.
+    const shadowed = !c.receiver && localDefs?.has(c.callee) === true;
     for (const rule of rules) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (!rule.callees.includes(c.callee)) continue;
@@ -680,16 +796,34 @@ export function findSinks(lang: LangSpec, calls: Call[], extraSinks?: SinkRule[]
       if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) continue;
       // Technology gate. Only enforced when imports were actually extracted:
       // an empty list means we couldn't see them, not that there are none.
-      if (rule.requireModule && specs.length && !rule.requireModule.some((m) => specs.some((s) => s.includes(m)))) continue;
+      const moduleSeen = !!rule.requireModule && rule.requireModule.some((m) => specs.some((s) => s.includes(m)));
+      if (rule.requireModule && specs.length && !moduleSeen) continue;
+      // Corroboration gate for `ambiguous` rules.
+      let downgraded: string | undefined;
+      if (rule.ambiguous && !(c.receiver && rule.receivers?.includes(c.receiver))) {
+        // A local definition outranks the import. A file that declares `run`
+        // and then calls `run(x)` is calling ITS `run`, even if the same file
+        // imports `subprocess` for use elsewhere — shadowing is a language rule,
+        // not a hint. (Only a receiver could say otherwise, and a call with a
+        // receiver is never `shadowed`.)
+        if (shadowed) continue;
+        // Otherwise the import decides. Without one, it turns on whether imports
+        // were VISIBLE at all — see the `ambiguous` doc comment.
+        if (!moduleSeen) {
+          if (specs.length) continue;
+          downgraded = UNRESOLVED_RECEIVER;
+        }
+      }
       out.push({
         line: c.line,
         callee: c.callee,
         receiver: c.receiver,
         kind: rule.kind,
         cwe: rule.cwe,
-        severity: rule.severity,
+        severity: downgraded ? UNRESOLVED_SEVERITY : rule.severity,
         title: rule.title,
         note: rule.note,
+        ...(downgraded ? { downgraded } : {}),
       });
       break; // first matching rule wins
     }
