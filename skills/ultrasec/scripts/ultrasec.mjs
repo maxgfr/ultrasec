@@ -18624,10 +18624,10 @@ function buildGraph2(scan2) {
   const symbolDefs = {};
   for (const [name2, files] of defs) symbolDefs[name2] = [...files].sort(byStr2);
   const edgeMap = /* @__PURE__ */ new Map();
-  const resolve36 = buildFileResolver(scan2);
+  const resolve37 = buildFileResolver(scan2);
   for (const f of scan2.files) {
     for (const imp of f.imports) {
-      const to = resolve36(f.rel, imp.spec);
+      const to = resolve37(f.rel, imp.spec);
       if (to && to !== f.rel) add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
     }
     for (const c2 of f.calls) {
@@ -20252,7 +20252,7 @@ wrote ${join31(resolve8(out2), "MAP.md")} + attack-surface.json`);
 }
 
 // src/commands/scan.ts
-import { resolve as resolve10, join as join48, relative as relative4 } from "path";
+import { resolve as resolve11, join as join48, relative as relative4 } from "path";
 import { existsSync as existsSync23 } from "fs";
 
 // src/taint.ts
@@ -23460,7 +23460,7 @@ var ADAPTERS = [
 
 // src/context.ts
 import { existsSync as existsSync22, readFileSync as readFileSync21 } from "fs";
-import { join as join47 } from "path";
+import { join as join47, resolve as resolve10 } from "path";
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
 var AUTH_RE = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
@@ -23490,19 +23490,65 @@ var JS_FRAMEWORKS = {
   passport: "passport",
   jsonwebtoken: "jwt"
 };
+var PY_RULES = [
+  [/\bflask\b/i, "flask"],
+  [/\bdjango\b/i, "django"],
+  [/\bfastapi\b/i, "fastapi"],
+  [/\btornado\b/i, "tornado"],
+  [/\bbottle\b/i, "bottle"],
+  [/\bpyramid\b/i, "pyramid"],
+  [/\bsanic\b/i, "sanic"],
+  [/\baiohttp\b/i, "aiohttp"],
+  [/\bsqlalchemy\b/i, "sqlalchemy"]
+];
 var TEXT_MANIFESTS = [
   {
     file: "requirements.txt",
+    rules: PY_RULES
+  },
+  // Same rules, the manifests modern Python actually uses. requirements.txt alone
+  // reported "none detected" on any Poetry/PDM/uv or setuptools project.
+  {
+    file: "pyproject.toml",
+    rules: PY_RULES
+  },
+  {
+    file: "Pipfile",
+    rules: PY_RULES
+  },
+  {
+    file: "setup.py",
+    rules: PY_RULES
+  },
+  {
+    file: "Cargo.toml",
     rules: [
-      [/\bflask\b/i, "flask"],
-      [/\bdjango\b/i, "django"],
-      [/\bfastapi\b/i, "fastapi"],
-      [/\btornado\b/i, "tornado"],
-      [/\bbottle\b/i, "bottle"],
-      [/\bpyramid\b/i, "pyramid"],
-      [/\bsanic\b/i, "sanic"],
-      [/\baiohttp\b/i, "aiohttp"],
-      [/\bsqlalchemy\b/i, "sqlalchemy"]
+      [/^\s*actix-web\s*=/m, "actix-web"],
+      [/^\s*axum\s*=/m, "axum"],
+      [/^\s*rocket\s*=/m, "rocket"],
+      [/^\s*warp\s*=/m, "warp"],
+      [/^\s*tide\s*=/m, "tide"],
+      [/^\s*diesel\s*=/m, "diesel"],
+      [/^\s*sqlx\s*=/m, "sqlx"]
+    ]
+  },
+  {
+    file: "build.gradle.kts",
+    rules: [[/org\.springframework/, "spring"]]
+  },
+  {
+    file: "mix.exs",
+    rules: [
+      [/:phoenix\b/, "phoenix"],
+      [/:plug\b/, "plug"],
+      [/:ecto\b/, "ecto"]
+    ]
+  },
+  {
+    file: "deno.json",
+    rules: [
+      [/\boak\b/, "oak"],
+      [/\bfresh\b/, "fresh"]
     ]
   },
   {
@@ -23545,9 +23591,20 @@ var TEXT_MANIFESTS = [
     ]
   }
 ];
+function manifestDirs(repo, names) {
+  const dirs = new Set(findManifestDirs(repo, names));
+  try {
+    for (const w of detectWorkspaces(repo).packages) {
+      const dir = resolve10(repo, w.dir);
+      for (const name2 of names) if (existsSync22(join47(dir, name2))) dirs.add(dir);
+    }
+  } catch {
+  }
+  return [...dirs].sort(byStr2);
+}
 function detectFrameworks(repo) {
   const found = /* @__PURE__ */ new Set();
-  for (const dir of findManifestDirs(repo, ["package.json"])) {
+  for (const dir of manifestDirs(repo, ["package.json"])) {
     try {
       const pkg = JSON.parse(readFileSync21(join47(dir, "package.json"), "utf8"));
       const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {}, ...pkg.peerDependencies ?? {} };
@@ -23559,7 +23616,7 @@ function detectFrameworks(repo) {
     }
   }
   for (const m of TEXT_MANIFESTS) {
-    for (const dir of findManifestDirs(repo, [m.file])) {
+    for (const dir of manifestDirs(repo, [m.file])) {
       let raw;
       try {
         raw = readFileSync21(join47(dir, m.file), "utf8");
@@ -23771,8 +23828,8 @@ var BUDGETS = {
 };
 var REVDEP_DEPTH = 2;
 async function runScan(args2) {
-  const repo = resolve10(flagStr(args2, "repo") ?? ".");
-  const out2 = resolve10(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve11(flagStr(args2, "repo") ?? ".");
+  const out2 = resolve11(flagStr(args2, "out") ?? ".ultrasec");
   if (!isScannableDir(repo)) {
     eprintln(`ultrasec: --repo '${repo}' is not a directory. Aborting \u2014 an unscannable path must not report a clean audit.`);
     return 2;
@@ -23999,10 +24056,10 @@ async function runScan(args2) {
 
 // src/commands/context.ts
 import { mkdirSync as mkdirSync11, writeFileSync as writeFileSync12 } from "fs";
-import { join as join49, resolve as resolve11 } from "path";
+import { join as join49, resolve as resolve12 } from "path";
 function runContext(args2) {
-  const repo = resolve11(flagStr(args2, "repo") ?? ".");
-  const out2 = resolve11(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve12(flagStr(args2, "repo") ?? ".");
+  const out2 = resolve12(flagStr(args2, "out") ?? ".ultrasec");
   if (!isScannableDir(repo)) {
     eprintln(`ultrasec context: --repo '${repo}' is not a directory.`);
     return 2;
@@ -24044,7 +24101,7 @@ function runContext(args2) {
 }
 
 // src/commands/import.ts
-import { resolve as resolve12, join as join50 } from "path";
+import { resolve as resolve13, join as join50 } from "path";
 import { existsSync as existsSync24, readFileSync as readFileSync22 } from "fs";
 
 // src/tools/deepsec.ts
@@ -24116,7 +24173,7 @@ async function runImport(args2) {
     eprintln("ultrasec import: need a findings file \u2014 `ultrasec import <findings.json> --run <dir>`.");
     return 2;
   }
-  const run2 = resolve12(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve13(flagStr(args2, "run") ?? ".ultrasec");
   const format = flagStr(args2, "format") ?? "deepsec-json";
   if (format !== "deepsec-json") {
     eprintln(`ultrasec import: unknown --format '${format}' (supported: deepsec-json).`);
@@ -24124,7 +24181,7 @@ async function runImport(args2) {
   }
   let raw;
   try {
-    raw = readFileSync22(resolve12(file), "utf8");
+    raw = readFileSync22(resolve13(file), "utf8");
   } catch (e) {
     eprintln(`ultrasec import: cannot read ${file} (${e instanceof Error ? e.message : String(e)}).`);
     return 2;
@@ -24145,7 +24202,7 @@ async function runImport(args2) {
   }
   const prevFindings = prev?.findings ?? [];
   const correlated = correlate([...prevFindings, ...imported]);
-  const repo = prev?.manifest.repo ?? resolve12(flagStr(args2, "repo") ?? ".");
+  const repo = prev?.manifest.repo ?? resolve13(flagStr(args2, "repo") ?? ".");
   const enrichOn = !(flagBool(args2, "no-enrich") || flagBool(args2, "offline"));
   const { findings: enriched, note: riskNote } = await enrichFindings(correlated, { enabled: enrichOn, context: loadContextDoc(run2) });
   const blameOn = flagBool(args2, "blame") || flagBool(args2, "provenance");
@@ -24183,7 +24240,7 @@ async function runImport(args2) {
 }
 
 // src/commands/logs.ts
-import { resolve as resolve13, join as join51, dirname as dirname7, extname as extname3, sep as sep5 } from "path";
+import { resolve as resolve14, join as join51, dirname as dirname7, extname as extname3, sep as sep5 } from "path";
 import { existsSync as existsSync25, statSync as statSync10, readdirSync as readdirSync6, mkdirSync as mkdirSync12, writeFileSync as writeFileSync13, openSync, readSync, closeSync } from "fs";
 
 // src/logs/analyze.ts
@@ -25105,7 +25162,7 @@ async function runLogs(args2) {
     eprintln(`ultrasec logs: ${e instanceof Error ? e.message : String(e)}`);
     return 2;
   }
-  const out2 = resolve13(flagStr(args2, "out") ?? ".ultrasec-logs");
+  const out2 = resolve14(flagStr(args2, "out") ?? ".ultrasec-logs");
   const budget = flagStr(args2, "budget") ?? "standard";
   if (!["quick", "standard", "thorough"].includes(budget)) {
     eprintln(`ultrasec logs: unknown --budget '${budget}' (expected quick|standard|thorough).`);
@@ -25224,7 +25281,7 @@ function looksLikeText(path) {
 function expandInputs(inputs) {
   const out2 = /* @__PURE__ */ new Set();
   for (const raw of inputs) {
-    const p = resolve13(raw);
+    const p = resolve14(raw);
     if (!existsSync25(p)) throw new Error(`path not found: ${raw}`);
     const st = statSync10(p);
     if (st.isDirectory()) {
@@ -25262,7 +25319,7 @@ function strictCommonAncestor(dirs) {
   return joined === "" ? sep5 : joined;
 }
 function computeBase(absFiles) {
-  const cwd = resolve13(process.cwd());
+  const cwd = resolve14(process.cwd());
   if (absFiles.every((f) => f.startsWith(cwd + sep5))) return cwd;
   const common = strictCommonAncestor(absFiles.map((f) => dirname7(f)));
   if (!common) throw new Error("input log paths share no common ancestor directory \u2014 pass paths under one common root.");
@@ -25270,7 +25327,7 @@ function computeBase(absFiles) {
 }
 
 // src/commands/dossier.ts
-import { resolve as resolve14 } from "path";
+import { resolve as resolve15 } from "path";
 
 // src/dossier.ts
 import { join as join52 } from "path";
@@ -25358,7 +25415,7 @@ function renderFindingDossier(repo, graph, f, context) {
 
 // src/commands/dossier.ts
 function runDossier(args2) {
-  const run2 = resolve14(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve15(flagStr(args2, "run") ?? ".ultrasec");
   const id = args2._[1];
   if (!id) {
     eprintln("ultrasec dossier: need a <finding-id>. List them in DOSSIER.md or with `paths`.");
@@ -25384,11 +25441,11 @@ function runDossier(args2) {
 }
 
 // src/commands/triage.ts
-import { resolve as resolve16 } from "path";
+import { resolve as resolve17 } from "path";
 
 // src/stage.ts
 import { mkdirSync as mkdirSync13, writeFileSync as writeFileSync14, readFileSync as readFileSync23, readdirSync as readdirSync7, statSync as statSync11 } from "fs";
-import { join as join53, resolve as resolve15 } from "path";
+import { join as join53, resolve as resolve16 } from "path";
 function stageFiles(stem) {
   return { todo: `${stem}.todo.json`, md: `${stem}.md` };
 }
@@ -25400,8 +25457,8 @@ function emitWorklist(run2, files, items, md) {
   return todoPath;
 }
 function collectApplyFiles(applyPath, dirRegex) {
-  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve15(s.trim()));
-  const abs = resolve15(applyPath);
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve16(s.trim()));
+  const abs = resolve16(applyPath);
   let isDir = false;
   try {
     isDir = statSync11(abs).isDirectory();
@@ -25748,7 +25805,7 @@ function parseTriage(raw) {
 
 // src/commands/triage.ts
 function runTriage(args2) {
-  const run2 = resolve16(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve17(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -25798,14 +25855,14 @@ function runTriage(args2) {
 
 // src/commands/investigate.ts
 import { readFileSync as readFileSync24 } from "fs";
-import { join as join56, resolve as resolve18 } from "path";
+import { join as join56, resolve as resolve19 } from "path";
 
 // src/check.ts
 import { existsSync as existsSync26, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
-import { join as join54, resolve as resolve17, sep as sep6 } from "path";
+import { join as join54, resolve as resolve18, sep as sep6 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve17(repo);
-  const abs = resolve17(base, file);
+  const base = resolve18(repo);
+  const abs = resolve18(base, file);
   return abs === base || abs.startsWith(base + sep6);
 }
 var LINE_COUNT_CHUNK_BYTES = 1 << 20;
@@ -26248,7 +26305,7 @@ function parseDiscoveries(raw) {
 
 // src/commands/investigate.ts
 function runInvestigate(args2) {
-  const run2 = resolve18(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve19(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -26256,7 +26313,7 @@ function runInvestigate(args2) {
     eprintln(`ultrasec investigate: ${e.message}`);
     return 2;
   }
-  const repo = resolve18(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve19(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed;
@@ -26342,9 +26399,9 @@ function runInvestigate(args2) {
 }
 
 // src/commands/paths.ts
-import { resolve as resolve19 } from "path";
+import { resolve as resolve20 } from "path";
 function runPaths(args2) {
-  const run2 = resolve19(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve20(flagStr(args2, "run") ?? ".ultrasec");
   const kind = flagStr(args2, "kind");
   const sev = flagStr(args2, "severity");
   let d;
@@ -26379,9 +26436,9 @@ function runPaths(args2) {
 }
 
 // src/commands/verify.ts
-import { join as join57, resolve as resolve20 } from "path";
+import { join as join57, resolve as resolve21 } from "path";
 function runVerify(args2) {
-  const run2 = resolve20(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve21(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -26470,7 +26527,7 @@ function applyMode(run2, dossier, applyPath, args2) {
 }
 
 // src/commands/revalidate.ts
-import { resolve as resolve21 } from "path";
+import { resolve as resolve22 } from "path";
 
 // src/revalidate.ts
 var REVALIDATION_VERDICTS = ["still-valid", "fixed", "false-positive", "uncertain"];
@@ -26625,7 +26682,7 @@ function revalFactsFromWorklist(items) {
 
 // src/commands/revalidate.ts
 function runRevalidate(args2) {
-  const run2 = resolve21(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve22(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -26633,7 +26690,7 @@ function runRevalidate(args2) {
     eprintln(`ultrasec revalidate: ${e.message}`);
     return 2;
   }
-  const repo = resolve21(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve22(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed;
@@ -26698,7 +26755,7 @@ function runRevalidate(args2) {
 
 // src/commands/variants.ts
 import { writeFileSync as writeFileSync15 } from "fs";
-import { join as join58, resolve as resolve22 } from "path";
+import { join as join58, resolve as resolve23 } from "path";
 
 // src/variants.ts
 function sinkOf(f) {
@@ -26844,7 +26901,7 @@ function renderRegressionRules(results) {
 
 // src/commands/variants.ts
 function runVariants(args2) {
-  const run2 = resolve22(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve23(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -26852,7 +26909,7 @@ function runVariants(args2) {
     eprintln(`ultrasec variants: ${e.message}`);
     return 2;
   }
-  const repo = resolve22(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve23(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed;
@@ -26915,9 +26972,9 @@ function runVariants(args2) {
 
 // src/commands/assumptions.ts
 import { writeFileSync as writeFileSync16 } from "fs";
-import { join as join59, resolve as resolve23 } from "path";
+import { join as join59, resolve as resolve24 } from "path";
 function runAssumptions(args2) {
-  const run2 = resolve23(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve24(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -26925,7 +26982,7 @@ function runAssumptions(args2) {
     eprintln(`ultrasec assumptions: ${e.message}`);
     return 2;
   }
-  const repo = resolve23(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve24(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed;
@@ -26981,7 +27038,7 @@ function runAssumptions(args2) {
 
 // src/commands/coverage.ts
 import { writeFileSync as writeFileSync17 } from "fs";
-import { join as join60, resolve as resolve24 } from "path";
+import { join as join60, resolve as resolve25 } from "path";
 
 // src/coverage.ts
 var ASVS_CATEGORIES = [
@@ -27352,7 +27409,7 @@ function renderCoverageMd(rows, standardTitle = "OWASP ASVS") {
 
 // src/commands/coverage.ts
 function runCoverage(args2) {
-  const run2 = resolve24(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve25(flagStr(args2, "run") ?? ".ultrasec");
   const standardId = flagStr(args2, "standard") ?? DEFAULT_STANDARD;
   if (!own(STANDARDS, standardId)) {
     eprintln(`ultrasec coverage: unknown --standard '${standardId}' (expected ${Object.keys(STANDARDS).join("|")}).`);
@@ -27385,7 +27442,7 @@ function runCoverage(args2) {
 }
 
 // src/commands/narrative.ts
-import { resolve as resolve25 } from "path";
+import { resolve as resolve26 } from "path";
 
 // src/narrative.ts
 var AI_DISCLAIMER = "AI-authored \u2014 verify against the cited findings before acting.";
@@ -27562,7 +27619,7 @@ function hardeningNotesMd(n) {
 
 // src/commands/narrative.ts
 function runNarrative(args2) {
-  const run2 = resolve25(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve26(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -27587,7 +27644,7 @@ function runNarrative(args2) {
 }
 
 // src/commands/implement.ts
-import { resolve as resolve26 } from "path";
+import { resolve as resolve27 } from "path";
 
 // src/implement.ts
 import { existsSync as existsSync27, readFileSync as readFileSync25 } from "fs";
@@ -27748,7 +27805,7 @@ function renderImplementMd(wl, context) {
 
 // src/commands/implement.ts
 function runImplement(args2) {
-  const run2 = resolve26(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve27(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -27757,7 +27814,7 @@ function runImplement(args2) {
     return 2;
   }
   const narrFile = flagStr(args2, "narrative");
-  const narrative = loadNarrative(run2, dossier, narrFile ? resolve26(narrFile) : void 0);
+  const narrative = loadNarrative(run2, dossier, narrFile ? resolve27(narrFile) : void 0);
   const wl = buildImplementWorklist(dossier, narrative);
   const todoPath = emitWorklist(run2, stageFiles("IMPLEMENT"), wl, renderImplementMd(wl, loadContextDoc(run2)));
   if (flagBool(args2, "json")) {
@@ -27776,9 +27833,9 @@ function runImplement(args2) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve27 } from "path";
+import { resolve as resolve28 } from "path";
 function runCheck(args2) {
-  const run2 = resolve27(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve28(flagStr(args2, "run") ?? ".ultrasec");
   const repo = flagStr(args2, "repo");
   const semantic = flagBool(args2, "semantic");
   const minSevRaw = flagStr(args2, "min-severity");
@@ -27808,7 +27865,7 @@ function runCheck(args2) {
 
 // src/commands/render.ts
 import { readFileSync as readFileSync26, writeFileSync as writeFileSync18 } from "fs";
-import { join as join62, resolve as resolve28 } from "path";
+import { join as join62, resolve as resolve29 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -28144,7 +28201,7 @@ function renderHtml(d, narrative) {
 
 // src/commands/render.ts
 function runRender(args2) {
-  const run2 = resolve28(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve29(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -28158,7 +28215,7 @@ function runRender(args2) {
   if (narrativePath) {
     let parsed;
     try {
-      parsed = parseNarrative(readFileSync26(resolve28(narrativePath), "utf8"));
+      parsed = parseNarrative(readFileSync26(resolve29(narrativePath), "utf8"));
     } catch (e) {
       eprintln(`ultrasec render: cannot read narrative at ${narrativePath}: ${e.message}`);
       return 2;
@@ -28182,7 +28239,7 @@ function runRender(args2) {
 // src/commands/clean.ts
 import { execFileSync as execFileSync9 } from "child_process";
 import { existsSync as existsSync28, rmSync as rmSync4, readdirSync as readdirSync8 } from "fs";
-import { join as join63, resolve as resolve29 } from "path";
+import { join as join63, resolve as resolve30 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 var DELIVERABLES = /* @__PURE__ */ new Set(["SUMMARY.md", "REPORT.md", "index.html", "findings.json", JOURNAL_FILE]);
@@ -28206,7 +28263,7 @@ function docker(args2) {
   }
 }
 function runClean(args2) {
-  const run2 = resolve29(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve30(flagStr(args2, "run") ?? ".ultrasec");
   const dry = flagBool(args2, "dry-run");
   const withDocker = flagBool(args2, "docker");
   const keepOutput = flagBool(args2, "keep-output");
@@ -28269,7 +28326,7 @@ function runClean(args2) {
 
 // src/commands/run.ts
 import { existsSync as existsSync30 } from "fs";
-import { join as join65, resolve as resolve30 } from "path";
+import { join as join65, resolve as resolve31 } from "path";
 
 // src/powered/agent.ts
 import { spawnSync as spawnSync3 } from "child_process";
@@ -28555,8 +28612,8 @@ function runPipeline(opts) {
 
 // src/commands/run.ts
 function runRun(args2) {
-  const repo = resolve30(flagStr(args2, "repo") ?? ".");
-  const run2 = resolve30(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve31(flagStr(args2, "repo") ?? ".");
+  const run2 = resolve31(flagStr(args2, "out") ?? ".ultrasec");
   const powered = flagBool(args2, "powered");
   const noScan = flagBool(args2, "no-scan");
   const requested = listFlag(args2, "stages");
@@ -28630,7 +28687,7 @@ import { fileURLToPath as fileURLToPath3 } from "url";
 
 // src/orchestrate.ts
 import { existsSync as existsSync31, mkdirSync as mkdirSync14, readFileSync as readFileSync28, writeFileSync as writeFileSync20 } from "fs";
-import { join as join67, resolve as resolve31 } from "path";
+import { join as join67, resolve as resolve32 } from "path";
 
 // src/orchestrate-templates.ts
 import { join as join66 } from "path";
@@ -28923,7 +28980,7 @@ function readIds(path, id) {
   }
 }
 function listPhases(runDir, engineAbs) {
-  const run2 = resolve31(runDir);
+  const run2 = resolve32(runDir);
   const findingsPath = join67(run2, "findings.json");
   const allIds = readIds(findingsPath, (f) => f.id);
   let adjIds = [];
@@ -28985,7 +29042,7 @@ function repoOf(run2) {
   return "<repo>";
 }
 function orchestrateRun(runDir, engineAbs, opts = {}) {
-  const run2 = resolve31(runDir);
+  const run2 = resolve32(runDir);
   if (!existsSync31(run2)) {
     return { exitCode: 2, written: [], notices: [], errors: [`run dir not found: ${run2}`], phases: [] };
   }
@@ -29088,7 +29145,7 @@ function runOrchestrate(args2) {
 
 // src/commands/probe.ts
 import { mkdirSync as mkdirSync15, writeFileSync as writeFileSync21 } from "fs";
-import { join as join69, resolve as resolve32 } from "path";
+import { join as join69, resolve as resolve33 } from "path";
 import { request as httpsRequest } from "https";
 import { request as httpRequest } from "http";
 import { lookup } from "dns/promises";
@@ -29457,7 +29514,7 @@ async function runProbe(args2) {
   const deep = flagBool(args2, "deep");
   const graphql = flagBool(args2, "graphql");
   const timeout = numFlag(args2, "timeout") ?? 1e4;
-  const out2 = resolve32(flagStr(args2, "out") ?? ".ultrasec");
+  const out2 = resolve33(flagStr(args2, "out") ?? ".ultrasec");
   const ctx = { cap: deep ? 24 : 12, made: 0, timeout, findings: [], truncated: false };
   const main2 = await fetchWithin(ctx, url, { method: "GET" });
   if (!main2) {
@@ -29508,7 +29565,7 @@ async function runProbe(args2) {
 
 // src/commands/route.ts
 import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync22 } from "fs";
-import { join as join70, resolve as resolve33 } from "path";
+import { join as join70, resolve as resolve34 } from "path";
 var ROUTE_TABLE = [
   {
     id: "android-apk",
@@ -29769,7 +29826,7 @@ function runRoute(args2) {
   const c2 = classifyTarget(target);
   const result = buildResult(target, c2);
   if (flagStr(args2, "out") !== void 0 || flagBool(args2, "write")) {
-    const out2 = resolve33(flagStr(args2, "out") ?? ".");
+    const out2 = resolve34(flagStr(args2, "out") ?? ".");
     mkdirSync16(out2, { recursive: true });
     const p = join70(out2, "ROUTE.md");
     writeFileSync22(p, renderMd(result));
@@ -29831,7 +29888,7 @@ import { createInterface as createInterface3 } from "readline";
 
 // src/mcp/handlers.ts
 import { existsSync as existsSync33, readFileSync as readFileSync29, realpathSync as realpathSync5, statSync as statSync13 } from "fs";
-import { isAbsolute as isAbsolute2, join as join71, resolve as resolve34, sep as sep7 } from "path";
+import { isAbsolute as isAbsolute2, join as join71, resolve as resolve35, sep as sep7 } from "path";
 
 // src/run-lock.ts
 var chains = /* @__PURE__ */ new Map();
@@ -29893,7 +29950,7 @@ function positive(v, key) {
 function requiredRepo(args2, defaults) {
   const repo = str2(args2.repo) ?? defaults.defaultRun;
   if (!repo) throw new ToolError("`repo` is required: an absolute path to the repository root.");
-  const abs = resolve34(repo);
+  const abs = resolve35(repo);
   if (!isScannableDir(abs)) {
     throw new ToolError(`\`repo\` is not a directory: ${abs}. Refusing to continue \u2014 an unscannable path must not report a clean audit.`);
   }
@@ -29903,7 +29960,7 @@ function resolveRun(args2, repo) {
   const explicit = str2(args2.run) ?? str2(args2.out);
   if (explicit) {
     if (!isAbsolute2(explicit)) throw new ToolError("`run` must be an absolute path.");
-    return resolve34(explicit);
+    return resolve35(explicit);
   }
   return join71(repo, ".ultrasec");
 }
@@ -30062,7 +30119,7 @@ function handleRead(args2, repo, run2) {
     try {
       return realpathSync5(d);
     } catch {
-      return resolve34(d);
+      return resolve35(d);
     }
   });
   if (!allowed.some((root) => real === root || real.startsWith(root + sep7))) {
@@ -30544,13 +30601,13 @@ var DECLARED = new Set([...TOOLS3, ...WRITE_TOOLS].map((t) => t.name));
 
 // src/mcp/resources.ts
 import { existsSync as existsSync34, readdirSync as readdirSync9, readFileSync as readFileSync30, realpathSync as realpathSync6, statSync as statSync14 } from "fs";
-import { basename as basename4, dirname as dirname8, join as join72, resolve as resolve35, sep as sep8 } from "path";
+import { basename as basename4, dirname as dirname8, join as join72, resolve as resolve36, sep as sep8 } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 var SKILL_NAME = "ultrasec";
 var URI_SCHEME = "skill://";
 function resolveSkillRoot(moduleDir) {
   const here = moduleDir ?? dirname8(fileURLToPath4(import.meta.url));
-  const candidates = [resolve35(here, ".."), resolve35(here, "..", "skills", SKILL_NAME), resolve35(here, "..", "..", "skills", SKILL_NAME)];
+  const candidates = [resolve36(here, ".."), resolve36(here, "..", "skills", SKILL_NAME), resolve36(here, "..", "..", "skills", SKILL_NAME)];
   return candidates.find((dir) => existsSync34(join72(dir, "SKILL.md")));
 }
 function listResources(moduleDir) {
@@ -30573,7 +30630,7 @@ function readResource(uri, moduleDir) {
   if (!root) throw new ResourceError("no skill payload found next to this build \u2014 nothing to read");
   const rel2 = uri.slice(URI_SCHEME.length);
   if (!rel2) throw new ResourceError("empty resource path");
-  const target = resolve35(root, rel2);
+  const target = resolve36(root, rel2);
   const rootReal = realpathSync6(root);
   let targetReal;
   try {
@@ -30854,14 +30911,14 @@ function startHttpServer(opts = {}) {
   server.requestTimeout = 0;
   server.headersTimeout = 6e4;
   server.keepAliveTimeout = 12e4;
-  return new Promise((resolve36, reject) => {
+  return new Promise((resolve37, reject) => {
     server.once("error", reject);
     server.listen(opts.port ?? 0, bind, () => {
       server.removeListener("error", reject);
       const addr2 = server.address();
       const port = typeof addr2 === "object" && addr2 ? addr2.port : opts.port ?? 0;
       const host = bind.includes(":") ? `[${bind}]` : bind;
-      resolve36({
+      resolve37({
         server,
         port,
         url: `http://${host}:${port}${MCP_PATH}`,
@@ -30970,7 +31027,7 @@ function sendJson(res, status, body2, origin, extra = {}) {
 }
 var DRAIN_LIMIT = MAX_BODY_BYTES * 8;
 function readBody(req) {
-  return new Promise((resolve36, reject) => {
+  return new Promise((resolve37, reject) => {
     const chunks = [];
     let size = 0;
     let over = false;
@@ -30994,7 +31051,7 @@ function readBody(req) {
     });
     req.on("end", () => {
       if (over) reject(new Error("too large"));
-      else resolve36(Buffer.concat(chunks).toString("utf8"));
+      else resolve37(Buffer.concat(chunks).toString("utf8"));
     });
     req.on("error", reject);
     req.on("aborted", () => reject(new Error("client aborted the request")));

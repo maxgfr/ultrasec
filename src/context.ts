@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { findManifestDirs, readText } from "./walk.js";
+import { detectWorkspaces } from "./vendor/codeindex-engine.mjs";
 import { langForFile, type LangSpec } from "./lang.js";
 import { SANITIZERS, findSinks, findTextSinks } from "./catalog.js";
 import type { RepoScan } from "./scan.js";
@@ -57,20 +58,69 @@ const JS_FRAMEWORKS: Record<string, string> = {
   jsonwebtoken: "jwt",
 };
 
+/** Shared by every Python manifest — the framework names are the same whichever
+ *  file declares them. */
+const PY_RULES: [RegExp, string][] = [
+  [/\bflask\b/i, "flask"],
+  [/\bdjango\b/i, "django"],
+  [/\bfastapi\b/i, "fastapi"],
+  [/\btornado\b/i, "tornado"],
+  [/\bbottle\b/i, "bottle"],
+  [/\bpyramid\b/i, "pyramid"],
+  [/\bsanic\b/i, "sanic"],
+  [/\baiohttp\b/i, "aiohttp"],
+  [/\bsqlalchemy\b/i, "sqlalchemy"],
+];
+
 // Substring/regex detectors for text-based manifests (offline, tolerant of format).
 const TEXT_MANIFESTS: { file: string; rules: [RegExp, string][] }[] = [
   {
     file: "requirements.txt",
+    rules: PY_RULES,
+  },
+  // Same rules, the manifests modern Python actually uses. requirements.txt alone
+  // reported "none detected" on any Poetry/PDM/uv or setuptools project.
+  {
+    file: "pyproject.toml",
+    rules: PY_RULES,
+  },
+  {
+    file: "Pipfile",
+    rules: PY_RULES,
+  },
+  {
+    file: "setup.py",
+    rules: PY_RULES,
+  },
+  {
+    file: "Cargo.toml",
     rules: [
-      [/\bflask\b/i, "flask"],
-      [/\bdjango\b/i, "django"],
-      [/\bfastapi\b/i, "fastapi"],
-      [/\btornado\b/i, "tornado"],
-      [/\bbottle\b/i, "bottle"],
-      [/\bpyramid\b/i, "pyramid"],
-      [/\bsanic\b/i, "sanic"],
-      [/\baiohttp\b/i, "aiohttp"],
-      [/\bsqlalchemy\b/i, "sqlalchemy"],
+      [/^\s*actix-web\s*=/m, "actix-web"],
+      [/^\s*axum\s*=/m, "axum"],
+      [/^\s*rocket\s*=/m, "rocket"],
+      [/^\s*warp\s*=/m, "warp"],
+      [/^\s*tide\s*=/m, "tide"],
+      [/^\s*diesel\s*=/m, "diesel"],
+      [/^\s*sqlx\s*=/m, "sqlx"],
+    ],
+  },
+  {
+    file: "build.gradle.kts",
+    rules: [[/org\.springframework/, "spring"]],
+  },
+  {
+    file: "mix.exs",
+    rules: [
+      [/:phoenix\b/, "phoenix"],
+      [/:plug\b/, "plug"],
+      [/:ecto\b/, "ecto"],
+    ],
+  },
+  {
+    file: "deno.json",
+    rules: [
+      [/\boak\b/, "oak"],
+      [/\bfresh\b/, "fresh"],
     ],
   },
   {
@@ -125,10 +175,40 @@ const TEXT_MANIFESTS: { file: string; rules: [RegExp, string][] }[] = [
  * inferred from that emptiness were wrong for the same reason. `findManifestDirs`
  * is the same bounded walk the lockfile adapters already use for exactly this.
  */
+/**
+ * Directories to look for manifests in: the bounded basename walk, UNION the
+ * workspaces the repo actually declares.
+ *
+ * The walk alone is capped at `MANIFEST_MAX_DEPTH` and knows nothing about
+ * membership, so a two-deep `packages` layout is found and a four-deep one is
+ * not — and it counts a `package.json` in an untracked scratch tree no build sees.
+ * `detectWorkspaces` reads the declarations instead (npm/yarn `workspaces`,
+ * `pnpm-workspace.yaml`, `lerna.json`, `nx.json`, Cargo, go.work, Maven, uv,
+ * Composer, Gradle). It is already vendored and already used by `regionKeyer`
+ * for `investigate` regions — so those were workspace-aware while the stack
+ * detection right next to them was not.
+ *
+ * Union, not replacement: a manifest outside any declared workspace is still a
+ * manifest, and losing it to be principled would be a worse bug than the one
+ * being fixed.
+ */
+function manifestDirs(repo: string, names: readonly string[]): string[] {
+  const dirs = new Set(findManifestDirs(repo, names));
+  try {
+    for (const w of detectWorkspaces(repo).packages) {
+      const dir = resolve(repo, w.dir);
+      for (const name of names) if (existsSync(join(dir, name))) dirs.add(dir);
+    }
+  } catch {
+    /* not a workspace, or an unreadable declaration — the walk still stands */
+  }
+  return [...dirs].sort(byStr);
+}
+
 function detectFrameworks(repo: string): string[] {
   const found = new Set<string>();
 
-  for (const dir of findManifestDirs(repo, ["package.json"])) {
+  for (const dir of manifestDirs(repo, ["package.json"])) {
     try {
       const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
         dependencies?: Record<string, string>;
@@ -146,7 +226,7 @@ function detectFrameworks(repo: string): string[] {
   }
 
   for (const m of TEXT_MANIFESTS) {
-    for (const dir of findManifestDirs(repo, [m.file])) {
+    for (const dir of manifestDirs(repo, [m.file])) {
       let raw: string;
       try {
         raw = readFileSync(join(dir, m.file), "utf8");
