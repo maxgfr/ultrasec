@@ -40,14 +40,17 @@ NOT exploitable — do not flag it.
 - CWE-78 · taint
 - files: `src/server.js:18`, `src/server.js:19`, `src/report.js:5`
 - claim: Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
+- reachability (engine evidence, not a verdict): scope symbol · def-use linked
 
 ## 54b733703450 — [high] SQL injection: untrusted input reaches query()
 - CWE-89 · taint
 - files: `src/server.js:10`, `src/server.js:11`, `src/db.js:6`
 - claim: Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
+- reachability (engine evidence, not a verdict): scope symbol · def-use linked
 
 ## 9b0bcc91ea6a — [medium] Cross-site scripting (reflected): untrusted input reaches send()
 - CWE-79 · taint
 - files: `src/server.js:18`, `src/server.js:20`
 - claim: Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
+- reachability (engine evidence, not a verdict): scope symbol · def-use linked
 

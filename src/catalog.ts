@@ -713,8 +713,24 @@ export function findTextSinks(lang: LangSpec, content: string): SinkHit[] {
       if (!m) continue;
       // The match ends just past the `=`, so the remainder of the line is the
       // assigned value.
+      const rhs = rule.requiresDynamicValue
+        ? line
+            .slice(m.index + m[0].length)
+            .trim()
+            .replace(/[;,]\s*$/, "")
+            .trim()
+        : undefined;
       if (rule.requiresDynamicValue && isConstantAssignment(line.slice(m.index + m[0].length))) continue;
-      out.push({ line: i + 1, callee: rule.label, kind: rule.kind, cwe: rule.cwe, severity: rule.severity, title: rule.title, note: rule.note });
+      out.push({
+        line: i + 1,
+        callee: rule.label,
+        kind: rule.kind,
+        cwe: rule.cwe,
+        severity: rule.severity,
+        title: rule.title,
+        note: rule.note,
+        ...(rhs ? { assigned: rhs } : {}),
+      });
       break; // first matching rule wins, as with call sinks
     }
   }
@@ -807,6 +823,19 @@ export interface SinkHit {
   severity: Severity;
   title: string;
   note: string;
+  /**
+   * For an ASSIGNMENT sink (`el.innerHTML = …`, `script.src = …`), the text of
+   * the assigned value.
+   *
+   * This is the evidence #13 asked for — "require a real flow edge into the
+   * sink's attribute". The engine does NOT decide it: reachability here is
+   * closed by "a source at or above the sink line in the same file", which is
+   * co-location, and tightening that mechanically would trade recall on DOM XSS,
+   * the class where real bugs actually live. So the value is surfaced instead,
+   * next to the names the def-use walk was tracking, and the adjudicator can see
+   * in one line whether anything tainted arrives.
+   */
+  assigned?: string;
   /** Why this hit was reported below its catalog severity — set when an
    *  `ambiguous` rule matched a bare call the extractor could not corroborate.
    *  Absent on every ordinary hit, so consumers that ignore it behave exactly as

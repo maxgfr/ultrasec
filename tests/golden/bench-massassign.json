@@ -40,6 +40,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "body"
+        ]
+      },
       "message": "Cross-file candidate: http input at routes.js:3 may reach the massassign sink setAttributes() at sink.js:3 through 2 hop(s). A whole request object bound onto a model. Whitelist the assignable fields explicitly — otherwise an attacker sets `isAdmin`, `role`, `balance` or the primary key. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

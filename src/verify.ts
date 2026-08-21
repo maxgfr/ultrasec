@@ -39,6 +39,10 @@ export interface VerifyItem {
   /** Machine-proposed ground for a noise-by-construction finding. A suggestion
    *  to accept or refuse — never a filled-in verdict. */
   proposed?: ProposedAdjudication;
+  /** What the engine saw about whether the value actually ARRIVES at the sink —
+   *  scope tier, def-use verdict, and (for an assignment sink) whether anything
+   *  tracked appears in the assigned value. Evidence, never a verdict. */
+  reachability?: string;
   /** Upstream-agent signal (e.g. deepsec revalidation verdict) — a HINT shown to
    *  the adjudicator, never auto-applied. Absent unless `priorAnalysis` exists. */
   priorSignal?: string;
@@ -103,6 +107,28 @@ export function worklistCounts(dossier: Dossier, opts: WorklistOptions = {}): Wo
   return { fresh: p.length - re, reOpened: opts.all ? re : 0, withheld: opts.all ? 0 : re };
 }
 
+/**
+ * One line of reachability evidence for a worklist item, so a fan-out
+ * adjudicator sees it without opening the dossier. Absent when the engine has
+ * nothing to say, which keeps the emitted JSON identical for those items.
+ */
+function reachabilityLine(f: Finding): string | undefined {
+  const bits: string[] = [];
+  if (f.sourceScope) bits.push(`scope ${f.sourceScope}${f.sourceScope === "file" ? " (co-location only)" : ""}`);
+  if (f.dataflow) bits.push(`def-use ${f.dataflow}`);
+  const assigned = f.flow?.assigned;
+  if (assigned) {
+    const uses = (f.flow?.tainted ?? []).some((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(assigned));
+    // The walk is per-file: on a cross-file path "no tracked binding" is the
+    // expected reading of a REAL flow, not a signal against it.
+    const crossFile = new Set((f.path ?? []).map((p) => p.file)).size > 1;
+    bits.push(
+      `assigned value ${uses ? "USES a tracked binding" : crossFile ? "is a parameter (cross-file — walk cannot follow)" : "uses NO tracked binding, same file"}`,
+    );
+  }
+  return bits.length ? bits.join(" · ") : undefined;
+}
+
 export function buildWorklist(dossier: Dossier, opts: WorklistOptions = {}): VerifyItem[] {
   return pending(dossier.findings)
     .filter((f) => opts.all || !reOpened(f))
@@ -127,6 +153,8 @@ export function buildWorklist(dossier: Dossier, opts: WorklistOptions = {}): Ver
       };
       const proposed = proposedFor(f);
       if (proposed) item.proposed = proposed;
+      const reach = reachabilityLine(f);
+      if (reach) item.reachability = reach;
       const pa = f.priorAnalysis;
       if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
       if (reOpened(f)) item.priorVerdict = f.verdict;
@@ -184,6 +212,7 @@ export function renderWorklistMd(items: VerifyItem[], context?: string, counts?:
     if (it.cwe) L.push(`- ${it.cwe} · ${it.category}`);
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
     L.push(`- claim: ${it.claim}`);
+    if (it.reachability) L.push(`- reachability (engine evidence, not a verdict): ${it.reachability}`);
     if (it.priorSignal) L.push(`- signal (not a verdict — adjudicate yourself): ${it.priorSignal}`);
     if (it.proposed)
       L.push(`- proposed ground \`${it.proposed.ground}\` (${it.proposed.class}) — ${it.proposed.why}. Accept it or refuse it; it is not a verdict.`);

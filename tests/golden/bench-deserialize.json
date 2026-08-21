@@ -34,6 +34,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "data"
+        ]
+      },
       "message": "Intra-file candidate: http input at vuln.py:3 may reach the deserialize sink loads() at vuln.py:4 through 1 hop(s). Tainted data deserialized into objects. Use a safe loader (yaml.safe_load, JSON) and never unpickle untrusted input. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

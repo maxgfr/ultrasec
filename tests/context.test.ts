@@ -166,3 +166,85 @@ describe("compactContextDoc — the adjudication-bearing sections only", () => {
     expect(compactContextDoc("# CONTEXT\n\nJust prose, no headings.\n")).toBeUndefined();
   });
 });
+
+describe("renderFindingDossier — reachability evidence, stated not decided", () => {
+  // #13's third ask was "require a real flow edge into the sink's attribute".
+  // The engine does not enforce it: enumeration closes a path on co-location,
+  // and tightening that mechanically trades recall on DOM XSS — the class where
+  // real bugs live. So it SHOWS whether there is an edge, and the adjudicator
+  // can require one.
+  const graph: Graph = { files: [], edges: [], symbolDefs: {} };
+
+  function f(over: Partial<Finding>): Finding {
+    return {
+      id: "x",
+      category: "taint",
+      title: "DOM XSS",
+      severity: "medium",
+      confidence: "low",
+      message: "m",
+      tool: "ultrasec",
+      status: "open",
+      sink: { file: "a.js", line: 7 },
+      ...over,
+    };
+  }
+
+  it("says CO-LOCATION when the whole path is one file and nothing tracked arrives", () => {
+    const md = renderFindingDossier(
+      FIXTURE,
+      graph,
+      f({
+        sourceScope: "file",
+        dataflow: "unlinked",
+        flow: { assigned: "unrelated", tainted: ["frag"] },
+        path: [
+          { file: "a.js", line: 3, why: "source" },
+          { file: "a.js", line: 7, why: "sink" },
+        ],
+      }),
+    );
+    expect(md).toContain("## Reachability evidence");
+    expect(md).toContain("CO-LOCATION only");
+    expect(md).toContain("the walk could have followed it and did not");
+  });
+
+  // The case that stops this evidence misleading. A cross-file flow legitimately
+  // shows "no tracked binding" because the walk is per-file and the assigned
+  // value is a parameter — the domxss bench fixture is exactly that, and it is a
+  // TRUE positive.
+  it("says EXPECTED when the path crosses files, instead of pointing away from a real flow", () => {
+    const md = renderFindingDossier(
+      FIXTURE,
+      graph,
+      f({
+        sourceScope: "symbol",
+        dataflow: "linked",
+        flow: { assigned: "html", tainted: ["frag"] },
+        path: [
+          { file: "routes.js", line: 3, why: "source" },
+          { file: "sink.js", line: 7, why: "sink" },
+        ],
+      }),
+    );
+    expect(md).toContain("EXPECTED here");
+    expect(md).not.toContain("the walk could have followed it and did not");
+  });
+
+  it("confirms an edge when a tracked binding IS in the assigned value", () => {
+    const md = renderFindingDossier(
+      FIXTURE,
+      graph,
+      f({
+        sourceScope: "symbol",
+        flow: { assigned: "frag + suffix", tainted: ["frag"] },
+        path: [{ file: "a.js", line: 3, why: "source" }],
+      }),
+    );
+    expect(md).toContain("there IS an edge into the attribute");
+  });
+
+  it("omits the whole block when the engine has nothing to say", () => {
+    expect(renderFindingDossier(FIXTURE, graph, f({}))).not.toContain("Reachability evidence");
+  });
+});

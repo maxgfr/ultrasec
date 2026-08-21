@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { sanitizersAlongPath, traceDefUse, boundNames } from "../src/dataflow.js";
+import { sanitizersAlongPath, traceDefUse, traceDefUseDetail, boundNames } from "../src/dataflow.js";
 import type { PathStep } from "../src/types.js";
 
 const step = (file: string, line: number): PathStep => ({ file, line, why: "" });
@@ -91,5 +91,29 @@ describe("boundNames", () => {
 
   it("reduces a member assignment to its property, which later mentions contain", () => {
     expect(boundNames("this.userId")).toEqual(["userId"]);
+  });
+});
+
+describe("traceDefUseDetail — the names, not just the verdict", () => {
+  // The verdict says "the bound value is not mentioned at the sink". The names
+  // say WHICH value should have arrived, which is what turns a hint into
+  // something an adjudicator can check against the code in front of them.
+  it("returns the bindings the walk followed", () => {
+    const src = ["const id = req.query.id;", "const q = id;", "db.query(q);"];
+    const d = traceDefUseDetail(src, 1, "req.query", 3);
+    expect(d.verdict).toBe("linked");
+    expect(d.tainted).toEqual(["id", "q"]);
+  });
+
+  it("reports the names even when nothing reaches the sink", () => {
+    const src = ["const id = req.query.id;", "db.query(other);"];
+    const d = traceDefUseDetail(src, 1, "req.query", 2);
+    expect(d.verdict).toBe("unlinked");
+    expect(d.tainted).toEqual(["id"]);
+  });
+
+  it("agrees with traceDefUse, which now delegates to it", () => {
+    const src = ["const id = req.query.id;", "const q = id;", "db.query(q);"];
+    expect(traceDefUse(src, 1, "req.query", 3)).toBe(traceDefUseDetail(src, 1, "req.query", 3).verdict);
   });
 });

@@ -24,7 +24,9 @@ export const VERSION = "1.37.0";
 // Additive + optional — older dossiers omit it, and a consumer that can't tell
 // "flag not passed" from "flag passed, zero results" falls back to the old
 // advice, byte-identical to before.
-// 9: findings gained optional `atCommit` (the commit a history-scanned citation
+// 9: findings gained optional `flow` (the assigned value at an assignment sink
+// plus the bindings the def-use walk followed — evidence for the adjudicator,
+// never acted on by the engine), optional `atCommit` (the commit a history-scanned citation
 // belongs to, so the gate resolves it against that tree rather than HEAD) and
 // optional `noise` — the noise-by-construction class a
 // finding was DEMOTED under (never dismissed): ciphertext-by-design, a taint
@@ -416,6 +418,24 @@ export interface Finding {
    * see which dismissals were argued and which were merely asserted.
    */
   brocard?: Brocard;
+  /**
+   * What the engine knows about whether the tainted value actually ARRIVES at
+   * the sink — laid out for the adjudicator instead of acted on.
+   *
+   * Enumeration closes a path on "a source at or above the sink line in the same
+   * file", which is co-location. Tightening that mechanically would trade recall
+   * on DOM XSS, the class where real bugs live, to remove noise. So the engine
+   * states what it saw — the value assigned at an assignment sink, and the names
+   * the def-use walk was following — and the reader decides. That is the
+   * division of labour this tool is built on: the engine enumerates and
+   * evidences, the reasoning is not its job.
+   */
+  flow?: {
+    /** For an assignment sink, the text of the assigned value. */
+    assigned?: string;
+    /** The bindings the def-use walk tracked from the source. */
+    tainted?: string[];
+  };
   /**
    * The commit the cited location belongs to, when the finding came from a scan
    * of git HISTORY rather than of the working tree.

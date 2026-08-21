@@ -5,7 +5,7 @@ import { enclosingSymbolName, localDefNames } from "./scan.js";
 import type { Graph } from "./graph.js";
 import { langForFile } from "./lang.js";
 import { findSinks, findSources, findTextSinks, cweUrl, LOG_SINKS, UNRESOLVED_RECEIVER, type SinkHit, type SourceHit } from "./catalog.js";
-import { buildUnitMap, classifySourceScope, sanitizersAlongPath, scopeRank, traceDefUse, type UnitMap } from "./dataflow.js";
+import { buildUnitMap, classifySourceScope, sanitizersAlongPath, scopeRank, traceDefUseDetail, type UnitMap } from "./dataflow.js";
 import { shortHash, byStr } from "./util.js";
 import { SEVERITIES, type Finding, type PathStep, type Severity, type SourceScope } from "./types.js";
 
@@ -178,7 +178,8 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     // Does the bound value still reach the line that closed this frame? For the
     // seed frame that line IS the sink; for a caller frame it is the call that
     // leads to it — the same question one hop out.
-    const dataflow = traceDefUse(lines(srcFile), srcHit.line, srcHit.match, frameEntryLine);
+    const flowDetail = traceDefUseDetail(lines(srcFile), srcHit.line, srcHit.match, frameEntryLine);
+    const dataflow = flowDetail.verdict;
 
     // Every hop, not just the sink line: defensive code is normally written on
     // the line before the dangerous call, or at an intermediate hop entirely.
@@ -212,6 +213,11 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
       path,
       sourceScope,
       ...(dataflow ? { dataflow } : {}),
+      // Presence-gated: a call sink with nothing tracked adds no key at all, so
+      // a dossier without this evidence is byte-identical to before.
+      ...(sink.assigned || flowDetail.tainted.length
+        ? { flow: { ...(sink.assigned ? { assigned: sink.assigned } : {}), ...(flowDetail.tainted.length ? { tainted: flowDetail.tainted } : {}) } }
+        : {}),
       message:
         `${crossFile ? "Cross-file" : "Intra-file"} candidate: ${srcHit.kind} input at ${srcStep.file}:${srcStep.line} ` +
         `may reach the ${sink.kind} sink ${calleeLabel(sink)} at ${sinkFile}:${sink.line} through ${path.length - 1} hop(s). ` +

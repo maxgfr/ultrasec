@@ -40,6 +40,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "note"
+        ]
+      },
       "message": "Cross-file candidate: http input at routes.py:7 may reach the csv sink writerows() at sink.py:7 through 2 hop(s). Tainted data written into a spreadsheet cell. A value starting with = + - @ TAB or CR executes when opened in Excel/Sheets. Prefix such values with an apostrophe or reject them. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

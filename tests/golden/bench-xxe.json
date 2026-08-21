@@ -34,6 +34,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "doc"
+        ]
+      },
       "message": "Intra-file candidate: http input at vuln.js:3 may reach the xxe sink parseXml() at vuln.js:4 through 1 hop(s). Tainted XML parsed with external entities/DTDs enabled. Disable entity resolution (resolve_entities=False / FEATURE_SECURE_PROCESSING / noent off). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

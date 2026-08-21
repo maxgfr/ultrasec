@@ -61,6 +61,11 @@
       ],
       "sourceScope": "symbol",
       "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "ref"
+        ]
+      },
       "message": "Cross-file candidate: http input at routes.js:3 may reach the argv sink execFile() at sink.js:6 through 2 hop(s). Tainted data used as an ARGUMENT to a program. An argv array stops shell metacharacters, not option injection: verify the value cannot start with '-' and is not a path/URL the callee will act on. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [

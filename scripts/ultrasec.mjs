@@ -19344,8 +19344,18 @@ function findTextSinks(lang, content) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       const m = rule.re.exec(line);
       if (!m) continue;
+      const rhs = rule.requiresDynamicValue ? line.slice(m.index + m[0].length).trim().replace(/[;,]\s*$/, "").trim() : void 0;
       if (rule.requiresDynamicValue && isConstantAssignment(line.slice(m.index + m[0].length))) continue;
-      out2.push({ line: i2 + 1, callee: rule.label, kind: rule.kind, cwe: rule.cwe, severity: rule.severity, title: rule.title, note: rule.note });
+      out2.push({
+        line: i2 + 1,
+        callee: rule.label,
+        kind: rule.kind,
+        cwe: rule.cwe,
+        severity: rule.severity,
+        title: rule.title,
+        note: rule.note,
+        ...rhs ? { assigned: rhs } : {}
+      });
       break;
     }
   }
@@ -20903,15 +20913,16 @@ function boundNames2(lhs) {
 function mentions(line, name2) {
   return new RegExp(`(?<![A-Za-z0-9_$])${name2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_$])`).test(line);
 }
-function traceDefUse(lines5, sourceLine, sourceMatch, entryLine) {
-  if (sourceLine > entryLine) return void 0;
+function traceDefUseDetail(lines5, sourceLine, sourceMatch, entryLine) {
+  const none = { verdict: void 0, tainted: [] };
+  if (sourceLine > entryLine) return none;
   const srcText = lines5[sourceLine - 1] ?? "";
-  if (sourceLine === entryLine) return "linked";
+  if (sourceLine === entryLine) return { verdict: "linked", tainted: [] };
   const at = srcText.indexOf(sourceMatch);
   const op = bindingOperatorBefore(srcText, at < 0 ? srcText.length : at);
-  if (op < 0) return void 0;
+  if (op < 0) return none;
   const tainted = new Set(boundNames2(srcText.slice(0, op)));
-  if (!tainted.size) return void 0;
+  if (!tainted.size) return none;
   for (let l = sourceLine + 1; l < entryLine; l++) {
     const text = lines5[l - 1] ?? "";
     if (![...tainted].some((n) => mentions(text, n))) continue;
@@ -20920,7 +20931,8 @@ function traceDefUse(lines5, sourceLine, sourceMatch, entryLine) {
     for (const n of boundNames2(text.slice(0, assign))) tainted.add(n);
   }
   const target = lines5[entryLine - 1] ?? "";
-  return [...tainted].some((n) => mentions(target, n)) ? "linked" : "unlinked";
+  const names = [...tainted].sort();
+  return { verdict: names.some((n) => mentions(target, n)) ? "linked" : "unlinked", tainted: names };
 }
 
 // src/taint.ts
@@ -21000,7 +21012,8 @@ function enumerateTaint(scan2, graph, opts = {}) {
       why: `untrusted input (${srcHit.kind}): ${truncate(srcHit.match)}${SCOPE_WHY[sourceScope]}`
     };
     const path = [srcStep, ...hops];
-    const dataflow = traceDefUse(lines5(srcFile), srcHit.line, srcHit.match, frameEntryLine);
+    const flowDetail = traceDefUseDetail(lines5(srcFile), srcHit.line, srcHit.match, frameEntryLine);
+    const dataflow = flowDetail.verdict;
     const sanitizers = sanitizersAlongPath(path, sink.kind, (f, l) => lines5(f)[l - 1] ?? "");
     const crossFile2 = new Set(path.map((p) => p.file)).size > 1;
     const note = sanitizers.length ? ` Possible sanitizer along the path \u2014 ${sanitizers.map((s) => `${s.file}:${s.line} (${s.note})`).join("; ")} \u2014 confirm it actually neutralizes this flow.` : "";
@@ -21019,6 +21032,9 @@ function enumerateTaint(scan2, graph, opts = {}) {
       path,
       sourceScope,
       ...dataflow ? { dataflow } : {},
+      // Presence-gated: a call sink with nothing tracked adds no key at all, so
+      // a dossier without this evidence is byte-identical to before.
+      ...sink.assigned || flowDetail.tainted.length ? { flow: { ...sink.assigned ? { assigned: sink.assigned } : {}, ...flowDetail.tainted.length ? { tainted: flowDetail.tainted } : {} } } : {},
       message: `${crossFile2 ? "Cross-file" : "Intra-file"} candidate: ${srcHit.kind} input at ${srcStep.file}:${srcStep.line} may reach the ${sink.kind} sink ${calleeLabel(sink)} at ${sinkFile}:${sink.line} through ${path.length - 1} hop(s). ${sink.note}${note}${flowNote}${receiverNote} Heuristic \u2014 verify the data actually reaches the sink unsanitized before trusting it.`,
       tool: "ultrasec",
       references: [cweUrl(sink.cwe)],
@@ -25491,6 +25507,33 @@ function excerpt(repo, step, ctx = 3) {
   }
   return out2.join("\n");
 }
+function reachabilityEvidence(f) {
+  const scope = f.sourceScope;
+  const flow = f.flow;
+  if (!scope && !f.dataflow && !flow) return [];
+  const L = [`## Reachability evidence`, `_What the engine saw. It did not decide \u2014 that is this dossier's question._`, ""];
+  if (scope)
+    L.push(
+      `- **source scope**: \`${scope}\`${scope === "symbol" ? " \u2014 the source is in the SAME function as the line that closed the path. Strongest tier." : scope === "module" ? " \u2014 same module scope, different function. Verify the value is actually passed." : " \u2014 a DIFFERENT function of the same file. This is CO-LOCATION only: the engine has not shown the value travels."}`
+    );
+  if (f.dataflow)
+    L.push(
+      `- **def-use**: \`${f.dataflow}\`${f.dataflow === "linked" ? " \u2014 a binding from the source is mentioned at the sink line." : " \u2014 NO binding from the source is mentioned at the sink line."}`
+    );
+  else if (flow?.tainted?.length)
+    L.push(`- **def-use**: undecidable \u2014 the walk could not follow the value (used inline, or rebound through state it cannot see).`);
+  if (flow?.tainted?.length) L.push(`- **bindings tracked from the source**: ${flow.tainted.map((n) => `\`${n}\``).join(", ")}`);
+  if (flow?.assigned) {
+    const uses = (flow.tainted ?? []).filter((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(flow.assigned));
+    L.push(`- **value assigned at the sink**: \`${flow.assigned.length > 160 ? `${flow.assigned.slice(0, 160)}\u2026` : flow.assigned}\``);
+    const crossFile = new Set((f.path ?? []).map((p) => p.file)).size > 1;
+    L.push(
+      uses.length ? `  - a tracked binding (${uses.map((n) => `\`${n}\``).join(", ")}) appears in it \u2014 there IS an edge into the attribute.` : crossFile ? `  - no tracked binding appears in it, which is EXPECTED here: the path crosses files, so the assigned value is a parameter and the def-use walk (per-file) cannot follow it. Read the path above to decide whether the caller's value reaches this attribute.` : `  - **no tracked binding appears in it**, and the whole path is in ONE file \u2014 so the walk could have followed it and did not. Either the value arrives through state this walk cannot see, or nothing tainted arrives here at all. Decide which before rating it.`
+    );
+  }
+  L.push("");
+  return L;
+}
 function renderFindingDossier(repo, graph, f, context) {
   const L = [];
   L.push(`# ${f.id} \u2014 ${f.title}`);
@@ -25506,6 +25549,7 @@ function renderFindingDossier(repo, graph, f, context) {
     L.push(context);
     L.push("");
   }
+  L.push(...reachabilityEvidence(f));
   L.push(`## What to decide`);
   L.push(f.message);
   L.push("");
@@ -25735,6 +25779,20 @@ function worklistCounts(dossier, opts = {}) {
   const re = p.filter(reOpened).length;
   return { fresh: p.length - re, reOpened: opts.all ? re : 0, withheld: opts.all ? 0 : re };
 }
+function reachabilityLine(f) {
+  const bits = [];
+  if (f.sourceScope) bits.push(`scope ${f.sourceScope}${f.sourceScope === "file" ? " (co-location only)" : ""}`);
+  if (f.dataflow) bits.push(`def-use ${f.dataflow}`);
+  const assigned = f.flow?.assigned;
+  if (assigned) {
+    const uses = (f.flow?.tainted ?? []).some((n) => new RegExp(`\\b${n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(assigned));
+    const crossFile = new Set((f.path ?? []).map((p) => p.file)).size > 1;
+    bits.push(
+      `assigned value ${uses ? "USES a tracked binding" : crossFile ? "is a parameter (cross-file \u2014 walk cannot follow)" : "uses NO tracked binding, same file"}`
+    );
+  }
+  return bits.length ? bits.join(" \xB7 ") : void 0;
+}
 function buildWorklist(dossier, opts = {}) {
   return pending(dossier.findings).filter((f) => opts.all || !reOpened(f)).slice().sort((a, b) => byStr2(a.id, b.id)).map((f) => {
     const files = /* @__PURE__ */ new Set();
@@ -25755,6 +25813,8 @@ function buildWorklist(dossier, opts = {}) {
     };
     const proposed = proposedFor(f);
     if (proposed) item.proposed = proposed;
+    const reach = reachabilityLine(f);
+    if (reach) item.reachability = reach;
     const pa = f.priorAnalysis;
     if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
     if (reOpened(f)) item.priorVerdict = f.verdict;
@@ -25804,6 +25864,7 @@ function renderWorklistMd(items, context, counts) {
     if (it.cwe) L.push(`- ${it.cwe} \xB7 ${it.category}`);
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
     L.push(`- claim: ${it.claim}`);
+    if (it.reachability) L.push(`- reachability (engine evidence, not a verdict): ${it.reachability}`);
     if (it.priorSignal) L.push(`- signal (not a verdict \u2014 adjudicate yourself): ${it.priorSignal}`);
     if (it.proposed)
       L.push(`- proposed ground \`${it.proposed.ground}\` (${it.proposed.class}) \u2014 ${it.proposed.why}. Accept it or refuse it; it is not a verdict.`);

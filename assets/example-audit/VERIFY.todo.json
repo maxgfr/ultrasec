@@ -13,7 +13,8 @@
     ],
     "verdict": null,
     "note": "",
-    "brocard": null
+    "brocard": null,
+    "reachability": "scope symbol · def-use linked"
   },
   {
     "id": "54b733703450",
@@ -29,7 +30,8 @@
     ],
     "verdict": null,
     "note": "",
-    "brocard": null
+    "brocard": null,
+    "reachability": "scope symbol · def-use linked"
   },
   {
     "id": "9b0bcc91ea6a",
@@ -44,6 +46,7 @@
     ],
     "verdict": null,
     "note": "",
-    "brocard": null
+    "brocard": null,
+    "reachability": "scope symbol · def-use linked"
   }
 ]
