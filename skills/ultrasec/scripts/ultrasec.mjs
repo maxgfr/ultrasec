@@ -26131,6 +26131,49 @@ function parseVerdicts(raw) {
   });
 }
 
+// src/family.ts
+var MIN_FAMILY = 3;
+function pathRoot(file) {
+  const parts2 = file.split("/");
+  if (parts2.length <= 1) return ".";
+  return parts2.slice(0, Math.min(2, parts2.length - 1)).join("/");
+}
+function locationOf(f) {
+  return f.sink?.file ?? f.source?.file ?? f.path?.[f.path.length - 1]?.file;
+}
+var KEY_SEP = " :: ";
+var UNPLACED = "unplaced" + KEY_SEP;
+function groupFamilies2(findings, minFamily = MIN_FAMILY) {
+  const byKey2 = /* @__PURE__ */ new Map();
+  for (const f of findings) {
+    const at = locationOf(f);
+    const key = at ? f.title + KEY_SEP + pathRoot(at) : UNPLACED + f.id;
+    const list = byKey2.get(key);
+    if (list) list.push(f);
+    else byKey2.set(key, [f]);
+  }
+  const families = [];
+  const singles = [];
+  for (const [key, members] of byKey2) {
+    if (members.length < minFamily) {
+      singles.push(...members);
+      continue;
+    }
+    const ranked = members.slice().sort(compareWithinStatus);
+    const lead = ranked[0];
+    families.push({ key, title: lead.title, root: pathRoot(locationOf(lead)), lead, members: ranked });
+  }
+  families.sort((a, b) => compareWithinStatus(a.lead, b.lead) || byStr2(a.key, b.key));
+  singles.sort(compareWithinStatus);
+  return { families, singles };
+}
+function familyCount(f) {
+  return `\xD7${f.members.length}`;
+}
+function collapsedCount(grouped) {
+  return grouped.families.reduce((n, f) => n + f.members.length - 1, 0);
+}
+
 // src/triage.ts
 var TRIAGE_VERDICTS = ["noise", "keep"];
 function citedAt(f) {
@@ -26141,7 +26184,7 @@ function citedAt(f) {
   return "\u2014";
 }
 function buildTriageWorklist(dossier) {
-  return dossier.findings.filter((f) => f.status === "open").slice().sort((a, b) => byStr2(a.id, b.id)).map((f) => {
+  return dossier.findings.filter((f) => f.status === "open").slice().sort(compareWithinStatus).map((f) => {
     const item = { id: f.id, severity: f.severity, category: f.category, title: f.title, at: citedAt(f), verdict: null };
     const proposed = proposedFor(f);
     if (proposed) item.proposed = proposed;
@@ -26168,11 +26211,42 @@ function renderTriageMd(items, context) {
     L.push("");
   }
   L.push(...renderProposalSummary(items));
-  for (const it of items) {
-    L.push(`- \`${it.id}\` \u2014 [${it.severity}] ${it.category}: ${it.title} \xB7 at \`${it.at}\``);
-  }
+  L.push(...groupedWorklist(items));
   L.push("");
   return L.join("\n") + "\n";
+}
+function groupedWorklist(items) {
+  const asFinding = new Map(items.map((it) => [it.id, it]));
+  const shims = items.map((it) => ({
+    id: it.id,
+    category: it.category,
+    title: it.title,
+    severity: it.severity,
+    confidence: "low",
+    message: "",
+    tool: "ultrasec",
+    status: "open",
+    sink: { file: it.at.replace(/:\d+$/, ""), line: Number(/:(\d+)$/.exec(it.at)?.[1] ?? 1) }
+  }));
+  const { families, singles } = groupFamilies2(shims);
+  const line = (it) => `- \`${it.id}\` \u2014 [${it.severity}] ${it.category}: ${it.title} \xB7 at \`${it.at}\``;
+  const L = [];
+  for (const fam of families) {
+    const lead = asFinding.get(fam.lead.id);
+    L.push(`### ${lead.title} \xD7${fam.members.length} \u2014 under \`${fam.root}\``);
+    L.push(`_One judgment, ${fam.members.length} rows. A verdict must still name each id you mean._`);
+    L.push("");
+    for (const m of fam.members) L.push(line(asFinding.get(m.id)));
+    L.push("");
+  }
+  if (singles.length) {
+    if (families.length) {
+      L.push(`### The rest (${singles.length})`);
+      L.push("");
+    }
+    for (const s of singles) L.push(line(asFinding.get(s.id)));
+  }
+  return L;
 }
 function applyTriage(dossier, inputs) {
   const byId = /* @__PURE__ */ new Map();
@@ -28541,49 +28615,6 @@ function pathMermaid(f) {
   L.push(`  class n0 src;`);
   L.push(`  class n${f.path.length - 1} snk;`);
   return L.join("\n");
-}
-
-// src/family.ts
-var MIN_FAMILY = 3;
-function pathRoot(file) {
-  const parts2 = file.split("/");
-  if (parts2.length <= 1) return ".";
-  return parts2.slice(0, Math.min(2, parts2.length - 1)).join("/");
-}
-function locationOf(f) {
-  return f.sink?.file ?? f.source?.file ?? f.path?.[f.path.length - 1]?.file;
-}
-var KEY_SEP = " :: ";
-var UNPLACED = "unplaced" + KEY_SEP;
-function groupFamilies2(findings, minFamily = MIN_FAMILY) {
-  const byKey2 = /* @__PURE__ */ new Map();
-  for (const f of findings) {
-    const at = locationOf(f);
-    const key = at ? f.title + KEY_SEP + pathRoot(at) : UNPLACED + f.id;
-    const list = byKey2.get(key);
-    if (list) list.push(f);
-    else byKey2.set(key, [f]);
-  }
-  const families = [];
-  const singles = [];
-  for (const [key, members] of byKey2) {
-    if (members.length < minFamily) {
-      singles.push(...members);
-      continue;
-    }
-    const ranked = members.slice().sort(compareWithinStatus);
-    const lead = ranked[0];
-    families.push({ key, title: lead.title, root: pathRoot(locationOf(lead)), lead, members: ranked });
-  }
-  families.sort((a, b) => compareWithinStatus(a.lead, b.lead) || byStr2(a.key, b.key));
-  singles.sort(compareWithinStatus);
-  return { families, singles };
-}
-function familyCount(f) {
-  return `\xD7${f.members.length}`;
-}
-function collapsedCount(grouped) {
-  return grouped.families.reduce((n, f) => n + f.members.length - 1, 0);
 }
 
 // src/render/report.ts
