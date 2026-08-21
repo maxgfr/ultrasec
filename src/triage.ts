@@ -2,7 +2,7 @@ import type { Dossier } from "./store.js";
 import type { Finding, Status } from "./types.js";
 import { isHigh } from "./verify.js";
 import { byStr } from "./util.js";
-import { proposedFor, type ProposedAdjudication } from "./noise.js";
+import { proposedFor, renderProposalSummary, type ProposedAdjudication } from "./noise.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 
 // The cheap quick-dismiss fast-lane (Phase 4). A compact, code-free worklist of
@@ -74,6 +74,7 @@ export function renderTriageMd(items: TriageItem[], context?: string): string {
     L.push(context);
     L.push("");
   }
+  L.push(...renderProposalSummary(items));
   for (const it of items) {
     L.push(`- \`${it.id}\` — [${it.severity}] ${it.category}: ${it.title} · at \`${it.at}\``);
   }

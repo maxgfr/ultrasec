@@ -17705,6 +17705,7 @@ function makeToolFinding(i2) {
   if (i2.pkg) f.pkg = i2.pkg;
   if (i2.version) f.version = i2.version;
   if (i2.verified !== void 0) f.verified = i2.verified;
+  if (i2.atCommit) f.atCommit = i2.atCommit;
   if (i2.file) {
     const loc = { file: i2.file, line: i2.line ?? 1 };
     f.sink = loc;
@@ -21833,6 +21834,33 @@ function shapeOf(repo, rel2) {
   }
   return shapeCache.get(key);
 }
+function proposalSummary(items) {
+  const byClass = /* @__PURE__ */ new Map();
+  for (const it of items) {
+    if (!it.proposed) continue;
+    const row = byClass.get(it.proposed.class) ?? { class: it.proposed.class, ground: it.proposed.ground, why: it.proposed.why, ids: [] };
+    row.ids.push(it.id);
+    byClass.set(it.proposed.class, row);
+  }
+  return NOISE_CLASSES.filter((c2) => byClass.has(c2)).map((c2) => byClass.get(c2));
+}
+function renderProposalSummary(items) {
+  const rows = proposalSummary(items);
+  if (!rows.length) return [];
+  const L = [`## Proposed noise classes (${rows.length})`, ""];
+  L.push(`_The engine classified these as noise BY CONSTRUCTION and DEMOTED them \u2014 it did not`);
+  L.push(`adjudicate them. Each row is a suggestion with a named ground: accept it per item, or`);
+  L.push(`refuse it. Read the caveat \u2014 a demotion you cannot interrogate is a silent filter._`);
+  L.push("");
+  for (const r of rows) {
+    L.push(`- **${r.class}** (${r.ids.length}) \u2192 ground \`${r.ground}\` \u2014 ${r.why}`);
+    const shown = r.ids.slice(0, SUMMARY_IDS);
+    L.push(`  - ${shown.map((i2) => `\`${i2}\``).join(", ")}${r.ids.length > shown.length ? `, \u2026 and ${r.ids.length - shown.length} more` : ""}`);
+  }
+  L.push("");
+  return L;
+}
+var SUMMARY_IDS = 8;
 function proposedFor(f) {
   if (!f.noise) return void 0;
   return { class: f.noise, ground: NOISE_GROUND[f.noise], why: PROPOSAL_WHY[f.noise] };
@@ -21940,6 +21968,13 @@ function worktreePrefix(repo) {
 }
 function fileExistsAtHead(repo, file) {
   return git(repo, ["cat-file", "-e", `HEAD:${worktreePrefix(repo)}${file}`]) !== null;
+}
+function lineCountAtCommit(repo, commit, file) {
+  if (!/^[0-9a-f]{7,40}$/i.test(commit)) return null;
+  const blob = git(repo, ["show", `${commit}:${worktreePrefix(repo)}${file}`]);
+  if (blob === null) return null;
+  const lines5 = blob.split(/\r?\n/);
+  return lines5.length > 0 && lines5[lines5.length - 1] === "" ? lines5.length - 1 : lines5.length;
 }
 function lineContentAtHead(repo, file, line) {
   if (!Number.isInteger(line) || line < 1) return null;
@@ -22371,10 +22406,18 @@ var gitleaks = {
         ident: `${f.RuleID}:${f.File}:${f.StartLine}`,
         title: f.Description || f.RuleID,
         severity: "high",
-        message: `Hardcoded secret (${f.Description || f.RuleID}) at ${f.File}:${f.StartLine}`,
+        // A history hit needs different ADVICE from a working-tree one: deleting
+        // the file does not remove the credential from the history, so if it was
+        // ever real it has to be rotated, not just removed.
+        message: `Hardcoded secret (${f.Description || f.RuleID}) at ${f.File}:${f.StartLine}${f.Commit ? ` \u2014 found in git HISTORY at commit ${String(f.Commit).slice(0, 8)}. If the file no longer exists at HEAD the credential is still in the history: rotate it, deleting the file does not revoke it.` : ""}`,
         file: f.File,
         line: f.StartLine,
-        cwe: "CWE-798"
+        cwe: "CWE-798",
+        // `detect` reads every commit, so the cited file may not exist at HEAD.
+        // Keeping the sha is what lets the citation gate resolve the location
+        // against the tree it actually belongs to instead of calling it
+        // hallucinated. Absent on a `--no-git` (working-tree) scan.
+        ...typeof f.Commit === "string" && f.Commit ? { atCommit: f.Commit } : {}
       })
     );
   }
@@ -25693,6 +25736,7 @@ function renderWorklistMd(items, context, counts) {
     L.push(context);
     L.push("");
   }
+  L.push(...renderProposalSummary(items));
   for (const it of items) {
     L.push(`## ${it.id} \u2014 [${it.severity}] ${it.title}`);
     if (it.cwe) L.push(`- ${it.cwe} \xB7 ${it.category}`);
@@ -25809,6 +25853,7 @@ function renderTriageMd(items, context) {
     L.push(context);
     L.push("");
   }
+  L.push(...renderProposalSummary(items));
   for (const it of items) {
     L.push(`- \`${it.id}\` \u2014 [${it.severity}] ${it.category}: ${it.title} \xB7 at \`${it.at}\``);
   }
@@ -25963,10 +26008,20 @@ function check(dossier, opts = {}) {
     if (!lineCache2.has(file)) lineCache2.set(file, lineCountDetailed(repo, file));
     return lineCache2.get(file);
   };
+  let historical = 0;
   for (const f of findings) {
     if (f.status === "dismissed") continue;
     for (const loc of locsOf(f)) {
       if (!insideRepo(repo, loc.file)) continue;
+      if (f.atCommit) {
+        const at = lineCountAtCommit(repo, f.atCommit, loc.file);
+        if (at === null)
+          dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `file not found at ${f.atCommit.slice(0, 8)} (the commit the scanner cited)` });
+        else if (loc.line !== 0 && (loc.line < 1 || loc.line > at))
+          dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range at ${f.atCommit.slice(0, 8)} (file had ${at} lines)` });
+        else historical++;
+        continue;
+      }
       const lc = linesOf(loc.file);
       if (lc.status === "missing") dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
       else if (lc.status === "unreadable") dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `file unreadable (${lc.error})` });
@@ -25988,6 +26043,10 @@ function check(dossier, opts = {}) {
     ok = false;
     messages.push(`${dangling.length} dangling citation(s) \u2014 a cited [file:line] does not resolve (hallucinated or stale).`);
   }
+  if (historical > 0)
+    messages.push(
+      `${historical} citation(s) resolved against the commit that introduced them, not HEAD \u2014 history-scanned secrets in files since deleted. Still graded, just against the right tree.`
+    );
   if (opts.semantic) {
     if (unadjudicated > 0) {
       ok = false;
@@ -26001,7 +26060,7 @@ function check(dossier, opts = {}) {
   }
   if (ok)
     messages.push(`grounding OK${opts.semantic ? " \xB7 audit adjudicated" : ""} \u2014 ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
-  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, unarguedDismissals: unargued, messages };
+  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, unarguedDismissals: unargued, historical, messages };
 }
 
 // src/assumptions.ts

@@ -1,7 +1,7 @@
 import type { Dossier } from "./store.js";
 import { BROCARDS, VERDICTS, type Brocard, type Finding, type Status, type Verdict } from "./types.js";
 import { byStr, withStageNote } from "./util.js";
-import { proposedFor, type ProposedAdjudication } from "./noise.js";
+import { proposedFor, renderProposalSummary, type ProposedAdjudication } from "./noise.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 
 // The adversarial verification gate. The engine emits a claim↔evidence worklist;
@@ -178,6 +178,7 @@ export function renderWorklistMd(items: VerifyItem[], context?: string, counts?:
     L.push(context);
     L.push("");
   }
+  L.push(...renderProposalSummary(items));
   for (const it of items) {
     L.push(`## ${it.id} — [${it.severity}] ${it.title}`);
     if (it.cwe) L.push(`- ${it.cwe} · ${it.category}`);

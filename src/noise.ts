@@ -197,6 +197,54 @@ export interface ProposedAdjudication {
   why: string;
 }
 
+/**
+ * The proposed classes across a worklist, named ONCE each with their ground and
+ * their members — the only grouping this design does.
+ *
+ * Grouping saves no verdict (`check --semantic` counts per finding) and must not
+ * try to: a group that fans out would let one row rewrite findings the apply file
+ * never named. What it saves is READING. A brief carrying 46 identical
+ * "every node of this path is a test path" lines buries the handful of items
+ * that need thought; naming the class once and listing its members does not.
+ *
+ * Returns `[]` when nothing was classified, so the block is presence-gated and a
+ * run without demotions renders byte-identically to before.
+ */
+export function proposalSummary(
+  items: readonly { id: string; proposed?: ProposedAdjudication }[],
+): { class: NoiseClass; ground: Brocard; why: string; ids: string[] }[] {
+  const byClass = new Map<NoiseClass, { class: NoiseClass; ground: Brocard; why: string; ids: string[] }>();
+  for (const it of items) {
+    if (!it.proposed) continue;
+    const row = byClass.get(it.proposed.class) ?? { class: it.proposed.class, ground: it.proposed.ground, why: it.proposed.why, ids: [] };
+    row.ids.push(it.id);
+    byClass.set(it.proposed.class, row);
+  }
+  // Stable order: the vocabulary's own.
+  return NOISE_CLASSES.filter((c) => byClass.has(c)).map((c) => byClass.get(c)!);
+}
+
+/** Markdown lines for `proposalSummary`, or `[]` when nothing was classified. */
+export function renderProposalSummary(items: readonly { id: string; proposed?: ProposedAdjudication }[]): string[] {
+  const rows = proposalSummary(items);
+  if (!rows.length) return [];
+  const L: string[] = [`## Proposed noise classes (${rows.length})`, ""];
+  L.push(`_The engine classified these as noise BY CONSTRUCTION and DEMOTED them — it did not`);
+  L.push(`adjudicate them. Each row is a suggestion with a named ground: accept it per item, or`);
+  L.push(`refuse it. Read the caveat — a demotion you cannot interrogate is a silent filter._`);
+  L.push("");
+  for (const r of rows) {
+    L.push(`- **${r.class}** (${r.ids.length}) → ground \`${r.ground}\` — ${r.why}`);
+    const shown = r.ids.slice(0, SUMMARY_IDS);
+    L.push(`  - ${shown.map((i) => `\`${i}\``).join(", ")}${r.ids.length > shown.length ? `, … and ${r.ids.length - shown.length} more` : ""}`);
+  }
+  L.push("");
+  return L;
+}
+
+/** Enough ids to recognise the family without reprinting the worklist. */
+const SUMMARY_IDS = 8;
+
 /** The proposal for a finding, if the engine classified it. */
 export function proposedFor(f: Finding): ProposedAdjudication | undefined {
   if (!f.noise) return undefined;

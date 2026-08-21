@@ -58,6 +58,9 @@ export interface ToolFindingInput {
   version?: string;
   /** Secret adapters: whether the credential was actively validated as live. */
   verified?: boolean;
+  /** Commit a history-scanned citation belongs to. gitleaks reads every commit,
+   *  so the cited file need not exist at HEAD. */
+  atCommit?: string;
 }
 
 /** Pull the canonical CVE id out of a set of advisory ids, if any. */
@@ -112,6 +115,7 @@ export function makeToolFinding(i: ToolFindingInput): Finding {
   if (i.pkg) f.pkg = i.pkg;
   if (i.version) f.version = i.version;
   if (i.verified !== undefined) f.verified = i.verified;
+  if (i.atCommit) f.atCommit = i.atCommit;
   if (i.file) {
     const loc = { file: i.file, line: i.line ?? 1 };
     f.sink = loc; // for SAST/secret/config the flagged location is the "sink"

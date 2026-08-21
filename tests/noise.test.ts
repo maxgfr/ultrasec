@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { classifyNoise, demoteNoise } from "../src/noise.js";
+import { classifyNoise, demoteNoise, proposalSummary, renderProposalSummary } from "../src/noise.js";
 import { NOISE_GROUND, BROCARDS, type Finding } from "../src/types.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
@@ -205,5 +205,46 @@ describe("NOISE_GROUND", () => {
     for (const [cls, ground] of Object.entries(NOISE_GROUND)) {
       expect(BROCARDS as readonly string[], cls).toContain(ground);
     }
+  });
+});
+
+describe("proposalSummary — the only grouping this design does", () => {
+  // Grouping saves no VERDICT (`check --semantic` counts per finding) and must
+  // not try to: a group that fanned out would let one row rewrite findings the
+  // apply file never named. What it saves is READING — 46 identical
+  // "every node of this path is a test path" lines bury the items needing thought.
+  const items = [
+    { id: "aaa", proposed: { class: "test-only-path" as const, ground: "outside-usage" as const, why: "w1" } },
+    { id: "bbb", proposed: { class: "test-only-path" as const, ground: "outside-usage" as const, why: "w1" } },
+    { id: "ccc", proposed: { class: "vendored-artifact" as const, ground: "no-threat-model" as const, why: "w2" } },
+    { id: "ddd" },
+  ];
+
+  it("names each class once, with its ground and its members", () => {
+    expect(proposalSummary(items)).toEqual([
+      { class: "test-only-path", ground: "outside-usage", why: "w1", ids: ["aaa", "bbb"] },
+      { class: "vendored-artifact", ground: "no-threat-model", why: "w2", ids: ["ccc"] },
+    ]);
+  });
+
+  it("renders a block that states it is a suggestion, not an adjudication", () => {
+    const md = renderProposalSummary(items).join("\n");
+    expect(md).toContain("## Proposed noise classes (2)");
+    expect(md).toContain("**test-only-path** (2)");
+    expect(md).toContain("`outside-usage`");
+    expect(md).toMatch(/did not\s+adjudicate them/);
+  });
+
+  it("caps the id list so a large family does not reprint the worklist", () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      id: `id${i}`,
+      proposed: { class: "test-only-path" as const, ground: "outside-usage" as const, why: "w" },
+    }));
+    expect(renderProposalSummary(many).join("\n")).toContain("and 32 more");
+  });
+
+  it("renders nothing when nothing was classified — the block is presence-gated", () => {
+    expect(renderProposalSummary([{ id: "x" }])).toEqual([]);
+    expect(proposalSummary([{ id: "x" }])).toEqual([]);
   });
 });

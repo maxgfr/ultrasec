@@ -127,6 +127,24 @@ export function fileExistsAtHead(repo: string, file: string): boolean {
   return git(repo, ["cat-file", "-e", `HEAD:${worktreePrefix(repo)}${file}`]) !== null;
 }
 
+/**
+ * How many lines `file` had at `commit`, or `null` when the blob does not exist
+ * there (or git is unavailable).
+ *
+ * `<rev>:<path>` is one argv rev-expression, never a shell string — the same
+ * injection-hardening as `blameLine`. `commit` is validated as a hex sha first,
+ * so a crafted value out of a scanner's JSON cannot become a rev-expression like
+ * `HEAD --output=…`.
+ */
+export function lineCountAtCommit(repo: string, commit: string, file: string): number | null {
+  if (!/^[0-9a-f]{7,40}$/i.test(commit)) return null;
+  const blob = git(repo, ["show", `${commit}:${worktreePrefix(repo)}${file}`]);
+  if (blob === null) return null;
+  const lines = blob.split(/\r?\n/);
+  // A trailing newline yields a final empty element that is not a line.
+  return lines.length > 0 && lines[lines.length - 1] === "" ? lines.length - 1 : lines.length;
+}
+
 /** The content of `file` line `line` at HEAD, or `null` if the file/line is gone. */
 export function lineContentAtHead(repo: string, file: string, line: number): string | null {
   if (!Number.isInteger(line) || line < 1) return null;

@@ -24,7 +24,9 @@ export const VERSION = "1.37.0";
 // Additive + optional — older dossiers omit it, and a consumer that can't tell
 // "flag not passed" from "flag passed, zero results" falls back to the old
 // advice, byte-identical to before.
-// 9: findings gained optional `noise` — the noise-by-construction class a
+// 9: findings gained optional `atCommit` (the commit a history-scanned citation
+// belongs to, so the gate resolves it against that tree rather than HEAD) and
+// optional `noise` — the noise-by-construction class a
 // finding was DEMOTED under (never dismissed): ciphertext-by-design, a taint
 // path confined to the test harness, a vendored build artifact. Additive +
 // optional; it is re-derived by every scan rather than authored, and it carries
@@ -409,6 +411,21 @@ export interface Finding {
    * see which dismissals were argued and which were merely asserted.
    */
   brocard?: Brocard;
+  /**
+   * The commit the cited location belongs to, when the finding came from a scan
+   * of git HISTORY rather than of the working tree.
+   *
+   * gitleaks `detect` reads every commit, which is the coverage that catches a
+   * credential added and later deleted — and it means the cited `file:line` need
+   * not exist at HEAD at all. Without this the citation gate read those as
+   * dangling ("hallucinated or stale") and FAILED, on any repo that ever deleted
+   * a file: 20 of them on the first real audit, none of them invented.
+   *
+   * Engine-set only, from the scanner's own output. Never author-set, so it
+   * cannot be used to walk a made-up citation past the gate — and the gate does
+   * not skip the check, it resolves it against THIS commit instead.
+   */
+  atCommit?: string;
   /**
    * The noise-by-construction class this finding was DEMOTED under — never
    * dismissed. Set by the scan's de-noising pass, not authored, and re-derived

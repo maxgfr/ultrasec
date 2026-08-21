@@ -35,10 +35,22 @@ export const gitleaks: ToolAdapter = {
         ident: `${f.RuleID}:${f.File}:${f.StartLine}`,
         title: f.Description || f.RuleID,
         severity: "high",
-        message: `Hardcoded secret (${f.Description || f.RuleID}) at ${f.File}:${f.StartLine}`,
+        // A history hit needs different ADVICE from a working-tree one: deleting
+        // the file does not remove the credential from the history, so if it was
+        // ever real it has to be rotated, not just removed.
+        message: `Hardcoded secret (${f.Description || f.RuleID}) at ${f.File}:${f.StartLine}${
+          f.Commit
+            ? ` — found in git HISTORY at commit ${String(f.Commit).slice(0, 8)}. If the file no longer exists at HEAD the credential is still in the history: rotate it, deleting the file does not revoke it.`
+            : ""
+        }`,
         file: f.File,
         line: f.StartLine,
         cwe: "CWE-798",
+        // `detect` reads every commit, so the cited file may not exist at HEAD.
+        // Keeping the sha is what lets the citation gate resolve the location
+        // against the tree it actually belongs to instead of calling it
+        // hallucinated. Absent on a `--no-git` (working-tree) scan.
+        ...(typeof f.Commit === "string" && f.Commit ? { atCommit: f.Commit } : {}),
       }),
     );
   },
