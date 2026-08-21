@@ -69,7 +69,7 @@ describe("renderDossierMd — de-noised families are named once", () => {
   // meets 46 separate "untrusted input reaches query()" entries and has to work
   // out one at a time that they are the same test harness.
   function withNoise(): Dossier {
-    const d = dossier();
+    const d = dossier({ candidates: 0, total: 0 });
     d.findings = [
       { ...finding(), id: "a", noise: "test-only-path" as const },
       { ...finding(), id: "b", noise: "test-only-path" as const },
@@ -94,7 +94,7 @@ describe("renderDossierMd — de-noised families are named once", () => {
   });
 
   it("renders byte-identically when nothing was demoted", () => {
-    const clean = dossier();
+    const clean = dossier({ candidates: 0, total: 0 });
     expect(renderDossierMd(clean)).not.toContain("Proposed noise classes");
   });
 });
