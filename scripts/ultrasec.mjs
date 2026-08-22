@@ -18575,7 +18575,12 @@ function notebookShadow(raw) {
   let unaligned = 0;
   let blanked = 0;
   let cursor = 0;
-  const lineOf4 = (index) => raw.slice(0, index).split("\n").length;
+  let scanned = 0;
+  let scannedLine = 1;
+  const lineOf4 = (index) => {
+    for (; scanned < index; scanned++) if (raw.charCodeAt(scanned) === 10) scannedLine++;
+    return scannedLine;
+  };
   for (const cell of doc.cells) {
     if (cell?.cell_type !== "code") continue;
     const source = cell.source;

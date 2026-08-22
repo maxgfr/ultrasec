@@ -95,7 +95,18 @@ export function notebookShadow(raw: string): NotebookShadow | undefined {
   // ended. That keeps two identical lines in two different cells from both
   // resolving to the first one's position.
   let cursor = 0;
-  const lineOf = (index: number): number => raw.slice(0, index).split("\n").length;
+
+  // Line numbers are counted INCREMENTALLY off that same forward cursor. The
+  // obvious `raw.slice(0, at).split("\n").length` is O(n) per source line and
+  // therefore O(n²) over a notebook — fine on eight cells, not fine on the
+  // 3870-line ones these repositories also contain. Because every `at` is
+  // non-decreasing, carrying the count forward is exact and linear.
+  let scanned = 0; // characters already counted
+  let scannedLine = 1; // the line `scanned` sits on
+  const lineOf = (index: number): number => {
+    for (; scanned < index; scanned++) if (raw.charCodeAt(scanned) === 10) scannedLine++;
+    return scannedLine;
+  };
 
   for (const cell of doc.cells as RawCell[]) {
     if (cell?.cell_type !== "code") continue;
