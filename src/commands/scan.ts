@@ -163,7 +163,14 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // evidence, not zero evidence (a value can travel through module state).
   const strictScope = flagBool(args, "strict-scope");
   step(`enumerating source→sink taint paths…`);
-  const taint = enumerateTaint(scan, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn, excludeEnvSources, strictScope });
+  const taint = enumerateTaint(scan, graph, {
+    maxDepth,
+    maxCandidates,
+    includeLogSinks: logHygieneOn,
+    excludeEnvSources,
+    strictScope,
+    includeTests: flagBool(args, "include-tests"),
+  });
   const taintFindings = taint.findings;
   step(`${taintFindings.length} taint candidate(s)`);
 
