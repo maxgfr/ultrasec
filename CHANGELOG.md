@@ -2,6 +2,29 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.40.0](https://github.com/maxgfr/ultrasec/compare/v1.39.0...v1.40.0) (2026-08-22)
+
+
+### Bug Fixes
+
+* **noise:** a Jupyter checkpoint is a stale copy, like every other autosave ([ab75869](https://github.com/maxgfr/ultrasec/commit/ab75869cee2996b69a49d9eef29783be7fa26f01))
+* **paths:** a kind it cannot list is not a kind that is absent ([dfbf26c](https://github.com/maxgfr/ultrasec/commit/dfbf26cc75236453558549c663063d985f778480))
+* **run:** say it where the document is written, not only at the gate ([758bd7b](https://github.com/maxgfr/ultrasec/commit/758bd7bf2374d6c6b02438568bd6d4f050724556))
+
+
+### Features
+
+* **catalog:** the two ordinary classes a source→sink walk cannot shape ([49f9049](https://github.com/maxgfr/ultrasec/commit/49f904927315d7e42e57e168f19c61b359d033f1))
+* **check:** confront CONTEXT.md's negations with the code ([b103aca](https://github.com/maxgfr/ultrasec/commit/b103acaf56c63be5db7ad428c567e0b207c629c9))
+* **guards:** enumerate the OTHER absence — the rate limit nobody wrote ([0a78b48](https://github.com/maxgfr/ultrasec/commit/0a78b48c8100ffa7a17303e712a38eaf61e54db7))
+* **run:** drive the throttle lens from the pipeline like every other stage ([165197f](https://github.com/maxgfr/ultrasec/commit/165197f84339bbfd417812a233eb13965e194672))
+* **scan:** read the code that is stored as JSON ([afaea16](https://github.com/maxgfr/ultrasec/commit/afaea16fae40083be9dd550de15495784d33d866))
+
+
+### Performance Improvements
+
+* **notebooks:** count lines off the cursor that is already moving forward ([04e1c8b](https://github.com/maxgfr/ultrasec/commit/04e1c8b264409db0cb197eb08f16742c3d202f41))
+
 # [1.39.0](https://github.com/maxgfr/ultrasec/compare/v1.38.0...v1.39.0) (2026-08-22)
 
 
