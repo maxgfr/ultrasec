@@ -627,6 +627,15 @@ export interface Manifest {
      * question is which of them the auditor adjudicated.
      */
     guards?: boolean;
+    /**
+     * `ultrasec guards --lens throttle` (the entry-point × rate-limit matrix).
+     *
+     * The same absence question, asked of throttling instead of authorization,
+     * and it unlocks the same kind of coverage claim: "missing rate limiting"
+     * stops being a line in an advice string nobody can act on and becomes an
+     * enumerated set of handlers with a marker or without one.
+     */
+    throttle?: boolean;
   };
   /** Findings de-prioritized as noise BY CONSTRUCTION, with the reason and how
    *  many. The engine's rule is that nothing disappears quietly: a class that

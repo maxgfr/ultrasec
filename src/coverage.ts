@@ -99,10 +99,11 @@ const ASVS_CATEGORIES: AsvsCategory[] = [
     // + `sink.kind: "log"` + CWE-117. Listing only "logs" scored a run with 117
     // CWE-117 findings as "not examined" — the exact coverage theatre this file
     // exists to avoid, pointed the other way.
-    kinds: ["logs", "log", "CWE-117", "CWE-532"],
-    hint: "Needs `scan --log-hygiene` to be enumerated at all (CWE-117/532).",
+    kinds: ["logs", "log", "CWE-117", "CWE-532", "errleak", "CWE-209"],
+    hint: "The error-HANDLING half is enumerated (CWE-209 — a caught error written into the response body). Needs `scan --log-hygiene` for the logging half (CWE-117/532).",
     requiresPass: "logHygiene",
-    hintWhenRan: "`--log-hygiene` ran and found no CWE-117/532 candidate — error handling and log content are still yours to read.",
+    hintWhenRan:
+      "`--log-hygiene` ran and found no CWE-117/532 candidate — what an error handler returns to the caller is enumerated (CWE-209), what it swallows is still yours to read.",
   },
   {
     id: "V8",
@@ -112,7 +113,19 @@ const ASVS_CATEGORIES: AsvsCategory[] = [
     hint: "Where personal data goes, how long it stays, whether pseudonymisation is reversible.",
   },
   { id: "V9", title: "Communications", judgment: true, hint: "TLS verification disabled anywhere? Certificate pinning claims that do not hold?" },
-  { id: "V11", title: "Business logic", judgment: true, hint: "Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance." },
+  {
+    // ASVS 11.1.4 is anti-automation and resource consumption, so this chapter —
+    // not V13 — is where an unbounded similarity/distance call and a route with
+    // no throttling belong.
+    id: "V11",
+    title: "Business logic",
+    kinds: ["algodos", "CWE-407", "CWE-400", "CWE-770", "CWE-307"],
+    judgment: true,
+    hint: "Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance. Anti-automation is partly enumerated: `scan` finds unbounded similarity/distance calls (CWE-407), `guards --lens throttle` finds handlers nothing rate-limits.",
+    requiresPass: "throttle",
+    hintWhenRan:
+      "`guards --lens throttle` enumerated every handler and the throttling visible in its scope — workflow skipping, price tampering and replay are still yours to read.",
+  },
   { id: "V12", title: "Files & resources", kinds: ["path"], hint: "Traversal and zip-slip are enumerated; upload type/size/AV policy is not." },
   {
     id: "V13",
@@ -156,14 +169,18 @@ const OWASP_TOP10_2021: AsvsCategory[] = [
   {
     id: "A04",
     title: "Insecure design",
+    kinds: ["algodos", "CWE-407", "CWE-400", "CWE-770", "CWE-307"],
     judgment: true,
-    hint: "Missing rate limiting, no threat model, business-logic abuse — read CONTEXT.md and the investigate leads.",
+    hint: "Missing rate limiting, no threat model, business-logic abuse. Two halves are now enumerated — unbounded similarity/distance calls (CWE-407) by `scan`, handlers nothing throttles by `guards --lens throttle`; the rest is CONTEXT.md and the investigate leads.",
+    requiresPass: "throttle",
+    hintWhenRan:
+      "`guards --lens throttle` ran: every handler is listed with the throttling visible in its scope. What remains is design — the threat model and the abuse cases no marker can stand for.",
   },
   {
     id: "A05",
     title: "Security misconfiguration",
-    kinds: ["config", "CWE-16", "CWE-200", "CWE-489", "CWE-942", "CWE-1004", "CWE-1275", "xxe"],
-    hint: "CORS, security headers, cookie flags, debug/verbose errors, directory listing, GraphQL introspection, IaC.",
+    kinds: ["config", "CWE-16", "CWE-200", "CWE-209", "CWE-489", "CWE-942", "CWE-1004", "CWE-1275", "xxe", "errleak"],
+    hint: "CORS, security headers, cookie flags, debug/verbose errors (CWE-209 — enumerated), directory listing, GraphQL introspection, IaC.",
   },
   {
     id: "A06",
@@ -228,8 +245,11 @@ const OWASP_API_TOP10_2023: AsvsCategory[] = [
   {
     id: "API4",
     title: "Unrestricted resource consumption",
+    kinds: ["algodos", "CWE-407", "CWE-400", "CWE-770"],
     judgment: true,
-    hint: "Rate limiting, pagination caps, GraphQL query cost/depth — not statically enumerable.",
+    hint: "Unbounded similarity/distance calls (CWE-407) are enumerated and `guards --lens throttle` lists the handlers nothing rate-limits; pagination caps and GraphQL query cost/depth stay judgment.",
+    requiresPass: "throttle",
+    hintWhenRan: "`guards --lens throttle` ran — pagination caps and GraphQL query cost/depth are still yours to read.",
   },
   {
     id: "API5",

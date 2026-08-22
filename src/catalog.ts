@@ -208,6 +208,66 @@ export const SINKS: SinkRule[] = [
     note: "Tainted data compiled as a regex pattern. A crafted pattern (nested quantifiers) burns CPU on any input. Use a fixed pattern, or a linear-time engine (RE2), and bound the input length.",
   },
   {
+    // ReDoS's sibling, and the one nothing here was looking for: the super-linear
+    // cost is not in a regex the caller wrote, it is inside a LIBRARY the caller
+    // called. Measured on a real audit: `fuzz.extract(userQuery, ~10k variants)`
+    // — an O(n·m) Levenshtein DP, synchronous, no early exit — behind a `q`
+    // parameter validated with `min(1)` and no `max`. An 8 KB query is ~2·10⁸
+    // blocking operations per request, and ten concurrent requests take the
+    // process down. The taint walk already had the whole path (query → controller
+    // → service → this call); the catalog simply had no sink at the end of it, so
+    // nothing was ever emitted.
+    //
+    // `ambiguous` + `requireModule` is the discipline `exec` gets, for the same
+    // reason: `extract`, `ratio`, `distance` and `similarity` are among the most
+    // reused method names there are. The import is what says this one is a
+    // string-distance engine rather than someone's own helper.
+    kind: "algodos",
+    cwe: "CWE-407",
+    severity: "medium",
+    languages: ["javascript", "python", "java", "kotlin", "go"],
+    callees: [
+      "extract",
+      "extractAsPromised",
+      "extractAsync",
+      "ratio",
+      "partial_ratio",
+      "token_sort_ratio",
+      "token_set_ratio",
+      "WRatio",
+      "distance",
+      "levenshtein",
+      "closest",
+      "findBestMatch",
+      "compareTwoStrings",
+      "similarity",
+      "get_close_matches",
+      "SequenceMatcher",
+    ],
+    requireModule: [
+      "fuzzball",
+      "fuzzysort",
+      "fast-levenshtein",
+      "js-levenshtein",
+      "levenshtein",
+      "leven",
+      "string-similarity",
+      "didyoumean",
+      "fuse.js",
+      "natural",
+      "talisman",
+      "rapidfuzz",
+      "fuzzywuzzy",
+      "difflib",
+      "commons-text",
+      "jellyfish",
+      "textdistance",
+    ],
+    ambiguous: true,
+    title: "Algorithmic denial of service (unbounded similarity/distance computation)",
+    note: "Tainted data handed to a string-distance / fuzzy-match routine whose cost is super-linear in the input length (Levenshtein DP is O(n·m)) and linear again in the size of the candidate set. Unbounded, a single request can block the event loop for seconds. Bound the input length BEFORE the call (a `max` on the schema, a hard slice) — a MINIMUM length is not a bound.",
+  },
+  {
     kind: "code",
     cwe: "CWE-94",
     severity: "high",
@@ -678,6 +738,41 @@ export const TEXT_SINKS: TextSinkRule[] = [
     label: "URL attribute",
     title: "DOM XSS via a URL attribute",
     note: "Tainted data assigned to src/href executes when the scheme is `javascript:` or `data:`. Allow-list the scheme before assigning.",
+  },
+  // ── The caught error, handed straight to the caller (CWE-209) ─────────────
+  //
+  // A line sink rather than a flow, because the line carries BOTH halves: the
+  // error value and the write that returns it. There is no untrusted SOURCE to
+  // trace here — the tainted value is the exception itself, produced by the
+  // server — so no source→sink walk could ever have reached this class, and
+  // nothing else in the engine asks the question.
+  //
+  // The gap between the writer and the error expression forbids `)`, which is
+  // what keeps `const d = await res.json(); log(err.message)` — two unrelated
+  // statements on one line — from matching. An explicit `.status(NNN)` hop is
+  // allowed through because `res.status(500).json({ error: err.message })` is
+  // the single most common shape of this bug.
+  {
+    kind: "errleak",
+    cwe: "CWE-209",
+    severity: "low",
+    languages: ["javascript"],
+    re: /(?:\bNextResponse|\bJsonResponse|\b(?:res|resp|response|reply|ctx)\w*)\s*(?:\.\s*status\s*\(\s*\d{3}\s*\))?\s*\.\s*(?:json|send|end|write|text)\s*\([^\n)]{0,160}?(?:\bString\s*\(\s*(?:err|error|e|ex|exc)\b|\b(?:err|error|e|ex|exc|exception)\s*\.\s*(?:message|stack|stackTrace|detail|details|sqlMessage|toString)\b|\$\{\s*(?:err|error|e)\s*\})/,
+    label: "error → response body",
+    title: "Error detail returned to the client (CWE-209)",
+    note: "The caught error's own text is written into the HTTP response. Upstream errors leak internals the caller should never see — driver and index names, SQL fragments, file paths, the status text of a third-party API. Return a fixed message and keep the detail in the log / the exception tracker.",
+  },
+  {
+    // Flask/Django's shape of the same bug. Bare-callee rather than
+    // receiver-dotted, so it needs its own rule.
+    kind: "errleak",
+    cwe: "CWE-209",
+    severity: "low",
+    languages: ["python"],
+    re: /\b(?:jsonify|JsonResponse|HttpResponse|HttpResponseServerError|make_response|abort)\s*\([^\n)]{0,160}?(?:\bstr\s*\(\s*(?:e|err|error|exc|ex)\s*\)|\brepr\s*\(\s*(?:e|err|error|exc|ex)\s*\)|\btraceback\s*\.\s*format_exc|\b(?:e|err|error|exc|ex)\s*\.\s*(?:message|args)\b)/,
+    label: "error → response body",
+    title: "Error detail returned to the client (CWE-209)",
+    note: "The caught exception's own text is written into the HTTP response. Upstream errors leak internals the caller should never see — driver names, SQL fragments, file paths, a full traceback. Return a fixed message and keep the detail in the log / the exception tracker.",
   },
 ];
 
@@ -1279,6 +1374,19 @@ export interface SanitizerRule {
    * 3% of every TypeScript line in a real repo.
    */
   sinkLineOnly?: boolean;
+  /**
+   * Sink kinds this rule must NOT speak for, even though it is a wildcard.
+   *
+   * The general-validation rule answers "is this value type-checked?", and for
+   * nearly every sink that is evidence. For `algodos` it is the opposite of
+   * evidence: the audited repository validated every route parameter with zod
+   * and still shipped a remote CPU denial of service, because the schema said
+   * `min(1)` and never said `max`. Reporting "type-coercion/validation present"
+   * on that line would hand the adjudicator the exact reassurance the bug
+   * depends on. What contains this class is an upper BOUND, and the `algodos`
+   * rule below is the one that looks for it.
+   */
+  exceptKinds?: string[];
 }
 
 export const SANITIZERS: SanitizerRule[] = [
@@ -1322,6 +1430,15 @@ export const SANITIZERS: SanitizerRule[] = [
     note: "option-injection guard present (leading '-' rejected or `--` terminator)",
   },
   { kind: "redos", languages: ["*"], re: /\bRE2\b|re2|\bescapeRegExp\b|\bescape_string\b|timeout/, note: "linear-time engine or pattern escaping present" },
+  // What actually contains an algorithmic-DoS sink is an upper bound on the
+  // input, so that is what this looks for — and NOT a minimum. `min(1)` /
+  // `length >= 3` is the guard the audited repo had, and it bounds nothing.
+  {
+    kind: "algodos",
+    languages: ["*"],
+    re: /\.slice\s*\(\s*0\s*,|\.substring\s*\(\s*0\s*,|\.substr\s*\(\s*0\s*,|\bmax\s*\(\s*\d|\bmaxLength\b|\bmax_length\b|\blength\s*[<>]=?\s*\d|\btruncate\b|\[\s*:\s*\d+\s*\]/,
+    note: "input length bounded (upper bound present)",
+  },
   {
     kind: "reflect",
     languages: ["*"],
@@ -1361,6 +1478,7 @@ export const SANITIZERS: SanitizerRule[] = [
     languages: ["*"],
     re: /\bparseInt\b|\bNumber\(|\bInteger\.parse|validator\.|\bz\.|Joi\.|\bisInt\b|\bUUID\b/,
     note: "type-coercion/validation present",
+    exceptKinds: ["algodos"],
   },
 ];
 
@@ -1370,6 +1488,7 @@ export function findSanitizers(lang: LangSpec, line: string, sinkKind: string): 
   for (const rule of SANITIZERS) {
     if (!appliesTo(rule.languages, lang.id)) continue;
     if (rule.kind !== "*" && rule.kind !== sinkKind) continue;
+    if (rule.exceptKinds?.includes(sinkKind)) continue;
     if (rule.re.test(line)) hints.push(rule.note);
   }
   return hints;

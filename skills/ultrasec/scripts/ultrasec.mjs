@@ -18921,6 +18921,66 @@ var SINKS = [
     note: "Tainted data compiled as a regex pattern. A crafted pattern (nested quantifiers) burns CPU on any input. Use a fixed pattern, or a linear-time engine (RE2), and bound the input length."
   },
   {
+    // ReDoS's sibling, and the one nothing here was looking for: the super-linear
+    // cost is not in a regex the caller wrote, it is inside a LIBRARY the caller
+    // called. Measured on a real audit: `fuzz.extract(userQuery, ~10k variants)`
+    // — an O(n·m) Levenshtein DP, synchronous, no early exit — behind a `q`
+    // parameter validated with `min(1)` and no `max`. An 8 KB query is ~2·10⁸
+    // blocking operations per request, and ten concurrent requests take the
+    // process down. The taint walk already had the whole path (query → controller
+    // → service → this call); the catalog simply had no sink at the end of it, so
+    // nothing was ever emitted.
+    //
+    // `ambiguous` + `requireModule` is the discipline `exec` gets, for the same
+    // reason: `extract`, `ratio`, `distance` and `similarity` are among the most
+    // reused method names there are. The import is what says this one is a
+    // string-distance engine rather than someone's own helper.
+    kind: "algodos",
+    cwe: "CWE-407",
+    severity: "medium",
+    languages: ["javascript", "python", "java", "kotlin", "go"],
+    callees: [
+      "extract",
+      "extractAsPromised",
+      "extractAsync",
+      "ratio",
+      "partial_ratio",
+      "token_sort_ratio",
+      "token_set_ratio",
+      "WRatio",
+      "distance",
+      "levenshtein",
+      "closest",
+      "findBestMatch",
+      "compareTwoStrings",
+      "similarity",
+      "get_close_matches",
+      "SequenceMatcher"
+    ],
+    requireModule: [
+      "fuzzball",
+      "fuzzysort",
+      "fast-levenshtein",
+      "js-levenshtein",
+      "levenshtein",
+      "leven",
+      "string-similarity",
+      "didyoumean",
+      "fuse.js",
+      "natural",
+      "talisman",
+      "rapidfuzz",
+      "fuzzywuzzy",
+      "difflib",
+      "commons-text",
+      "jellyfish",
+      "textdistance"
+    ],
+    ambiguous: true,
+    title: "Algorithmic denial of service (unbounded similarity/distance computation)",
+    note: "Tainted data handed to a string-distance / fuzzy-match routine whose cost is super-linear in the input length (Levenshtein DP is O(n\xB7m)) and linear again in the size of the candidate set. Unbounded, a single request can block the event loop for seconds. Bound the input length BEFORE the call (a `max` on the schema, a hard slice) \u2014 a MINIMUM length is not a bound."
+  },
+  {
     kind: "code",
     cwe: "CWE-94",
     severity: "high",
@@ -19357,6 +19417,41 @@ var TEXT_SINKS = [
     label: "URL attribute",
     title: "DOM XSS via a URL attribute",
     note: "Tainted data assigned to src/href executes when the scheme is `javascript:` or `data:`. Allow-list the scheme before assigning."
+  },
+  // ── The caught error, handed straight to the caller (CWE-209) ─────────────
+  //
+  // A line sink rather than a flow, because the line carries BOTH halves: the
+  // error value and the write that returns it. There is no untrusted SOURCE to
+  // trace here — the tainted value is the exception itself, produced by the
+  // server — so no source→sink walk could ever have reached this class, and
+  // nothing else in the engine asks the question.
+  //
+  // The gap between the writer and the error expression forbids `)`, which is
+  // what keeps `const d = await res.json(); log(err.message)` — two unrelated
+  // statements on one line — from matching. An explicit `.status(NNN)` hop is
+  // allowed through because `res.status(500).json({ error: err.message })` is
+  // the single most common shape of this bug.
+  {
+    kind: "errleak",
+    cwe: "CWE-209",
+    severity: "low",
+    languages: ["javascript"],
+    re: /(?:\bNextResponse|\bJsonResponse|\b(?:res|resp|response|reply|ctx)\w*)\s*(?:\.\s*status\s*\(\s*\d{3}\s*\))?\s*\.\s*(?:json|send|end|write|text)\s*\([^\n)]{0,160}?(?:\bString\s*\(\s*(?:err|error|e|ex|exc)\b|\b(?:err|error|e|ex|exc|exception)\s*\.\s*(?:message|stack|stackTrace|detail|details|sqlMessage|toString)\b|\$\{\s*(?:err|error|e)\s*\})/,
+    label: "error \u2192 response body",
+    title: "Error detail returned to the client (CWE-209)",
+    note: "The caught error's own text is written into the HTTP response. Upstream errors leak internals the caller should never see \u2014 driver and index names, SQL fragments, file paths, the status text of a third-party API. Return a fixed message and keep the detail in the log / the exception tracker."
+  },
+  {
+    // Flask/Django's shape of the same bug. Bare-callee rather than
+    // receiver-dotted, so it needs its own rule.
+    kind: "errleak",
+    cwe: "CWE-209",
+    severity: "low",
+    languages: ["python"],
+    re: /\b(?:jsonify|JsonResponse|HttpResponse|HttpResponseServerError|make_response|abort)\s*\([^\n)]{0,160}?(?:\bstr\s*\(\s*(?:e|err|error|exc|ex)\s*\)|\brepr\s*\(\s*(?:e|err|error|exc|ex)\s*\)|\btraceback\s*\.\s*format_exc|\b(?:e|err|error|exc|ex)\s*\.\s*(?:message|args)\b)/,
+    label: "error \u2192 response body",
+    title: "Error detail returned to the client (CWE-209)",
+    note: "The caught exception's own text is written into the HTTP response. Upstream errors leak internals the caller should never see \u2014 driver names, SQL fragments, file paths, a full traceback. Return a fixed message and keep the detail in the log / the exception tracker."
   }
 ];
 var PURE_QUOTED = /^(['"])(?:\\.|(?!\1)[^\\])*\1$/;
@@ -19793,6 +19888,15 @@ var SANITIZERS = [
     note: "option-injection guard present (leading '-' rejected or `--` terminator)"
   },
   { kind: "redos", languages: ["*"], re: /\bRE2\b|re2|\bescapeRegExp\b|\bescape_string\b|timeout/, note: "linear-time engine or pattern escaping present" },
+  // What actually contains an algorithmic-DoS sink is an upper bound on the
+  // input, so that is what this looks for — and NOT a minimum. `min(1)` /
+  // `length >= 3` is the guard the audited repo had, and it bounds nothing.
+  {
+    kind: "algodos",
+    languages: ["*"],
+    re: /\.slice\s*\(\s*0\s*,|\.substring\s*\(\s*0\s*,|\.substr\s*\(\s*0\s*,|\bmax\s*\(\s*\d|\bmaxLength\b|\bmax_length\b|\blength\s*[<>]=?\s*\d|\btruncate\b|\[\s*:\s*\d+\s*\]/,
+    note: "input length bounded (upper bound present)"
+  },
   {
     kind: "reflect",
     languages: ["*"],
@@ -19831,7 +19935,8 @@ var SANITIZERS = [
     kind: "*",
     languages: ["*"],
     re: /\bparseInt\b|\bNumber\(|\bInteger\.parse|validator\.|\bz\.|Joi\.|\bisInt\b|\bUUID\b/,
-    note: "type-coercion/validation present"
+    note: "type-coercion/validation present",
+    exceptKinds: ["algodos"]
   }
 ];
 function findSanitizers(lang, line, sinkKind) {
@@ -19839,6 +19944,7 @@ function findSanitizers(lang, line, sinkKind) {
   for (const rule of SANITIZERS) {
     if (!appliesTo(rule.languages, lang.id)) continue;
     if (rule.kind !== "*" && rule.kind !== sinkKind) continue;
+    if (rule.exceptKinds?.includes(sinkKind)) continue;
     if (rule.re.test(line)) hints.push(rule.note);
   }
   return hints;
@@ -27844,10 +27950,10 @@ var ASVS_CATEGORIES = [
     // + `sink.kind: "log"` + CWE-117. Listing only "logs" scored a run with 117
     // CWE-117 findings as "not examined" — the exact coverage theatre this file
     // exists to avoid, pointed the other way.
-    kinds: ["logs", "log", "CWE-117", "CWE-532"],
-    hint: "Needs `scan --log-hygiene` to be enumerated at all (CWE-117/532).",
+    kinds: ["logs", "log", "CWE-117", "CWE-532", "errleak", "CWE-209"],
+    hint: "The error-HANDLING half is enumerated (CWE-209 \u2014 a caught error written into the response body). Needs `scan --log-hygiene` for the logging half (CWE-117/532).",
     requiresPass: "logHygiene",
-    hintWhenRan: "`--log-hygiene` ran and found no CWE-117/532 candidate \u2014 error handling and log content are still yours to read."
+    hintWhenRan: "`--log-hygiene` ran and found no CWE-117/532 candidate \u2014 what an error handler returns to the caller is enumerated (CWE-209), what it swallows is still yours to read."
   },
   {
     id: "V8",
@@ -27857,7 +27963,18 @@ var ASVS_CATEGORIES = [
     hint: "Where personal data goes, how long it stays, whether pseudonymisation is reversible."
   },
   { id: "V9", title: "Communications", judgment: true, hint: "TLS verification disabled anywhere? Certificate pinning claims that do not hold?" },
-  { id: "V11", title: "Business logic", judgment: true, hint: "Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance." },
+  {
+    // ASVS 11.1.4 is anti-automation and resource consumption, so this chapter —
+    // not V13 — is where an unbounded similarity/distance call and a route with
+    // no throttling belong.
+    id: "V11",
+    title: "Business logic",
+    kinds: ["algodos", "CWE-407", "CWE-400", "CWE-770", "CWE-307"],
+    judgment: true,
+    hint: "Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance. Anti-automation is partly enumerated: `scan` finds unbounded similarity/distance calls (CWE-407), `guards --lens throttle` finds handlers nothing rate-limits.",
+    requiresPass: "throttle",
+    hintWhenRan: "`guards --lens throttle` enumerated every handler and the throttling visible in its scope \u2014 workflow skipping, price tampering and replay are still yours to read."
+  },
   { id: "V12", title: "Files & resources", kinds: ["path"], hint: "Traversal and zip-slip are enumerated; upload type/size/AV policy is not." },
   {
     id: "V13",
@@ -27897,14 +28014,17 @@ var OWASP_TOP10_2021 = [
   {
     id: "A04",
     title: "Insecure design",
+    kinds: ["algodos", "CWE-407", "CWE-400", "CWE-770", "CWE-307"],
     judgment: true,
-    hint: "Missing rate limiting, no threat model, business-logic abuse \u2014 read CONTEXT.md and the investigate leads."
+    hint: "Missing rate limiting, no threat model, business-logic abuse. Two halves are now enumerated \u2014 unbounded similarity/distance calls (CWE-407) by `scan`, handlers nothing throttles by `guards --lens throttle`; the rest is CONTEXT.md and the investigate leads.",
+    requiresPass: "throttle",
+    hintWhenRan: "`guards --lens throttle` ran: every handler is listed with the throttling visible in its scope. What remains is design \u2014 the threat model and the abuse cases no marker can stand for."
   },
   {
     id: "A05",
     title: "Security misconfiguration",
-    kinds: ["config", "CWE-16", "CWE-200", "CWE-489", "CWE-942", "CWE-1004", "CWE-1275", "xxe"],
-    hint: "CORS, security headers, cookie flags, debug/verbose errors, directory listing, GraphQL introspection, IaC."
+    kinds: ["config", "CWE-16", "CWE-200", "CWE-209", "CWE-489", "CWE-942", "CWE-1004", "CWE-1275", "xxe", "errleak"],
+    hint: "CORS, security headers, cookie flags, debug/verbose errors (CWE-209 \u2014 enumerated), directory listing, GraphQL introspection, IaC."
   },
   {
     id: "A06",
@@ -27966,8 +28086,11 @@ var OWASP_API_TOP10_2023 = [
   {
     id: "API4",
     title: "Unrestricted resource consumption",
+    kinds: ["algodos", "CWE-407", "CWE-400", "CWE-770"],
     judgment: true,
-    hint: "Rate limiting, pagination caps, GraphQL query cost/depth \u2014 not statically enumerable."
+    hint: "Unbounded similarity/distance calls (CWE-407) are enumerated and `guards --lens throttle` lists the handlers nothing rate-limits; pagination caps and GraphQL query cost/depth stay judgment.",
+    requiresPass: "throttle",
+    hintWhenRan: "`guards --lens throttle` ran \u2014 pagination caps and GraphQL query cost/depth are still yours to read."
   },
   {
     id: "API5",

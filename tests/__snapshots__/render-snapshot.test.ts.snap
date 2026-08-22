@@ -269,10 +269,10 @@ a clean bill of health — it is a gap in the audit, and it belongs in the repor
 - **V3 Session management** — Token lifetime, rotation on privilege change, invalidation on logout.
 - **V5 Validation, sanitization & encoding** — Injection classes — the taint catalog's core.
 - **V6 Stored cryptography** — Weak-hash detection is mechanical; key management, IV reuse and constant-time comparison are not.
-- **V7 Error handling & logging** — Needs \`scan --log-hygiene\` to be enumerated at all (CWE-117/532).
+- **V7 Error handling & logging** — The error-HANDLING half is enumerated (CWE-209 — a caught error written into the response body). Needs \`scan --log-hygiene\` for the logging half (CWE-117/532).
 - **V8 Data protection & privacy** — Where personal data goes, how long it stays, whether pseudonymisation is reversible.
 - **V9 Communications** — TLS verification disabled anywhere? Certificate pinning claims that do not hold?
-- **V11 Business logic** — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance.
+- **V11 Business logic** — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance. Anti-automation is partly enumerated: \`scan\` finds unbounded similarity/distance calls (CWE-407), \`guards --lens throttle\` finds handlers nothing rate-limits.
 - **V12 Files & resources** — Traversal and zip-slip are enumerated; upload type/size/AV policy is not.
 - **V13 API & web service** — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.
 - **V14 Configuration & supply chain** — Dependencies, secrets, IaC, CI — including workflows that hand an agent the repo.
@@ -289,7 +289,7 @@ reason is how coverage silently shrinks between audits.
 - **V6 Stored cryptography** — Weak-hash detection is mechanical; key management, IV reuse and constant-time comparison are not.
 - **V8 Data protection & privacy** — Where personal data goes, how long it stays, whether pseudonymisation is reversible.
 - **V9 Communications** — TLS verification disabled anywhere? Certificate pinning claims that do not hold?
-- **V11 Business logic** — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance.
+- **V11 Business logic** — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance. Anti-automation is partly enumerated: \`scan\` finds unbounded similarity/distance calls (CWE-407), \`guards --lens throttle\` finds handlers nothing rate-limits.
 - **V13 API & web service** — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.
 
 
