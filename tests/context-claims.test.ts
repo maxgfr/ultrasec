@@ -1,9 +1,11 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { extractNegativeClaims, contradictedClaims } from "../src/context.js";
 import { check } from "../src/check.js";
+import { runRun } from "../src/commands/run.js";
+import { parseArgs } from "../src/util.js";
 import type { Dossier } from "../src/store.js";
 import { SCHEMA_VERSION, VERSION } from "../src/types.js";
 
@@ -157,6 +159,34 @@ describe("check reports contradictions, and --semantic fails on them", () => {
     const res = check(dossier(repo), { repo, run, semantic: true });
     expect(res.ok).toBe(false);
     expect(res.messages.join("\n")).toMatch(/negation\(s\) in CONTEXT\.md contradicted/);
+  });
+
+  it("is surfaced by `run`, which is where CONTEXT.md is authored", () => {
+    // The gate is not where most audits find out. `run` writes the document and
+    // then reads it back into every worklist, so it is the place a contradicted
+    // sentence has to be said out loud — as a NOTICE, since the citation gate
+    // itself passed and the audit is still usable.
+    const repo = repoWith({ "src/Form.tsx": "export const F = () => <div dangerouslySetInnerHTML={{ __html: v }} />;\n" });
+    const run = mkdtempSync(join(tmpdir(), "ultrasec-claims-run-"));
+    writeFileSync(join(run, "CONTEXT.md"), FALSE_CLAIM);
+
+    const out: string[] = [];
+    const so = vi.spyOn(process.stdout, "write").mockImplementation((c: unknown) => {
+      out.push(String(c));
+      return true;
+    });
+    const se = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    let code: number;
+    try {
+      code = runRun(parseArgs(["run", "--repo", repo, "--out", run, "--stages", "guards"]));
+    } finally {
+      so.mockRestore();
+      se.mockRestore();
+    }
+
+    // A notice, not a failure.
+    expect(code).toBe(0);
+    expect(out.join("")).toContain("says there is no `dangerouslySetInnerHTML`");
   });
 
   it("is byte-identical to before when there is no CONTEXT.md", () => {

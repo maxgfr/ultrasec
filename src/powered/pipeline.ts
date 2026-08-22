@@ -297,6 +297,11 @@ export interface PipelineResult {
   externalCalls: number;
   escalated: string[];
   errors: string[];
+  /** Things the run must SAY but that did not break it — a negation in
+   *  CONTEXT.md the code contradicts, above all. Not `errors`: the citation gate
+   *  passed, and the audit is still usable; what is wrong is a sentence every
+   *  later stage was reading as settled. */
+  notices: string[];
 }
 
 /** Run the deterministic, network-free scan that seeds the dossier (no tools). */
@@ -323,6 +328,7 @@ export function runPipeline(opts: PipelineOptions): PipelineResult {
   const emitted: PipelineResult["emitted"] = [];
   const escalated: string[] = [];
   const errors: string[] = [];
+  const notices: string[] = [];
   let externalCalls = 0;
 
   if (opts.scan !== false) {
@@ -385,9 +391,19 @@ export function runPipeline(opts: PipelineOptions): PipelineResult {
   }
 
   // Final deterministic steps: grounding check + render (narrative-aware if filled).
+  //
+  // `run` is where CONTEXT.md is authored, so it is where a negation the code
+  // contradicts must be said out loud — passing the run dir is what lets the
+  // gate read it. Reported as a NOTICE, not an error: `check` here is not
+  // `--semantic`, and a contradicted sentence does not invalidate a citation.
   const dossier = loadDossier(opts.run);
-  const ck = check(dossier, { repo: opts.repo });
+  const ck = check(dossier, { repo: opts.repo, run: opts.run });
   if (!ck.ok) errors.push(`check: ${ck.messages.join(" ")}`);
+  for (const c of ck.contradictions) {
+    notices.push(
+      `CONTEXT.md:${c.claim.line} says there is no \`${c.token}\`, and there are ${c.total} in code (${c.hits.map((h) => `${h.file}:${h.line}`).join(", ")}) — reconcile it before the report ships.`,
+    );
+  }
   actions.push("check");
 
   let narrative: ReturnType<typeof mergeNarrative> | undefined;
@@ -405,5 +421,5 @@ export function runPipeline(opts: PipelineOptions): PipelineResult {
   writeFileSync(join(opts.run, "index.html"), renderHtml(dossier, narrative));
   actions.push("render");
 
-  return { actions, emitted, externalCalls, escalated, errors };
+  return { actions, emitted, externalCalls, escalated, errors, notices };
 }

@@ -30177,6 +30177,7 @@ function runPipeline(opts) {
   const emitted = [];
   const escalated = [];
   const errors = [];
+  const notices = [];
   let externalCalls = 0;
   if (opts.scan !== false) {
     scanCore(opts.repo, opts.run, opts.scanOpts ?? {});
@@ -30230,8 +30231,13 @@ function runPipeline(opts) {
     actions.push(`apply:${name2}`);
   }
   const dossier = loadDossier(opts.run);
-  const ck = check(dossier, { repo: opts.repo });
+  const ck = check(dossier, { repo: opts.repo, run: opts.run });
   if (!ck.ok) errors.push(`check: ${ck.messages.join(" ")}`);
+  for (const c2 of ck.contradictions) {
+    notices.push(
+      `CONTEXT.md:${c2.claim.line} says there is no \`${c2.token}\`, and there are ${c2.total} in code (${c2.hits.map((h) => `${h.file}:${h.line}`).join(", ")}) \u2014 reconcile it before the report ships.`
+    );
+  }
   actions.push("check");
   let narrative;
   const narrPath = join67(opts.run, "NARRATIVE.json");
@@ -30246,7 +30252,7 @@ function runPipeline(opts) {
   writeFileSync20(join67(opts.run, "REPORT.md"), renderReport(dossier, narrative));
   writeFileSync20(join67(opts.run, "index.html"), renderHtml(dossier, narrative));
   actions.push("render");
-  return { actions, emitted, externalCalls, escalated, errors };
+  return { actions, emitted, externalCalls, escalated, errors, notices };
 }
 
 // src/commands/run.ts
@@ -30299,9 +30305,13 @@ function runRun(args2) {
     println(JSON.stringify(res, null, 2));
     return powered && res.errors.length ? 1 : 0;
   }
+  const printNotices = () => {
+    for (const n of res.notices) println(`  \u26A0\uFE0F  ${n}`);
+  };
   if (!powered) {
     println(`ultrasec run \u2192 ${run2} (no --powered: emitted worklists, ZERO external calls)`);
     println(`  stages: ${stages.join(" \u2192 ")}`);
+    printNotices();
     println(`  agent TODO \u2014 fill each worklist, then apply (or re-run with --powered --agent <cli>):`);
     for (const e of res.emitted) {
       const noApply = e.outName === "CONTEXT.md" || e.outName === "NARRATIVE.json" || e.outName === "REMEDIATION_PRD.md";
@@ -30314,6 +30324,7 @@ function runRun(args2) {
   println(`ultrasec run --powered \u2192 ${run2} (agent: ${agent}${crossCheck ? `, cross-check: ${crossCheck}` : ""})`);
   println(`  stages: ${stages.join(" \u2192 ")}  \xB7  external agent calls: ${res.externalCalls}`);
   if (res.escalated.length) println(`  \u26A0\uFE0F  cross-check escalated ${res.escalated.length} finding(s) to needs-human: ${res.escalated.join(", ")}`);
+  printNotices();
   for (const err2 of res.errors) println(`  \u2717 ${err2}`);
   println(`  report: ${join68(run2, "REPORT.md")} \xB7 ${join68(run2, "index.html")}`);
   return res.errors.length ? 1 : 0;
