@@ -24338,6 +24338,96 @@ function loadContextDoc(run2) {
     return void 0;
   }
 }
+var PRESENCE_NEGATION = /\b(?:aucune?s?|nulle\s+part|jamais|n['’]existe|n['’]ont|ne\s+contien\w*|n['’]a\s+aucun|pas\s+d['’]|pas\s+de\b|sans\b|z[ée]ro|no\b|none\b|never\b|nowhere\b|not\s+a\s+single|there\s+(?:is|are)\s+no|contains?\s+no|does\s+not\s+contain|do\s+not\s+contain)/gi;
+var CODE_SPAN = /`([^`\n]+)`/g;
+var NEGATION_WINDOW = 16;
+var isSearchable = (rel2) => langForFile(rel2) !== void 0;
+var MIN_TOKEN = 4;
+var MAX_CLAIMS = 20;
+var MAX_HITS = 3;
+var isToken = (s) => s.length >= MIN_TOKEN && /^[\w$@][\w$.@/:-]*$/.test(s) && /[A-Za-z]/.test(s);
+function extractNegativeClaims(md) {
+  const claims = [];
+  const lines5 = md.split(/\r?\n/);
+  let block;
+  const flush = () => {
+    if (!block) return;
+    const { from, to } = block;
+    for (const sentence of block.text.split(/(?<=[.;!?])\s+/)) {
+      const tokens = [];
+      PRESENCE_NEGATION.lastIndex = 0;
+      let m = PRESENCE_NEGATION.exec(sentence);
+      while (m) {
+        const at = m.index + m[0].length;
+        const rest = sentence.slice(at);
+        CODE_SPAN.lastIndex = 0;
+        let span = CODE_SPAN.exec(rest);
+        while (span && span.index <= NEGATION_WINDOW) {
+          const t = span[1].trim();
+          if (isToken(t) && !tokens.includes(t)) tokens.push(t);
+          span = CODE_SPAN.exec(rest);
+        }
+        m = PRESENCE_NEGATION.exec(sentence);
+      }
+      if (!tokens.length) continue;
+      let line = from;
+      for (let i2 = from; i2 <= to; i2++) {
+        if (lines5[i2 - 1]?.includes(tokens[0])) {
+          line = i2;
+          break;
+        }
+      }
+      claims.push({ sentence: sentence.trim(), line, tokens });
+    }
+    block = void 0;
+  };
+  for (let i2 = 0; i2 < lines5.length; i2++) {
+    const line = lines5[i2];
+    if (!line.trim() || /^#{1,6}\s/.test(line)) {
+      flush();
+      continue;
+    }
+    if (block) {
+      block.text += ` ${line.trim()}`;
+      block.to = i2 + 1;
+    } else block = { text: line.trim(), from: i2 + 1, to: i2 + 1 };
+  }
+  flush();
+  return claims;
+}
+function contradictedClaims(repo, claims, opts = {}) {
+  const examined = claims.slice(0, MAX_CLAIMS);
+  const wanted = /* @__PURE__ */ new Map();
+  for (const claim of examined) {
+    for (const token of claim.tokens) {
+      const key = `${claim.line}:${token}`;
+      if (!wanted.has(key)) wanted.set(key, { claim, token, hits: [], total: 0 });
+    }
+  }
+  if (!wanted.size) return [];
+  const pruned = buildPruneMatcher(repo, { gitignore: opts.gitignore, exclude: opts.exclude, includeVendored: opts.includeVendored });
+  for (const file of walk2(repo, { gitignore: opts.gitignore, exclude: opts.exclude, maxFiles: opts.maxFiles })) {
+    if (pruned?.(file.rel) || !isSearchable(file.rel)) continue;
+    let text;
+    try {
+      text = readText2(file.abs);
+    } catch {
+      continue;
+    }
+    if (!text) continue;
+    let lines5;
+    for (const entry of wanted.values()) {
+      if (!text.includes(entry.token)) continue;
+      lines5 ??= text.split(/\r?\n/);
+      for (let i2 = 0; i2 < lines5.length; i2++) {
+        if (!lines5[i2].includes(entry.token)) continue;
+        entry.total++;
+        if (entry.hits.length < MAX_HITS) entry.hits.push({ file: file.rel, line: i2 + 1 });
+      }
+    }
+  }
+  return [...wanted.values()].filter((e) => e.total > 0).sort((a, b) => a.claim.line - b.claim.line || byStr2(a.token, b.token));
+}
 
 // src/reachability.ts
 import { existsSync as existsSync23, readFileSync as readFileSync22 } from "fs";
@@ -26745,9 +26835,37 @@ function check(dossier, opts = {}) {
         `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", \u2026" : ""}) \u2014 set the verdict's \`brocard\` field so the refutation can be reviewed. A prose \`note\` is not read as a ground, however carefully argued: references/dismissal-brocards.md.`
       );
   }
+  const claims = opts.run ? contradicted(repo, opts.run) : [];
+  if (claims.length && opts.semantic) {
+    ok = false;
+    messages.push(
+      `${claims.length} negation(s) in CONTEXT.md contradicted by the code \u2014 reconcile the sentence or the finding before trusting it as background.`
+    );
+  }
   if (ok)
     messages.push(`grounding OK${opts.semantic ? " \xB7 audit adjudicated" : ""} \u2014 ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
-  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, unarguedDismissals: unargued, historical, messages };
+  return {
+    ok,
+    dangling,
+    open,
+    confirmed,
+    dismissed,
+    needsHuman,
+    gated: findings.length,
+    unarguedDismissals: unargued,
+    historical,
+    contradictions: claims,
+    messages
+  };
+}
+function contradicted(repo, run2) {
+  const doc = loadContextDoc(run2);
+  if (!doc) return [];
+  try {
+    return contradictedClaims(repo, extractNegativeClaims(doc));
+  } catch {
+    return [];
+  }
 }
 
 // src/assumptions.ts
@@ -29032,13 +29150,24 @@ function runCheck(args2) {
     eprintln(`ultrasec check: ${e.message}`);
     return 2;
   }
-  const res = check(dossier, { repo, semantic, minSeverity });
+  const res = check(dossier, { repo, semantic, minSeverity, run: run2 });
   if (flagBool(args2, "json")) {
     println(JSON.stringify(res, null, 2));
     return res.ok ? 0 : 1;
   }
   for (const d of res.dangling.slice(0, 50)) {
     eprintln(`  \u2717 ${d.id}: ${d.file}:${d.line} \u2014 ${d.reason}`);
+  }
+  for (const c2 of res.contradictions) {
+    const where = c2.hits.map((h) => `${h.file}:${h.line}`).join(", ");
+    const more = c2.total > c2.hits.length ? ` +${c2.total - c2.hits.length} more` : "";
+    eprintln(`  \u26A0\uFE0F  CONTEXT.md:${c2.claim.line} \u2014 \`${c2.token}\` occurs ${c2.total} time(s) in code: ${where}${more}`);
+    eprintln(`      \u201C${c2.claim.sentence.length <= 110 ? c2.claim.sentence : `${c2.claim.sentence.slice(0, 107)}\u2026`}\u201D`);
+  }
+  if (res.contradictions.length && !semantic) {
+    eprintln(
+      `  \u26A0\uFE0F  ${res.contradictions.length} negation(s) in CONTEXT.md contradicted by the code. Every later stage reads that document as background \u2014 reconcile the sentence, or the finding. \`--semantic\` fails on this.`
+    );
   }
   for (const m of res.messages) println((res.ok ? "  \u2713 " : "  \u2022 ") + m);
   return res.ok ? 0 : 1;

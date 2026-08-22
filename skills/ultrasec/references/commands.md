@@ -263,11 +263,31 @@ dropped. No `--json`. Without `--narrative` the output is byte-identical to a pl
 ### `check --run <dir>`
 The exit gate. **Read-only — it writes nothing and changes no status.** Fails on any finding
 whose cited `[file:line]` doesn't resolve (the anti-hallucination gate); `--semantic` *also*
-fails when a candidate is still unadjudicated.
+fails when a candidate is still unadjudicated, or when **CONTEXT.md contradicts itself against the
+code** (below).
 
 `--run` (default `.ultrasec`) · `--repo` · `--semantic` ·
 `--min-severity critical|high|medium|low|info` · `--json`. Exit **0** ok · **1** gate failed ·
 **2** unreadable run.
+
+**Negations in CONTEXT.md are checked against the tree.** That document is injected into every
+dossier and every worklist, and a single confident sentence can close a whole family: a real
+audit's CONTEXT.md said *"le dépôt ne contient aucun `dangerouslySetInnerHTML` en code de
+production"*. There were eight, in production components — and the stored-XSS class went
+unexamined, not because the engine missed the sinks, but because the auditor had written down that
+there were none.
+
+So `check` extracts every sentence that negates the PRESENCE of a backticked identifier, greps the
+code for that identifier, and prints the sentence next to the `[file:line]`s that disagree with it.
+It never parses the claim; putting the two side by side is the whole value. Always reported;
+**only `--semantic` fails**, because reconciling is one edit to one sentence and prose should not
+block a citation gate.
+
+Deliberately narrow, or it would cry wolf. Only presence negations count (`aucun X`, `no X`,
+`pas de X`, `never X`) — *"pas de protection CSRF sur les routes `pages/api`"* negates the
+protection, not the route, and does not fire. The identifier must follow the negation immediately.
+Only files a language recognises are searched, so a repo's own audit notes and README discussing a
+token are not evidence that the token is there.
 
 ## Housekeeping
 

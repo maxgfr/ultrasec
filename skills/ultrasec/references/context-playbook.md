@@ -91,6 +91,27 @@ noise; "auth is `requireAuth` in `src/middleware/auth.js:12`, applied per-route 
 Re-read `CONTEXT.md` at the end of the audit and correct what turned out to be wrong. It ships
 with the dossier, and the next pass — yours or someone else's — starts from it.
 
+## 4. Be careful what you say does not exist
+
+A negation is the most dangerous sentence in this document, because every later stage reads it as
+settled. One real audit wrote *"le dépôt ne contient aucun `dangerouslySetInnerHTML` en code de
+production"*. There were eight, in production components. Nothing was wrong with the engine — the
+sinks were right there — but the whole stored-XSS family went unexamined, because the trust model
+said there was nothing to look at.
+
+Two habits follow.
+
+**Grep before you write "aucun".** It takes seconds and it is the only claim in the document you
+can actually settle mechanically. If you did grep, say what you ran; "vérifié par grep `rate|429` :
+0 résultat" is a finding-grade statement, "aucun rate-limiting" is a belief.
+
+**Say what the negation is ABOUT.** "React ne protège pas `dangerouslySetInnerHTML`" and "le dépôt
+ne contient aucun `dangerouslySetInnerHTML`" look alike and mean opposite things. The first is a
+framework fact you want recorded; the second is a coverage decision.
+
+`check` confronts every presence-negation naming a backticked identifier with the code, and
+`--semantic` fails while one still disagrees — see [commands.md](commands.md).
+
 ---
 
 Related: [severity-and-discipline.md](severity-and-discipline.md) (what the baseline is for) ·

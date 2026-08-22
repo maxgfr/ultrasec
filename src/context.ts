@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { findManifestDirs, readText } from "./walk.js";
+import { buildPruneMatcher, findManifestDirs, readText, walk } from "./walk.js";
 import { detectWorkspaces, isTestPath } from "./vendor/codeindex-engine.mjs";
 import { langForFile, type LangSpec } from "./lang.js";
 import { SANITIZERS, findSinks, findTextSinks } from "./catalog.js";
@@ -565,4 +565,219 @@ export function loadContextDoc(run: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+// ── Negative claims, and the tree that disagrees with them ──────────────────
+//
+// CONTEXT.md is injected into every dossier and every worklist. It is the most
+// load-bearing prose in the run, and until now nothing ever compared a word of
+// it to the code.
+//
+// One sentence is enough to lose a class. A real audit's CONTEXT.md said "le
+// dépôt ne contient aucun `dangerouslySetInnerHTML` en code de production".
+// There were seven, in production components. Every later stage read that
+// sentence as background, and the whole stored-XSS family went unexamined —
+// not because the engine missed the sinks, but because the auditor had told
+// themselves there were none.
+//
+// A negation is the one kind of prose claim that IS mechanically checkable, and
+// only through the part of it that is code: the backticked token. This pass
+// never parses the claim. It says: you wrote a negation, this identifier follows
+// it, and here is where the identifier occurs. Reconciling is one edit.
+
+/**
+ * Negations of PRESENCE, and only those.
+ *
+ * Bare `pas` is deliberately absent. The same audit wrote "React 19 : bloque les
+ * URL `javascript:` … (PAS sur `dangerouslySetInnerHTML`)" — a claim about what
+ * React protects, not about what the repo contains. Reading that as "there is no
+ * dangerouslySetInnerHTML" would fail a gate on a sentence that is true.
+ */
+const PRESENCE_NEGATION =
+  /\b(?:aucune?s?|nulle\s+part|jamais|n['’]existe|n['’]ont|ne\s+contien\w*|n['’]a\s+aucun|pas\s+d['’]|pas\s+de\b|sans\b|z[ée]ro|no\b|none\b|never\b|nowhere\b|not\s+a\s+single|there\s+(?:is|are)\s+no|contains?\s+no|does\s+not\s+contain|do\s+not\s+contain)/gi;
+
+/** An inline code span whose contents are ONE identifier-ish token. A span with
+ *  a space in it (`role: super`, `git log --all`) is prose or a command, not a
+ *  name a grep can settle. */
+const CODE_SPAN = /`([^`\n]+)`/g;
+
+/**
+ * How far after the negation a token still belongs to it — deliberately tiny.
+ *
+ * "aucun `X`", "no `X`", "pas de `X`", "sans `X`" negate the PRESENCE of X and
+ * put it within a couple of characters. Anything further along is a different
+ * grammatical role, and reading it as a presence claim is how this check would
+ * start crying wolf. Measured on the two audited CONTEXT.md files, a wide window
+ * turned "pas de protection CSRF sur les routes `pages/api`" and "Pas
+ * d'échappement automatique pour ce qu'un handler écrit via `res.write`" into
+ * contradictions — both sentences are true, and neither says the token is
+ * absent.
+ */
+const NEGATION_WINDOW = 16;
+
+/** Prose about a token is not the token. A repository's own audit notes,
+ *  changelog and README discuss `dangerouslySetInnerHTML` precisely because
+ *  someone was worrying about it, and counting those as evidence would make the
+ *  check loudest on the repos that document themselves best. Only files a
+ *  language recognises are searched; the message says so. */
+const isSearchable = (rel: string): boolean => langForFile(rel) !== undefined;
+
+/** Below this, a token is too generic to mean anything (`id`, `os`, `req`). */
+const MIN_TOKEN = 4;
+
+/** Claims examined per run. A CONTEXT.md with more negations than this is not
+ *  the shape this check was built for; the excess is reported, never dropped
+ *  in silence. */
+const MAX_CLAIMS = 20;
+
+/** Occurrences listed per contradicted claim, before "+N more". */
+const MAX_HITS = 3;
+
+export interface NegativeClaim {
+  /** The sentence as written, for the report. */
+  sentence: string;
+  /** Its line in CONTEXT.md. */
+  line: number;
+  /** Identifier-shaped tokens that FOLLOW the negation. */
+  tokens: string[];
+}
+
+export interface ClaimHit {
+  file: string;
+  line: number;
+}
+
+export interface ContradictedClaim {
+  claim: NegativeClaim;
+  /** The token the tree disagrees about. */
+  token: string;
+  /** The first few occurrences, for the report. */
+  hits: ClaimHit[];
+  /** How many occurrences there are in total. */
+  total: number;
+}
+
+const isToken = (s: string): boolean => s.length >= MIN_TOKEN && /^[\w$@][\w$.@/:-]*$/.test(s) && /[A-Za-z]/.test(s);
+
+/**
+ * Every sentence of `md` that negates the presence of a named identifier.
+ *
+ * Pure — no filesystem, so the extraction is testable on a string and the search
+ * that follows is a separate decision.
+ */
+export function extractNegativeClaims(md: string): NegativeClaim[] {
+  const claims: NegativeClaim[] = [];
+  const lines = md.split(/\r?\n/);
+
+  // Blocks of consecutive non-blank lines, so a claim wrapped across two lines
+  // is still one sentence. Headings end a block: a heading is not prose.
+  let block: { text: string; from: number; to: number } | undefined;
+  const flush = (): void => {
+    if (!block) return;
+    const { from, to } = block;
+    for (const sentence of block.text.split(/(?<=[.;!?])\s+/)) {
+      const tokens: string[] = [];
+      PRESENCE_NEGATION.lastIndex = 0;
+      let m: RegExpExecArray | null = PRESENCE_NEGATION.exec(sentence);
+      while (m) {
+        // The window bounds where the span STARTS, not where it ends — a
+        // 24-character identifier must not be missed for being longer than the
+        // window that is meant to sit in front of it.
+        const at = m.index + m[0].length;
+        const rest = sentence.slice(at);
+        CODE_SPAN.lastIndex = 0;
+        let span: RegExpExecArray | null = CODE_SPAN.exec(rest);
+        while (span && span.index <= NEGATION_WINDOW) {
+          const t = span[1]!.trim();
+          if (isToken(t) && !tokens.includes(t)) tokens.push(t);
+          span = CODE_SPAN.exec(rest);
+        }
+        m = PRESENCE_NEGATION.exec(sentence);
+      }
+      if (!tokens.length) continue;
+      // Cite the line the token is ON, not the paragraph's first line — three
+      // sentences of one paragraph all reporting the same line reads like a bug.
+      let line = from;
+      for (let i = from; i <= to; i++) {
+        if (lines[i - 1]?.includes(tokens[0]!)) {
+          line = i;
+          break;
+        }
+      }
+      claims.push({ sentence: sentence.trim(), line, tokens });
+    }
+    block = undefined;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (!line.trim() || /^#{1,6}\s/.test(line)) {
+      flush();
+      continue;
+    }
+    if (block) {
+      block.text += ` ${line.trim()}`;
+      block.to = i + 1;
+    } else block = { text: line.trim(), from: i + 1, to: i + 1 };
+  }
+  flush();
+
+  return claims;
+}
+
+export interface ClaimCheckOptions {
+  gitignore?: boolean;
+  exclude?: string[];
+  includeVendored?: boolean;
+  /** Paths never counted as evidence against a claim. The run's own dossier is
+   *  always excluded — a finding quoting the token is not the repo containing it. */
+  maxFiles?: number;
+}
+
+/**
+ * The claims the repository disagrees with.
+ *
+ * A literal search, on purpose. Anything cleverer would be reading the claim,
+ * and reading the claim is the auditor's job — the value here is entirely in
+ * putting the sentence and the `[file:line]` next to each other.
+ */
+export function contradictedClaims(repo: string, claims: readonly NegativeClaim[], opts: ClaimCheckOptions = {}): ContradictedClaim[] {
+  const examined = claims.slice(0, MAX_CLAIMS);
+  const wanted = new Map<string, ContradictedClaim>();
+  for (const claim of examined) {
+    for (const token of claim.tokens) {
+      const key = `${claim.line}:${token}`;
+      if (!wanted.has(key)) wanted.set(key, { claim, token, hits: [], total: 0 });
+    }
+  }
+  if (!wanted.size) return [];
+
+  const pruned = buildPruneMatcher(repo, { gitignore: opts.gitignore, exclude: opts.exclude, includeVendored: opts.includeVendored });
+  for (const file of walk(repo, { gitignore: opts.gitignore, exclude: opts.exclude, maxFiles: opts.maxFiles })) {
+    if (pruned?.(file.rel) || !isSearchable(file.rel)) continue;
+    let text: string;
+    try {
+      text = readText(file.abs);
+    } catch {
+      continue;
+    }
+    if (!text) continue;
+    let lines: string[] | undefined;
+    for (const entry of wanted.values()) {
+      if (!text.includes(entry.token)) continue;
+      lines ??= text.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i]!.includes(entry.token)) continue;
+        entry.total++;
+        if (entry.hits.length < MAX_HITS) entry.hits.push({ file: file.rel, line: i + 1 });
+      }
+    }
+  }
+
+  return [...wanted.values()].filter((e) => e.total > 0).sort((a, b) => a.claim.line - b.claim.line || byStr(a.token, b.token));
+}
+
+/** Claims beyond `MAX_CLAIMS`, so a truncated check never reads as a clean one. */
+export function claimsNotExamined(claims: readonly NegativeClaim[]): number {
+  return Math.max(0, claims.length - MAX_CLAIMS);
 }

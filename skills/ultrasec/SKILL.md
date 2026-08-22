@@ -201,7 +201,9 @@ each: [references/schemas.md](references/schemas.md).
    instance. State the *why*, generalize one dimension at a time, and emit a Semgrep rule so the
    family cannot come back: [references/variant-analysis.md](references/variant-analysis.md).
 
-10. **Gate.** `check --run <run> --semantic`. Fix any dangling citation; adjudicate anything left.
+10. **Gate.** `check --run <run> --semantic`. Fix any dangling citation, adjudicate anything left,
+   and reconcile any negation in `CONTEXT.md` the code contradicts — a sentence saying a class
+   isn't there is how a class goes unexamined.
 
 10b. **State the coverage.** `coverage --run <run>` — an ASVS matrix of what this audit looked at
    and what it did not. A short report reads as "nothing there" when it means "nothing there, in
