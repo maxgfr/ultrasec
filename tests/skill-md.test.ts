@@ -119,9 +119,20 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
   //                 mistake, and a `scan --include-vendored` mention. Everything else — the
   //                 row shape, the verdict vocabulary, what a marker does and does not prove —
   //                 went to references/schemas.md and references/commands.md.
+  //   2975 -> 2997: two more absences the engine can now enumerate, both from the same
+  //                 pair of real audits. `guards --lens throttle` — the handlers nothing
+  //                 rate-limits, with the AUTH routes flagged apart (credential stuffing and
+  //                 account enumeration, not capacity) — and `check` confronting CONTEXT.md's
+  //                 negations with the code, because one sentence saying a class is not there
+  //                 is how a class goes unexamined. Both are workflow-changing, so both buy a
+  //                 clause in their step; the vocabulary, the CWE mapping, the precision rules
+  //                 and the worked examples went to references/commands.md,
+  //                 references/context-playbook.md and references/hunting-heuristics.md.
+  //                 Paid for in part: five passages that duplicated a reference file or
+  //                 repeated themselves were cut in the same change (-32 words).
   it("keeps the SKILL.md body within its word budget", () => {
     const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
-    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2975);
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2997);
   });
 
   // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits

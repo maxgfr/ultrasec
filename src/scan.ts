@@ -2,6 +2,7 @@ import { resolve, join } from "node:path";
 import { langForFile, type Sym, type Imp, type Call } from "./lang.js";
 import { byStr } from "./util.js";
 import type { CacheEntry } from "./cache.js";
+import { scanNotebooks, type NotebookStats } from "./notebooks.js";
 import {
   scanRepo as engineScanRepo,
   allGrammarKeys,
@@ -37,6 +38,10 @@ export interface RepoScan {
   /** The raw engine scan (richer symbols/refs/calls + doc text). NOT serialized —
    *  a downstream input (e.g. the raw caller-index); never persisted to the dossier. */
   engine?: EngineRepoScan;
+  /** What the notebook pass found and what it could not read. Recorded because a
+   *  repo with no notebooks and a repo whose notebooks could not be written to a
+   *  temp dir must never produce the same silence. */
+  notebooks?: NotebookStats;
 }
 
 export interface ScanOptions {
@@ -167,9 +172,32 @@ export function recordToFileScan(f: FileRecord): FileScan | undefined {
 function adapt(repo: string, engine: EngineRepoScan): RepoScan {
   const files: FileScan[] = [];
   for (const f of engine.files) {
+    // A `.ipynb` record carries no extraction — the engine walked it as
+    // `kind: "other"` and read no symbols out of JSON. Its FileScan comes from
+    // the notebook pass below instead, so taking it here too would put two
+    // entries under one `rel` and double every finding in it.
+    if (f.ext.toLowerCase() === ".ipynb") continue;
     const fs = recordToFileScan(f);
     if (fs) files.push(fs);
   }
+
+  // Notebooks. The engine's walk already enumerated them, so this costs no
+  // second walk and inherits every --scope/--exclude/--gitignore decision the
+  // walk already made.
+  //
+  // Their code is extracted into line-aligned Python shadows and folded in here
+  // rather than in a pass of its own, so that a notebook is an ordinary scanned
+  // file to everything downstream: the taint walk, the orphan-sink layer, the
+  // graph, coverage. `rel` is swapped back to the NOTEBOOK's path after the
+  // mapping, so every citation resolves in the file a reader will open.
+  const notebookRels = engine.files.filter((f) => f.ext.toLowerCase() === ".ipynb").map((f) => f.rel);
+  const notebooks = scanNotebooks(repo, notebookRels);
+  for (const rec of notebooks.records) {
+    const fs = recordToFileScan(rec); // the shadow's `.py` rel is what makes this Python
+    const rel = notebooks.origin.get(rec.rel);
+    if (fs && rel) files.push({ ...fs, rel });
+  }
+
   files.sort((a, b) => byStr(a.rel, b.rel));
   // NOTE semantic shift vs. pre-adoption: this used to be ultrasec's own walk.ts's
   // enumerated-file count (its own ignore-dirs, its own byte cap). It's now the
@@ -177,7 +205,7 @@ function adapt(repo: string, engine: EngineRepoScan): RepoScan {
   // same intent, but produced by a different walk with its own filter surface (see
   // the ignore-dir/byte-cap notes on toEngineOptions above). No reader exists today;
   // flagged so a future one doesn't assume byte-identical semantics with pre-adoption.
-  return { repo, files, truncated: engine.capped, walkedFiles: engine.files.length, engine };
+  return { repo, files, truncated: engine.capped, walkedFiles: engine.files.length, engine, notebooks: notebooks.stats };
 }
 
 /** Walk the repo and extract symbols/imports/calls from every recognized file. */

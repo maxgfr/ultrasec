@@ -12,7 +12,7 @@ you a glance; a missed flow is a missed bug.
 | sql | CWE-89 | high | `query`, `execute`, `raw`, `executemany` · JDBC/JPA: `prepareStatement`, `prepareCall`, `executeUpdate`, `addBatch`, `createQuery` |
 | nosql | CWE-943 | high | `db.find`, `collection.findOne`, `mapReduce`, `aggregate` (receiver-gated) |
 | command | CWE-78 | critical | `execSync`, `spawnSync`, `popen`, `Popen`, `shell_exec`, `passthru`, `proc_open`, `ProcessBuilder`, `Runtime.getRuntime` · plus `exec`/`spawn`/`run` **corroborated** (see below) |
-| code | CWE-94 | high | `eval`, `Function`, `runInThisContext`, `compile` |
+| code | CWE-94 | high | `eval`, `Function`, `runInThisContext`, `compile` · plus the **line shape** `.apply(eval)` / `.map(exec)`, where the interpreter is a *reference*, not a call |
 | ssti | CWE-1336 | high | `from_string`, `renderString`, `Template`, `compileString` |
 | path | CWE-22 | high | `readFile`, `writeFile`, `sendFile`, `open` · JVM/C# constructors: `new File`, `FileInputStream`, `newBufferedReader` · zip-slip: `extractall`, `extract`, `unzip` |
 | ssrf | CWE-918 | high | bare `fetch`, `request`, `urlopen`, `axios`, `got` · + member calls `axios.get`, `http.get`, `requests.get`, `session.post` (receiver-gated) |
@@ -29,6 +29,8 @@ you a glance; a missed flow is a missed bug.
 | domxss | CWE-79 | high | **assignments**, not calls: `.innerHTML =`, `dangerouslySetInnerHTML`, `v-html`, `.src =` |
 | llm | CWE-1427 | high | `completions.create`, `messages.create`, `chain.invoke`, `model.generate` (receiver- + import-gated) |
 | redos | CWE-1333 | medium | `new RegExp`, `regexp.MustCompile`, `re.compile` (receiver-gated) |
+| algodos | CWE-407 | medium | `fuzz.extract`, `ratio`, `token_sort_ratio`, `distance`, `levenshtein`, `findBestMatch`, `get_close_matches` (import-gated) |
+| errleak | CWE-209 | low | **line shape**, not a call: `res.json({ error: err.message })`, `NextResponse.json({ message: String(error) })`, `jsonify({"error": str(e)})` |
 | reflect | CWE-470 | medium | `getattr`, `Class.forName`, `importlib.import_module`, `newInstance` |
 | xpath | CWE-643 | high | `selectNodes`, `xpath.select`, `evaluate` (receiver-gated) |
 | massassign | CWE-915 | medium | `setAttributes`, `bulkCreate`, `fill`, `update_attributes` |
@@ -72,6 +74,25 @@ So `execFile` is a sink in its own right, not a safe harbour. Ask whether the va
 **`domxss` is matched as an ASSIGNMENT.** `el.innerHTML = userInput` is the commonest DOM XSS shape
 in the wild and it is not a call at all, so a call-based catalog could never see it. These rules run
 over the line text, like sources do.
+
+**`algodos` (CWE-407) is ReDoS's sibling, and the cost lives in someone else's code.** The
+super-linear blow-up is not in a pattern the caller wrote, it is inside the library the caller
+called: `fuzz.extract(userQuery, tenThousandVariants)` is an O(n·m) Levenshtein DP, synchronous, no
+early exit. Measured on a real audit, the taint walk already had the whole path — query → controller
+→ service → this call — and emitted nothing, because the catalog had no sink at the end of it. It is
+import-gated for the usual reason (`extract`, `ratio`, `distance` and `similarity` are ordinary
+method names), and its sanitizer looks for an upper **bound**, never for validation. That distinction
+is the whole finding: the audited repo validated every parameter with zod, `min(1)`, no `max`, and
+shipped a remote CPU denial of service. So the general "type-coercion/validation present" hint is
+suppressed for this kind — on this class it would tell you the opposite of the truth.
+
+**`errleak` (CWE-209) has no untrusted source, which is why nothing found it.** The tainted value is
+the *exception*, produced by the server, so no source→sink walk can reach this class however deep it
+goes. It is a line shape instead — the response writer and the error expression on one line — and
+the gap between them forbids `)`, so `const d = await res.json(); log(err.message)` (two unrelated
+statements) does not match while `res.status(500).json({ error: err.message })` does. Rated `low` on
+purpose: what it leaks is usually a driver name or a status text, and it is the adjudicator who
+raises it when the message carries a stack, a SQL fragment or an internal hostname.
 
 **`llm` (CWE-1427) runs in both directions**, and the second one is the severe one:
 
@@ -139,9 +160,16 @@ NoSQL operator-stripping (`mongo-sanitize`), XML entity-disabling
 (`resolve_entities=False`, `FEATURE_SECURE_PROCESSING`), LDAP escaping
 (`ldap.escape`), CR/LF stripping, prototype-pollution guards
 (`Object.create(null)`, `__proto__` checks), template autoescaping, and
-type-coercion/validation (`parseInt`, `Number`, `validator.*`, `zod`/`Joi`). These
+type-coercion/validation (`parseInt`, `Number`, `validator.*`, `zod`/`Joi`), and an input-length
+**bound** (`slice(0, n)`, `max(n)`, `maxLength`, `[:n]`) for `algodos`. These
 **lower confidence and annotate** a candidate — they do not auto-dismiss it; you
 confirm the sanitizer actually covers the flow.
+
+One rule opts out of the general one, and the exception is the point: `algodos` never receives the
+"type-coercion/validation present" hint. A schema that checks the *type* says nothing about the
+*length*, and the repo that produced this class had zod on every route — with `min(1)` and no `max`.
+On that line the general hint would have handed the adjudicator the exact reassurance the bug
+depends on. A floor is not a bound.
 
 ## Two signals that sharpen a candidate
 
@@ -174,6 +202,31 @@ a detail: measured on a 69-file TypeScript repo, the regex tier produced **27 ta
 instead of 66**, lost every cross-file command-injection candidate, and dropped two CWE classes
 entirely. `ast: false` means the catalog below was applied to a thinner view of the code — check
 it before concluding a class is absent, and say so in the report.
+
+## Jupyter notebooks are scanned as Python
+
+A `.ipynb` is JSON, so for a long time nothing in this engine read one — and no external scanner
+does either: bandit has had B307 (`eval`) forever and simply cannot open the format. On a repo with
+eight notebooks that produced the two statements a security tool must never both make: eight files
+tracked, nothing in them.
+
+`scan` now extracts each notebook's code cells into a **line-aligned Python shadow** — line N of the
+shadow is line N of the raw JSON — runs the ordinary extractor over it, and files the result under
+the notebook's own path. So a notebook is an ordinary scanned file to the taint walk, the orphan-sink
+layer, the graph and `coverage`, and every citation it produces resolves in the file a reader opens.
+
+What the run tells you, and why each number is there:
+
+- `notebooks: 8/8 .ipynb extracted as python` — found vs. actually read.
+- `N checkpoint copy(ies) skipped` — `.ipynb_checkpoints/` is Jupyter's autosave. Scanning it
+  doubles every finding in the tree.
+- `N source line(s) could not be aligned and are NOT cited` — a cell whose `source` is one
+  multi-line string puts all its lines on a single raw line. Those are counted, never guessed at.
+
+Two limits worth knowing. Magics (`%matplotlib`) and shell escapes (`!pip …`) are blanked, because
+they are not Python — the line still exists, so nothing after it shifts. And the line-content passes
+(sanitizer hints, secret scanning, the `dossier` excerpt) read the raw JSON line, which carries the
+cell's source text: readable, correctly numbered, JSON-escaped.
 
 ## Beyond taint: config & auth line-detectors (run under `scan`)
 

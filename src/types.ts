@@ -575,6 +575,11 @@ export interface Manifest {
    *  from "failed". Additive/optional; older dossiers and `--tools none` omit it. */
   toolStatus?: { name: string; status: "ran" | "empty" | "skipped" | "failed"; findings?: number; note?: string }[];
   counts: { findings: number; bySeverity: Record<Severity, number> };
+  /** Jupyter notebooks: how many the walk found, how many were extracted, and
+   *  what could not be aligned. Present only when the tree HAS notebooks — a
+   *  repo with none stays silent, a repo whose notebooks could not be read says
+   *  so, and those two cases produce identical findings lists otherwise. */
+  notebooks?: { found: number; scanned: number; checkpoints: number; unaligned: number; note?: string };
   /** Coverage truncation — surfaced so a capped run is never mistaken for a full one. */
   truncation?: {
     /** Taint candidates dropped by `--max-candidates` (0 = none dropped). */
@@ -627,6 +632,15 @@ export interface Manifest {
      * question is which of them the auditor adjudicated.
      */
     guards?: boolean;
+    /**
+     * `ultrasec guards --lens throttle` (the entry-point × rate-limit matrix).
+     *
+     * The same absence question, asked of throttling instead of authorization,
+     * and it unlocks the same kind of coverage claim: "missing rate limiting"
+     * stops being a line in an advice string nobody can act on and becomes an
+     * enumerated set of handlers with a marker or without one.
+     */
+    throttle?: boolean;
   };
   /** Findings de-prioritized as noise BY CONSTRUCTION, with the reason and how
    *  many. The engine's rule is that nothing disappears quietly: a class that

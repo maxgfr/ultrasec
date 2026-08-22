@@ -214,11 +214,37 @@ You write:
 ```
 
 `guarded` · `unguarded` · `intentionally-public` (a health check, a login route, a webhook with its
-own signature check). An `unguarded` verdict becomes a cited `authz` finding through the same
-citation gate as any discovery. **A marker in scope is a candidate, not a proof** — it may guard a
-different branch, run after the object is read, or check authentication where the route needs
-authorization; and a route protected by framework middleware this pass cannot see will show as
-`unguarded` when it is fine.
+own signature check). An `unguarded` verdict becomes a cited `authz` finding (CWE-306) through the
+same citation gate as any discovery. **A marker in scope is a candidate, not a proof** — it may
+guard a different branch, run after the object is read, or check authentication where the route
+needs authorization; and a route protected by framework middleware this pass cannot see will show
+as `unguarded` when it is fine.
+
+## `THROTTLE.todo.json` → `THROTTLE.json`
+
+`guards --lens throttle` asks the same crossing of a different vocabulary: which handlers has
+nobody put a rate limit in front of. Same row shape, plus one field.
+
+```json
+[ { "id": "ed4204e1fcf5", "file": "src/pages/api/auth/[...nextauth].ts", "line": 8,
+    "handler": "authOptions", "kinds": ["http"], "reads": 2, "guards": [],
+    "lens": "throttle", "loginShape": true, "scope": "approx",
+    "state": "unguarded", "verdict": null } ]
+```
+
+`loginShape` marks a handler whose path or name says it authenticates. It changes the class, not
+just the severity: unbounded attempts there are **credential stuffing (CWE-307)** and, if the
+failure response distinguishes an unknown account from a wrong password — in the body, the status
+or the timing — **account enumeration (CWE-204)**. Ordinary handlers file as CWE-770.
+
+You write `throttled` · `unthrottled` · `not-abusable` (idempotent, cheap, and nothing to learn by
+repeating it). The ids differ from the auth lens's, so both worklists can be filled independently
+in one run.
+
+When **no** marker of the chosen kind appears anywhere in the tree, both lenses say so once, at the
+top of the brief: that is one architectural fact — the app is public by design, or its limit lives
+at an ingress this scan cannot see — and answering it in `CONTEXT.md` is cheaper and more accurate
+than N identical verdicts.
 
 ## `VERIFY.todo.json` → `verdicts.json`
 

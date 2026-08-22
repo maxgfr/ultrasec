@@ -350,6 +350,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     // never passed" from "the flag was passed and the pass found nothing".
     passes: { sinks: sinksOn, logHygiene: logHygieneOn, blame: blameOn, includeTests },
     ...(noiseDowngrades.length ? { downgraded: noiseDowngrades } : {}),
+    // Notebooks, recorded only when the tree HAS some. A repo with none is
+    // silent; a repo whose notebooks could not be read says so, because those
+    // two produce the same empty findings list and mean opposite things.
+    ...(scan.notebooks && scan.notebooks.found ? { notebooks: scan.notebooks } : {}),
     // What the reachability pass could actually see. A damped score has to be
     // accountable: without this, "toolchain: 0" reads the same whether there
     // were no build-only advisories or no lockfile to tell.
@@ -411,6 +415,15 @@ export async function runScan(args: ParsedArgs): Promise<number> {
 
   println(`ultrasec scan → ${out}${mergedNote}`);
   println(`  files scanned: ${scan.files.length}  ·  languages: ${languages.join(", ") || "—"}`);
+  if (scan.notebooks?.found) {
+    const nb = scan.notebooks;
+    println(
+      `  notebooks: ${nb.scanned}/${nb.found} .ipynb extracted as python` +
+        `${nb.checkpoints ? ` · ${nb.checkpoints} checkpoint copy(ies) skipped` : ""}` +
+        `${nb.unaligned ? ` · ${nb.unaligned} source line(s) could not be aligned and are NOT cited` : ""}`,
+    );
+    if (nb.note) println(`  ⚠️  ${nb.note}`);
+  }
   if (diffNote) println(`  ${diffNote}`);
   if (toolsAutoSkipped) {
     println(`  external scanners skipped in scoped mode — pass \`--tools auto\` to run them.`);

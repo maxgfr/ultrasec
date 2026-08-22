@@ -4,6 +4,7 @@ import type { Dossier } from "./store.js";
 import { SEVERITIES, type CodeLoc, type Finding, type Severity } from "./types.js";
 import { byStr } from "./util.js";
 import { lineCountAtCommit } from "./git.js";
+import { contradictedClaims, extractNegativeClaims, loadContextDoc, type ContradictedClaim } from "./context.js";
 
 // The exit gate. Grounding (default): every cited [file:line] must resolve in the
 // repo — a hallucinated or stale location fails the audit (the same
@@ -31,6 +32,10 @@ export interface CheckResult {
   /** Citations resolved against a HISTORICAL commit rather than HEAD — a secret
    *  in a file that has since been deleted. Reported, never a failure. */
   historical: number;
+  /** Negations in CONTEXT.md that the tree disagrees with. Always reported;
+   *  only `--semantic` fails on them. Empty when there is no run dir, no
+   *  CONTEXT.md, or nothing to disagree about. */
+  contradictions: ContradictedClaim[];
   messages: string[];
 }
 
@@ -132,6 +137,10 @@ export interface CheckOptions {
   repo?: string;
   semantic?: boolean;
   minSeverity?: Severity;
+  /** The run dir, so the gate can read the agent-authored `CONTEXT.md` and
+   *  confront its NEGATIONS with the tree. Omitted ⇒ that section is skipped and
+   *  the output is byte-identical to a run without it. */
+  run?: string;
 }
 
 function atLeast(sev: Severity, floor: Severity): boolean {
@@ -236,8 +245,53 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
         `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", …" : ""}) — set the verdict's \`brocard\` field so the refutation can be reviewed. A prose \`note\` is not read as a ground, however carefully argued: references/dismissal-brocards.md.`,
       );
   }
+  // CONTEXT.md's negations, confronted with the tree. Presence-gated: no run
+  // dir, no CONTEXT.md, or no negation naming an identifier ⇒ nothing is added
+  // and the output is byte-identical to before this existed.
+  //
+  // ALWAYS reported, and only `--semantic` fails on it. The gate's business is
+  // whether the audit's own claims hold, and this is one of them — but a
+  // negation can be contradicted for a good reason ("no `eval` in production
+  // code", with an `eval` in a test fixture), and reconciling it is one edit to
+  // one sentence. Blocking the default gate on prose would be the wrong trade;
+  // letting the sentence stand unchallenged is how a family goes unexamined.
+  const claims = opts.run ? contradicted(repo, opts.run) : [];
+  // Under `--semantic` this is a failure and belongs in the message list, which
+  // is what explains a failure. Without it the contradictions are still
+  // reported — through `contradictions`, which every renderer reads — but a
+  // green gate must not carry a "✓" in front of a challenge to its own premise.
+  if (claims.length && opts.semantic) {
+    ok = false;
+    messages.push(
+      `${claims.length} negation(s) in CONTEXT.md contradicted by the code — reconcile the sentence or the finding before trusting it as background.`,
+    );
+  }
+
   if (ok)
     messages.push(`grounding OK${opts.semantic ? " · audit adjudicated" : ""} — ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
 
-  return { ok, dangling, open, confirmed, dismissed, needsHuman, gated: findings.length, unarguedDismissals: unargued, historical, messages };
+  return {
+    ok,
+    dangling,
+    open,
+    confirmed,
+    dismissed,
+    needsHuman,
+    gated: findings.length,
+    unarguedDismissals: unargued,
+    historical,
+    contradictions: claims,
+    messages,
+  };
+}
+
+function contradicted(repo: string, run: string): ContradictedClaim[] {
+  const doc = loadContextDoc(run);
+  if (!doc) return [];
+  try {
+    return contradictedClaims(repo, extractNegativeClaims(doc));
+  } catch {
+    // A tree this process cannot walk is not a reason to fail a citation gate.
+    return [];
+  }
 }

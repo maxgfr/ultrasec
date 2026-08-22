@@ -240,6 +240,12 @@ async function dispatch(name: string, args: Record<string, unknown>, repo: strin
       return runCommand(name, [], { repo, run, shards, shard, json: true });
     }
 
+    case "ultrasec_guards":
+      requireRun(run);
+      // An unknown lens is refused by the command itself (exit 2 → ToolError),
+      // so there is one place that decides the vocabulary.
+      return runCommand(name, [], { repo, run, lens: str(args.lens), json: true });
+
     case "ultrasec_check":
       requireRun(run);
       return runCommand(name, [], { repo, run, semantic: bool(args.semantic), "min-severity": str(args.min_severity), json: true });
@@ -315,7 +321,7 @@ function artifactFor(name: string, flags: Record<string, unknown>): string | und
   if (name === "ultrasec_map") return join(run, "MAP.md");
   if (name === "ultrasec_scan") return join(run, "findings.json");
   if (name === "ultrasec_triage") return join(run, "TRIAGE.todo.json");
-  if (name === "ultrasec_guards") return join(run, "GUARDS.todo.json");
+  if (name === "ultrasec_guards") return join(run, flags.lens === "throttle" ? "THROTTLE.todo.json" : "GUARDS.todo.json");
   if (name === "ultrasec_verify") return join(run, "VERIFY.todo.json");
   if (name === "ultrasec_investigate") return join(run, "INVESTIGATE.todo.json");
   return undefined;

@@ -39,6 +39,7 @@ describe("run command — stage selection & order", () => {
       "assumptions",
       "triage",
       "guards",
+      "throttle",
       "investigate",
       "verify",
       "revalidate",

@@ -72,6 +72,7 @@ ultrasec graph   <file|symbol> --run .ultrasec  # cross-file links into/out of a
 ultrasec assumptions --run .ultrasec            # what each unit trusts that NOTHING enforces (--apply)
 ultrasec triage  --run .ultrasec                # cheap noise|keep fast-lane  (--apply TRIAGE.json)
 ultrasec guards  --run .ultrasec                # entry point × auth guard — the MISSING check (--apply)
+  # --lens throttle                             # …and the MISSING rate limit
 ultrasec investigate --run .ultrasec            # hunt authz/logic  (--apply INVESTIGATE.json)
 ultrasec verify  --run .ultrasec                # adversarial worklist → write verdicts.json
 ultrasec verify  --apply verdicts.json --run .ultrasec       # a file, comma-list, DIRECTORY, or -
@@ -177,7 +178,10 @@ each: [references/schemas.md](references/schemas.md).
 6c. **Enumerate the MISSING guard.** `guards --run <run>` lists every handler reading request data
    with no auth marker in scope — the class taint cannot reach, since an absent check has no line
    to trace. A marker is a *candidate*: read the handler, confirm it guards authorization before
-   the object is touched. `--apply` turns `unguarded` into a cited finding.
+   the object is touched. `--apply` turns `unguarded` into a cited finding. Run it again with
+   `--lens throttle` for the other absence — handlers nothing rate-limits, auth routes flagged
+   apart. Under either lens, **no marker anywhere is one architectural fact, not N findings**:
+   answer it once in `CONTEXT.md`. [references/hunting-heuristics.md](references/hunting-heuristics.md).
 
 7. **Hunt what the engine can't enumerate.** `investigate --run <run>` groups the attack surface
    by region; find broken access control/IDOR, business logic, auth/session/JWT, crypto, races,
@@ -194,20 +198,21 @@ each: [references/schemas.md](references/schemas.md).
    [references/revalidate-playbook.md](references/revalidate-playbook.md).
 
 9b. **Hunt the variants.** `variants --run <run>` — a root cause almost never produced exactly one
-   instance. State the *why*, build an exact match that finds the known bug, generalize one
-   dimension at a time, and emit a Semgrep rule so the family cannot come back:
-   [references/variant-analysis.md](references/variant-analysis.md).
+   instance. State the *why*, generalize one dimension at a time, and emit a Semgrep rule so the
+   family cannot come back: [references/variant-analysis.md](references/variant-analysis.md).
 
-10. **Gate.** `check --run <run> --semantic`. Fix any dangling citation; adjudicate anything left.
+10. **Gate.** `check --run <run> --semantic`. Fix any dangling citation, adjudicate anything left,
+   and reconcile any negation in `CONTEXT.md` the code contradicts — a sentence saying a class
+   isn't there is how a class goes unexamined.
 
 10b. **State the coverage.** `coverage --run <run>` — an ASVS matrix of what this audit looked at
    and what it did not. A short report reads as "nothing there" when it means "nothing there, in
-   what I looked at"; the matrix separates the two, and it is folded into REPORT.md automatically.
+   what I looked at"; the matrix separates the two. Folded into REPORT.md automatically.
 
 11. **Narrate & render.** `narrative --run <run>`, author `NARRATIVE.json` (executive summary,
     `positivePatterns`, fixes, attack chains, root causes, `hardeningNotes`), then `render --run
     <run> --narrative NARRATIVE.json`. Present the SUMMARY, the confirmed findings with their
-    exploit paths, the needs-human list, the coverage caveats from step 3, and the run folder.
+    exploit paths, the needs-human list and the run folder.
     [references/narrative-playbook.md](references/narrative-playbook.md).
 
 12. **Plan the fixes (optional).** `implement --run <run>` → `IMPLEMENT.md`, a remediation-PRD
@@ -231,12 +236,11 @@ ultrasec orchestrate --run <dir> [--phase adjudicate|verify|revalidate|investiga
 | Subagents but no Workflow tool | Same `orchestrate`; dispatch one subagent per batch following `<RUN>/orchestration/agents/<role>.md` (the workflow script shows batches + prompts). One writer: you merge and fold. |
 | Eco mode, or no subagents | `orchestrate --run <RUN> --eco` → follow `<RUN>/orchestration/RUNBOOK.md` sequentially, playing each role yourself. Correctness-identical; only wall-clock differs. |
 
-Fan-out is an optimization, never a requirement — the gates are harness-independent and every
-phase has a sequential fallback with identical artifacts. Subagents never write: the emitted
-contracts end with the one-writer rule (read-only commands only — `dossier`, `graph`, `paths`),
-and `--apply` stays with you, so an uncertain high-severity finding still lands needs-human
-whoever adjudicated it. Re-run `orchestrate` whenever a worklist changes (emission is idempotent);
-`--phase <p>` before its worklist exists fails and names the command that produces it.
+Fan-out is an optimization, never a requirement — every phase has a sequential fallback with
+identical artifacts. Subagents never write: the contracts end with the one-writer rule (read-only
+commands only), and `--apply` stays with you, so an uncertain high-severity finding still lands
+needs-human whoever adjudicated it. Re-run `orchestrate` whenever a worklist changes (emission is
+idempotent); `--phase <p>` before its worklist exists fails and names the command that produces it.
 
 ## When the run looks wrong
 
@@ -248,7 +252,7 @@ whoever adjudicated it. Re-run `orchestrate` whenever a worklist changes (emissi
 | `check` keeps failing | A cited `[file:line]` doesn't resolve: the file moved, the line is out of range, or it was invented. Reopen `dossier <id>`, fix the citation, or drop the finding. |
 | `check --semantic` fails | Candidates are still `open`. Adjudicate them, or clear the obvious ones with `triage`. |
 | `--apply` exits 2 | Fail-closed: malformed file, or no id in it matches the dossier (stale fragments). Re-emit the worklist and refill. |
-| `--apply` from a directory folded nothing | Fragment names must match the stage pattern — `*verdict*.json`, `*triage*.json`, `*revalidat*.json`, `*investigat*`/`*discover*.json`. |
+| `--apply` from a directory folded nothing | Fragment names must match the stage's pattern — [commands.md](references/commands.md) lists them. |
 | `investigate --apply` rejected a discovery | Either its `[file:line]` doesn't resolve — the anti-hallucination gate working; get the real line and resubmit — or a field is outside its vocabulary. The reason names the field and the value. Class names (`xss`, `dos`, `disclosure`…) are folded onto `category`, not refused. |
 | First run is slow / hits the network | A cold machine downloads ~22 MB of tree-sitter grammars once (`--offline` does not suppress it). Prewarm, or set `CODEINDEX_GRAMMARS_DIR`. |
 | A scoped re-scan seems to lose findings | Use `--merge` — it preserves prior verdicts and keeps out-of-scope findings. |
@@ -267,8 +271,8 @@ whoever adjudicated it. Re-run `orchestrate` whenever a worklist changes (emissi
 7. **Stopping at the scanners.** They cover known patterns; authz, business logic and races are
    where a manual pass earns its keep.
 8. **Skipping `context`.** Without a trust model you are rating in the abstract.
-9. **Hunting only what the engine listed.** It finds PATTERNS, not ABSENCES — run `guards`. A
-   FAILED scanner is the same trap: a hole that reads exactly like an empty result.
+9. **Hunting only what the engine listed.** It finds PATTERNS, not ABSENCES — run `guards`, both
+   lenses. A FAILED scanner is the same trap: a hole that reads like an empty result.
 
 ## Do not
 
@@ -286,10 +290,9 @@ whoever adjudicated it. Re-run `orchestrate` whenever a worklist changes (emissi
 - **Deterministic core, optional tools.** Two scans of an unchanged repo yield the same taint
   candidates *on the same extraction tier*; external-tool results depend on what's installed and
   may hit the network (advisory DBs). Nothing external is required.
-- **Risk ranking & correlation are deterministic.** The same issue seen by several tools becomes
-  one finding whose `sources[]` names each producer — a scanner hit landing on a taint node
-  corroborates that flow rather than duplicating it — ranked by a composite EPSS/KEV/CVSS `risk`.
-  Feeds are cached (daily TTL); the math is offline. `--offline` ranks by severity alone.
+- **Risk ranking & correlation are deterministic.** One issue seen by several tools becomes one
+  finding whose `sources[]` names each producer, ranked by a composite EPSS/KEV/CVSS `risk`. Feeds
+  are cached (daily TTL); the math is offline. `--offline` ranks by severity alone.
 - **~15 languages** for the link-graph (JS/TS, Python, Go, Java, Ruby, PHP, Rust, C/C++, C#,
   Kotlin, Swift, Scala, shell, Lua, Elixir); the catalog is deepest for the web stacks —
   [references/catalog.md](references/catalog.md).

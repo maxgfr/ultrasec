@@ -189,8 +189,15 @@ The cross-file links into and out of a node. `--depth n` (default 1) · `--run` 
 target, an ambiguous symbol, or an unknown node.
 
 ### `paths`
-List the candidate source→sink chains. `--run` (default `.ultrasec`) · `--kind <k>` ·
+List the candidate source→sink **chains**. `--run` (default `.ultrasec`) · `--kind <k>` ·
 `--severity <s>` · `--json`.
+
+It lists chains and only chains, so an **orphan sink** — a dangerous callee the walk could not
+connect to a source — never appears here. `--kind X` printing nothing therefore does not mean
+there is no X, and some classes live almost entirely as orphans: the real CWE-407 finding this
+catalog was built from is one `fuzz.extract` sink with no proven path to it. When a kind has
+findings it could not list, `paths` now says how many rather than leaving the silence to be read
+as absence — then go to `DOSSIER.md` or `findings.json`.
 
 ### `dossier <finding-id>`
 The grounding packet for one finding: the real code at every hop, graph neighbours, and the four
@@ -205,14 +212,15 @@ The verdict→status table and every JSON shape live in [schemas.md](schemas.md)
 | command | emits | you write | apply rule |
 |---|---|---|---|
 | `triage --run <d>` | `TRIAGE.todo.json` + `.md` | `noise\|keep` | `noise` clears only low/med/info; on high/critical it is **ignored** |
-| `guards --run <d>` | `GUARDS.todo.json` + `.md` | `guarded\|unguarded\|intentionally-public` | `unguarded` becomes a cited `authz` finding; the matrix is re-derived from the code, so a stale row is refused |
+| `guards --run <d>` | `GUARDS.todo.json` + `.md` | `guarded\|unguarded\|intentionally-public` | `unguarded` becomes a cited `authz` finding (CWE-306); the matrix is re-derived from the code, so a stale row is refused |
+| `guards --lens throttle --run <d>` | `THROTTLE.todo.json` + `.md` | `throttled\|unthrottled\|not-abusable` | `unthrottled` becomes a cited `other` finding — **CWE-307 + CWE-204** on an auth-shaped handler, CWE-770 otherwise |
 | `verify --run <d>` | `VERIFY.todo.json` + `.md` | `supported\|partial\|unsupported\|refuted` | `partial` → needs-human at any severity; `unsupported` → needs-human on high/critical |
 | `investigate --run <d>` | `INVESTIGATE.todo.json` + `.md` | `Discovery[]` | citations checked **before** ingest; a bad one is rejected, not folded |
 | `revalidate --run <d>` | `REVALIDATE.todo.json` + `.md` | `still-valid\|fixed\|false-positive\|uncertain` | `fixed` → dismissed + `fixedIn`; high/critical `false-positive` → needs-human |
 
 Shared `--apply` behaviour: the argument may be **a file, a comma-separated list, or a
 directory**. From a directory each stage picks up its own pattern, sorted for determinism —
-`*verdict*.json` (verify), `*triage*.json`, `*guard*.json`, `*revalidat*.json`, `*investigat*`/`*discover*.json`.
+`*verdict*.json` (verify), `*triage*.json`, `*guard*.json`, `*throttle*.json`, `*revalidat*.json`, `*investigat*`/`*discover*.json`.
 A directory with no match, or a fragment set where **no id matches the dossier**, exits 2 rather
 than folding nothing and reporting success. `--apply -` reads the payload from **stdin**, so a
 generated set of verdicts can be piped straight in.
@@ -262,11 +270,31 @@ dropped. No `--json`. Without `--narrative` the output is byte-identical to a pl
 ### `check --run <dir>`
 The exit gate. **Read-only — it writes nothing and changes no status.** Fails on any finding
 whose cited `[file:line]` doesn't resolve (the anti-hallucination gate); `--semantic` *also*
-fails when a candidate is still unadjudicated.
+fails when a candidate is still unadjudicated, or when **CONTEXT.md contradicts itself against the
+code** (below).
 
 `--run` (default `.ultrasec`) · `--repo` · `--semantic` ·
 `--min-severity critical|high|medium|low|info` · `--json`. Exit **0** ok · **1** gate failed ·
 **2** unreadable run.
+
+**Negations in CONTEXT.md are checked against the tree.** That document is injected into every
+dossier and every worklist, and a single confident sentence can close a whole family: a real
+audit's CONTEXT.md said *"le dépôt ne contient aucun `dangerouslySetInnerHTML` en code de
+production"*. There were eight, in production components — and the stored-XSS class went
+unexamined, not because the engine missed the sinks, but because the auditor had written down that
+there were none.
+
+So `check` extracts every sentence that negates the PRESENCE of a backticked identifier, greps the
+code for that identifier, and prints the sentence next to the `[file:line]`s that disagree with it.
+It never parses the claim; putting the two side by side is the whole value. Always reported;
+**only `--semantic` fails**, because reconciling is one edit to one sentence and prose should not
+block a citation gate.
+
+Deliberately narrow, or it would cry wolf. Only presence negations count (`aucun X`, `no X`,
+`pas de X`, `never X`) — *"pas de protection CSRF sur les routes `pages/api`"* negates the
+protection, not the route, and does not fire. The identifier must follow the negation immediately.
+Only files a language recognises are searched, so a repo's own audit notes and README discussing a
+token are not evidence that the token is there.
 
 ## Housekeeping
 

@@ -70,9 +70,17 @@ export function runRun(args: ParsedArgs): number {
     return powered && res.errors.length ? 1 : 0;
   }
 
+  // Notices belong to both branches: a negation in CONTEXT.md the code
+  // contradicts is exactly what a non-powered run — where a human is about to
+  // fill the worklists from that document — needs told before it starts.
+  const printNotices = (): void => {
+    for (const n of res.notices) println(`  ⚠️  ${n}`);
+  };
+
   if (!powered) {
     println(`ultrasec run → ${run} (no --powered: emitted worklists, ZERO external calls)`);
     println(`  stages: ${stages.join(" → ")}`);
+    printNotices();
     println(`  agent TODO — fill each worklist, then apply (or re-run with --powered --agent <cli>):`);
     for (const e of res.emitted) {
       const noApply = e.outName === "CONTEXT.md" || e.outName === "NARRATIVE.json" || e.outName === "REMEDIATION_PRD.md";
@@ -86,6 +94,7 @@ export function runRun(args: ParsedArgs): number {
   println(`ultrasec run --powered → ${run} (agent: ${agent}${crossCheck ? `, cross-check: ${crossCheck}` : ""})`);
   println(`  stages: ${stages.join(" → ")}  ·  external agent calls: ${res.externalCalls}`);
   if (res.escalated.length) println(`  ⚠️  cross-check escalated ${res.escalated.length} finding(s) to needs-human: ${res.escalated.join(", ")}`);
+  printNotices();
   for (const err of res.errors) println(`  ✗ ${err}`);
   println(`  report: ${join(run, "REPORT.md")} · ${join(run, "index.html")}`);
   return res.errors.length ? 1 : 0;

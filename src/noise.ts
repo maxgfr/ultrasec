@@ -55,9 +55,15 @@ import { NOISE_CLASSES, NOISE_GROUND, type Brocard, type Confidence, type Findin
  * that still arrives with such a path (an `--include-vendored` run, a scanner
  * reporting a location the matcher could not parse) is demoted rather than
  * ranked.
+ *
+ * `.ipynb_checkpoints/` joins the list for the same reason `.next/` did: it is
+ * Jupyter's autosave, a stale copy of the notebook beside it, and every finding
+ * in it is a second copy of one in real source. The notebook pass skips it
+ * outright; this catches whatever reaches a finding by another route (a secret
+ * scanner reading the raw file, an `--include-vendored` run).
  */
 const VENDORED_DIR =
-  /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules|\.pnpm|bower_components|site-packages|\.venv|venv|__pycache__|\.tox|dist|build|out|target|coverage|\.next|\.nuxt|\.svelte-kit|\.turbo|\.gradle)\//i;
+  /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules|\.pnpm|bower_components|site-packages|\.venv|venv|__pycache__|\.tox|\.ipynb_checkpoints|dist|build|out|target|coverage|\.next|\.nuxt|\.svelte-kit|\.turbo|\.gradle)\//i;
 const MINIFIED = /\.min\.(js|mjs|cjs|css)$/i;
 
 interface NoiseRule {

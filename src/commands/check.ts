@@ -31,7 +31,9 @@ export function runCheck(args: ParsedArgs): number {
     return 2;
   }
 
-  const res = check(dossier, { repo, semantic, minSeverity });
+  // `run` is passed so the gate can read the agent-authored CONTEXT.md and
+  // confront its negations with the tree. Absent CONTEXT.md ⇒ nothing changes.
+  const res = check(dossier, { repo, semantic, minSeverity, run });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(res, null, 2));
@@ -40,6 +42,20 @@ export function runCheck(args: ParsedArgs): number {
 
   for (const d of res.dangling.slice(0, 50)) {
     eprintln(`  ✗ ${d.id}: ${d.file}:${d.line} — ${d.reason}`);
+  }
+  // Contradicted negations print under their own marker rather than through the
+  // message list: a `✓` in front of "CONTEXT.md says there are none and here are
+  // seven" reads as approval of exactly the sentence being challenged.
+  for (const c of res.contradictions) {
+    const where = c.hits.map((h) => `${h.file}:${h.line}`).join(", ");
+    const more = c.total > c.hits.length ? ` +${c.total - c.hits.length} more` : "";
+    eprintln(`  ⚠️  CONTEXT.md:${c.claim.line} — \`${c.token}\` occurs ${c.total} time(s) in code: ${where}${more}`);
+    eprintln(`      “${c.claim.sentence.length <= 110 ? c.claim.sentence : `${c.claim.sentence.slice(0, 107)}…`}”`);
+  }
+  if (res.contradictions.length && !semantic) {
+    eprintln(
+      `  ⚠️  ${res.contradictions.length} negation(s) in CONTEXT.md contradicted by the code. Every later stage reads that document as background — reconcile the sentence, or the finding. \`--semantic\` fails on this.`,
+    );
   }
   for (const m of res.messages) println((res.ok ? "  ✓ " : "  • ") + m);
   return res.ok ? 0 : 1;
