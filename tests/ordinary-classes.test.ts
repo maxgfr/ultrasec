@@ -1,7 +1,14 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { findSinks, findTextSinks, findSanitizers, SINKS, TEXT_SINKS } from "../src/catalog.js";
 import { langForFile } from "../src/lang.js";
 import type { Call } from "../src/lang.js";
+import { runPaths } from "../src/commands/paths.js";
+import { writeDossier } from "../src/store.js";
+import { parseArgs } from "../src/util.js";
+import { SCHEMA_VERSION, VERSION } from "../src/types.js";
 
 // Two classes an audit of a real repository found by hand and the engine could
 // not enumerate at all. Every literal below is a line copied out of the audited
@@ -63,6 +70,77 @@ describe("CWE-407 — algorithmic DoS on a library call", () => {
     // `findSinks` breaks on the first matching rule, so ordering is behaviour.
     const kinds = SINKS.map((r) => r.kind);
     expect(kinds).toContain("algodos");
+  });
+});
+
+describe("`paths --kind` does not let a class disappear into a silence", () => {
+  // `paths` lists CHAINS. An orphan sink — a dangerous callee the walk could not
+  // connect to a source — has no path and never appears, so `paths --kind
+  // algodos` printing nothing reads as "no algodos". Measured on the audited
+  // repo, that is exactly what the real A2 finding looks like: one `fuzz.extract`
+  // sink, reported, with no proven source path.
+  const dossier = (findings: unknown[]) =>
+    ({
+      manifest: {
+        version: VERSION,
+        schemaVersion: SCHEMA_VERSION,
+        repo: "/tmp/x",
+        generatedNote: "",
+        languages: ["javascript"],
+        toolsRun: [],
+        counts: { findings: findings.length, bySeverity: { critical: 0, high: 0, medium: 0, low: 0, info: 0 } },
+      },
+      findings,
+      graph: { files: [], edges: [], symbolDefs: {} },
+    }) as never;
+
+  const orphan = {
+    id: "aaaaaaaaaaaa",
+    category: "sast",
+    cwe: "CWE-407",
+    title: "Algorithmic denial of service: extract() sink (no source path found)",
+    severity: "medium",
+    confidence: "low",
+    sink: { file: "src/search.ts", line: 101, kind: "algodos" },
+    message: "",
+    tool: "ultrasec",
+    status: "open",
+  };
+
+  it("says how many findings of that kind it could not list", () => {
+    const run = mkdtempSync(join(tmpdir(), "ultrasec-paths-"));
+    writeDossier(run, dossier([orphan]));
+
+    const out: string[] = [];
+    const so = vi.spyOn(process.stdout, "write").mockImplementation((c: unknown) => {
+      out.push(String(c));
+      return true;
+    });
+    try {
+      expect(runPaths(parseArgs(["paths", "--run", run, "--kind", "algodos"]))).toBe(0);
+    } finally {
+      so.mockRestore();
+    }
+    const text = out.join("");
+    expect(text).toContain("no candidate taint paths match");
+    expect(text).toContain("1 `algodos` finding(s) exist WITHOUT a proven source path");
+  });
+
+  it("stays quiet when the kind really is absent", () => {
+    const run = mkdtempSync(join(tmpdir(), "ultrasec-paths-"));
+    writeDossier(run, dossier([orphan]));
+
+    const out: string[] = [];
+    const so = vi.spyOn(process.stdout, "write").mockImplementation((c: unknown) => {
+      out.push(String(c));
+      return true;
+    });
+    try {
+      runPaths(parseArgs(["paths", "--run", run, "--kind", "sql"]));
+    } finally {
+      so.mockRestore();
+    }
+    expect(out.join("")).not.toContain("WITHOUT a proven source path");
   });
 });
 

@@ -189,8 +189,15 @@ The cross-file links into and out of a node. `--depth n` (default 1) · `--run` 
 target, an ambiguous symbol, or an unknown node.
 
 ### `paths`
-List the candidate source→sink chains. `--run` (default `.ultrasec`) · `--kind <k>` ·
+List the candidate source→sink **chains**. `--run` (default `.ultrasec`) · `--kind <k>` ·
 `--severity <s>` · `--json`.
+
+It lists chains and only chains, so an **orphan sink** — a dangerous callee the walk could not
+connect to a source — never appears here. `--kind X` printing nothing therefore does not mean
+there is no X, and some classes live almost entirely as orphans: the real CWE-407 finding this
+catalog was built from is one `fuzz.extract` sink with no proven path to it. When a kind has
+findings it could not list, `paths` now says how many rather than leaving the silence to be read
+as absence — then go to `DOSSIER.md` or `findings.json`.
 
 ### `dossier <finding-id>`
 The grounding packet for one finding: the real code at every hop, graph neighbours, and the four
