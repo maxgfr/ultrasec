@@ -19,7 +19,7 @@ import { buildWorklist, renderWorklistMd, applyVerdicts, parseVerdicts } from ".
 import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../revalidate.js";
 import { buildAssumptionWorklist, renderAssumptionsMd, parseAssumptionResults, renderAssumptionMap, unenforced, LEADS_FILE } from "../assumptions.js";
 import { buildVariantWorklist, renderVariantsMd, parseVariantResults, renderRegressionRules } from "../variants.js";
-import { buildGuardMatrix, renderGuardsMd, parseGuardVerdicts, guardDiscovery } from "../guards.js";
+import { buildGuardMatrix, renderGuardsMd, parseGuardVerdicts, guardDiscovery, LENSES } from "../guards.js";
 import { buildNarrativeWorklist, renderNarrativeWorklistMd, parseNarrative, mergeNarrative, hasNarrativeContent } from "../narrative.js";
 import { buildImplementWorklist, renderImplementMd, loadNarrative } from "../implement.js";
 import type { AgentRunner } from "./agent.js";
@@ -34,7 +34,19 @@ import { eprintln } from "../util.js";
 // Canonical order. `assumptions` runs BEFORE the hunt (its leads feed
 // `investigate`) and `variants` AFTER adjudication (its seeds are confirmed
 // findings), so neither can be slotted in arbitrarily.
-export const ALL_STAGES = ["context", "assumptions", "triage", "guards", "investigate", "verify", "revalidate", "variants", "narrative", "implement"] as const;
+export const ALL_STAGES = [
+  "context",
+  "assumptions",
+  "triage",
+  "guards",
+  "throttle",
+  "investigate",
+  "verify",
+  "revalidate",
+  "variants",
+  "narrative",
+  "implement",
+] as const;
 export type StageName = (typeof ALL_STAGES)[number];
 
 interface StageDef {
@@ -137,6 +149,31 @@ const STAGES: Record<StageName, StageDef> = {
     },
     instruction: (repo, run, worklist, outPath) =>
       `Read the guard matrix at ${worklist}. It lists every handler that reads request data and the auth/authorization markers visible in its scope. For each row READ THE HANDLER and decide guarded|unguarded|intentionally-public, writing a JSON array of {id, verdict, note} to ${outPath}. A marker in scope is a CANDIDATE — confirm it runs before the object is touched and that it checks authorization, not just authentication. A route can also be protected by middleware or an ingress rule this pass cannot see. ${UNTRUSTED}`,
+  },
+  // The same crossing, of rate limiting. Runs beside `guards` rather than after
+  // `investigate`, because an unthrottled AUTH route is a region investigate
+  // should already know about when it picks where to look.
+  throttle: {
+    crossCheckable: false,
+    emit(repo, run) {
+      const rows = buildGuardMatrix(scanRepo(repo), "throttle");
+      const f = stageFiles(LENSES.throttle.stem);
+      emitWorklist(run, f, rows, renderGuardsMd(rows, loadContextDoc(run), "throttle"));
+      return { worklist: join(run, f.md), outName: "THROTTLE.json" };
+    },
+    applyPure: (repo, run, dossier, raw) => {
+      const byId = new Map(buildGuardMatrix(scanRepo(repo), "throttle").map((r) => [r.id, r]));
+      const discoveries = rowsOf("throttle", parseGuardVerdicts(raw, "throttle"))
+        .filter((r) => r.verdict === "unthrottled")
+        .map((r) => {
+          const at = byId.get(r.id);
+          return at ? guardDiscovery(at, r.note, "throttle") : undefined;
+        })
+        .filter((d): d is NonNullable<typeof d> => !!d);
+      return ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run) }).findings;
+    },
+    instruction: (repo, run, worklist, outPath) =>
+      `Read the throttle matrix at ${worklist}. It lists every handler that reads request data and the rate-limiting markers visible in its scope. If it opens by saying NO throttling marker exists anywhere in the tree, answer that question FIRST — nothing bounds request volume, or the limit lives at an ingress/CDN/gateway this scan cannot see — and record the answer in CONTEXT.md rather than repeating it per row. Then for each row decide throttled|unthrottled|not-abusable, writing a JSON array of {id, verdict, note} to ${outPath}. Rows marked as AUTH endpoints come first and are the ones that matter: there the absence is credential stuffing and account enumeration, so also check what a FAILED attempt reveals — whether the response, the status code or the timing distinguishes an unknown account from a wrong password. ${UNTRUSTED}`,
   },
   investigate: {
     crossCheckable: false,

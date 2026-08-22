@@ -115,6 +115,11 @@ class MockRunner implements AgentRunner {
       // that shift the counts the stage-order assertions below rely on.
       const items = JSON.parse(readFileSync(join(task.run, "GUARDS.todo.json"), "utf8")) as { id: string }[];
       writeFileSync(task.outPath, JSON.stringify(items.map((i) => ({ id: i.id, verdict: "guarded" }))));
+    } else if (stage === "throttle") {
+      // Same reasoning as `guards`: every row `throttled`, so the stage-order
+      // assertions are not shifted by findings this test is not about.
+      const items = JSON.parse(readFileSync(join(task.run, "THROTTLE.todo.json"), "utf8")) as { id: string }[];
+      writeFileSync(task.outPath, JSON.stringify(items.map((i) => ({ id: i.id, verdict: "throttled" }))));
     } else if (stage === "verify") {
       const items = JSON.parse(readFileSync(join(task.run, "VERIFY.todo.json"), "utf8")) as { id: string }[];
       writeFileSync(task.outPath, JSON.stringify(items.map((i) => ({ id: i.id, verdict: this.verifyVerdict }))));
@@ -168,6 +173,9 @@ describe("runPipeline — powered", () => {
       "emit:guards",
       "fill:guards",
       "apply:guards",
+      "emit:throttle",
+      "fill:throttle",
+      "apply:throttle",
       "emit:investigate",
       "fill:investigate",
       "apply:investigate",

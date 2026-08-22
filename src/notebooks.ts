@@ -98,7 +98,7 @@ export function notebookShadow(raw: string): NotebookShadow | undefined {
   const lineOf = (index: number): number => raw.slice(0, index).split("\n").length;
 
   for (const cell of doc.cells as RawCell[]) {
-    if (!cell || cell.cell_type !== "code") continue;
+    if (cell?.cell_type !== "code") continue;
     const source = cell.source;
     // nbformat allows `source` to be a list of lines OR one string, and real
     // notebooks carry both — six cells of the notebook that motivated this file

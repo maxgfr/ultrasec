@@ -170,13 +170,13 @@ COMMANDS
              intermediates; a run that was never rendered is removed whole.
              Flags: --run · --all · --keep-output · --docker · --dry-run · --json.
   run        Orchestrate the AI stages (context → assumptions → triage → guards →
-             investigate → verify → revalidate → variants → narrative →
+             throttle → investigate → verify → revalidate → variants → narrative →
              implement), then ALWAYS check + render. DEFAULT
              makes ZERO external calls: scans + emits every worklist + prints the agent
              TODO. --powered drives an agent CLI per worklist (keys live in that CLI,
              not ultrasec); --cross-check <cli> escalates high/critical verify/
              revalidate disagreement to needs-human. --stages selects a subset of the
-             SEVEN stage names above — 'check'/'render' are unconditional post-steps
+             stage names above — 'check'/'render' are unconditional post-steps
              and are NOT valid --stages tokens. Flags: --repo · --out · --powered ·
              --agent <name|tpl> · --cross-check <name|tpl> · --stages · --no-scan ·
              --scope/--include/--exclude/--max-files/--gitignore · --json.
