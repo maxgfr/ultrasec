@@ -57,6 +57,36 @@ groups them for you), run the value through these lenses:
 or a missing authz check while reviewing crypto — report it. Attackers don't respect
 category boundaries.
 
+## The ordinary classes
+
+A deep source→sink engine is very good at the shape it models and structurally blind to
+everything else, and the failure is not that it reports a class weakly — it is that the class
+never appears at all, so the report looks complete. Two audits of real repositories found five
+of these by hand while the engine, running well, said nothing.
+
+Each is now enumerated. They are listed here anyway, because knowing *why* the machine was
+blind is what lets you notice the sixth.
+
+| The ordinary thing | Why a taint walk cannot see it | Ask for it |
+|---|---|---|
+| The caught error handed back to the caller (CWE-209) | there is no untrusted SOURCE — the tainted value is the exception, produced by the server | `paths --kind errleak` |
+| Cost inside a library call (CWE-407) | the super-linear step is in code the repo does not contain; the call site looks ordinary | `paths --kind algodos` |
+| Nothing rate-limits this route | an absence has no line to trace | `guards --lens throttle` |
+| Nobody checks who is calling | same | `guards` |
+| Code stored as something else — notebooks, `.sql`, templates | no language claimed the extension, so the file was never read | `manifest.notebooks`, `manifest.languages` |
+
+Two habits generalize past the table.
+
+**Read the file list, not just the findings.** `manifest.languages` and the scanned-file count
+answer a question the findings cannot: was this file type read at all? A tracked file that
+produced nothing and a tracked file nothing looked at are the same silence. Eight notebooks were
+lost to exactly that.
+
+**Distrust your own negations.** The most expensive sentence of one audit was in its own
+`CONTEXT.md`: "the repo contains no `dangerouslySetInnerHTML`". There were eight. `check` now
+confronts negations with the code, but only the ones naming an identifier — the rest are still
+yours. Before writing "aucun X", grep for X, and write down what you ran.
+
 ## Where the classes live
 
 Which classes to hunt, and the mechanism-level method for each — what to grep, how to prove it,

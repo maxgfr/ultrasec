@@ -71,6 +71,8 @@ to an integer before the handler sees it. → Refute by citing the coercion/vali
 one but never auto-dismisses, because a sanitizer can be present and *not apply*. Confirm three
 things before refuting: it runs on **this** path (not a sibling branch), it neutralizes for
 **this** sink's context, and nothing after it re-introduces the value.
+When the sanitizer is a WRAPPER around a library, none of those three can be answered from the
+repository — see *Question 3 sometimes lives in `node_modules`* below.
 *Sanitizers that look sufficient and aren't:* `basename()` doesn't stop an absolute path or a
 Windows drive-relative one; `parseInt`/`Number` are decisive only if the **coerced** value is
 what reaches the sink (re-stringifying the original is common); `DOMPurify` with
@@ -182,6 +184,39 @@ means stopping and doing the step it replaced.
 | "There's a validator on the line, so it's fine" | A validator that checks the wrong property protects nothing | Read what it actually rejects |
 | "It's behind auth, so it's low" | An authenticated user is an attacker in most threat models | Brocard 2 — check what the precondition really costs |
 | "Too many candidates to read them all" | The count is a budgeting problem, not an evidence problem | `triage`, `--min-severity`, and the **Reachability evidence** block in each dossier (scope tier · def-use · does anything tainted reach the assigned value) — then read what's left. `--strict-scope` is the blunt version: it discards the whole `file` tier rather than letting you judge it. |
+
+## Question 3 sometimes lives in `node_modules`
+
+A house sanitizer is a wrapper, and the wrapper is not where the bug is. `xssWrapper` around
+`xss@1.0.15`, `sanitizeHtml` with a custom `transformTags`, a `DOMPurify` call with hooks — the
+repo's own code is a config object, and whether that config holds is decided inside the library.
+
+The audit that produced this section found two bypasses of one such wrapper, and **neither could be
+seen from the repository**. Both were in the options: an `onTagAttr` hook returning a value, which
+short-circuits the library's own `safeAttrValue` and with it every URL-scheme check; and an
+`onIgnoreTag` hook re-emitting the raw tag with its attributes intact. You confirm that by opening
+`node_modules/xss/lib/parser.js` and reading what the hook's return value does — nothing else
+proves it, and nothing else refutes it either.
+
+Since the default prune, that tree is not in the scan. So when question 3 turns on a wrapper you
+did not write, go and get it:
+
+```bash
+ultrasec scan --repo . --out .ultrasec --include-vendored --scope node_modules/xss --sinks
+# and to just READ it, which is usually what you want:
+#   rg -n 'onTagAttr|safeAttrValue' node_modules/xss/lib/
+```
+
+Scoped, on purpose. `--include-vendored` across a whole repository is how an audit ends up with 561
+findings from a tree nobody maintains — that is exactly why the prune exists. Pointed at the one
+package a verdict depends on, it is the difference between "a sanitizer is present" and a verdict
+you can defend.
+
+Three shapes worth the trip: a hook or callback whose RETURN VALUE the library acts on; an
+allow-list you extended (`allowedTags`, `ALLOWED_ATTR`) where the addition re-opens a class; and a
+version whose behaviour you are asserting from memory. If you cannot read the library, the honest
+verdict is `needs-human` with the question written down — not `refuted` because a sanitizer was on
+the line.
 
 ## After the batch: look for chains
 

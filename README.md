@@ -543,6 +543,12 @@ pnpm run build:example                                # regenerate assets/exampl
 Releases are automatic: Conventional Commits on `main` drive semantic-release
 (GitHub release + tarball).
 
+Commit **bodies** land in `CHANGELOG.md` verbatim, so they are Markdown whether you meant them to
+be. Never start a line with `#` — an issue reference written as `#24` at the start of a line, or a
+bare `#` used as a separator, becomes an H1 in the middle of a release entry and the document grows
+a release that does not exist. Write `issue 24` or `n°24`, or keep the reference mid-line.
+`tests/changelog.test.ts` fails on the commit that would introduce one.
+
 ## License
 
 MIT
