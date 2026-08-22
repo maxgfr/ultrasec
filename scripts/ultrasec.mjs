@@ -20350,7 +20350,7 @@ function fileRenamedTo(repo, file) {
 }
 
 // src/noise.ts
-var VENDORED_DIR = /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules|\.pnpm|bower_components|site-packages|\.venv|venv|__pycache__|\.tox|dist|build|out|target|coverage|\.next|\.nuxt|\.svelte-kit|\.turbo|\.gradle)\//i;
+var VENDORED_DIR = /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules|\.pnpm|bower_components|site-packages|\.venv|venv|__pycache__|\.tox|\.ipynb_checkpoints|dist|build|out|target|coverage|\.next|\.nuxt|\.svelte-kit|\.turbo|\.gradle)\//i;
 var MINIFIED = /\.min\.(js|mjs|cjs|css)$/i;
 function locationsOf(f) {
   const out2 = [];
