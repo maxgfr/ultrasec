@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.39.0](https://github.com/maxgfr/ultrasec/compare/v1.38.0...v1.39.0) (2026-08-22)
+
+
+### Bug Fixes
+
+* **guards:** say "this app has no auth" once, not once per handler ([6b6483f](https://github.com/maxgfr/ultrasec/commit/6b6483fc649a2061dca54d4d83e6560bba6f56c5))
+* **investigate:** keep the vulnerability class the auditor named ([b0a0804](https://github.com/maxgfr/ultrasec/commit/b0a0804b01e3b1d48c3aeda2c4c89131d00c858f)), closes [hi#severity](https://github.com/hi/issues/severity)
+* **sinks:** give assignment sinks the orphan coverage calls always had ([e5293c7](https://github.com/maxgfr/ultrasec/commit/e5293c72cbaea132d308d5fb165d17818c56b316))
+* **taint:** a test file is not an entry point ([d5876e9](https://github.com/maxgfr/ultrasec/commit/d5876e9386d54cc450c89ea8b5eb25cdc882a6cc))
+
+
+### Features
+
+* **authtokens:** report a password hash committed to the repository ([3caa2de](https://github.com/maxgfr/ultrasec/commit/3caa2de8afae5983c9a103e1582a73029a57db3e))
+
 # [1.38.0](https://github.com/maxgfr/ultrasec/compare/v1.37.0...v1.38.0) (2026-08-21)
 
 
