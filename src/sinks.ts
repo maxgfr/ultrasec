@@ -3,7 +3,7 @@ import { readText } from "./walk.js";
 import type { RepoScan } from "./scan.js";
 import { enclosingSymbolName, localDefNames } from "./scan.js";
 import { langForFile } from "./lang.js";
-import { findSinks, findSanitizers, cweUrl, UNRESOLVED_RECEIVER } from "./catalog.js";
+import { findSinks, findTextSinks, findSanitizers, cweUrl, UNRESOLVED_RECEIVER } from "./catalog.js";
 import { shortHash, byStr } from "./util.js";
 import { SEVERITIES, type Finding, type Severity } from "./types.js";
 
@@ -86,7 +86,30 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
   for (const file of scan.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls, undefined, file.imports, localDefNames(file.symbols))) {
+    // CALL sinks and ASSIGNMENT sinks, both.
+    //
+    // This pass enumerated only `findSinks` — the call-shaped ones — for its
+    // whole life, while the taint pass has always used both. So the entire
+    // assignment family (`dangerouslySetInnerHTML`, `innerHTML =`, `v-html`,
+    // `[innerHTML]`, `.src =`) existed ONLY when a source could be linked to
+    // it, which is exactly the case a recall pass is for. Where the value is
+    // editorial content loaded from a database or an API, no source links, and
+    // the sink was reported nowhere at all.
+    //
+    // Measured on a real audit: seven `dangerouslySetInnerHTML` in the audited
+    // tree, all seven matched by `findTextSinks`, **zero** reported. Six were
+    // later found by hand and one by an external scanner. A second audit of a
+    // different repo lost a latent `dangerouslySetInnerHTML` the same way.
+    // The doc comment above says "every `findSinks` hit not already covered" —
+    // it was accurate, and that was the bug.
+    const callSinks = findSinks(lang, file.calls, undefined, file.imports, localDefNames(file.symbols));
+    const textSinks = findTextSinks(lang, lines(file.rel).join("\n"));
+    const isAssignment = new Set(textSinks);
+    for (const sink of [...callSinks, ...textSinks]) {
+      // An assignment sink's `callee` is a LABEL ("framework HTML bypass"), not
+      // a function name, so the call phrasing below would read
+      // "framework HTML bypass() sink".
+      const what = isAssignment.has(sink) ? `\`${sink.callee}\`` : `${sink.callee}()`;
       const key = `${file.rel}:${sink.line}:${sink.kind}`;
       if (taken.has(key)) continue; // covered by taint, or already emitted this pass
       taken.add(key);
@@ -108,7 +131,7 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
         id: shortHash(`sink:${file.rel}:${sink.line}:${sink.kind}`),
         category: "sast",
         cwe: sink.cwe,
-        title: `${sink.title}: ${sink.callee}() sink (no source path found)`,
+        title: `${sink.title}: ${what} sink (no source path found)`,
         severity: cappedAt(sink.severity, ORPHAN_SEVERITY_CEILING),
         confidence: "low",
         // Says out loud what `confidence: low` only implied, and what the
@@ -118,7 +141,7 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
         reachability: "unproven",
         sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbolName(file.symbols, sink.line) },
         message:
-          `Dangerous ${sink.kind} sink ${sink.callee}() at ${file.rel}:${sink.line} that the cross-file taint pass ` +
+          `Dangerous ${sink.kind} sink ${what} at ${file.rel}:${sink.line} that the cross-file taint pass ` +
           `could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a ` +
           `path the summary call-graph misses (framework dispatch, dynamic call, config). ` +
           `${sink.note}${note}${receiverNote} Confirm whether attacker-controlled data can reach it before trusting it.`,

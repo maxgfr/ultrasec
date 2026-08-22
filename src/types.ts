@@ -491,6 +491,23 @@ export interface Finding {
    * means the run did not establish it.
    */
   reachability?: Reachability;
+  /**
+   * The vulnerability class the AUTHOR named, when it differs from the storage
+   * `category` it was folded onto.
+   *
+   * `category` records how a finding was surfaced, and it must stay a closed
+   * vocabulary because dedup, correlation and ASVS scoring key on it. An auditor
+   * filing a discovery names what the bug IS — "stored-xss", "idor", "ssrf" —
+   * and `CATEGORY_ALIASES` folds that onto `taint`/`authz`/`other` so it can be
+   * stored. Which worked, and then threw the answer away: on one real audit all
+   * twelve semantic findings — three of them high-severity XSS — read as `sast`
+   * in the report, and the class an auditor had actually determined appeared
+   * nowhere.
+   *
+   * Set only on the fold, so a finding whose category was already canonical
+   * carries nothing and the field stays absent from every engine-produced row.
+   */
+  vulnClass?: string;
   /** Concrete trigger path / proof-of-exploit sketch, once reasoned. */
   exploitPath?: string;
   /** Deterministic git-blame / CODEOWNERS provenance (opt-in `--blame`). Evidence only. */

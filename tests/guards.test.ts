@@ -139,3 +139,41 @@ describe("guard matrix — the verdict is the auditor's", () => {
     expect(md).toContain("No handler reads request data");
   });
 });
+
+// A repo with no authentication at all is ONE fact, not N findings.
+//
+// Tested against a public information site: 21 handlers, 21 unguarded, each
+// demanding an `intentionally-public` verdict for a single architectural truth.
+describe("guard matrix — an application with no auth anywhere", () => {
+  const rows = matrixOf({
+    "src/a.js": "export function a(req, res) {\n  res.end(req.query.x);\n}\n",
+    "src/b.js": "export function b(req, res) {\n  res.end(req.body.y);\n}\n",
+    "src/c.js": "export function c(req, res) {\n  res.end(req.params.z);\n}\n",
+  });
+
+  it("says so once instead of asking the same question N times", () => {
+    expect(guardTotals(rows).noAuthAnywhere).toBe(true);
+    const md = renderGuardsMd(rows);
+    expect(md).toContain("No authentication mechanism anywhere");
+    expect(md).toContain("one architectural fact");
+    // …and names the two answers worth distinguishing.
+    expect(md).toContain("public by design");
+    expect(md).toMatch(/gateway|ingress|proxy/);
+  });
+
+  it("stays quiet when the repo does have auth somewhere", () => {
+    const mixed = matrixOf({
+      "src/open.js": "export function open(req, res) {\n  res.end(req.query.x);\n}\n",
+      "src/guarded.js": "export function guarded(req, res) {\n  if (!requireAuth(req)) return;\n  res.end(req.body.y);\n}\n",
+      "src/other.js": "export function other(req, res) {\n  res.end(req.params.z);\n}\n",
+    });
+    expect(guardTotals(mixed).noAuthAnywhere).toBe(false);
+    expect(renderGuardsMd(mixed)).not.toContain("No authentication mechanism anywhere");
+  });
+
+  it("does not fire on a single badly-written route file", () => {
+    // Two handlers is a file, not an architecture.
+    const tiny = matrixOf({ "src/only.js": "export function a(req, res) {\n  res.end(req.query.x);\n}\n" });
+    expect(guardTotals(tiny).noAuthAnywhere).toBe(false);
+  });
+});
