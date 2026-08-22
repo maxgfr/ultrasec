@@ -175,7 +175,9 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Reme
   L.push("");
   const src = sourcesTag(f);
   L.push(
-    `\`${f.id}\` · ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) · ` : ""}${f.category} · ${statusTag(f)}${src ? ` · ${src}` : ""}`,
+    // `vulnClass` first when the author named one: "stored-xss" is what they
+    // determined, "taint" is only where it had to be stored.
+    `\`${f.id}\` · ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) · ` : ""}${f.vulnClass ? `**${f.vulnClass}** (${f.category})` : f.category} · ${statusTag(f)}${src ? ` · ${src}` : ""}`,
   );
   const rt = riskTag(f);
   if (rt) {

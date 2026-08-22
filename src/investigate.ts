@@ -264,6 +264,9 @@ export function ingestDiscoveries(dossier: Dossier, discoveries: Discovery[], re
       confidence: "low", // AI-discovered + unverified — recall-oriented, adjudicate it
     });
     if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: p.why }));
+    // Keep the class the author named. `category` had to be folded to stay a
+    // closed vocabulary; the fold should not also erase the answer.
+    if (d.vulnClass) f.vulnClass = d.vulnClass;
     f.risk = scoreFinding(f, deployment);
     result.set(f.id, f);
     idByKey.set(key, f.id);

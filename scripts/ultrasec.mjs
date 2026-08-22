@@ -21036,7 +21036,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
     let s = sourceCache.get(rel2);
     if (!s) {
       const lang = langForFile(rel2);
-      s = lang ? findSources(lang, content(rel2), rel2) : [];
+      s = lang && (opts.includeTests || !isTestPath(rel2)) ? findSources(lang, content(rel2), rel2) : [];
       sourceCache.set(rel2, s);
     }
     return s;
@@ -21182,7 +21182,11 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls, void 0, file.imports, localDefNames(file.symbols))) {
+    const callSinks = findSinks(lang, file.calls, void 0, file.imports, localDefNames(file.symbols));
+    const textSinks = findTextSinks(lang, lines5(file.rel).join("\n"));
+    const isAssignment = new Set(textSinks);
+    for (const sink of [...callSinks, ...textSinks]) {
+      const what = isAssignment.has(sink) ? `\`${sink.callee}\`` : `${sink.callee}()`;
       const key = `${file.rel}:${sink.line}:${sink.kind}`;
       if (taken.has(key)) continue;
       taken.add(key);
@@ -21194,7 +21198,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
         id: shortHash2(`sink:${file.rel}:${sink.line}:${sink.kind}`),
         category: "sast",
         cwe: sink.cwe,
-        title: `${sink.title}: ${sink.callee}() sink (no source path found)`,
+        title: `${sink.title}: ${what} sink (no source path found)`,
         severity: cappedAt(sink.severity, ORPHAN_SEVERITY_CEILING),
         confidence: "low",
         // Says out loud what `confidence: low` only implied, and what the
@@ -21203,7 +21207,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
         // it and the severity comes back with the evidence.
         reachability: "unproven",
         sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbolName(file.symbols, sink.line) },
-        message: `Dangerous ${sink.kind} sink ${sink.callee}() at ${file.rel}:${sink.line} that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look \u2014 the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). ${sink.note}${note}${receiverNote} Confirm whether attacker-controlled data can reach it before trusting it.`,
+        message: `Dangerous ${sink.kind} sink ${what} at ${file.rel}:${sink.line} that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look \u2014 the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). ${sink.note}${note}${receiverNote} Confirm whether attacker-controlled data can reach it before trusting it.`,
         tool: "ultrasec",
         references: [cweUrl(sink.cwe)],
         status: "open"
@@ -21844,8 +21848,18 @@ var AUTH_SHAPES = {
     cwe: "CWE-916",
     category: "crypto",
     note: "MD5/SHA-1 (or a bcrypt cost < 10) for passwords is brute-forceable at scale. Use bcrypt/scrypt/argon2 with a sound work factor."
+  },
+  "committed-password-hash": {
+    id: "committed-password-hash",
+    title: "Password hash committed to the repository",
+    severity: "high",
+    cwe: "CWE-798",
+    category: "secret",
+    note: "A password hash in a tracked file is crackable offline at the attacker's leisure, and a seed/migration file does not merely CONTAIN the account \u2014 it CREATES it, in every environment that runs the file. Check the account's role and which environments execute this, then rotate the password and move the value out of the repo. Purging the file is not enough: it is in the git history."
   }
 };
+var PASSWORD_HASH_LITERAL = /\$(?:argon2(?:id|i|d)?|2[abxy]|scrypt|pbkdf2[\w-]*)\$/;
+var SEEDED_CREDENTIAL_EXTS = /* @__PURE__ */ new Set(["sql", "yaml", "yml", "json", "env", "ini", "conf", "cfg", "toml", "properties", "tpl", "template"]);
 function lines3(content) {
   return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
 }
@@ -21967,10 +21981,18 @@ function auditAuthTokens(repo, prune) {
   for (const wf of walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf4(wf.rel);
-    if (!CODE2.has(ext)) continue;
+    const isCode2 = CODE2.has(ext);
+    const seedable = SEEDED_CREDENTIAL_EXTS.has(ext);
+    if (!isCode2 && !seedable) continue;
     const content = readText2(wf.abs);
     if (!content) continue;
     const rel2 = wf.rel;
+    if (PASSWORD_HASH_LITERAL.test(content)) {
+      for (const l of lines3(content)) {
+        if (PASSWORD_HASH_LITERAL.test(l.text)) out2.push(hit3(rel2, l.n, AUTH_SHAPES["committed-password-hash"], l.text));
+      }
+    }
+    if (!isCode2) continue;
     for (const l of lines3(content)) {
       for (const r of LINE_RULES) if ((r.langs === null || r.langs.has(ext)) && r.re.test(l.text)) out2.push(hit3(rel2, l.n, AUTH_SHAPES[r.shape], l.text));
       for (const r of PWHASH_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit3(rel2, l.n, AUTH_SHAPES["password-hash"], l.text));
@@ -24206,7 +24228,14 @@ async function runScan(args2) {
   const excludeEnvSources = flagBool(args2, "no-env-sources");
   const strictScope = flagBool(args2, "strict-scope");
   step(`enumerating source\u2192sink taint paths\u2026`);
-  const taint = enumerateTaint(scan2, graph, { maxDepth, maxCandidates, includeLogSinks: logHygieneOn, excludeEnvSources, strictScope });
+  const taint = enumerateTaint(scan2, graph, {
+    maxDepth,
+    maxCandidates,
+    includeLogSinks: logHygieneOn,
+    excludeEnvSources,
+    strictScope,
+    includeTests: flagBool(args2, "include-tests")
+  });
   const taintFindings = taint.findings;
   step(`${taintFindings.length} taint candidate(s)`);
   const sinksOn = flagBool(args2, "sinks");
@@ -25951,6 +25980,7 @@ function parseDiscoveryRow(raw) {
     row: {
       title: d.title,
       category: cat.category,
+      ...cat.folded ? { vulnClass: String(d.category) } : {},
       severity: d.severity,
       ...typeof d.cwe === "string" ? { cwe: d.cwe } : {},
       message: d.message,
@@ -26747,6 +26777,7 @@ function ingestDiscoveries(dossier, discoveries, repo, opts = {}) {
       // AI-discovered + unverified — recall-oriented, adjudicate it
     });
     if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: p.why }));
+    if (d.vulnClass) f.vulnClass = d.vulnClass;
     f.risk = scoreFinding(f, deployment);
     result.set(f.id, f);
     idByKey.set(key, f.id);
@@ -27536,10 +27567,15 @@ function buildGuardMatrix(scan2) {
   return rows.sort((a, b) => byStr2(a.file, b.file) || a.line - b.line);
 }
 function guardTotals(rows) {
+  const unguarded = rows.filter((r) => r.state === "unguarded").length;
   return {
     handlers: rows.length,
-    unguarded: rows.filter((r) => r.state === "unguarded").length,
-    fileScoped: rows.filter((r) => r.scope === "file").length
+    unguarded,
+    fileScoped: rows.filter((r) => r.scope === "file").length,
+    // Not "every row is unguarded" — that is also true of one badly-written
+    // route file. It takes a handler population big enough for the absence to
+    // be a property of the application rather than of a file.
+    noAuthAnywhere: rows.length >= 3 && unguarded === rows.length
   };
 }
 function renderGuardsMd(rows, context) {
@@ -27560,6 +27596,21 @@ function renderGuardsMd(rows, context) {
   L.push(`> framework middleware, an ingress rule or a decorator this pass cannot see \u2014 a`);
   L.push(`> \`unguarded\` row is a question, not an accusation.`);
   L.push("");
+  if (t.noAuthAnywhere) {
+    L.push(`## No authentication mechanism anywhere in this repository`);
+    L.push("");
+    L.push(`Not one of the ${t.handlers} handlers has an auth marker in scope, and no marker appears`);
+    L.push(`anywhere in the scanned tree. That is **one architectural fact, not ${t.handlers} findings**:`);
+    L.push(`either the application is public by design (an information site, a docs portal), or its`);
+    L.push(`authentication lives somewhere this scan cannot see \u2014 an API gateway, an ingress rule, a`);
+    L.push(`reverse proxy, a separate BFF.`);
+    L.push("");
+    L.push(`**Answer that question once**, in \`CONTEXT.md\`, before adjudicating the rows below. If the`);
+    L.push(`app is genuinely public, every row is \`intentionally-public\` and this stage is done. If it`);
+    L.push(`is not, the guard is outside the repo and the real question is whether anything can reach`);
+    L.push(`these handlers directly \u2014 bypassing it.`);
+    L.push("");
+  }
   if (t.fileScoped) {
     L.push(`> \u26A0\uFE0F  ${t.fileScoped} row(s) have \`scope: file\`: nothing bounded the handler, so the`);
     L.push(`> markers listed are the whole FILE's and may guard a different handler. (A single-`);
@@ -27672,6 +27723,10 @@ function runGuards(args2) {
   println(
     `  ${t.handlers} handler(s) reading request data \xB7 ${t.unguarded} with no visible guard${t.fileScoped ? ` \xB7 ${t.fileScoped} file-scoped (weaker evidence)` : ""}`
   );
+  if (t.noAuthAnywhere) {
+    println(`  \u26A0\uFE0F  NO auth marker anywhere in the tree \u2014 that is one architectural fact, not ${t.handlers} findings.`);
+    println(`      Decide once in CONTEXT.md: public by design, or authenticated outside the repo (gateway/ingress/proxy)?`);
+  }
   if (!t.handlers) {
     println(`  no HTTP/WS handler found \u2014 if the app has routes, check \`manifest.extraction\` and the scan's --scope.`);
   }
@@ -28743,7 +28798,9 @@ function renderFinding(f, opts = {}) {
   L.push("");
   const src = sourcesTag(f);
   L.push(
-    `\`${f.id}\` \xB7 ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) \xB7 ` : ""}${f.category} \xB7 ${statusTag(f)}${src ? ` \xB7 ${src}` : ""}`
+    // `vulnClass` first when the author named one: "stored-xss" is what they
+    // determined, "taint" is only where it had to be stored.
+    `\`${f.id}\` \xB7 ${f.cwe ? `[${f.cwe}](${(f.references ?? [])[0] ?? `https://cwe.mitre.org/`}) \xB7 ` : ""}${f.vulnClass ? `**${f.vulnClass}** (${f.category})` : f.category} \xB7 ${statusTag(f)}${src ? ` \xB7 ${src}` : ""}`
   );
   const rt = riskTag(f);
   if (rt) {
@@ -28919,7 +28976,7 @@ function refsHtml(f) {
   return refs ? `<p class="refs">${refs}</p>` : "";
 }
 function metaHtml(f) {
-  return `<div class="meta"><code>${esc2(f.id)}</code>${f.cwe ? ` \xB7 ${esc2(f.cwe)}` : ""} \xB7 ${esc2(f.category)} \xB7 ${esc2(f.status ?? MISSING)}${f.verdict ? ` \xB7 ${esc2(f.verdict)}` : ""} \xB7 confidence ${esc2(f.confidence)}${sourcesHtml(f)}</div>`;
+  return `<div class="meta"><code>${esc2(f.id)}</code>${f.cwe ? ` \xB7 ${esc2(f.cwe)}` : ""} \xB7 ${esc2(f.vulnClass ?? f.category)} \xB7 ${esc2(f.status ?? MISSING)}${f.verdict ? ` \xB7 ${esc2(f.verdict)}` : ""} \xB7 confidence ${esc2(f.confidence)}${sourcesHtml(f)}</div>`;
 }
 function findingHtml(f, rem, extra = "") {
   return `
