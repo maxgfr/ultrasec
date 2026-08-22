@@ -109,7 +109,7 @@ function refsHtml(f: Finding): string {
 }
 
 function metaHtml(f: Finding): string {
-  return `<div class="meta"><code>${esc(f.id)}</code>${f.cwe ? ` · ${esc(f.cwe)}` : ""} · ${esc(f.category)} · ${esc(f.status ?? MISSING)}${
+  return `<div class="meta"><code>${esc(f.id)}</code>${f.cwe ? ` · ${esc(f.cwe)}` : ""} · ${esc(f.vulnClass ?? f.category)} · ${esc(f.status ?? MISSING)}${
     f.verdict ? ` · ${esc(f.verdict)}` : ""
   } · confidence ${esc(f.confidence)}${sourcesHtml(f)}</div>`;
 }

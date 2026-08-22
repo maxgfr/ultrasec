@@ -63,7 +63,7 @@ ultrasec scan    --repo . --out .ultrasec       # graph + cross-file taint + too
   #         --include-vendored (audit node_modules/.venv/dist too — pruned by default)
   # budget: --budget quick|standard|thorough  --max-candidates N  --max-depth N
   # again:  --diff origin/main --merge --resume        # incremental, folds into one run
-  # recall: --sinks (orphan sinks)  --log-hygiene (CWE-117/532)  --blame (git provenance)
+  # recall: --sinks (orphan sinks: calls AND assignments)  --log-hygiene  --blame
   #         --no-env-sources (drop env-rooted flows)  --strict-scope (drop cross-function-in-file)
   # net:    --offline / --no-enrich (no EPSS/KEV)      --docker (scanners without installing)
 ultrasec paths   --run .ultrasec                # the candidate chains  (--kind sql --severity high)

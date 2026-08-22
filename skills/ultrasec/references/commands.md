@@ -66,7 +66,19 @@ cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 **Budget** `--budget quick|standard|thorough` · `--max-depth` · `--max-candidates`
 **Incremental** `--diff <ref>` / `--since <commit>` · `--merge` · `--resume`
 **Recall & provenance** `--sinks` · `--log-hygiene` · `--blame` (alias `--provenance`) ·
-`--no-env-sources` · `--strict-scope`
+`--no-env-sources` · `--strict-scope` · `--include-tests`
+
+`--sinks` enumerates **call** sinks and **assignment** sinks alike. The assignment family
+(`dangerouslySetInnerHTML`, `innerHTML =`, `v-html`, `[innerHTML]`, `.src =`) used to surface only
+when the taint pass could link a source, which is exactly the case a recall pass is for: on one
+real audit, seven `dangerouslySetInnerHTML` were matched by the catalog and **zero** were reported.
+Editorial HTML loaded from a database has no source the graph can see.
+
+**A test file is not an entry point.** Its sources are ignored unless `--include-tests`, because
+nobody sends a request to `__tests__/service.test.ts`. On one audit that harness accounted for
+**46 of 63** taint candidates (73 %), none confirmed, including 37 SQL-injection candidates in a
+repo with no SQL database. A test file is still a valid sink and a valid hop — the flag is about
+whether the harness is something an attacker can *speak to*.
 
 **Progress goes to stderr, and is on by default.** A line per stage, and per external scanner
 started and finished, with its result and elapsed time. Adapters run serially and one of them can

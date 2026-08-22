@@ -177,6 +177,9 @@ export function parseIdVerdictRows<V extends string, T>(
 export interface DiscoveryRow {
   title: string;
   category: Category;
+  /** The class name the author wrote, when it was folded onto `category`.
+   *  Preserved so the report can say "stored-xss" where storage says "taint". */
+  vulnClass?: string;
   severity: Severity;
   cwe?: string;
   message: string;
@@ -237,6 +240,7 @@ export function parseDiscoveryRow(raw: unknown): DiscoveryRowResult {
     row: {
       title: d.title as string,
       category: cat!.category,
+      ...(cat!.folded ? { vulnClass: String(d.category) } : {}),
       severity: d.severity as Severity,
       ...(typeof d.cwe === "string" ? { cwe: d.cwe } : {}),
       message: d.message as string,
