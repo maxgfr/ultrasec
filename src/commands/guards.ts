@@ -85,6 +85,10 @@ export function runGuards(args: ParsedArgs): number {
   println(
     `  ${t.handlers} handler(s) reading request data · ${t.unguarded} with no visible guard${t.fileScoped ? ` · ${t.fileScoped} file-scoped (weaker evidence)` : ""}`,
   );
+  if (t.noAuthAnywhere) {
+    println(`  ⚠️  NO auth marker anywhere in the tree — that is one architectural fact, not ${t.handlers} findings.`);
+    println(`      Decide once in CONTEXT.md: public by design, or authenticated outside the repo (gateway/ingress/proxy)?`);
+  }
   if (!t.handlers) {
     println(`  no HTTP/WS handler found — if the app has routes, check \`manifest.extraction\` and the scan's --scope.`);
   }

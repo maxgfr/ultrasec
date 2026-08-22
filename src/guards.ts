@@ -215,12 +215,25 @@ export function buildGuardMatrix(scan: RepoScan): GuardRow[] {
   return rows.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
 }
 
-/** The matrix's headline numbers, for the command line and the report. */
-export function guardTotals(rows: readonly GuardRow[]): { handlers: number; unguarded: number; fileScoped: number } {
+/**
+ * The matrix's headline numbers, for the command line and the report.
+ *
+ * `noAuthAnywhere` is the one that changes what a reader should DO. Tested
+ * against a public information site with no login at all, the matrix reported
+ * 21 handlers, 21 unguarded — each demanding an `intentionally-public` verdict
+ * for what is a single architectural fact: this application has no
+ * authentication mechanism. Twenty-one rows is the wrong shape for one answer.
+ */
+export function guardTotals(rows: readonly GuardRow[]): { handlers: number; unguarded: number; fileScoped: number; noAuthAnywhere: boolean } {
+  const unguarded = rows.filter((r) => r.state === "unguarded").length;
   return {
     handlers: rows.length,
-    unguarded: rows.filter((r) => r.state === "unguarded").length,
+    unguarded,
     fileScoped: rows.filter((r) => r.scope === "file").length,
+    // Not "every row is unguarded" — that is also true of one badly-written
+    // route file. It takes a handler population big enough for the absence to
+    // be a property of the application rather than of a file.
+    noAuthAnywhere: rows.length >= 3 && unguarded === rows.length,
   };
 }
 
@@ -242,6 +255,21 @@ export function renderGuardsMd(rows: GuardRow[], context?: string): string {
   L.push(`> framework middleware, an ingress rule or a decorator this pass cannot see — a`);
   L.push(`> \`unguarded\` row is a question, not an accusation.`);
   L.push("");
+  if (t.noAuthAnywhere) {
+    L.push(`## No authentication mechanism anywhere in this repository`);
+    L.push("");
+    L.push(`Not one of the ${t.handlers} handlers has an auth marker in scope, and no marker appears`);
+    L.push(`anywhere in the scanned tree. That is **one architectural fact, not ${t.handlers} findings**:`);
+    L.push(`either the application is public by design (an information site, a docs portal), or its`);
+    L.push(`authentication lives somewhere this scan cannot see — an API gateway, an ingress rule, a`);
+    L.push(`reverse proxy, a separate BFF.`);
+    L.push("");
+    L.push(`**Answer that question once**, in \`CONTEXT.md\`, before adjudicating the rows below. If the`);
+    L.push(`app is genuinely public, every row is \`intentionally-public\` and this stage is done. If it`);
+    L.push(`is not, the guard is outside the repo and the real question is whether anything can reach`);
+    L.push(`these handlers directly — bypassing it.`);
+    L.push("");
+  }
   if (t.fileScoped) {
     L.push(`> ⚠️  ${t.fileScoped} row(s) have \`scope: file\`: nothing bounded the handler, so the`);
     L.push(`> markers listed are the whole FILE's and may guard a different handler. (A single-`);
