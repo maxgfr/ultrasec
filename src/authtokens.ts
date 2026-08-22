@@ -18,7 +18,10 @@ export interface AuthShape {
   title: string;
   severity: Severity;
   cwe: string;
-  category: "crypto" | "authz";
+  // `secret` joined the pair for the committed-password-hash shape: a hash in a
+  // tracked file is a credential leak, not a cryptography mistake, and filing it
+  // under `crypto` would put it in the wrong coverage bucket.
+  category: "crypto" | "authz" | "secret";
   note: string;
 }
 
@@ -112,7 +115,39 @@ export const AUTH_SHAPES: Record<string, AuthShape> = {
     category: "crypto",
     note: "MD5/SHA-1 (or a bcrypt cost < 10) for passwords is brute-forceable at scale. Use bcrypt/scrypt/argon2 with a sound work factor.",
   },
+  "committed-password-hash": {
+    id: "committed-password-hash",
+    title: "Password hash committed to the repository",
+    severity: "high",
+    cwe: "CWE-798",
+    category: "secret",
+    note: "A password hash in a tracked file is crackable offline at the attacker's leisure, and a seed/migration file does not merely CONTAIN the account — it CREATES it, in every environment that runs the file. Check the account's role and which environments execute this, then rotate the password and move the value out of the repo. Purging the file is not enough: it is in the git history.",
+  },
 };
+
+/**
+ * A password hash literal, in modular crypt format.
+ *
+ * Deliberately restricted to the four unambiguous prefixes. `$6$`/`$5$`
+ * (sha512crypt/sha256crypt) are the same shape but collide with ordinary shell
+ * positional expansion, and this rule fires on data files where a false
+ * positive is expensive.
+ *
+ * Motivated by a real audit whose most serious finding was exactly this: an
+ * `INSERT INTO auth.users` carrying a literal argon2id hash for a `super`
+ * account, in a SQL file re-executed on every preprod deployment. Nothing in
+ * the engine looked at it — `.sql` was in no extension set at all — and the
+ * report listed "passwords are hashed with argon2" among the repo's STRENGTHS.
+ * A second, never-reported pair of hashes sat in the initial Hasura migration.
+ */
+const PASSWORD_HASH_LITERAL = /\$(?:argon2(?:id|i|d)?|2[abxy]|scrypt|pbkdf2[\w-]*)\$/;
+
+/**
+ * Where a seeded credential actually lives: data and config files, not only
+ * code. `authtokens` walks `CODE` alone, which is right for a JWT call and
+ * wrong for an account seeded by a migration.
+ */
+const SEEDED_CREDENTIAL_EXTS = new Set(["sql", "yaml", "yml", "json", "env", "ini", "conf", "cfg", "toml", "properties", "tpl", "template"]);
 
 interface Line {
   n: number;
@@ -258,10 +293,22 @@ export function auditAuthTokens(repo: string, prune?: (rel: string) => boolean):
   for (const wf of walk(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
-    if (!CODE.has(ext)) continue;
+    const isCode = CODE.has(ext);
+    const seedable = SEEDED_CREDENTIAL_EXTS.has(ext);
+    if (!isCode && !seedable) continue;
     const content = readText(wf.abs);
     if (!content) continue;
     const rel = wf.rel;
+
+    // A committed password hash is checked in BOTH file classes, because the
+    // account it creates does not care which. Everything below this block is
+    // code-only, so a data file stops here.
+    if (PASSWORD_HASH_LITERAL.test(content)) {
+      for (const l of lines(content)) {
+        if (PASSWORD_HASH_LITERAL.test(l.text)) out.push(hit(rel, l.n, AUTH_SHAPES["committed-password-hash"]!, l.text));
+      }
+    }
+    if (!isCode) continue;
 
     for (const l of lines(content)) {
       for (const r of LINE_RULES) if ((r.langs === null || r.langs.has(ext)) && r.re.test(l.text)) out.push(hit(rel, l.n, AUTH_SHAPES[r.shape]!, l.text));
