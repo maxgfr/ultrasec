@@ -4,6 +4,7 @@ import type { RepoScan } from "./scan.js";
 import { enclosingSymbolName, localDefNames } from "./scan.js";
 import type { Graph } from "./graph.js";
 import { langForFile } from "./lang.js";
+import { isTestPath } from "./vendor/codeindex-engine.mjs";
 import { findSinks, findSources, findTextSinks, cweUrl, LOG_SINKS, UNRESOLVED_RECEIVER, type SinkHit, type SourceHit } from "./catalog.js";
 import { buildUnitMap, classifySourceScope, sanitizersAlongPath, scopeRank, traceDefUseDetail, type UnitMap } from "./dataflow.js";
 import { shortHash, byStr } from "./util.js";
@@ -13,6 +14,9 @@ const DEFAULT_MAX_DEPTH = 6; // call-graph hops walked back from a sink
 const DEFAULT_MAX_CANDIDATES = 1000;
 
 export interface TaintOptions {
+  /** Treat test files as attack surface too (`scan --include-tests`), for
+   *  auditing the harness itself. Default false — see `sourcesOf`. */
+  includeTests?: boolean;
   /** Call-graph hops walked back from each sink (default 6). */
   maxDepth?: number;
   /** Keep at most this many ranked candidates (default 1000). Excess is reported, not dropped silently. */
@@ -105,11 +109,29 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     if (!l) lineCache.set(rel, (l = content(rel).split(/\r?\n/)));
     return l;
   };
+  /**
+   * The untrusted-input sources a file offers — none, if it is a test.
+   *
+   * A test file is not an attack surface: nobody sends it a request. Indexing
+   * `__tests__/service.test.ts` as an entry point produced **46 of 63** taint
+   * candidates on one real audit (73 %), **zero** of them confirmed — including
+   * 37 SQL-injection candidates in a repo with no SQL database at all, 22 of
+   * them from a single `.test.tsx`.
+   *
+   * `noise.ts` already demotes a finding whose every location is a test path,
+   * but that happens AFTER the candidate is enumerated, ranked, capped, written
+   * into the worklist and adjudicated. Not treating the harness as a source is
+   * the cheaper and more honest place to say it.
+   *
+   * A test file remains a valid SINK and a valid hop — `includeTests` is about
+   * whether the harness is something an attacker can SPEAK to. `--include-tests`
+   * restores the old behaviour for auditing the harness itself.
+   */
   const sourcesOf = (rel: string): SourceHit[] => {
     let s = sourceCache.get(rel);
     if (!s) {
       const lang = langForFile(rel);
-      s = lang ? findSources(lang, content(rel), rel) : [];
+      s = lang && (opts.includeTests || !isTestPath(rel)) ? findSources(lang, content(rel), rel) : [];
       sourceCache.set(rel, s);
     }
     return s;
