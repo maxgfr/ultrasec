@@ -23831,6 +23831,7 @@ import { join as join47, resolve as resolve10 } from "path";
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
 var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
+var THROTTLE_MARKER = /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
 var JS_FRAMEWORKS = {
   express: "express",
   koa: "koa",
@@ -27600,12 +27601,29 @@ import { resolve as resolve24 } from "path";
 import { join as join60 } from "path";
 var REQUEST_KINDS = /* @__PURE__ */ new Set(["http", "ws"]);
 var MODULE_SCOPE = "(module scope)";
-var GUARD_VERDICTS = ["guarded", "unguarded", "intentionally-public"];
-function parseGuardVerdicts(raw) {
+var GUARD_LENSES = ["auth", "throttle"];
+var LOGIN_SHAPE = /\b(sign-?in|log-?in|log-?on|auth|password|passwd|reset|forgot|recover|register|sign-?up|otp|mfa|2fa|token|verify|magic-?link|invite|activation)\b/i;
+var LENSES2 = {
+  auth: {
+    marker: AUTH_MARKER,
+    verdicts: ["guarded", "unguarded", "intentionally-public"],
+    stem: "GUARDS",
+    pass: "guards"
+  },
+  throttle: {
+    marker: THROTTLE_MARKER,
+    verdicts: ["throttled", "unthrottled", "not-abusable"],
+    stem: "THROTTLE",
+    pass: "throttle"
+  }
+};
+var GUARD_VERDICTS = LENSES2.auth.verdicts;
+function parseGuardVerdicts(raw, lens = "auth") {
+  const spec = LENSES2[lens];
   return parseIdVerdictRows(raw, {
     wrapperKeys: ["guards", "verdicts"],
-    label: "guard verdicts",
-    verdicts: GUARD_VERDICTS,
+    label: `${lens === "auth" ? "guard" : "throttle"} verdicts`,
+    verdicts: spec.verdicts,
     build: (row, verdict) => ({
       id: row.id,
       verdict,
@@ -27626,7 +27644,8 @@ function guardScope(symbols, line, lineCount2) {
   for (const s of symbols) if (s.line > best.line && s.line < next) next = s.line;
   return next === Infinity ? { from: best.line, to: lineCount2, scope: "file" } : { from: best.line, to: next - 1, scope: "approx" };
 }
-function buildGuardMatrix(scan2) {
+function buildGuardMatrix(scan2, lens = "auth") {
+  const spec = LENSES2[lens];
   const rows = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
@@ -27637,7 +27656,7 @@ function buildGuardMatrix(scan2) {
     const lines5 = text.split(/\r?\n/);
     const markers = [];
     for (let i2 = 0; i2 < lines5.length; i2++) {
-      const m = AUTH_MARKER.exec(lines5[i2]);
+      const m = spec.marker.exec(lines5[i2]);
       if (m) markers.push({ line: i2 + 1, hint: m[0] });
     }
     const byHandler = /* @__PURE__ */ new Map();
@@ -27657,13 +27676,18 @@ function buildGuardMatrix(scan2) {
       const { from, to, scope } = guardScope(file.symbols, h.line, lines5.length);
       const guards = markers.filter((m) => m.line >= from && m.line <= to);
       rows.push({
-        id: shortHash2(`guard:${file.rel}:${h.handler ?? ""}`),
+        // The auth lens keeps its historical id, so a GUARDS.json written before
+        // lenses existed still names the same rows. A throttle row is a
+        // different question about the same handler and needs its own id.
+        id: shortHash2(lens === "auth" ? `guard:${file.rel}:${h.handler ?? ""}` : `guard:${lens}:${file.rel}:${h.handler ?? ""}`),
         file: file.rel,
         line: h.line,
         ...h.handler ? { handler: h.handler } : {},
         kinds: [...h.kinds].sort(byStr2),
         reads: h.reads,
         guards,
+        ...lens === "auth" ? {} : { lens },
+        ...LOGIN_SHAPE.test(file.rel) || (h.handler ? LOGIN_SHAPE.test(h.handler) : false) ? { loginShape: true } : {},
         scope,
         state: guards.length ? "guarded" : "unguarded",
         verdict: null
@@ -27673,36 +27697,84 @@ function buildGuardMatrix(scan2) {
   return rows.sort((a, b) => byStr2(a.file, b.file) || a.line - b.line);
 }
 function guardTotals(rows) {
-  const unguarded = rows.filter((r) => r.state === "unguarded").length;
+  const unguarded = rows.filter((r) => r.state === "unguarded");
   return {
     handlers: rows.length,
-    unguarded,
+    unguarded: unguarded.length,
     fileScoped: rows.filter((r) => r.scope === "file").length,
     // Not "every row is unguarded" — that is also true of one badly-written
     // route file. It takes a handler population big enough for the absence to
     // be a property of the application rather than of a file.
-    noAuthAnywhere: rows.length >= 3 && unguarded === rows.length
+    noMarkerAnywhere: rows.length >= 3 && unguarded.length === rows.length,
+    unguardedLoginShaped: unguarded.filter((r) => r.loginShape).length
   };
 }
-function renderGuardsMd(rows, context) {
+function renderGuardsMd(rows, context, lens = "auth") {
   const t = guardTotals(rows);
-  const L = [`# ultrasec guard matrix (${t.handlers} handler(s), ${t.unguarded} with no visible guard)`, ""];
-  L.push(`Every handler that reads request data, and the authentication/authorization markers`);
-  L.push(`visible in its scope. This is the question the taint pass cannot ask: a missing`);
-  L.push(`authorization check has no line to point at.`);
+  const spec = LENSES2[lens];
+  const [present, absent, waived] = spec.verdicts;
+  const throttling = lens === "throttle";
+  const L = [
+    throttling ? `# ultrasec throttle matrix (${t.handlers} handler(s), ${t.unguarded} with no visible rate limit)` : `# ultrasec guard matrix (${t.handlers} handler(s), ${t.unguarded} with no visible guard)`,
+    ""
+  ];
+  if (throttling) {
+    L.push(`Every handler that reads request data, and the rate-limiting/throttling markers visible`);
+    L.push(`in its scope. This is the other question the taint pass cannot ask: a missing limit has`);
+    L.push(`no line to point at either.`);
+  } else {
+    L.push(`Every handler that reads request data, and the authentication/authorization markers`);
+    L.push(`visible in its scope. This is the question the taint pass cannot ask: a missing`);
+    L.push(`authorization check has no line to point at.`);
+  }
   L.push("");
   L.push(`For each row set a \`verdict\`:`);
-  L.push(`\`guarded\` (a real check protects it) \xB7 \`unguarded\` (nothing does \u2014 a finding) \xB7`);
-  L.push(`\`intentionally-public\` (health check, login, webhook with its own signature check).`);
-  L.push(`Save as GUARDS.json (array of {id, verdict, note?}) and run \`ultrasec guards --apply GUARDS.json\`.`);
+  if (throttling) {
+    L.push(`\`${present}\` (a real limit applies) \xB7 \`${absent}\` (nothing bounds request volume \u2014 a finding) \xB7`);
+    L.push(`\`${waived}\` (idempotent, cheap and non-enumerable \u2014 nothing to gain by repeating it).`);
+    L.push(`Save as THROTTLE.json (array of {id, verdict, note?}) and run \`ultrasec guards --lens throttle --apply THROTTLE.json\`.`);
+  } else {
+    L.push(`\`${present}\` (a real check protects it) \xB7 \`${absent}\` (nothing does \u2014 a finding) \xB7`);
+    L.push(`\`${waived}\` (health check, login, webhook with its own signature check).`);
+    L.push(`Save as GUARDS.json (array of {id, verdict, note?}) and run \`ultrasec guards --apply GUARDS.json\`.`);
+  }
   L.push("");
-  L.push(`> **A marker is a candidate, not a proof.** \`requireAuth\` in scope may guard a`);
-  L.push(`> different branch, run after the object is read, or check authentication where the`);
-  L.push(`> route needs authorization. Read the handler. Equally, a route can be protected by`);
-  L.push(`> framework middleware, an ingress rule or a decorator this pass cannot see \u2014 a`);
-  L.push(`> \`unguarded\` row is a question, not an accusation.`);
+  if (throttling) {
+    L.push(`> **A marker is a candidate, not a proof.** A \`limiter\` in scope may cover a different`);
+    L.push(`> route, count the wrong key, or be configured with a ceiling so high it never fires.`);
+    L.push(`> Read the handler. Equally, the limit may live at an ingress, a CDN or an API gateway`);
+    L.push(`> this pass cannot see \u2014 an \`${absent}\` row is a question, not an accusation.`);
+  } else {
+    L.push(`> **A marker is a candidate, not a proof.** \`requireAuth\` in scope may guard a`);
+    L.push(`> different branch, run after the object is read, or check authentication where the`);
+    L.push(`> route needs authorization. Read the handler. Equally, a route can be protected by`);
+    L.push(`> framework middleware, an ingress rule or a decorator this pass cannot see \u2014 a`);
+    L.push(`> \`unguarded\` row is a question, not an accusation.`);
+  }
   L.push("");
-  if (t.noAuthAnywhere) {
+  if (t.noMarkerAnywhere && throttling) {
+    L.push(`## No rate limiting anywhere in this repository`);
+    L.push("");
+    L.push(`Not one of the ${t.handlers} handlers has a throttling marker in scope, and no marker appears`);
+    L.push(`anywhere in the scanned tree. That is **one architectural fact, not ${t.handlers} findings**:`);
+    L.push(`either nothing bounds request volume at all, or the limit lives somewhere this scan cannot`);
+    L.push(`see \u2014 an ingress rule, a CDN, an API gateway, a WAF.`);
+    L.push("");
+    L.push(`**Answer that question once**, in \`CONTEXT.md\`, before adjudicating the rows below. If a`);
+    L.push(`limit does exist outside the repo, say where and say what it counts; a per-IP cap does not`);
+    L.push(`stop a distributed attempt and a global cap does not stop one account being ground down.`);
+    L.push(`If there is no limit at all, the severity is decided by what the cheapest request costs \u2014`);
+    L.push(`an unbounded fan-out to a backend, or a CPU-bound call (see the \`algodos\` findings).`);
+    L.push("");
+    if (t.unguardedLoginShaped) {
+      L.push(`> \u26A0\uFE0F  ${t.unguardedLoginShaped} of those handler(s) look like AUTHENTICATION endpoints. There the absence`);
+      L.push(`> is not a capacity problem: it is credential stuffing (CWE-307) and, if the response`);
+      L.push(`> distinguishes "no such account" from "wrong password" \u2014 in the body, the status or`);
+      L.push(`> merely the timing \u2014 account enumeration (CWE-204). Read those first, and read what`);
+      L.push(`> they answer on a failure, not just whether they are limited.`);
+      L.push("");
+    }
+  } else if (t.noMarkerAnywhere) {
     L.push(`## No authentication mechanism anywhere in this repository`);
     L.push("");
     L.push(`Not one of the ${t.handlers} handlers has an auth marker in scope, and no marker appears`);
@@ -27730,20 +27802,24 @@ function renderGuardsMd(rows, context) {
     L.push(context);
     L.push("");
   }
-  const unguarded = rows.filter((r) => r.state === "unguarded");
+  const unguardedAll = rows.filter((r) => r.state === "unguarded");
+  const unguarded = throttling ? [...unguardedAll.filter((r) => r.loginShape), ...unguardedAll.filter((r) => !r.loginShape)] : unguardedAll;
   const guarded = rows.filter((r) => r.state === "guarded");
   if (unguarded.length) {
-    L.push(`## No visible guard (${unguarded.length}) \u2014 read these first`);
+    L.push(throttling ? `## No visible rate limit (${unguarded.length}) \u2014 read these first` : `## No visible guard (${unguarded.length}) \u2014 read these first`);
     L.push("");
     for (const r of unguarded) {
+      const shape = throttling && r.loginShape ? ` \xB7 **auth endpoint \u2014 brute force / account enumeration**` : "";
       L.push(
-        `- \`${r.id}\` \u2014 \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : " (module scope)"} \xB7 ${r.kinds.join("/")} \xB7 ${r.reads} request read(s)`
+        `- \`${r.id}\` \u2014 \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : " (module scope)"} \xB7 ${r.kinds.join("/")} \xB7 ${r.reads} request read(s)${shape}`
       );
     }
     L.push("");
   }
   if (guarded.length) {
-    L.push(`## A guard is visible (${guarded.length}) \u2014 confirm it actually applies`);
+    L.push(
+      throttling ? `## A rate limit is visible (${guarded.length}) \u2014 confirm it actually applies` : `## A guard is visible (${guarded.length}) \u2014 confirm it actually applies`
+    );
     L.push("");
     for (const r of guarded) {
       const hints = r.guards.slice(0, 3).map((g) => `\`${g.hint}\`:${g.line}`).join(", ");
@@ -27760,23 +27836,46 @@ function renderGuardsMd(rows, context) {
   }
   return L.join("\n") + "\n";
 }
-function guardDiscovery(row, note) {
+function guardDiscovery(row, note, lens = "auth") {
   const where = row.handler ? `${row.handler}()` : "module scope";
+  const scopeWord = row.scope === "symbol" ? "the handler's scope" : "the file";
+  const cited = `\`${row.file}:${row.line}\`${row.handler ? ` (\`${row.handler}()\`)` : ""} reads request data (${row.kinds.join("/")}, ${row.reads} read(s))`;
+  if (lens === "throttle") {
+    return {
+      title: row.loginShape ? `Authentication endpoint with no rate limit: ${where} in ${row.file}` : `Request handler with no rate limit: ${where} in ${row.file}`,
+      category: "other",
+      severity: row.loginShape ? "high" : "medium",
+      cwe: row.loginShape ? "CWE-307" : "CWE-770",
+      message: `${cited} and no rate-limiting or throttling marker is visible in ${scopeWord}. ` + (row.loginShape ? `The handler's name or path says it authenticates, so unbounded attempts are credential stuffing (CWE-307); if its failure response distinguishes an unknown account from a wrong password \u2014 in the body, the status code or the timing \u2014 it is also account enumeration (CWE-204). ` : ``) + `Adjudicated \`unthrottled\` against the throttle matrix. A limit enforced outside the repo (ingress, CDN, gateway) refutes this \u2014 name it and say what it counts.` + (note ? ` ${note}` : ""),
+      file: row.file,
+      line: row.line
+    };
+  }
   return {
     title: `Unauthenticated request handler: ${where} in ${row.file}`,
     category: "authz",
     severity: "high",
     cwe: "CWE-306",
-    message: `\`${row.file}:${row.line}\`${row.handler ? ` (\`${row.handler}()\`)` : ""} reads request data (${row.kinds.join("/")}, ${row.reads} read(s)) and no authentication or authorization marker is visible in ${row.scope === "symbol" ? "the handler's scope" : "the file"}. Adjudicated \`unguarded\` against the guard matrix.` + (note ? ` ${note}` : ""),
+    message: `${cited} and no authentication or authorization marker is visible in ${scopeWord}. Adjudicated \`unguarded\` against the guard matrix.` + (note ? ` ${note}` : ""),
     file: row.file,
     line: row.line
   };
 }
 
 // src/commands/guards.ts
+var isLens = (s) => GUARD_LENSES.includes(s);
 function runGuards(args2) {
   const run2 = resolve24(flagStr(args2, "run") ?? ".ultrasec");
   const strict = flagBool(args2, "strict");
+  const lensName = flagStr(args2, "lens");
+  if (lensName !== void 0 && !isLens(lensName)) {
+    eprintln(`ultrasec guards: unknown --lens '${lensName}' (expected ${GUARD_LENSES.join("|")}).`);
+    return 2;
+  }
+  const lens = lensName && isLens(lensName) ? lensName : "auth";
+  const spec = LENSES2[lens];
+  const [present, absent, waived] = spec.verdicts;
+  const label = lens === "auth" ? "guard" : "rate limit";
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -27789,55 +27888,67 @@ function runGuards(args2) {
   if (applyPath) {
     let parsed;
     try {
-      parsed = readApply(applyPath, /guard.*\.json$/i, parseGuardVerdicts);
+      parsed = readApply(applyPath, lens === "auth" ? /guard.*\.json$/i : /throttle.*\.json$/i, (raw) => parseGuardVerdicts(raw, lens));
     } catch (e) {
       eprintln(`ultrasec guards --apply: ${e.message}`);
       return 2;
     }
-    const byId = new Map(buildGuardMatrix(scanRepo2(repo)).map((r) => [r.id, r]));
+    const byId = new Map(buildGuardMatrix(scanRepo2(repo), lens).map((r) => [r.id, r]));
     const unknown = [];
     const discoveries = [];
-    let guarded = 0;
-    let publicOnPurpose = 0;
+    let confirmedPresent = 0;
+    let waivedRows = 0;
     for (const row of parsed.rows) {
       const at = byId.get(row.id);
       if (!at) {
         unknown.push(row.id);
         continue;
       }
-      if (row.verdict === "guarded") guarded++;
-      else if (row.verdict === "intentionally-public") publicOnPurpose++;
-      else discoveries.push(guardDiscovery(at, row.note));
+      if (row.verdict === present) confirmedPresent++;
+      else if (row.verdict === waived) waivedRows++;
+      else discoveries.push(guardDiscovery(at, row.note, lens));
     }
     const res = ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run2) });
     persistFindings(run2, dossier, res.findings);
     println(`ultrasec guards --apply \u2192 ${run2}`);
     println(
-      `  ${res.ingested} unguarded handler(s) filed as findings \xB7 ${res.folded} folded into existing \xB7 ${guarded} confirmed guarded \xB7 ${publicOnPurpose} intentionally public`
+      `  ${res.ingested} ${absent} handler(s) filed as findings \xB7 ${res.folded} folded into existing \xB7 ${confirmedPresent} confirmed ${present} \xB7 ${waivedRows} ${waived}`
     );
     for (const r of res.rejected) eprintln(`  \u2717 rejected ${r.discovery.file}:${r.discovery.line} \u2014 ${r.reason}`);
-    for (const id of unknown) eprintln(`  \u2717 dropped ${id}: no handler with that id in the current matrix (re-run \`ultrasec guards\` and refill)`);
+    for (const id of unknown)
+      eprintln(
+        `  \u2717 dropped ${id}: no handler with that id in the current matrix (re-run \`ultrasec guards${lens === "auth" ? "" : " --lens " + lens}\` and refill)`
+      );
     const code = surfaceDropped(parsed.dropped, strict, eprintln);
     if (strict && (unknown.length || res.rejected.length)) return 1;
     return code;
   }
-  const rows = buildGuardMatrix(scanRepo2(repo));
-  const todoPath = emitWorklist(run2, stageFiles("GUARDS"), rows, renderGuardsMd(rows, loadContextDoc(run2)));
+  const rows = buildGuardMatrix(scanRepo2(repo), lens);
+  const todoPath = emitWorklist(run2, stageFiles(spec.stem), rows, renderGuardsMd(rows, loadContextDoc(run2), lens));
   const t = guardTotals(rows);
-  writeDossier(run2, { ...dossier, manifest: { ...dossier.manifest, passes: { ...dossier.manifest.passes, guards: true } } });
-  println(`ultrasec guards \u2192 ${run2}`);
+  writeDossier(run2, { ...dossier, manifest: { ...dossier.manifest, passes: { ...dossier.manifest.passes, [spec.pass]: true } } });
+  println(`ultrasec guards${lens === "auth" ? "" : ` --lens ${lens}`} \u2192 ${run2}`);
   println(
-    `  ${t.handlers} handler(s) reading request data \xB7 ${t.unguarded} with no visible guard${t.fileScoped ? ` \xB7 ${t.fileScoped} file-scoped (weaker evidence)` : ""}`
+    `  ${t.handlers} handler(s) reading request data \xB7 ${t.unguarded} with no visible ${label}${t.fileScoped ? ` \xB7 ${t.fileScoped} file-scoped (weaker evidence)` : ""}`
   );
-  if (t.noAuthAnywhere) {
+  if (t.noMarkerAnywhere && lens === "throttle") {
+    println(`  \u26A0\uFE0F  NO throttling marker anywhere in the tree \u2014 that is one architectural fact, not ${t.handlers} findings.`);
+    println(`      Decide once in CONTEXT.md: nothing bounds request volume, or the limit lives outside the repo (ingress/CDN/gateway)?`);
+  } else if (t.noMarkerAnywhere) {
     println(`  \u26A0\uFE0F  NO auth marker anywhere in the tree \u2014 that is one architectural fact, not ${t.handlers} findings.`);
     println(`      Decide once in CONTEXT.md: public by design, or authenticated outside the repo (gateway/ingress/proxy)?`);
+  }
+  if (lens === "throttle" && t.unguardedLoginShaped) {
+    println(`  \u26A0\uFE0F  ${t.unguardedLoginShaped} of them look like AUTH endpoints \u2014 there the absence is credential stuffing (CWE-307)`);
+    println(`      and, if a failed login distinguishes an unknown account from a wrong password, enumeration (CWE-204).`);
   }
   if (!t.handlers) {
     println(`  no HTTP/WS handler found \u2014 if the app has routes, check \`manifest.extraction\` and the scan's --scope.`);
   }
   println(`  worklist: ${todoPath}`);
-  println(`  next: read GUARDS.md, set a verdict per row, then \`ultrasec guards --apply GUARDS.json --run ${run2}\``);
+  println(
+    `  next: read ${spec.stem}.md, set a verdict per row, then \`ultrasec guards${lens === "auth" ? "" : ` --lens ${lens}`} --apply ${spec.stem}.json --run ${run2}\``
+  );
   return 0;
 }
 
@@ -31255,6 +31366,9 @@ async function dispatch(name2, args2, repo, run2) {
       }
       return runCommand(name2, [], { repo, run: run2, shards, shard: shard2, json: true });
     }
+    case "ultrasec_guards":
+      requireRun(run2);
+      return runCommand(name2, [], { repo, run: run2, lens: str2(args2.lens), json: true });
     case "ultrasec_check":
       requireRun(run2);
       return runCommand(name2, [], { repo, run: run2, semantic: bool(args2.semantic), "min-severity": str2(args2.min_severity), json: true });
@@ -31306,7 +31420,7 @@ function artifactFor(name2, flags2) {
   if (name2 === "ultrasec_map") return join73(run2, "MAP.md");
   if (name2 === "ultrasec_scan") return join73(run2, "findings.json");
   if (name2 === "ultrasec_triage") return join73(run2, "TRIAGE.todo.json");
-  if (name2 === "ultrasec_guards") return join73(run2, "GUARDS.todo.json");
+  if (name2 === "ultrasec_guards") return join73(run2, flags2.lens === "throttle" ? "THROTTLE.todo.json" : "GUARDS.todo.json");
   if (name2 === "ultrasec_verify") return join73(run2, "VERIFY.todo.json");
   if (name2 === "ultrasec_investigate") return join73(run2, "INVESTIGATE.todo.json");
   return void 0;
@@ -31515,8 +31629,16 @@ var TOOLS3 = [
   {
     name: "ultrasec_guards",
     title: "Find the request handlers nothing checks",
-    description: "Cross every handler that reads request data against the authentication/authorization markers visible in its scope, and list the ones with none. This is the vulnerability that is an ABSENCE: a missing authorization check has no line to point at, so no taint path and no scanner can reach it \u2014 and it is where the worst findings of a real audit lived. A marker in scope is a CANDIDATE, never a proof: read the handler and confirm the check runs before the object is touched, and that it checks authorization rather than only authentication. " + JUDGMENT_NOTE + " " + RUN_NOTE,
-    inputSchema: { type: "object", properties: { repo: repoProp2, run: runProp }, required: ["repo"] }
+    description: "Cross every handler that reads request data against the markers visible in its scope, and list the ones with none. This is the vulnerability that is an ABSENCE: a missing check has no line to point at, so no taint path and no scanner can reach it \u2014 and it is where the worst findings of a real audit lived. `lens: auth` (the default) looks for authentication/authorization; `lens: throttle` looks for rate limiting, and flags the handlers that authenticate, where the absence is credential stuffing and account enumeration. When NO marker of the chosen kind appears anywhere in the tree, that is reported as ONE architectural fact rather than one finding per handler. A marker in scope is a CANDIDATE, never a proof: read the handler and confirm the check runs before the object is touched. " + JUDGMENT_NOTE + " " + RUN_NOTE,
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoProp2,
+        run: runProp,
+        lens: { type: "string", enum: ["auth", "throttle"], description: "Which absence to enumerate: authorization (default) or rate limiting." }
+      },
+      required: ["repo"]
+    }
   },
   {
     name: "ultrasec_verify",
@@ -32379,13 +32501,18 @@ COMMANDS
              Flags: --run \xB7 --repo \xB7 --apply \xB7 --strict \xB7
              --scope/--include/--exclude/--max-files/--gitignore \xB7 --json.
   guards     Cross the two lists the engine already builds but never compares:
-             every handler that reads request data, and the auth/authorization
-             markers visible in its scope. This is the vulnerability that is an
-             ABSENCE \u2014 a missing authorization check has no line to taint-trace,
-             so nothing else in the engine can reach it. Rows with no visible
-             guard are a worklist; a marker in scope is a CANDIDATE, never proof.
-             --apply turns an 'unguarded' verdict into a cited authz finding.
-             Flags: --run \xB7 --repo \xB7 --apply \xB7 --strict.
+             every handler that reads request data, and the markers visible in
+             its scope. This is the vulnerability that is an ABSENCE \u2014 a missing
+             check has no line to taint-trace, so nothing else in the engine can
+             reach it. --lens auth (default) looks for authentication/
+             authorization; --lens throttle looks for rate limiting and flags the
+             handlers that AUTHENTICATE, where the absence is credential stuffing
+             + account enumeration rather than capacity. No marker of that kind
+             anywhere in the tree is reported as ONE architectural fact, not one
+             finding per handler. Rows with none are a worklist; a marker in
+             scope is a CANDIDATE, never proof. --apply turns an 'unguarded' /
+             'unthrottled' verdict into a cited finding (GUARDS.md / THROTTLE.md).
+             Flags: --run \xB7 --repo \xB7 --lens auth|throttle \xB7 --apply \xB7 --strict.
   variants   Hunt other instances of a CONFIRMED bug's root cause: emit one seed
              per confirmed finding with its mechanical neighbours (same sink
              callee / file / CWE), you state the root cause and generalize a

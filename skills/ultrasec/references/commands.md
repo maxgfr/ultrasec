@@ -205,14 +205,15 @@ The verdict→status table and every JSON shape live in [schemas.md](schemas.md)
 | command | emits | you write | apply rule |
 |---|---|---|---|
 | `triage --run <d>` | `TRIAGE.todo.json` + `.md` | `noise\|keep` | `noise` clears only low/med/info; on high/critical it is **ignored** |
-| `guards --run <d>` | `GUARDS.todo.json` + `.md` | `guarded\|unguarded\|intentionally-public` | `unguarded` becomes a cited `authz` finding; the matrix is re-derived from the code, so a stale row is refused |
+| `guards --run <d>` | `GUARDS.todo.json` + `.md` | `guarded\|unguarded\|intentionally-public` | `unguarded` becomes a cited `authz` finding (CWE-306); the matrix is re-derived from the code, so a stale row is refused |
+| `guards --lens throttle --run <d>` | `THROTTLE.todo.json` + `.md` | `throttled\|unthrottled\|not-abusable` | `unthrottled` becomes a cited `other` finding — **CWE-307 + CWE-204** on an auth-shaped handler, CWE-770 otherwise |
 | `verify --run <d>` | `VERIFY.todo.json` + `.md` | `supported\|partial\|unsupported\|refuted` | `partial` → needs-human at any severity; `unsupported` → needs-human on high/critical |
 | `investigate --run <d>` | `INVESTIGATE.todo.json` + `.md` | `Discovery[]` | citations checked **before** ingest; a bad one is rejected, not folded |
 | `revalidate --run <d>` | `REVALIDATE.todo.json` + `.md` | `still-valid\|fixed\|false-positive\|uncertain` | `fixed` → dismissed + `fixedIn`; high/critical `false-positive` → needs-human |
 
 Shared `--apply` behaviour: the argument may be **a file, a comma-separated list, or a
 directory**. From a directory each stage picks up its own pattern, sorted for determinism —
-`*verdict*.json` (verify), `*triage*.json`, `*guard*.json`, `*revalidat*.json`, `*investigat*`/`*discover*.json`.
+`*verdict*.json` (verify), `*triage*.json`, `*guard*.json`, `*throttle*.json`, `*revalidat*.json`, `*investigat*`/`*discover*.json`.
 A directory with no match, or a fragment set where **no id matches the dossier**, exits 2 rather
 than folding nothing and reporting success. `--apply -` reads the payload from **stdin**, so a
 generated set of verdicts can be piped straight in.

@@ -35,6 +35,22 @@ const MAX_SCAFFOLD_ENTRIES = 80;
 export const AUTH_MARKER =
   /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
 
+// Rate-limiting / throttling markers, the same shape of vocabulary for the other
+// absence the matrix can enumerate.
+//
+// "No throttling anywhere" is a FACT about an application, and a real audit
+// established it with `grep -E 'rate|429'` returning nothing — then wrote it up
+// as one medium finding, correctly. Nothing in the engine could produce that
+// fact, so the coverage matrix carried "missing rate limiting" as advice in a
+// hint string and no run ever answered it.
+//
+// `429` earns its place: a repo that answers `TooManyRequests` anywhere has a
+// limiter, whatever it is called. It is matched as a bare number only next to a
+// status-shaped context, since a bare 429 in a fixture or a phone number would
+// otherwise read as a protection.
+export const THROTTLE_MARKER =
+  /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
+
 // Dependency name → friendly framework label (package.json deps/devDeps keys).
 const JS_FRAMEWORKS: Record<string, string> = {
   express: "express",

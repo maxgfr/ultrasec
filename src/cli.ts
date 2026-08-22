@@ -117,13 +117,18 @@ COMMANDS
              Flags: --run · --repo · --apply · --strict ·
              --scope/--include/--exclude/--max-files/--gitignore · --json.
   guards     Cross the two lists the engine already builds but never compares:
-             every handler that reads request data, and the auth/authorization
-             markers visible in its scope. This is the vulnerability that is an
-             ABSENCE — a missing authorization check has no line to taint-trace,
-             so nothing else in the engine can reach it. Rows with no visible
-             guard are a worklist; a marker in scope is a CANDIDATE, never proof.
-             --apply turns an 'unguarded' verdict into a cited authz finding.
-             Flags: --run · --repo · --apply · --strict.
+             every handler that reads request data, and the markers visible in
+             its scope. This is the vulnerability that is an ABSENCE — a missing
+             check has no line to taint-trace, so nothing else in the engine can
+             reach it. --lens auth (default) looks for authentication/
+             authorization; --lens throttle looks for rate limiting and flags the
+             handlers that AUTHENTICATE, where the absence is credential stuffing
+             + account enumeration rather than capacity. No marker of that kind
+             anywhere in the tree is reported as ONE architectural fact, not one
+             finding per handler. Rows with none are a worklist; a marker in
+             scope is a CANDIDATE, never proof. --apply turns an 'unguarded' /
+             'unthrottled' verdict into a cited finding (GUARDS.md / THROTTLE.md).
+             Flags: --run · --repo · --lens auth|throttle · --apply · --strict.
   variants   Hunt other instances of a CONFIRMED bug's root cause: emit one seed
              per confirmed finding with its mechanical neighbours (same sink
              callee / file / CWE), you state the root cause and generalize a

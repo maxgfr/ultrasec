@@ -108,14 +108,24 @@ export const TOOLS: ToolDecl[] = [
     name: "ultrasec_guards",
     title: "Find the request handlers nothing checks",
     description:
-      "Cross every handler that reads request data against the authentication/authorization markers visible in its scope, and list the ones with none. " +
-      "This is the vulnerability that is an ABSENCE: a missing authorization check has no line to point at, so no taint path and no scanner can reach it — " +
-      "and it is where the worst findings of a real audit lived. A marker in scope is a CANDIDATE, never a proof: read the handler and confirm the check " +
-      "runs before the object is touched, and that it checks authorization rather than only authentication. " +
+      "Cross every handler that reads request data against the markers visible in its scope, and list the ones with none. " +
+      "This is the vulnerability that is an ABSENCE: a missing check has no line to point at, so no taint path and no scanner can reach it — " +
+      "and it is where the worst findings of a real audit lived. `lens: auth` (the default) looks for authentication/authorization; " +
+      "`lens: throttle` looks for rate limiting, and flags the handlers that authenticate, where the absence is credential stuffing and account enumeration. " +
+      "When NO marker of the chosen kind appears anywhere in the tree, that is reported as ONE architectural fact rather than one finding per handler. " +
+      "A marker in scope is a CANDIDATE, never a proof: read the handler and confirm the check runs before the object is touched. " +
       JUDGMENT_NOTE +
       " " +
       RUN_NOTE,
-    inputSchema: { type: "object", properties: { repo: repoProp, run: runProp }, required: ["repo"] },
+    inputSchema: {
+      type: "object",
+      properties: {
+        repo: repoProp,
+        run: runProp,
+        lens: { type: "string", enum: ["auth", "throttle"], description: "Which absence to enumerate: authorization (default) or rate limiting." },
+      },
+      required: ["repo"],
+    },
   },
   {
     name: "ultrasec_verify",
