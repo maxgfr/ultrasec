@@ -39,7 +39,15 @@ export interface Extraction {
 
 export const LANGS: LangSpec[] = [
   { id: "javascript", extensions: ["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts"] },
-  { id: "python", extensions: ["py", "pyi"] },
+  // `ipynb` is Python to every consumer that asks "what language is this file",
+  // and it has to be, or the catalogs skip it: `findSinks`, `findTextSinks`, the
+  // taint walk and the guard matrix all gate on `langForFile` returning
+  // something. The EXTRACTION for a notebook does not come from the raw JSON —
+  // it comes from the line-aligned shadow built in src/notebooks.ts, which the
+  // scan adapter folds in under the notebook's own path. Line-content passes
+  // (sanitizer hints, secrets, the dossier excerpt) read the raw JSON line,
+  // which carries the cell's source text and the right line number.
+  { id: "python", extensions: ["py", "pyi", "ipynb"] },
   { id: "go", extensions: ["go"] },
   { id: "java", extensions: ["java"] },
   { id: "ruby", extensions: ["rb"] },

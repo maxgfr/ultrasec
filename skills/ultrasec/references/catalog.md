@@ -12,7 +12,7 @@ you a glance; a missed flow is a missed bug.
 | sql | CWE-89 | high | `query`, `execute`, `raw`, `executemany` · JDBC/JPA: `prepareStatement`, `prepareCall`, `executeUpdate`, `addBatch`, `createQuery` |
 | nosql | CWE-943 | high | `db.find`, `collection.findOne`, `mapReduce`, `aggregate` (receiver-gated) |
 | command | CWE-78 | critical | `execSync`, `spawnSync`, `popen`, `Popen`, `shell_exec`, `passthru`, `proc_open`, `ProcessBuilder`, `Runtime.getRuntime` · plus `exec`/`spawn`/`run` **corroborated** (see below) |
-| code | CWE-94 | high | `eval`, `Function`, `runInThisContext`, `compile` |
+| code | CWE-94 | high | `eval`, `Function`, `runInThisContext`, `compile` · plus the **line shape** `.apply(eval)` / `.map(exec)`, where the interpreter is a *reference*, not a call |
 | ssti | CWE-1336 | high | `from_string`, `renderString`, `Template`, `compileString` |
 | path | CWE-22 | high | `readFile`, `writeFile`, `sendFile`, `open` · JVM/C# constructors: `new File`, `FileInputStream`, `newBufferedReader` · zip-slip: `extractall`, `extract`, `unzip` |
 | ssrf | CWE-918 | high | bare `fetch`, `request`, `urlopen`, `axios`, `got` · + member calls `axios.get`, `http.get`, `requests.get`, `session.post` (receiver-gated) |
@@ -202,6 +202,31 @@ a detail: measured on a 69-file TypeScript repo, the regex tier produced **27 ta
 instead of 66**, lost every cross-file command-injection candidate, and dropped two CWE classes
 entirely. `ast: false` means the catalog below was applied to a thinner view of the code — check
 it before concluding a class is absent, and say so in the report.
+
+## Jupyter notebooks are scanned as Python
+
+A `.ipynb` is JSON, so for a long time nothing in this engine read one — and no external scanner
+does either: bandit has had B307 (`eval`) forever and simply cannot open the format. On a repo with
+eight notebooks that produced the two statements a security tool must never both make: eight files
+tracked, nothing in them.
+
+`scan` now extracts each notebook's code cells into a **line-aligned Python shadow** — line N of the
+shadow is line N of the raw JSON — runs the ordinary extractor over it, and files the result under
+the notebook's own path. So a notebook is an ordinary scanned file to the taint walk, the orphan-sink
+layer, the graph and `coverage`, and every citation it produces resolves in the file a reader opens.
+
+What the run tells you, and why each number is there:
+
+- `notebooks: 8/8 .ipynb extracted as python` — found vs. actually read.
+- `N checkpoint copy(ies) skipped` — `.ipynb_checkpoints/` is Jupyter's autosave. Scanning it
+  doubles every finding in the tree.
+- `N source line(s) could not be aligned and are NOT cited` — a cell whose `source` is one
+  multi-line string puts all its lines on a single raw line. Those are counted, never guessed at.
+
+Two limits worth knowing. Magics (`%matplotlib`) and shell escapes (`!pip …`) are blanked, because
+they are not Python — the line still exists, so nothing after it shifts. And the line-content passes
+(sanitizer hints, secret scanning, the `dossier` excerpt) read the raw JSON line, which carries the
+cell's source text: readable, correctly numbered, JSON-escaped.
 
 ## Beyond taint: config & auth line-detectors (run under `scan`)
 

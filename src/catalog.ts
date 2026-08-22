@@ -739,6 +739,27 @@ export const TEXT_SINKS: TextSinkRule[] = [
     title: "DOM XSS via a URL attribute",
     note: "Tainted data assigned to src/href executes when the scheme is `javascript:` or `data:`. Allow-list the scheme before assigning.",
   },
+  {
+    // `eval` handed to a higher-order function instead of being called.
+    //
+    // `df['action_eventname'].apply(eval)` evaluates every row of a column as
+    // Python. The catalog matches CALLS, and this is not one — `eval` appears
+    // only as an argument, so the extractor records `apply` and the code-injection
+    // rule never fires. Bandit's B307 misses it for the same reason: its blacklist
+    // is keyed on call nodes.
+    //
+    // It is the exact shape a real audit found by hand, over a column of analytics
+    // event names that any visitor to the public site can set. Kept narrow — the
+    // pandas/builtin apply-family plus a name that can only mean the interpreter.
+    kind: "code",
+    cwe: "CWE-94",
+    severity: "high",
+    languages: ["python"],
+    re: /\.\s*(?:apply|applymap|map|transform|agg|aggregate|pipe)\s*\(\s*(?:eval|exec)\s*[,)]|\b(?:map|filter)\s*\(\s*(?:eval|exec)\s*,/,
+    label: "eval as a callable",
+    title: "Code injection (the interpreter applied to data)",
+    note: "`eval`/`exec` passed as the function argument of an apply/map, so every value in the series is executed as Python. Nothing about the call site says which values those are — find where the column comes from before deciding this is safe. Parse with `ast.literal_eval` or `json.loads` instead.",
+  },
   // ── The caught error, handed straight to the caller (CWE-209) ─────────────
   //
   // A line sink rather than a flow, because the line carries BOTH halves: the
