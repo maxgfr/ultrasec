@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.41.0](https://github.com/maxgfr/ultrasec/compare/v1.40.2...v1.41.0) (2026-08-23)
+
+
+### Bug Fixes
+
+* **coverage:** four ASVS chapters could never leave "not examined" ([00feba0](https://github.com/maxgfr/ultrasec/commit/00feba06c236772e9cba13aff027a688e1fc3415))
+* **report:** the surface split stopped at the undecided tier ([715d672](https://github.com/maxgfr/ultrasec/commit/715d672b662a0dd98263ec1193d1b90d2ad62f04))
+* **scan:** --merge shipped two generations of noise rules side by side ([39fbd88](https://github.com/maxgfr/ultrasec/commit/39fbd88e91dc7be955231627af89509e7e6c329e))
+
+
+### Features
+
+* **report:** organise the audit by surface, and stop rendering dumps ([3722e51](https://github.com/maxgfr/ultrasec/commit/3722e5132eed8db3b81ff6a580165bab9c6d88be))
+
 ## [1.40.2](https://github.com/maxgfr/ultrasec/compare/v1.40.1...v1.40.2) (2026-08-23)
 
 
