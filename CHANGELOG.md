@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.40.1](https://github.com/maxgfr/ultrasec/compare/v1.40.0...v1.40.1) (2026-08-23)
+
+
+### Bug Fixes
+
+* **ci:** unblock the lint gate — a fixture placeholder, a schema drift, a format miss ([a8454a1](https://github.com/maxgfr/ultrasec/commit/a8454a1a774e6da3579d9071a29dc61742540b22))
+* **graph:** a unique name is not a link, and four defects the re-audit found ([dba1a9f](https://github.com/maxgfr/ultrasec/commit/dba1a9fa9d0fc7b67646a0f9588698561a3b2ea5))
+
 # [1.40.0](https://github.com/maxgfr/ultrasec/compare/v1.39.0...v1.40.0) (2026-08-22)
 
 
