@@ -348,7 +348,12 @@ node scripts/ultrasec.mjs import findings.json --run .ultrasec    # ingest a dee
   connect a dangerous sink *back* to an untrusted source. `--sinks` adds every sink it
   **can't** connect (single-file scripts, framework dispatch the summary-graph misses,
   config-fed sinks) as a low-confidence `sast` candidate — capped and truncation-reported
-  like taint, adjudicated the same way.
+  like taint, adjudicated the same way. A handful of classes are **sourceless** and are
+  enumerated on every scan without the flag: there is no source to trace, so gating them on
+  one hid them outright rather than leaving them unproven. CWE-407 (unbounded
+  similarity/distance) is the case that showed it — the super-linear cost lives inside the
+  library the caller called, and the finding it was written for was invisible to the scan
+  command the docs use.
 - **`--blame` (provenance).** Attaches deterministic git-blame author/commit/author-date +
   CODEOWNERS owner to each finding — a triage signal ("introduced last week by X, owned by
   team Y"). Reproducible (author-date, not wall-clock) and **evidence only**: it never culls

@@ -5,6 +5,7 @@ import { scanRepo, scanRepoCached, extractionTier } from "../scan.js";
 import { buildGraph, reverseDependents } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
 import { enumerateSinkCandidates } from "../sinks.js";
+import { SOURCELESS_SINK_KINDS } from "../catalog.js";
 import { enumerateSensitiveLogCandidates } from "../logs/hygiene.js";
 import { auditAgenticWorkflows } from "../actions.js";
 import { auditWebConfig } from "../webconfig.js";
@@ -177,8 +178,18 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // Orphan-sink recall (opt-in `--sinks`): dangerous sinks the source-gated taint
   // BFS can't connect to a source still warrant a look. Emitted as low-confidence
   // `sast` candidates, de-duped against the taint findings, capped + reported.
+  // Without `--sinks` the pass still runs, narrowed to the `sourceless` kinds:
+  // classes with no untrusted source to trace, which source-gating did not leave
+  // "unproven" but hid outright. CWE-407 was the one that showed it — the audit
+  // finding it was written for, an unbounded `fuzz.extract` on a search query,
+  // was invisible to the documented scan command and appeared only under a flag
+  // the docs use nowhere. One hit on that repo, zero on the other: the class
+  // pays for itself, and the full recall pass stays opt-in.
   const sinksOn = flagBool(args, "sinks");
-  const sinkCand = sinksOn ? enumerateSinkCandidates(scan, taintFindings, { maxCandidates }) : { findings: [] as Finding[], truncated: 0, total: 0 };
+  const sinkCand = enumerateSinkCandidates(scan, taintFindings, {
+    maxCandidates,
+    ...(sinksOn ? {} : { onlyKinds: SOURCELESS_SINK_KINDS }),
+  });
 
   // Sensitive-logging line-content pass (opt-in `--log-hygiene`, CWE-532): every
   // LOG_SINKS call site whose line names a sensitive identifier or contains a
@@ -401,7 +412,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
           scopes: fm.scopes,
           sbom: fm.sbom,
           diff: diffNote,
-          sinks: sinksOn ? sinkCand.findings.length : undefined,
+          // Counted whenever the pass produced anything, not only under --sinks:
+          // the sourceless classes it now emits by default are findings like any other,
+          // and a count that appears only behind a flag is a silent one.
+          sinks: sinkCand.findings.length || undefined,
           logHygiene: logHygieneOn ? hygieneCand.findings.length : undefined,
           downgraded: fm.downgraded,
           merged: mergedNote.trim() || undefined,
@@ -432,7 +446,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   }
   if (sbomResult) println(`  sbom: ${sbomResult.note}`);
   println(
-    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""}${logHygieneOn ? ` + ${hygieneCand.findings.length} log-hygiene` : ""} + ${tool.findings.length} tool this pass`,
+    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} · high ${fc.high} · med ${fc.medium} · low ${fc.low})  ·  ${taintFindings.length} taint${sinkCand.findings.length ? ` + ${sinkCand.findings.length} sink` : ""}${logHygieneOn ? ` + ${hygieneCand.findings.length} log-hygiene` : ""} + ${tool.findings.length} tool this pass`,
   );
   println(`  ${riskNote}`);
   if (fm.reachability) {

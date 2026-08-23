@@ -3,7 +3,7 @@ import { readText } from "./walk.js";
 import type { RepoScan } from "./scan.js";
 import { enclosingSymbolName, localDefNames } from "./scan.js";
 import { langForFile } from "./lang.js";
-import { findSinks, findTextSinks, findSanitizers, cweUrl, UNRESOLVED_RECEIVER } from "./catalog.js";
+import { findSinks, findTextSinks, findSanitizers, cweUrl, UNRESOLVED_RECEIVER, SOURCELESS_SINK_KINDS } from "./catalog.js";
 import { shortHash, byStr } from "./util.js";
 import { SEVERITIES, type Finding, type Severity } from "./types.js";
 
@@ -12,6 +12,13 @@ const DEFAULT_MAX_CANDIDATES = 1000;
 export interface SinkCandidateOptions {
   /** Keep at most this many ranked candidates (default 1000). Excess is reported, not dropped silently. */
   maxCandidates?: number;
+  /**
+   * Restrict the pass to these sink kinds. `scan` uses it to enumerate the
+   * `sourceless` classes on every run while the full recall pass stays opt-in:
+   * those classes have no source to trace, so source-gating them hid them
+   * entirely rather than merely leaving them unproven.
+   */
+  onlyKinds?: ReadonlySet<string>;
 }
 
 export interface SinkCandidateResult {
@@ -110,6 +117,7 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
       // a function name, so the call phrasing below would read
       // "framework HTML bypass() sink".
       const what = isAssignment.has(sink) ? `\`${sink.callee}\`` : `${sink.callee}()`;
+      if (opts.onlyKinds && !opts.onlyKinds.has(sink.kind)) continue;
       const key = `${file.rel}:${sink.line}:${sink.kind}`;
       if (taken.has(key)) continue; // covered by taint, or already emitted this pass
       taken.add(key);
@@ -122,6 +130,7 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
       // Same caveat the taint pass carries: an `ambiguous` rule matched by name
       // alone, with nothing to corroborate that this callee is what the rule
       // means. Worth a glance, not a headline.
+      const sourceless = SOURCELESS_SINK_KINDS.has(sink.kind);
       const receiverNote =
         sink.downgraded === UNRESOLVED_RECEIVER
           ? ` [${UNRESOLVED_RECEIVER}] Matched by NAME only — no receiver resolved and no corroborating import was visible, so \`${sink.callee}\` may not be a ${sink.kind} call at all.`
@@ -131,7 +140,7 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
         id: shortHash(`sink:${file.rel}:${sink.line}:${sink.kind}`),
         category: "sast",
         cwe: sink.cwe,
-        title: `${sink.title}: ${what} sink (no source path found)`,
+        title: sourceless ? `${sink.title}: ${what}` : `${sink.title}: ${what} sink (no source path found)`,
         severity: cappedAt(sink.severity, ORPHAN_SEVERITY_CEILING),
         confidence: "low",
         // Says out loud what `confidence: low` only implied, and what the
@@ -140,11 +149,15 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
         // it and the severity comes back with the evidence.
         reachability: "unproven",
         sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbolName(file.symbols, sink.line) },
-        message:
-          `Dangerous ${sink.kind} sink ${what} at ${file.rel}:${sink.line} that the cross-file taint pass ` +
-          `could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a ` +
-          `path the summary call-graph misses (framework dispatch, dynamic call, config). ` +
-          `${sink.note}${note}${receiverNote} Confirm whether attacker-controlled data can reach it before trusting it.`,
+        message: sourceless
+          ? `${what} at ${file.rel}:${sink.line}. The super-linear cost is inside the callee, not in anything the ` +
+            `caller wrote, so there is no source to trace and none is claimed here. ` +
+            `${sink.note}${note}${receiverNote} What decides it is whether attacker-controlled input reaches this call ` +
+            `AND whether its length is bounded before it does — a minimum length bounds nothing.`
+          : `Dangerous ${sink.kind} sink ${what} at ${file.rel}:${sink.line} that the cross-file taint pass ` +
+            `could NOT connect to an untrusted source (orphan sink). Still worth a look — the source may arrive via a ` +
+            `path the summary call-graph misses (framework dispatch, dynamic call, config). ` +
+            `${sink.note}${note}${receiverNote} Confirm whether attacker-controlled data can reach it before trusting it.`,
         tool: "ultrasec",
         references: [cweUrl(sink.cwe)],
         status: "open",

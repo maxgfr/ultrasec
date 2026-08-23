@@ -19109,6 +19109,7 @@ var SINKS = [
     kind: "algodos",
     cwe: "CWE-407",
     severity: "medium",
+    sourceless: true,
     languages: ["javascript", "python", "java", "kotlin", "go"],
     callees: [
       "extract",
@@ -19556,6 +19557,7 @@ var SINKS = [
     note: "Tainted data concatenated into a prompt. The model cannot separate instructions from data: assume the attacker controls the output, and gate what that output is ALLOWED to do (tools, sinks) rather than trying to sanitize the prompt."
   }
 ];
+var SOURCELESS_SINK_KINDS = new Set(SINKS.filter((r) => r.sourceless).map((r) => r.kind));
 var TEXT_SINKS = [
   {
     kind: "domxss",
@@ -21484,18 +21486,20 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
     const isAssignment = new Set(textSinks);
     for (const sink of [...callSinks, ...textSinks]) {
       const what = isAssignment.has(sink) ? `\`${sink.callee}\`` : `${sink.callee}()`;
+      if (opts.onlyKinds && !opts.onlyKinds.has(sink.kind)) continue;
       const key = `${file.rel}:${sink.line}:${sink.kind}`;
       if (taken.has(key)) continue;
       taken.add(key);
       const sinkLine = lines5(file.rel)[sink.line - 1] ?? "";
       const sanitizers = findSanitizers(lang, sinkLine, sink.kind);
       const note = sanitizers.length ? ` A possible sanitizer is present on the line (${sanitizers.join("; ")}) \u2014 confirm it neutralizes any untrusted input.` : "";
+      const sourceless = SOURCELESS_SINK_KINDS.has(sink.kind);
       const receiverNote = sink.downgraded === UNRESOLVED_RECEIVER ? ` [${UNRESOLVED_RECEIVER}] Matched by NAME only \u2014 no receiver resolved and no corroborating import was visible, so \`${sink.callee}\` may not be a ${sink.kind} call at all.` : "";
       findings.push({
         id: shortHash2(`sink:${file.rel}:${sink.line}:${sink.kind}`),
         category: "sast",
         cwe: sink.cwe,
-        title: `${sink.title}: ${what} sink (no source path found)`,
+        title: sourceless ? `${sink.title}: ${what}` : `${sink.title}: ${what} sink (no source path found)`,
         severity: cappedAt(sink.severity, ORPHAN_SEVERITY_CEILING),
         confidence: "low",
         // Says out loud what `confidence: low` only implied, and what the
@@ -21504,7 +21508,7 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
         // it and the severity comes back with the evidence.
         reachability: "unproven",
         sink: { file: file.rel, line: sink.line, kind: sink.kind, symbol: enclosingSymbolName(file.symbols, sink.line) },
-        message: `Dangerous ${sink.kind} sink ${what} at ${file.rel}:${sink.line} that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look \u2014 the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). ${sink.note}${note}${receiverNote} Confirm whether attacker-controlled data can reach it before trusting it.`,
+        message: sourceless ? `${what} at ${file.rel}:${sink.line}. The super-linear cost is inside the callee, not in anything the caller wrote, so there is no source to trace and none is claimed here. ${sink.note}${note}${receiverNote} What decides it is whether attacker-controlled input reaches this call AND whether its length is bounded before it does \u2014 a minimum length bounds nothing.` : `Dangerous ${sink.kind} sink ${what} at ${file.rel}:${sink.line} that the cross-file taint pass could NOT connect to an untrusted source (orphan sink). Still worth a look \u2014 the source may arrive via a path the summary call-graph misses (framework dispatch, dynamic call, config). ${sink.note}${note}${receiverNote} Confirm whether attacker-controlled data can reach it before trusting it.`,
         tool: "ultrasec",
         references: [cweUrl(sink.cwe)],
         status: "open"
@@ -24637,7 +24641,10 @@ async function runScan(args2) {
   const taintFindings = taint.findings;
   step(`${taintFindings.length} taint candidate(s)`);
   const sinksOn = flagBool(args2, "sinks");
-  const sinkCand = sinksOn ? enumerateSinkCandidates(scan2, taintFindings, { maxCandidates }) : { findings: [], truncated: 0, total: 0 };
+  const sinkCand = enumerateSinkCandidates(scan2, taintFindings, {
+    maxCandidates,
+    ...sinksOn ? {} : { onlyKinds: SOURCELESS_SINK_KINDS }
+  });
   const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan2, { maxCandidates: explicitMaxCandidates }) : { findings: [], truncated: 0, total: 0 };
   const includeVendored = flagBool(args2, "include-vendored");
   const prune = buildPruneMatcher(repo, { gitignore, exclude, includeVendored });
@@ -24760,7 +24767,10 @@ async function runScan(args2) {
           scopes: fm.scopes,
           sbom: fm.sbom,
           diff: diffNote,
-          sinks: sinksOn ? sinkCand.findings.length : void 0,
+          // Counted whenever the pass produced anything, not only under --sinks:
+          // the sourceless classes it now emits by default are findings like any other,
+          // and a count that appears only behind a flag is a silent one.
+          sinks: sinkCand.findings.length || void 0,
           logHygiene: logHygieneOn ? hygieneCand.findings.length : void 0,
           downgraded: fm.downgraded,
           merged: mergedNote.trim() || void 0
@@ -24788,7 +24798,7 @@ async function runScan(args2) {
   }
   if (sbomResult) println(`  sbom: ${sbomResult.note}`);
   println(
-    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} \xB7 high ${fc.high} \xB7 med ${fc.medium} \xB7 low ${fc.low})  \xB7  ${taintFindings.length} taint${sinksOn ? ` + ${sinkCand.findings.length} sink` : ""}${logHygieneOn ? ` + ${hygieneCand.findings.length} log-hygiene` : ""} + ${tool.findings.length} tool this pass`
+    `  candidate findings: ${fm.counts.findings}  (crit ${fc.critical} \xB7 high ${fc.high} \xB7 med ${fc.medium} \xB7 low ${fc.low})  \xB7  ${taintFindings.length} taint${sinkCand.findings.length ? ` + ${sinkCand.findings.length} sink` : ""}${logHygieneOn ? ` + ${hygieneCand.findings.length} log-hygiene` : ""} + ${tool.findings.length} tool this pass`
   );
   println(`  ${riskNote}`);
   if (fm.reachability) {

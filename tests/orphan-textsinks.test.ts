@@ -69,3 +69,47 @@ describe("orphan sinks — assignment shapes, not just calls", () => {
     expect(covered.some((f) => f.sink?.file === "Form.tsx")).toBe(false);
   });
 });
+
+// ── A sourceless class must not need the opt-in flag ───────────────────────
+//
+// `findSinks` is source-gated, so a rule with no untrusted SOURCE to trace is
+// not merely left unproven by the default scan — it is hidden by it. CWE-407
+// shipped that way: it arrived in the same commit as CWE-209, for the same
+// stated reason (the super-linear cost is inside the library the caller called,
+// so no source exists to find), but CWE-209 was written as a line-shape rule and
+// CWE-407 as a sink rule. The audit finding it was built for, an unbounded
+// `fuzz.extract` on a search query, was therefore invisible to the documented
+// scan command and appeared only under `--sinks`, which the docs use nowhere.
+describe("orphan sinks — sourceless classes are enumerated without --sinks", () => {
+  const dir = repoWith({
+    // No untrusted read anywhere: the query arrives as a plain parameter.
+    "search.js": 'const fuzz = require("fuzzball");\nexport function rank(q, all) {\n  return fuzz.extract(q, all, { scorer: fuzz.ratio });\n}\n',
+    // An ordinary orphan sink, for contrast: it needs the flag.
+    "db.js": 'import { pool } from "./pool.js";\nexport function find(name) {\n  return pool.query("SELECT * FROM t WHERE n = " + name);\n}\n',
+  });
+  const scan = scanRepo(dir);
+
+  it("emits the sourceless class when the pass is narrowed to it", () => {
+    const { findings } = enumerateSinkCandidates(scan, [], { onlyKinds: new Set(["algodos"]) });
+    expect(findings.map((f) => f.cwe)).toEqual(["CWE-407"]);
+    expect(findings[0]!.sink!.file).toBe("search.js");
+  });
+
+  it("does NOT drag ordinary orphan sinks in with it", () => {
+    const { findings } = enumerateSinkCandidates(scan, [], { onlyKinds: new Set(["algodos"]) });
+    expect(findings.some((f) => f.cwe === "CWE-89")).toBe(false);
+  });
+
+  it("still emits everything when the pass is not narrowed", () => {
+    const { findings } = enumerateSinkCandidates(scan, []);
+    const cwes = new Set(findings.map((f) => f.cwe));
+    expect(cwes.has("CWE-407")).toBe(true);
+    expect(cwes.has("CWE-89")).toBe(true);
+  });
+
+  it("does not claim a missing source path for a class that has none", () => {
+    const { findings } = enumerateSinkCandidates(scan, [], { onlyKinds: new Set(["algodos"]) });
+    expect(findings[0]!.title).not.toContain("no source path found");
+    expect(findings[0]!.message).toContain("no source to trace");
+  });
+});

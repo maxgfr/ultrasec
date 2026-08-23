@@ -68,6 +68,13 @@ cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 **Recall & provenance** `--sinks` · `--log-hygiene` · `--blame` (alias `--provenance`) ·
 `--no-env-sources` · `--strict-scope` · `--include-tests`
 
+**Sourceless classes need no flag.** `findSinks` is source-gated, so a class with no untrusted
+source to trace is not left *unproven* by a default scan — it is hidden by it. CWE-407 (unbounded
+similarity/distance: `fuzz.extract`, `levenshtein`, `get_close_matches`) is enumerated on every
+scan for that reason. It cost **one** extra candidate on the audit that found it and **zero** on
+the other repo, because `requireModule` already demands a real string-distance engine. The full
+recall pass below stays opt-in.
+
 `--sinks` enumerates **call** sinks and **assignment** sinks alike. The assignment family
 (`dangerouslySetInnerHTML`, `innerHTML =`, `v-html`, `[innerHTML]`, `.src =`) used to surface only
 when the taint pass could link a source, which is exactly the case a recall pass is for: on one

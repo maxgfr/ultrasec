@@ -50,6 +50,27 @@ export interface SinkRule {
    * we cannot substantiate is worse than a medium we can revisit.
    */
   ambiguous?: boolean;
+  /**
+   * The class has no untrusted SOURCE to trace, so source-gating it hides it.
+   *
+   * `findSinks` is source-gated: a hit becomes a finding only when the taint BFS
+   * connects it back to an untrusted read. For most classes that is the point —
+   * an `exec()` fed by a literal is not a command injection. But some classes are
+   * dangerous by the shape of the CALL, whatever reaches it, and gating those on
+   * a source means they surface only under the opt-in `--sinks` recall pass.
+   *
+   * CWE-407 shipped that way by accident. It arrived in the same commit as
+   * CWE-209 and for the same stated reason — no source exists to find, the cost
+   * lives inside the library the caller called — but CWE-209 was written as a
+   * line-shape rule (enumerated always) and CWE-407 as a sink rule (enumerated
+   * never, without `--sinks`). So the audit finding it was built for, an unbounded
+   * `fuzz.extract` on a search query, was invisible to the documented command.
+   *
+   * A rule may only claim this when its own gates already establish the danger —
+   * `requireModule` naming a real string-distance engine, here. It is not a way
+   * to skip the source question for a class that still needs it.
+   */
+  sourceless?: boolean;
   title: string;
   note: string;
 }
@@ -225,6 +246,7 @@ export const SINKS: SinkRule[] = [
     kind: "algodos",
     cwe: "CWE-407",
     severity: "medium",
+    sourceless: true,
     languages: ["javascript", "python", "java", "kotlin", "go"],
     callees: [
       "extract",
@@ -672,6 +694,15 @@ export const SINKS: SinkRule[] = [
     note: "Tainted data concatenated into a prompt. The model cannot separate instructions from data: assume the attacker controls the output, and gate what that output is ALLOWED to do (tools, sinks) rather than trying to sanitize the prompt.",
   },
 ];
+
+/**
+ * Sink kinds whose danger is the shape of the call, not the provenance of its
+ * argument — enumerated even without the opt-in `--sinks` recall pass.
+ *
+ * Derived from the rules rather than hand-listed, so a rule that claims
+ * `sourceless` cannot silently fail to be enumerated.
+ */
+export const SOURCELESS_SINK_KINDS: ReadonlySet<string> = new Set(SINKS.filter((r) => r.sourceless).map((r) => r.kind));
 
 /**
  * Sinks that are ASSIGNMENTS, not calls, and so are invisible to a call-based
