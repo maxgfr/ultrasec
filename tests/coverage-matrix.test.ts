@@ -188,6 +188,60 @@ describe("V7 / A09 — logging coverage is CWE-keyed", () => {
   });
 });
 
+// The four chapters that used to be structurally unreachable. `hits` counts
+// findings matching a chapter's `kinds`, so a chapter with none could never
+// leave "not examined" whatever the audit read — while the owasp-top10 pack in
+// the same file already mapped those exact CWEs. Same evidence, two answers.
+describe("V2 / V3 / V9 — the CWE-keyed chapters ASVS used to leave unreachable", () => {
+  const flips = (finding: Finding, id: string) => buildCoverage(dossier([finding]), enumeratedKindsOf([finding])).find((r) => r.id === id)!;
+
+  it("scores V2 examined from an authentication CWE", () => {
+    for (const cwe of ["CWE-287", "CWE-307", "CWE-347", "CWE-521", "CWE-798", "CWE-916"]) {
+      const row = flips(f({ category: "secret", cwe }), "V2");
+      expect(row.state, cwe).toBe("examined");
+      expect(row.hits, cwe).toBe(1);
+    }
+  });
+
+  it("scores V3 examined from a session CWE", () => {
+    for (const cwe of ["CWE-384", "CWE-613"]) {
+      expect(flips(f({ category: "authz", cwe }), "V3").state, cwe).toBe("examined");
+    }
+  });
+
+  it("scores V9 examined from a transport CWE", () => {
+    for (const cwe of ["CWE-295", "CWE-319"]) {
+      expect(flips(f({ category: "config", cwe }), "V9").state, cwe).toBe("examined");
+    }
+  });
+
+  it("agrees with the owasp-top10 pack on the same finding", () => {
+    // The defect this fixes, stated as a test: one finding, two standards, and
+    // the two must not contradict each other about whether it was looked at.
+    const hardcodedKey = f({ category: "secret", cwe: "CWE-798" });
+    const asvs = buildCoverage(dossier([hardcodedKey]), enumeratedKindsOf([hardcodedKey]));
+    const owasp = buildCoverage(dossier([hardcodedKey]), enumeratedKindsOf([hardcodedKey]), "owasp-top10");
+    expect(asvs.find((r) => r.id === "V2")!.state).toBe("examined");
+    expect(owasp.find((r) => r.id === "A07")!.state).toBe("examined");
+  });
+
+  it("leaves them unexamined when nothing of that shape is present", () => {
+    const sqli = f({ cwe: "CWE-89", sink: { file: "a.js", line: 1, kind: "sql" } });
+    const rows = buildCoverage(dossier([sqli]), enumeratedKindsOf([sqli]));
+    for (const id of ["V2", "V3", "V9"]) expect(rows.find((r) => r.id === id)!.state, id).toBe("unexamined");
+  });
+
+  it("keeps V1 unreachable on purpose — no finding shape proves a threat model", () => {
+    // Not an oversight: giving V1 a CWE would light the cell with nothing
+    // behind it. It is answered in CONTEXT.md and the narrative, and the
+    // "Answer these explicitly" section is what holds the author to that.
+    const everything = ["CWE-287", "CWE-613", "CWE-295", "CWE-798", "CWE-89"].map((cwe, i) => f({ id: `f${i}`, cwe }));
+    const rows = buildCoverage(dossier(everything), enumeratedKindsOf(everything));
+    expect(rows.find((r) => r.id === "V1")!.state).toBe("unexamined");
+    expect(rows.find((r) => r.id === "V1")!.judgment).toBe(true);
+  });
+});
+
 // ── Issue #10 (5): "flag not passed" vs "flag passed, zero results" ───────────
 describe("V7 advice distinguishes a missing flag from an empty pass", () => {
   const withPasses = (passes?: { logHygiene?: boolean }): Dossier => {

@@ -94,8 +94,23 @@ const RULES: NoiseRule[] = [
       const shape = f.sink?.file ? shapeOf(repo, f.sink.file, f.atCommit) : undefined;
       return `de-prioritized: ${f.sink?.file} is a ${shape?.label ?? "ciphertext-by-design file"}, where ciphertext is the point of the file. Check that the ENCRYPTION KEY is not also committed, and that this really is the format it claims.`;
     },
-    // Secret findings only: a SAST hit inside a SealedSecret is a different claim.
-    matches: (f, repo) => f.category === "secret" && !!f.sink?.file && !!shapeOf(repo, f.sink.file, f.atCommit),
+    // Keyed on the CLAIM, not on which tool made it.
+    //
+    // This used to read `f.category === "secret"`, on the reasoning that a SAST
+    // hit inside a SealedSecret is a different claim. The reasoning is right;
+    // the test was not. `category` records HOW a finding was surfaced, so the
+    // same "there is a credential on this line" claim arrives as `secret` from
+    // gitleaks and as `sast` from semgrep's own secret rules — and on a real
+    // audit 7 semgrep CWE-798 hits on `*.sealed-secret.yaml` therefore stayed
+    // at HIGH while the 34 gitleaks hits on the same files were demoted. Same
+    // files, same claim, opposite treatment, and the seven were counted as
+    // unread candidates in the report.
+    //
+    // CWE-798 (use of hard-coded credentials) is what makes it a secret claim.
+    // A SAST finding on a sealed-secret file that claims something ELSE — a
+    // malformed manifest, a bad apiVersion — carries a different CWE and is
+    // still left at full severity, which is what the original note meant.
+    matches: (f, repo) => (f.category === "secret" || f.cwe?.toUpperCase() === "CWE-798") && !!f.sink?.file && !!shapeOf(repo, f.sink.file, f.atCommit),
   },
   {
     id: "test-only-path",

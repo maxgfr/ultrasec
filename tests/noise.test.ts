@@ -62,6 +62,74 @@ describe("test-only-path", () => {
   });
 });
 
+describe("encrypted-at-rest", () => {
+  // `encryptedShapeOf` matches the path suffix before it reads content, so a
+  // file that plainly says what it is classifies even when it is not on disk.
+  const sealed = "env/prod/templates/www.sealed-secret.yaml";
+
+  it("demotes a gitleaks-style secret hit inside a SealedSecret", () => {
+    expect(classifyNoise(finding({ category: "secret", severity: "high", sink: { file: sealed, line: 9 } }), FIXTURE)).toBe("encrypted-at-rest");
+  });
+
+  it("demotes the SAME claim when a SAST scanner made it", () => {
+    // The defect this fixes. `category` records HOW a finding was surfaced, so
+    // "there is a credential on this line" arrives as `secret` from gitleaks
+    // and as `sast` from semgrep's own secret rules. Keying the rule on the
+    // category left 7 semgrep CWE-798 hits on `*.sealed-secret.yaml` at HIGH
+    // while the 34 gitleaks hits on the same files were demoted — and the
+    // seven were then counted as unread candidates in the report.
+    const semgrep = finding({
+      category: "sast",
+      cwe: "CWE-798",
+      tool: "semgrep",
+      severity: "high",
+      title: "generic.secrets.security.detected-generic-secret.detected-generic-secret",
+      sink: { file: sealed, line: 9 },
+    });
+    expect(classifyNoise(semgrep, FIXTURE)).toBe("encrypted-at-rest");
+  });
+
+  it("is case-insensitive on the CWE", () => {
+    expect(classifyNoise(finding({ category: "sast", cwe: "cwe-798", sink: { file: sealed, line: 1 } }), FIXTURE)).toBe("encrypted-at-rest");
+  });
+
+  it("leaves a SAST finding that claims something ELSE at full severity", () => {
+    // The original note was right about this: a rule firing on a sealed-secret
+    // file that is not making a credential claim — a malformed manifest, a bad
+    // apiVersion — is a different finding and keeps its severity.
+    const malformed = finding({ category: "sast", cwe: "CWE-1188", sink: { file: sealed, line: 3 } });
+    expect(classifyNoise(malformed, FIXTURE)).toBeUndefined();
+  });
+
+  it("does NOT demote the same claim in an ordinary file", () => {
+    expect(classifyNoise(finding({ category: "sast", cwe: "CWE-798", sink: { file: "docker-compose.yml", line: 103 } }), FIXTURE)).toBeUndefined();
+    expect(classifyNoise(finding({ category: "secret", sink: { file: "docker-compose.yml", line: 103 } }), FIXTURE)).toBeUndefined();
+  });
+
+  it("covers the other formats recognised by their filename", () => {
+    for (const p of ["secrets.sops.yaml", "config.enc.json", "app.sealedsecret.yaml"]) {
+      expect(classifyNoise(finding({ category: "secret", sink: { file: p, line: 1 } }), FIXTURE), p).toBe("encrypted-at-rest");
+    }
+  });
+
+  it("covers the formats recognised only by a content marker", () => {
+    // Ansible Vault and age announce themselves in the bytes, not the name, so
+    // these need a file on disk — the other branch of `encryptedShapeOf`.
+    const repo = mkdtempSync(join(tmpdir(), "ultrasec-noise-"));
+    writeFileSync(join(repo, "vault.yml"), "$ANSIBLE_VAULT;1.1;AES256\n3363396...\n");
+    writeFileSync(join(repo, "creds.txt"), "-----BEGIN AGE ENCRYPTED FILE-----\nYWdlLWVu\n");
+    writeFileSync(join(repo, "plain.yml"), "password: hunter2\n");
+    for (const p of ["vault.yml", "creds.txt"]) {
+      expect(classifyNoise(finding({ category: "secret", sink: { file: p, line: 1 } }), repo), p).toBe("encrypted-at-rest");
+    }
+    expect(classifyNoise(finding({ category: "secret", sink: { file: "plain.yml", line: 1 } }), repo)).toBeUndefined();
+  });
+
+  it("proposes standard-behavior as the ground, never a verdict", () => {
+    expect(NOISE_GROUND["encrypted-at-rest"]).toBe("standard-behavior");
+  });
+});
+
 describe("vendored-artifact", () => {
   it("demotes an entropy hit inside a vendored tool bundle", () => {
     const f = finding({ category: "secret", severity: "high", sink: { file: ".yarn/releases/yarn-3.8.7.cjs", line: 40 } });

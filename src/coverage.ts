@@ -63,13 +63,42 @@ export interface StandardPack {
  */
 const ASVS_CATEGORIES: AsvsCategory[] = [
   {
+    // Deliberately kind-less, and the only chapter that stays so. There is no
+    // finding shape that proves a threat model was built — inventing a CWE for
+    // it would light the cell without anything behind it, which is precisely
+    // the coverage theatre this file exists to prevent. V1 is answered in
+    // prose: CONTEXT.md, and `positivePatterns` in the narrative. The
+    // "Answer these explicitly" section below is what holds the author to it.
     id: "V1",
     title: "Architecture & threat modelling",
     judgment: true,
     hint: "Did CONTEXT.md establish a trust model and a threat model, or was severity rated in the abstract?",
   },
-  { id: "V2", title: "Authentication", judgment: true, hint: "Password/OTP/session-establishment paths read? Credential comparison constant-time?" },
-  { id: "V3", title: "Session management", judgment: true, hint: "Token lifetime, rotation on privilege change, invalidation on logout." },
+  {
+    id: "V2",
+    title: "Authentication",
+    // Keyed on the same CWEs OWASP A07 and A02 already claim, because leaving
+    // this chapter kind-less made the matrix contradict itself: `hits` counts
+    // findings whose category/sink.kind/cwe matches `kinds`, so a chapter with
+    // no kinds can NEVER leave "not examined" — no matter how much of it the
+    // audit actually read. On a real run a hardcoded JWT signing key (CWE-798)
+    // and a committed admin password hash (CWE-916) lit A07 under
+    // `--standard owasp-top10` and nothing at all under the default ASVS pack.
+    // Same evidence, same audit, two answers.
+    kinds: ["CWE-287", "CWE-307", "CWE-347", "CWE-521", "CWE-798", "CWE-916"],
+    judgment: true,
+    hint: "Password/OTP/session-establishment paths read? Credential comparison constant-time?",
+  },
+  {
+    id: "V3",
+    title: "Session management",
+    // CWE-384 session fixation, CWE-613 insufficient expiration — the two the
+    // engine and an auditor can both actually cite. Rotation on privilege
+    // change and invalidation on logout stay judgment, hence the hint.
+    kinds: ["CWE-384", "CWE-613"],
+    judgment: true,
+    hint: "Token lifetime, rotation on privilege change, invalidation on logout.",
+  },
   {
     id: "V4",
     title: "Access control",
@@ -112,7 +141,16 @@ const ASVS_CATEGORIES: AsvsCategory[] = [
     judgment: true,
     hint: "Where personal data goes, how long it stays, whether pseudonymisation is reversible.",
   },
-  { id: "V9", title: "Communications", judgment: true, hint: "TLS verification disabled anywhere? Certificate pinning claims that do not hold?" },
+  {
+    id: "V9",
+    title: "Communications",
+    // CWE-295 (certificate validation disabled) is already A02's under
+    // `owasp-top10`; CWE-319 (cleartext transmission) is the other half an
+    // auditor files here. Pinning claims stay judgment.
+    kinds: ["CWE-295", "CWE-319"],
+    judgment: true,
+    hint: "TLS verification disabled anywhere? Certificate pinning claims that do not hold?",
+  },
   {
     // ASVS 11.1.4 is anti-automation and resource consumption, so this chapter —
     // not V13 — is where an unbounded similarity/distance call and a route with

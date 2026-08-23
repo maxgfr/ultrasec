@@ -20417,8 +20417,23 @@ var RULES17 = [
       const shape = f.sink?.file ? shapeOf(repo, f.sink.file, f.atCommit) : void 0;
       return `de-prioritized: ${f.sink?.file} is a ${shape?.label ?? "ciphertext-by-design file"}, where ciphertext is the point of the file. Check that the ENCRYPTION KEY is not also committed, and that this really is the format it claims.`;
     },
-    // Secret findings only: a SAST hit inside a SealedSecret is a different claim.
-    matches: (f, repo) => f.category === "secret" && !!f.sink?.file && !!shapeOf(repo, f.sink.file, f.atCommit)
+    // Keyed on the CLAIM, not on which tool made it.
+    //
+    // This used to read `f.category === "secret"`, on the reasoning that a SAST
+    // hit inside a SealedSecret is a different claim. The reasoning is right;
+    // the test was not. `category` records HOW a finding was surfaced, so the
+    // same "there is a credential on this line" claim arrives as `secret` from
+    // gitleaks and as `sast` from semgrep's own secret rules — and on a real
+    // audit 7 semgrep CWE-798 hits on `*.sealed-secret.yaml` therefore stayed
+    // at HIGH while the 34 gitleaks hits on the same files were demoted. Same
+    // files, same claim, opposite treatment, and the seven were counted as
+    // unread candidates in the report.
+    //
+    // CWE-798 (use of hard-coded credentials) is what makes it a secret claim.
+    // A SAST finding on a sealed-secret file that claims something ELSE — a
+    // malformed manifest, a bad apiVersion — carries a different CWE and is
+    // still left at full severity, which is what the original note meant.
+    matches: (f, repo) => (f.category === "secret" || f.cwe?.toUpperCase() === "CWE-798") && !!f.sink?.file && !!shapeOf(repo, f.sink.file, f.atCommit)
   },
   {
     id: "test-only-path",
@@ -28964,13 +28979,42 @@ import { join as join65, resolve as resolve27 } from "path";
 // src/coverage.ts
 var ASVS_CATEGORIES = [
   {
+    // Deliberately kind-less, and the only chapter that stays so. There is no
+    // finding shape that proves a threat model was built — inventing a CWE for
+    // it would light the cell without anything behind it, which is precisely
+    // the coverage theatre this file exists to prevent. V1 is answered in
+    // prose: CONTEXT.md, and `positivePatterns` in the narrative. The
+    // "Answer these explicitly" section below is what holds the author to it.
     id: "V1",
     title: "Architecture & threat modelling",
     judgment: true,
     hint: "Did CONTEXT.md establish a trust model and a threat model, or was severity rated in the abstract?"
   },
-  { id: "V2", title: "Authentication", judgment: true, hint: "Password/OTP/session-establishment paths read? Credential comparison constant-time?" },
-  { id: "V3", title: "Session management", judgment: true, hint: "Token lifetime, rotation on privilege change, invalidation on logout." },
+  {
+    id: "V2",
+    title: "Authentication",
+    // Keyed on the same CWEs OWASP A07 and A02 already claim, because leaving
+    // this chapter kind-less made the matrix contradict itself: `hits` counts
+    // findings whose category/sink.kind/cwe matches `kinds`, so a chapter with
+    // no kinds can NEVER leave "not examined" — no matter how much of it the
+    // audit actually read. On a real run a hardcoded JWT signing key (CWE-798)
+    // and a committed admin password hash (CWE-916) lit A07 under
+    // `--standard owasp-top10` and nothing at all under the default ASVS pack.
+    // Same evidence, same audit, two answers.
+    kinds: ["CWE-287", "CWE-307", "CWE-347", "CWE-521", "CWE-798", "CWE-916"],
+    judgment: true,
+    hint: "Password/OTP/session-establishment paths read? Credential comparison constant-time?"
+  },
+  {
+    id: "V3",
+    title: "Session management",
+    // CWE-384 session fixation, CWE-613 insufficient expiration — the two the
+    // engine and an auditor can both actually cite. Rotation on privilege
+    // change and invalidation on logout stay judgment, hence the hint.
+    kinds: ["CWE-384", "CWE-613"],
+    judgment: true,
+    hint: "Token lifetime, rotation on privilege change, invalidation on logout."
+  },
   {
     id: "V4",
     title: "Access control",
@@ -29012,7 +29056,16 @@ var ASVS_CATEGORIES = [
     judgment: true,
     hint: "Where personal data goes, how long it stays, whether pseudonymisation is reversible."
   },
-  { id: "V9", title: "Communications", judgment: true, hint: "TLS verification disabled anywhere? Certificate pinning claims that do not hold?" },
+  {
+    id: "V9",
+    title: "Communications",
+    // CWE-295 (certificate validation disabled) is already A02's under
+    // `owasp-top10`; CWE-319 (cleartext transmission) is the other half an
+    // auditor files here. Pinning claims stay judgment.
+    kinds: ["CWE-295", "CWE-319"],
+    judgment: true,
+    hint: "TLS verification disabled anywhere? Certificate pinning claims that do not hold?"
+  },
   {
     // ASVS 11.1.4 is anti-automation and resource consumption, so this chapter —
     // not V13 — is where an unbounded similarity/distance call and a route with
