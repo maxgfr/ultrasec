@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.40.2](https://github.com/maxgfr/ultrasec/compare/v1.40.1...v1.40.2) (2026-08-23)
+
+
+### Bug Fixes
+
+* **sinks:** a class with no source to trace must not be gated on finding one ([980773a](https://github.com/maxgfr/ultrasec/commit/980773a128df6a0e5885031424d305b5ec8adaab))
+
 ## [1.40.1](https://github.com/maxgfr/ultrasec/compare/v1.40.0...v1.40.1) (2026-08-23)
 
 
