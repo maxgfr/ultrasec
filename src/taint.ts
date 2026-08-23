@@ -336,12 +336,23 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
         // rating on a call no runtime can make. A hop between languages is
         // refused outright rather than link-checked, because no import relation
         // could make it true either.
-        const ambiguous = Array.isArray(defs) && defs.length > 1;
+        //
+        // A UNIQUE NAME IS NOT A LINK. Gating on ambiguity was the wrong
+        // question: what makes a hop real is that the caller reaches the
+        // definition, and being the only `response` in the repo says nothing
+        // about that. The second audit of the same monorepo caught it —
+        // `export-elasticsearch/controllers/glossary.ts` "calls response()"
+        // resolved into `alert-cli/dares/scrapping.ts`, two sibling deployables
+        // whose package.json files never name each other. 21 of its cross-package
+        // paths were that shape, none reachable. So the link check is asked of
+        // EVERY cross-file hop now, ambiguous or not; `linksTo` keeps its own
+        // escape hatch for a caller with no imports recorded, which is what
+        // preserves recall where the engine could not see the edges.
         const callerList = graph.callersBySymbol?.[fr.sym];
         for (const caller of Array.isArray(callerList) ? callerList : []) {
           if (caller.file === fr.file) continue;
           if (!sameLanguage(caller.file, fr.file)) continue;
-          if (ambiguous && !linksTo(caller.file, fr.file)) continue;
+          if (!linksTo(caller.file, fr.file)) continue;
           const key = `${caller.file}#${caller.symbol ?? caller.line}`;
           if (visited.has(key)) continue;
           visited.add(key);

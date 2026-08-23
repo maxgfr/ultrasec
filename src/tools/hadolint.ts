@@ -20,6 +20,11 @@ export const hadolint: ToolAdapter = {
   name: "hadolint",
   category: "config",
   dockerImage: "hadolint/hadolint:latest",
+  // The image's entrypoint is a shell, not hadolint, so an argv starting with a
+  // flag is taken as the executable: every docker run of this adapter died with
+  // `exec: "--format": executable file not found in $PATH`. It surfaced only as
+  // a bare "Command failed: docker run …" until tool stderr was captured.
+  dockerEntrypointIsTool: false,
   argv: () => ["--format", "json", "--no-fail"],
   enumerate: (repo) =>
     walk(repo)
