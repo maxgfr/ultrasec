@@ -84,12 +84,74 @@ export function buildGraph(scan: RepoScan): Graph {
   const edgeMap = new Map<string, Edge>();
   const resolve = buildFileResolver(scan);
 
+  // Pass 1: import edges only. Call edges need the whole import graph to be
+  // known before any of them can be judged (see importReaches), so they wait.
+  const importsOf = new Map<string, Set<string>>();
   for (const f of scan.files) {
-    // Import edges (resolved to repo files only).
     for (const imp of f.imports) {
       const to = resolve(f.rel, imp.spec);
-      if (to && to !== f.rel) add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
+      if (!to || to === f.rel) continue;
+      add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
+      let set = importsOf.get(f.rel);
+      if (!set) importsOf.set(f.rel, (set = new Set()));
+      set.add(to);
     }
+  }
+
+  /**
+   * Can `from` reach `to` by following imports?
+   *
+   * A call edge used to need only a unique exported name and a shared language.
+   * Uniqueness is not reachability: in a pnpm/lerna monorepo the sole `response`
+   * lives in `alert-cli/dares/scrapping.ts`, and every other package calling
+   * something named `response` was linked to it — `export-elasticsearch`'s
+   * controllers among them, though the two package.json files never name each
+   * other. The second audit of that repo counted 21 cross-package paths of this
+   * shape, none of them reachable by any runtime.
+   *
+   * Direct-import equality is too strict to replace it: barrels are ordinary, and
+   * a file importing `utils/index.ts` really does call into `utils/name.ts`. So
+   * the question asked is transitive over import edges, bounded — deep enough to
+   * cross the barrels a package puts in front of itself, not so deep that a
+   * monorepo's shared/ tier joins everything to everything.
+   *
+   * A file whose imports RESOLVED to nothing stays permissive, the rule
+   * `requireModule` already follows: absent data means "could not see", not
+   * "none". Keying that on resolved edges rather than on written import lines is
+   * what makes the gate safe. `pages/api/storage/index.ts` writes five imports —
+   * `formidable`, `next`, `fs`, and two `src/lib/...` specifiers that are
+   * tsconfig `baseUrl` aliases the resolver does not map — so it has plenty of
+   * import lines and zero resolved edges. Judging it on the lines would have cut
+   * its real call into `lib/secu.ts:31`, the SVG filter a human audit confirmed.
+   * Judging it on the edges keeps it: the engine could not see, so it does not
+   * pretend to have looked.
+   */
+  const IMPORT_REACH_DEPTH = 8;
+  const reachCache = new Map<string, Set<string>>();
+  const importReaches = (from: string, to: string): boolean => {
+    let seen = reachCache.get(from);
+    if (!seen) {
+      seen = new Set<string>();
+      let frontier = [from];
+      for (let d = 0; d < IMPORT_REACH_DEPTH && frontier.length; d++) {
+        const next: string[] = [];
+        for (const node of frontier) {
+          for (const nb of importsOf.get(node) ?? []) {
+            if (seen.has(nb)) continue;
+            seen.add(nb);
+            next.push(nb);
+          }
+        }
+        frontier = next;
+      }
+      reachCache.set(from, seen);
+    }
+    return seen.has(to);
+  };
+
+  // Pass 2: call edges.
+  for (const f of scan.files) {
+    const blind = (importsOf.get(f.rel)?.size ?? 0) === 0;
     for (const c of f.calls) {
       // Call edges: a call to a uniquely-defined exported symbol in another file.
       const targets = defs.get(c.callee);
@@ -111,6 +173,8 @@ export function buildGraph(scan: RepoScan): Graph {
       // an FFI binding — none of which is a `call` edge, and all of which the
       // catalog already models as sinks.
       if (!sameLanguage(f.rel, to)) continue;
+      // …and the caller has to be able to reach it. See importReaches.
+      if (!blind && !importReaches(f.rel, to)) continue;
       // The caller attribution uses the SAME endLine-aware enclosing helper the raw
       // caller index uses for its hops (enclosingSymbolName), so a call edge's
       // fromSymbol matches the caller-index site for that same {file, line}.

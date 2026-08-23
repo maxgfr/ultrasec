@@ -188,3 +188,69 @@ describe("runGraph — --run resolves from the run's dossier (B2)", () => {
     expect(code).toBe(2);
   });
 });
+
+/**
+ * A unique exported name is not evidence that a caller can reach it.
+ *
+ * Found by re-auditing a pnpm/lerna monorepo: `export-elasticsearch` "called"
+ * `alert-cli`'s sole `response`, and the frontend's `nps/service.ts` "called"
+ * `dila-api-client`'s sole `fetch` — 21 cross-package paths in one repo, from
+ * packages whose manifests never name each other. Both survived the ambiguity
+ * gate precisely BECAUSE the name was unique.
+ */
+describe("buildGraph — a call edge needs reachability, not just a unique name", () => {
+  let dir = "";
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "ultrasec-reach-"));
+    // Package A: imports its own barrel, calls `response()` and `helper()`.
+    writeFileSync(join(dir, "a-main.js"), `import { helper } from "./a-barrel.js";\nexport function run(x) { return response(helper(x)); }\n`);
+    // The barrel re-exports the real helper: reachable transitively, not directly.
+    // `export *` rather than the named form on purpose — a named re-export also
+    // registers `helper` as a definition in the barrel, and a symbol with two
+    // definitions is dropped by the uniqueness gate before reachability is ever
+    // asked. That gate is not what this test is about.
+    writeFileSync(join(dir, "a-barrel.js"), `export * from "./a-helper.js";\n`);
+    writeFileSync(join(dir, "a-helper.js"), `export function helper(v) { return v; }\n`);
+    // Package B: the ONLY definition of `response` in the repo. A never imports it.
+    writeFileSync(join(dir, "b-unrelated.js"), `export function response(v) { return fetch(v); }\n`);
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("drops the call edge into a package the caller cannot reach", () => {
+    const graph = buildGraph(scanRepo(dir));
+    const e = graph.edges.find((x) => x.from === "a-main.js" && x.to === "b-unrelated.js");
+    expect(e).toBeUndefined();
+  });
+
+  it("keeps a call edge reached through a barrel (transitive import, not direct)", () => {
+    const graph = buildGraph(scanRepo(dir));
+    const e = graph.edges.find((x) => x.from === "a-main.js" && x.to === "a-helper.js" && x.kind === "call");
+    expect(e).toBeTruthy();
+    expect(e!.toSymbol).toBe("helper");
+  });
+});
+
+/**
+ * The escape hatch keys on RESOLVED edges, not on written import lines. A file
+ * whose specifiers are all tsconfig `baseUrl` aliases the resolver cannot map
+ * has imports and zero edges — the engine could not see, so it must not pretend
+ * to have looked. Judging that file on its import LINES cut a real call into a
+ * confirmed finding (`lib/secu.ts`, an SVG filter) on the audited repo.
+ */
+describe("buildGraph — unresolvable imports stay permissive", () => {
+  let dir = "";
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), "ultrasec-blind-"));
+    // Every specifier is an alias or a package: nothing resolves to a repo file.
+    writeFileSync(join(dir, "handler.js"), `import { isSafe } from "src/lib/secu";\nimport fs from "fs";\nexport function upload(req) { return isSafe(req.body); }\n`);
+    writeFileSync(join(dir, "secu.js"), `export function isSafe(p) { return readFileSync(p); }\n`);
+  });
+  afterAll(() => rmSync(dir, { recursive: true, force: true }));
+
+  it("keeps the call edge when no import resolved at all", () => {
+    const graph = buildGraph(scanRepo(dir));
+    const e = graph.edges.find((x) => x.from === "handler.js" && x.to === "secu.js" && x.kind === "call");
+    expect(e).toBeTruthy();
+    expect(e!.toSymbol).toBe("isSafe");
+  });
+});

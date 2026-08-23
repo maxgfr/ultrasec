@@ -136,16 +136,42 @@ function exec(name: string, args: string[], cwd: string, useStderr = false): { s
       if (res.error) return { stdout: "", failed: true, err: res.error.message };
       return { stdout: String(res.stderr ?? ""), failed: false };
     }
-    const stdout = execFileSync(name, args, { ...capture, stdio: ["ignore", "pipe", "ignore"] });
+    // stderr is PIPED, not ignored: on the happy path it is discarded either
+    // way, but when the tool fails it holds the only thing that tells a user
+    // what to do. Without it `gosec` and `hadolint` failing on a real repo
+    // reported "Command failed: docker run --rm --pull always -v …" and nothing
+    // else — the command line, which the user already knew, and no reason.
+    const stdout = execFileSync(name, args, { ...capture, stdio: ["ignore", "pipe", "pipe"] });
     return { stdout, failed: false };
   } catch (e: unknown) {
     // execFileSync throws on non-zero exit — but scanners exit non-zero WHEN they
     // find issues, and still print JSON to stdout. Recover it.
-    const err = e as { stdout?: Buffer | string; message?: string };
+    const err = e as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
     const stdout = err.stdout ? err.stdout.toString() : "";
     if (stdout.trim()) return { stdout, failed: false };
-    return { stdout: "", failed: true, err: err.message };
+    return { stdout: "", failed: true, err: withDiagnostic(err.message, err.stderr) };
   }
+}
+
+/** Longest single stderr line kept in a failure note. */
+const DIAG_MAX = 300;
+
+/**
+ * Attach the tool's own diagnostic to the generic "Command failed" message.
+ *
+ * Takes the LAST non-empty stderr line: scanners print progress and warnings
+ * first and the reason they gave up last, so the tail is the actionable part.
+ */
+function withDiagnostic(message: string | undefined, stderr: Buffer | string | undefined): string {
+  const base = message ?? "no output";
+  const lines = String(stderr ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const last = lines[lines.length - 1];
+  if (!last) return base;
+  const diag = last.length > DIAG_MAX ? `${last.slice(0, DIAG_MAX)}…` : last;
+  return `${base} — ${diag}`;
 }
 
 /**

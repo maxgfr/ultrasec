@@ -1,6 +1,7 @@
 import type { Finding } from "../types.js";
 import type { ToolAdapter } from "./run.js";
 import { makeToolFinding, normalizeSeverity } from "./normalize.js";
+import { walk } from "../walk.js";
 
 // gosec → Go security checker, stdlib-aware in ways generic SAST is not:
 // `math/rand` where crypto/rand is required, `tls.Config{InsecureSkipVerify:true}`,
@@ -12,6 +13,11 @@ export const gosec: ToolAdapter = {
   name: "gosec",
   category: "sast",
   dockerImage: "ghcr.io/securego/gosec:latest",
+  // gosec exits 1 with EMPTY stdout and EMPTY stderr on a repo that has no Go —
+  // no output to parse and no diagnostic to report, so the run surfaced as an
+  // unexplained failure on every non-Go project. Ask the question `cppcheck`
+  // already asks instead, and skip cleanly.
+  applicable: (repo) => (walk(repo).some((f) => /\.go$/i.test(f.rel)) ? null : "no Go sources"),
   argv: () => ["-fmt", "json", "-quiet", "-no-fail", "./..."],
   parse(raw): Finding[] {
     const data = JSON.parse(raw || "{}") as any;

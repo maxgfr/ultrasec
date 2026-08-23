@@ -4,6 +4,7 @@ import { localDefNames } from "./scan.js";
 import { readText } from "./walk.js";
 import { langForFile } from "./lang.js";
 import { findSinks, findSources } from "./catalog.js";
+import { isTestPath } from "./vendor/codeindex-engine.mjs";
 import { byStr } from "./util.js";
 import { coerceRows, type DroppedRow, type ParseResult } from "./apply-parse.js";
 
@@ -101,7 +102,22 @@ export function buildAssumptionWorklist(scan: RepoScan): AssumptionItem[] {
     }
   }
 
-  return items.sort((a, b) => b.signals.sources + b.signals.sinks - (a.signals.sources + a.signals.sinks) || byStr(a.at, b.at)).slice(0, MAX_UNITS);
+  // Shipped code first, test harness last.
+  //
+  // Ranking on source+sink density alone puts jest files near the top: a test
+  // reads fixtures (sources) and calls the very operation it exercises (sinks),
+  // so it scores exactly like the code it covers. On the audited repo that spent
+  // 29 of 120 units — a quarter of the agent's budget — recording what a mocked
+  // `sendEvent` guarantees, which is nothing anyone ships.
+  //
+  // Sorted last rather than dropped: `taint` excludes test paths because a test
+  // is not an ENTRY POINT and a wrong answer there is a false positive, but an
+  // assumption is understanding, and a repo with room left in the budget loses
+  // nothing by reading its harness. A test-only repo still gets a worklist.
+  const testLast = (i: AssumptionItem): number => (isTestPath(i.file) ? 1 : 0);
+  return items
+    .sort((a, b) => testLast(a) - testLast(b) || b.signals.sources + b.signals.sinks - (a.signals.sources + a.signals.sinks) || byStr(a.at, b.at))
+    .slice(0, MAX_UNITS);
 }
 
 export function renderAssumptionsMd(items: AssumptionItem[], context?: string): string {
