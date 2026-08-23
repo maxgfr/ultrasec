@@ -73,6 +73,11 @@ function mergeCluster(group: Finding[]): Finding {
   const cve = group.map((f) => f.cve).find(Boolean) ?? pickCve(aliases);
   const cwe = group.map((f) => f.cwe).find(Boolean);
   const verified = group.some((f) => f.verified === true);
+  // The remediation survives the merge even when the representative is the one
+  // scanner that didn't name it: grype outranks osv-scanner on severity often
+  // enough that dropping to `...rep` alone loses the fixed version the cluster
+  // demonstrably knows.
+  const fixedVersion = group.map((f) => f.fixedVersion).find(Boolean);
 
   const out: Finding = {
     ...rep,
@@ -85,6 +90,7 @@ function mergeCluster(group: Finding[]): Finding {
   if (aliases.length) out.aliases = aliases;
   if (cve) out.cve = cve;
   if (cwe) out.cwe = cwe;
+  if (fixedVersion) out.fixedVersion = fixedVersion;
   if (verified) out.verified = true;
 
   // dep clusters can span several installed versions / lockfile paths of the

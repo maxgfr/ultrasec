@@ -14,6 +14,24 @@ finding whose `sources[]` names all three) and ranks by a composite `risk` = sev
 CISA KEV. **Work the list in `risk` order and stop when the rest are below your bar** — that is
 what the ranking is for.
 
+> **Never open a dossier per CVE.** The grounding packet exists to show you code along a path;
+> an advisory has no path, and the question is not "does this code do something dangerous" but
+> "does my deployment reach it". A per-CVE fan-out spends a subagent on something the ranking
+> already answered — on one monorepo that was 190 of 882 open candidates, a quarter of the
+> adjudication budget bought with nothing to read. Use `--surface deps` to keep this half out of
+> `paths`, `triage` and the `orchestrate` fan-out, and work it from the report instead.
+
+### The report already groups them
+
+`render` rolls the advisories up **one row per package** — the unit you actually upgrade — with
+the installed versions, the advisory count, the highest fixed version across the cluster, the
+KEV/EPSS/dev-only signals, and every lockfile the correlator merged. `minimatch` with seven
+advisories is one row and one upgrade, not seven decisions. Open the row's fold for the individual
+CVEs; `findings.json` still holds each one under its own id.
+
+Leaving the tail `open` is a legitimate outcome, and the render gate does not count it: that gate
+only fires on unread HIGH/CRITICAL candidates in code you wrote.
+
 ### The prioritization ladder
 
 The composite score encodes a CISA-SSVC-style ordering: **exploitation status first,

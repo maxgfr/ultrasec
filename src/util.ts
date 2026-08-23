@@ -54,6 +54,10 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "strict",
   "no-context",
   "compact",
+  // `dossier` only — the compact batch packet.
+  "brief",
+  // `render` only — acknowledges an incomplete audit and exits 0.
+  "draft",
   "include-tests",
   "include-vendored",
   "re-verdict",

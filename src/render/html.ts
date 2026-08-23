@@ -4,6 +4,8 @@ import { compareWithinStatus } from "../rank.js";
 import { groupFamilies, collapsedCount, type Family } from "../family.js";
 import { buildCoverage, enumeratedKindsOf, type CoverageRow } from "../coverage.js";
 import { AI_DISCLAIMER, hasNarrativeContent, remediationMap } from "../narrative.js";
+import { groupAdvisoriesByPackage } from "../deps.js";
+import { bySurface, SURFACE_TITLE, unadjudicatedCode, type Surface } from "../surface.js";
 import { stageNotes } from "../util.js";
 
 // A single self-contained index.html — embedded CSS, no external assets, no JS
@@ -129,8 +131,25 @@ function findingHtml(f: Finding, rem?: Remediation, extra = ""): string {
       </article>`;
 }
 
-/** Where a finding is, for the compact tables. */
+/**
+ * Where a finding is, for the compact tables.
+ *
+ * `locations[]` takes precedence over the single cited anchor, and dropping it
+ * was a real asymmetry: the Markdown report has printed the merged instances
+ * since `locationsLine` landed, while the HTML showed only the representative.
+ * A CVE the correlator merged across three lockfiles rendered as one line, so a
+ * two-workspace monorepo looked like a one-workspace problem in one artifact
+ * and not the other. Capped at three, because a `pnpm-lock.yaml` advisory can
+ * carry a dozen and the cell is not the place to enumerate them.
+ */
+const AT_LOCATIONS = 3;
+
 function atOf(f: Finding): string {
+  if (f.locations?.length) {
+    const shown = f.locations.slice(0, AT_LOCATIONS).map((e) => `${e.version ? `v${e.version} ` : ""}${e.file}${e.line !== undefined ? `:${e.line}` : ""}`);
+    const rest = f.locations.length - shown.length;
+    return shown.join(" · ") + (rest > 0 ? ` +${rest} more` : "");
+  }
   const loc = f.sink ?? f.source ?? f.path?.[f.path.length - 1];
   return loc ? `${loc.file}:${loc.line}` : MISSING;
 }
@@ -163,18 +182,36 @@ function familyHtml(fam: Family, rem?: Remediation): string {
  * them — while the section header claimed the tier was printed so the
  * refutations could be checked.
  */
+function tableRowHtml(f: Finding, count = 1, members: readonly Finding[] = []): string {
+  const ground = f.brocard ? `<strong>${esc(f.brocard)}</strong>` : f.verdict ? esc(f.verdict) : "";
+  const note = stageNotes(f.message);
+  const why = [ground, note ? esc(note) : ""].filter(Boolean).join(" — ") || MISSING;
+  const tally = count > 1 ? ` <span class="chip">&times;${count}</span>` : "";
+  const where =
+    count > 1
+      ? `<details class="members"><summary>${count} location(s) under <code>${esc(atOf(f))}</code></summary><ul>${members
+          .map((m) => `<li>${esc(atOf(m))} <code>${esc(m.id)}</code></li>`)
+          .join("")}</ul></details>`
+      : esc(atOf(f));
+  return `<tr><td><span class="dot ${sevClass(f.severity)}"></span>${esc(sevLabel(f.severity))}</td><td>${esc(f.title)}${tally} <code>${esc(
+    f.id,
+  )}</code></td><td class="at">${where}</td><td class="prose">${why}</td></tr>`;
+}
+
 function tableHtml(findings: readonly Finding[]): string {
-  const rows = findings
-    .map((f) => {
-      const ground = f.brocard ? `<strong>${esc(f.brocard)}</strong>` : f.verdict ? esc(f.verdict) : "";
-      const note = stageNotes(f.message);
-      const why = [ground, note ? esc(note) : ""].filter(Boolean).join(" — ") || MISSING;
-      return `<tr><td><span class="dot ${sevClass(f.severity)}"></span>${esc(sevLabel(f.severity))}</td><td>${esc(f.title)} <code>${esc(
-        f.id,
-      )}</code></td><td class="at">${esc(atOf(f))}</td><td>${why}</td></tr>`;
-    })
-    .join("");
-  return `<div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  // Families collapse here too. The card tiers have folded repetitions since
+  // `family.ts` landed and the tables never did, which is why one audit's
+  // unadjudicated tier was 882 rows: 60 of them were the same SQL-injection
+  // shape under `targets/`, each restating the same sentence. The fold is
+  // presentation only — every member keeps its id, listed under the summary.
+  const grouped = groupFamilies(findings);
+  const rows = [
+    ...grouped.families.map((fam) => ({ at: fam.lead, html: tableRowHtml(fam.lead, fam.members.length, fam.members) })),
+    ...grouped.singles.map((f) => ({ at: f, html: tableRowHtml(f) })),
+  ].sort((a, b) => compareWithinStatus(a.at, b.at));
+  return `<div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody>${rows
+    .map((r) => r.html)
+    .join("")}</tbody></table></div>`;
 }
 
 /** One tier of findings: cards for the singles, one card per collapsed family. */
@@ -187,6 +224,163 @@ function tierHtml(findings: readonly Finding[], rem: Map<string, Remediation>): 
   const folded = collapsedCount(grouped);
   const note = folded ? `<p class="fold-note">${folded} repeated occurrence(s) folded into the cards above — open a card's fold for every location.</p>` : "";
   return cards.map((c) => c.html).join("\n") + note;
+}
+
+// ── The state of the audit, said before anything else ──────────────────────
+
+/**
+ * The banner a run gets when nobody read the code.
+ *
+ * The audit that prompted this rendered 882 candidates, 0 adjudicated, with an
+ * empty `why` column on every row — and said nothing about it. `SUMMARY.md`
+ * opened with "No confirmed issues", which is true and reads as a clean bill of
+ * health. It was a scan, not an audit, and the document that came out of it was
+ * indistinguishable from one.
+ *
+ * Dependency advisories left `open` do NOT trigger this: working the CVE list
+ * in risk order and stopping at the bar is the prescribed outcome
+ * (references/supply-chain.md). An unread cross-file flow is a different thing
+ * — deciding it means opening the file, and no one did.
+ */
+function bannerHtml(unread: readonly Finding[]): string {
+  if (!unread.length) return "";
+  const crit = unread.filter((f) => f.severity === "critical").length;
+  const high = unread.length - crit;
+  const tally = [crit ? `${crit} CRITICAL` : "", high ? `${high} HIGH` : ""].filter(Boolean).join(" and ");
+  return `
+  <section id="incomplete"><div class="banner">
+    <h2>Incomplete audit &mdash; ${unread.length} source-code candidate(s) were never read</h2>
+    <p class="prose">${esc(tally)} candidate(s) in this repository's own code still have no verdict. Nobody opened the files and followed the flows, so
+      this document is engine output, not an audit: absence of confirmed findings below means <em>undecided</em>, not <em>safe</em>.</p>
+    <p class="prose">Dependency advisories are worked as a ranked list and may legitimately stay open. Source-code candidates are read one at a time.</p>
+    <p class="next">ultrasec paths --run &lt;run&gt; --surface code &nbsp;&rarr;&nbsp; ultrasec dossier &lt;id&gt; --run &lt;run&gt; &nbsp;&rarr;&nbsp; ultrasec verify --apply verdicts.json --run &lt;run&gt;</p>
+  </div></section>`;
+}
+
+// ── The summary band, split by surface ─────────────────────────────────────
+
+/** A severity histogram as one proportional bar. */
+function barHtml(fs: readonly Finding[]): string {
+  if (!fs.length) return "";
+  const seg = SEVERITIES.map((sev) => ({ k: SEV_KEY[sev], n: fs.filter((f) => f.severity === sev).length }))
+    .filter((x) => x.n > 0)
+    .map((x) => `<span class="${x.k}" style="width:${((x.n / fs.length) * 100).toFixed(2)}%"></span>`)
+    .join("");
+  return `<div class="sf-bar">${seg}</div>`;
+}
+
+/** "0 confirmed - 3 needs human - 620 open - 0 refuted", omitting the zeroes. */
+function statusLine(fs: readonly Finding[]): string {
+  const n = (st: Finding["status"]) => fs.filter((f) => f.status === st).length;
+  const bits = [
+    n("confirmed") ? `${n("confirmed")} confirmed` : "",
+    n("needs-human") ? `${n("needs-human")} needs human` : "",
+    n("open") ? `${n("open")} undecided` : "",
+    n("dismissed") ? `${n("dismissed")} refuted` : "",
+  ].filter(Boolean);
+  return bits.join(" \u00b7 ") || "none";
+}
+
+/**
+ * Three cards instead of five severity tiles.
+ *
+ * The old band answered "how bad", which a reader cannot act on until they know
+ * "bad where". Splitting the counts by surface makes the first screen say the
+ * thing the flat table hid: this repo has N problems of its own, and M
+ * advisories about code it merely installs.
+ */
+function surfacesHtml(groups: Record<Surface, Finding[]>): string {
+  const card = (sf: Surface, lead: boolean, sub: string) => {
+    const fs = groups[sf];
+    return `<div class="sf${lead ? " lead" : ""}"><div class="sf-h"><span class="t">${esc(SURFACE_TITLE[sf])}</span><span class="n">${fs.length}</span></div>
+      ${barHtml(fs)}<div class="sf-sub">${esc(statusLine(fs))}</div><div class="sf-sub">${esc(sub)}</div></div>`;
+  };
+  return `<div class="surfaces">
+    ${card("code", true, "cross-file flows, missing guards, unsafe sinks - read one at a time")}
+    ${card("supply", false, "committed secrets, CI and IaC configuration - your repository")}
+    ${card("deps", false, "advisories on installed packages - triaged as a ranked list")}
+  </div>`;
+}
+
+// ── Attack surface: where an attacker gets in ──────────────────────────────
+
+/** The vulnerability class of a flow, preferring the auditor's name for it. */
+function classOf(f: Finding): string {
+  return f.vulnClass ?? f.sink?.kind ?? f.cwe ?? f.category;
+}
+
+/**
+ * One row per entry point, so the code section opens with the attacker's view.
+ *
+ * A list of 620 findings does not tell you that eleven of them enter through
+ * one Next.js API route. Grouping by `path[0].file` does, and it costs nothing
+ * to compute: it is the first hop of the chain the engine already enumerated.
+ * Only flows with a real path appear here — a standalone SAST hit has a
+ * location but no entry point, and inventing one for it would be a claim the
+ * engine never made.
+ */
+function entryPointsHtml(code: readonly Finding[]): string {
+  const flows = code.filter((f) => f.path && f.path.length > 0);
+  if (!flows.length) return "";
+  const byEntry = new Map<string, Finding[]>();
+  for (const f of flows) {
+    const at = f.path![0]!.file;
+    const list = byEntry.get(at);
+    if (list) list.push(f);
+    else byEntry.set(at, [f]);
+  }
+  const rows = [...byEntry.entries()]
+    .map(([file, fs]) => ({ file, fs, top: fs.slice().sort(compareWithinStatus)[0]! }))
+    .sort((a, b) => compareWithinStatus(a.top, b.top) || b.fs.length - a.fs.length)
+    .map(({ file, fs, top }) => {
+      const classes = [...new Set(fs.map(classOf))].sort();
+      return `<tr><td><span class="dot ${sevClass(top.severity)}"></span>${esc(sevLabel(top.severity))}</td><td class="at">${esc(file)}</td><td class="num">${
+        fs.length
+      }</td><td>${classes.map((c) => `<span class="chip">${esc(c)}</span>`).join(" ")}</td></tr>`;
+    })
+    .join("");
+  return `<details open><summary>Attack surface &mdash; ${byEntry.size} entry point(s) reaching a dangerous sink</summary>
+    <div class="tw"><table><thead><tr><th>worst</th><th>entry point</th><th>flows</th><th>classes</th></tr></thead><tbody>${rows}</tbody></table></div>
+  </details>`;
+}
+
+// ── Dependencies, rolled up per package ────────────────────────────────────
+
+function depsHtml(deps: readonly Finding[]): string {
+  if (!deps.length) return "";
+  const rows = groupAdvisoriesByPackage(deps)
+    .map((r) => {
+      const versions = r.versions.length ? r.versions.slice(0, 3).join(", ") + (r.versions.length > 3 ? ` +${r.versions.length - 3}` : "") : MISSING;
+      const sig = [
+        r.kev ? `<span class="kev">CISA KEV${r.kev > 1 ? ` \u00d7${r.kev}` : ""}</span>` : "",
+        typeof r.maxEpss === "number" ? `EPSS ${(r.maxEpss * 100).toFixed(1)}%` : "",
+        r.reachability === "toolchain" ? `<span class="tc">dev/toolchain</span>` : "",
+      ]
+        .filter(Boolean)
+        .join(" \u00b7 ");
+      const advisories = `<details class="members"><summary>${r.count} advisor${r.count === 1 ? "y" : "ies"}</summary><ul>${r.advisories
+        .map((a) => `<li>${esc(sevLabel(a.severity))} &mdash; ${esc(a.title)} <code>${esc(a.cve ?? a.id)}</code></li>`)
+        .join("")}</ul></details>`;
+      // Folded, never truncated. An advisory the correlator merged across three
+      // lockfiles must not render as a one-workspace problem — that asymmetry
+      // between the Markdown report and the HTML is the defect `atOf` had.
+      const locLabel = (l: { file: string; line?: number; version?: string }) =>
+        `${l.version ? `v${l.version} ` : ""}${l.file}${l.line !== undefined ? `:${l.line}` : ""}`;
+      const where = !r.locations.length
+        ? MISSING
+        : r.locations.length <= 2
+          ? esc(r.locations.map(locLabel).join(" · "))
+          : `<details class="members"><summary>${r.locations.length} location(s)</summary><ul>${r.locations
+              .map((l) => `<li>${esc(locLabel(l))}</li>`)
+              .join("")}</ul></details>`;
+      return `<tr><td><span class="dot ${sevClass(r.worst)}"></span>${esc(sevLabel(r.worst))}</td><td class="pkg">${esc(r.pkg)}</td><td class="num">${esc(
+        versions,
+      )}</td><td>${advisories}</td><td class="num">${r.fixedVersion ? esc(r.fixedVersion) : "<em>no fix published</em>"}</td><td class="sig">${
+        sig || MISSING
+      }</td><td class="at">${where}</td></tr>`;
+    })
+    .join("");
+  return `<div class="tw"><table><thead><tr><th>worst</th><th>package</th><th>installed</th><th>advisories</th><th>upgrade to</th><th>signals</th><th>where</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 
 // ── AI-authored narrative sections (presence-gated) ─────────────────────────
@@ -285,12 +479,18 @@ function coverageHtml(d: Dossier): string {
 
 // ── The registry rail ──────────────────────────────────────────────────────
 
-function railHtml(actionable: readonly Finding[]): string {
-  if (!actionable.length) return "";
+function railHtml(sections: readonly { id: string; label: string }[], actionable: readonly Finding[]): string {
+  if (!sections.length && !actionable.length) return "";
+  const nav = sections.map((x) => `<li><a href="#${esc(x.id)}"><span class="rt">${esc(x.label)}</span></a></li>`).join("");
   const items = actionable
     .map((f) => `<li><a href="#${esc(f.id)}"><span class="dot ${sevClass(f.severity)}"></span><span class="rt">${esc(f.title)}</span></a></li>`)
     .join("");
-  return `<nav class="rail" aria-label="Finding registry"><div class="rail-title">Registry</div><ol>${items}</ol></nav>`;
+  // Section anchors first, so the rail exists even on a run with nothing
+  // confirmed. It used to list only the actionable findings, which meant the
+  // page with the most to navigate — hundreds of undecided candidates — was the
+  // one page with no navigation at all.
+  const registry = items ? `<div class="rail-title">Registry</div><ol>${items}</ol>` : "";
+  return `<nav class="rail" aria-label="Report navigation"><div class="rail-title">Sections</div><ol>${nav}</ol>${registry}</nav>`;
 }
 
 const CSS = `
@@ -312,7 +512,7 @@ const CSS = `
   }
   *,*::before,*::after { box-sizing:border-box; }
   body { margin:0; background:var(--ground); color:var(--ink); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; }
-  .wrap { max-width:1180px; margin:0 auto; padding:0 24px 72px; }
+  .wrap { max-width:1600px; margin:0 auto; padding:0 24px 72px; }
   a { color:var(--accent); text-underline-offset:.15em; }
   code { font-family:var(--mono); font-size:.86em; background:var(--surface-alt); border:1px solid var(--rule-soft); border-radius:3px; padding:.08em .34em; }
   h1 { font-size:clamp(1.7rem,4vw,2.4rem); line-height:1.12; margin:0; letter-spacing:-.015em; }
@@ -324,7 +524,12 @@ const CSS = `
   .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); }
   .meta-line { font-family:var(--mono); font-size:12px; color:var(--ink-faint); display:flex; flex-wrap:wrap; gap:4px 22px; }
 
-  .cols { display:grid; grid-template-columns:230px minmax(0,1fr); gap:48px; align-items:start; padding-top:32px; }
+  .cols { display:grid; grid-template-columns:260px minmax(0,1fr); gap:56px; align-items:start; padding-top:32px; }
+  /* No rail to render -> ONE column. Without this the single <main> auto-places
+     into the first track and the whole report renders 260px wide. That is not a
+     hypothetical: a run with nothing confirmed and nothing needs-human has an
+     empty rail, which is exactly the run that most needs to be readable. */
+  .cols.norail { grid-template-columns:minmax(0,1fr); gap:0; }
   @media (max-width:939px) { .cols { grid-template-columns:1fr; gap:0; } .rail { display:none; } }
   .rail { position:sticky; top:20px; max-height:calc(100vh - 40px); overflow-y:auto; }
   .rail-title { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); padding-bottom:8px; border-bottom:1px solid var(--rule); margin-bottom:10px; }
@@ -333,7 +538,12 @@ const CSS = `
   .rail a:hover { background:var(--surface-alt); color:var(--ink); }
   .rail .rt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-  main { min-width:0; display:flex; flex-direction:column; gap:40px; }
+  /* Belt and braces with the .norail rule: pin <main> to the LAST track so
+     implicit placement can never put it in the rail's. */
+  main { min-width:0; grid-column:-2; display:flex; flex-direction:column; gap:40px; }
+  /* The page is wide so tables and flow diagrams can breathe; prose is not.
+     A 1500px line of running text is unreadable, so paragraphs keep a measure. */
+  .prose { max-width:78ch; }
   section { display:flex; flex-direction:column; gap:14px; scroll-margin-top:20px; }
 
   .band { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:6px; overflow:hidden; }
@@ -394,6 +604,30 @@ const CSS = `
   details.members > *:not(summary) { padding:0; }
 
   footer { margin-top:56px; padding-top:18px; border-top:1px solid var(--rule); font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); display:flex; flex-direction:column; gap:5px; }
+
+  .banner { background:var(--surface); border:2px solid var(--crit); border-radius:6px; padding:16px 20px; display:flex; flex-direction:column; gap:8px; }
+  .banner h2 { color:var(--crit); border-bottom:0; padding-bottom:0; font-size:1.15rem; }
+  .banner code { background:var(--ground); }
+  .banner .next { font-family:var(--mono); font-size:12px; color:var(--ink-soft); }
+
+  .surfaces { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; }
+  .sf { background:var(--surface); border:1px solid var(--rule); border-radius:6px; padding:14px 16px; display:flex; flex-direction:column; gap:8px; }
+  .sf.lead { border-color:var(--ink); }
+  .sf-h { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .sf-h .t { font-weight:700; font-size:.95rem; }
+  .sf-h .n { font-size:1.6rem; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; }
+  .sf-sub { font-family:var(--mono); font-size:11px; color:var(--ink-faint); }
+  .sf-bar { display:flex; height:6px; border-radius:3px; overflow:hidden; background:var(--surface-alt); }
+  .sf-bar span { display:block; }
+  .sf-bar .c{background:var(--crit)} .sf-bar .h{background:var(--high)} .sf-bar .m{background:var(--med)} .sf-bar .l{background:var(--low)} .sf-bar .i{background:var(--info)}
+
+  td.num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  td.pkg { font-family:var(--mono); font-weight:600; word-break:break-all; }
+  .sig { font-family:var(--mono); font-size:10.5px; }
+  .sig .kev { color:var(--crit); font-weight:700; }
+  .sig .tc { color:var(--ink-faint); }
+  details.members ul { margin:4px 0 0; padding-left:1.1em; font-size:12.5px; }
+  details.members li { margin:1px 0; }
 `;
 
 const AI_CSS = `
@@ -411,32 +645,71 @@ export function renderHtml(d: Dossier, narrative?: Narrative): string {
   const c = d.manifest.counts.bySeverity;
   const rem = remediationMap(narrative);
 
-  const byStatus = (s: Finding["status"]) => d.findings.filter((f) => f.status === s).sort(compareWithinStatus);
+  const byStatus = (st: Finding["status"]) => d.findings.filter((f) => f.status === st).sort(compareWithinStatus);
   const confirmed = byStatus("confirmed");
   const needsHuman = byStatus("needs-human");
   const open = byStatus("open");
   const dismissed = byStatus("dismissed");
 
-  // The rail lists what someone has to ACT on. Putting four hundred refuted
-  // candidates in a navigation aid is how the old page had no navigation at all.
-  const actionable = [...confirmed, ...needsHuman];
+  // The undecided tier splits by SURFACE. Decided findings do not: `confirmed`
+  // and `needs-human` are short and already the answer, so a reader wants them
+  // together regardless of where they came from.
+  const undecided = bySurface(open);
+  const unread = unadjudicatedCode(d.findings);
 
-  const tiles = SEVERITIES.map((s) => `<div class="tile ${SEV_KEY[s]}"><span class="n">${c[s] ?? 0}</span><span class="k">${s}</span></div>`).join("");
+  // HIGH and above earn a card with their cross-file flow drawn; the rest go in
+  // a table under a fold. On a real audit that is ~240 flows worth reading and
+  // ~380 worth knowing about, and printing both the same way is what made the
+  // first three screens unusable.
+  const loud = (fs: readonly Finding[]) => fs.filter((f) => f.severity === "critical" || f.severity === "high");
+  const quiet = (fs: readonly Finding[]) => fs.filter((f) => f.severity !== "critical" && f.severity !== "high");
+
+  const actionable = [...confirmed, ...needsHuman];
+  const railSections = [
+    ...(unread.length ? [{ id: "incomplete", label: "Incomplete audit" }] : []),
+    { id: "summary", label: "Summary" },
+    ...(confirmed.length ? [{ id: "confirmed", label: `Confirmed (${confirmed.length})` }] : []),
+    ...(needsHuman.length ? [{ id: "needs-human", label: `Needs human (${needsHuman.length})` }] : []),
+    ...(undecided.code.length ? [{ id: "code", label: `Your source code (${undecided.code.length})` }] : []),
+    ...(undecided.supply.length ? [{ id: "supply", label: `Secrets & config (${undecided.supply.length})` }] : []),
+    ...(undecided.deps.length ? [{ id: "deps", label: `Dependencies (${undecided.deps.length})` }] : []),
+    ...(dismissed.length ? [{ id: "dismissed", label: `Refuted (${dismissed.length})` }] : []),
+    { id: "coverage", label: "Coverage" },
+  ];
+
+  const tiles = SEVERITIES.map((sev) => `<div class="tile ${SEV_KEY[sev]}"><span class="n">${c[sev] ?? 0}</span><span class="k">${sev}</span></div>`).join("");
 
   const section = (id: string, title: string, sub: string, body: string) =>
-    body ? `\n  <section id="${id}"><h2>${esc(title)}</h2>${sub ? `<p class="msg">${esc(sub)}</p>` : ""}${body}</section>` : "";
+    body ? `\n  <section id="${id}"><h2>${esc(title)}</h2>${sub ? `<p class="msg prose">${esc(sub)}</p>` : ""}${body}</section>` : "";
 
-  const tools = d.manifest.toolStatus?.length ? toolStatusLines(d.manifest.toolStatus).join(" · ") : d.manifest.toolsRun.join(", ") || "none";
+  const foldedTable = (label: string, fs: readonly Finding[]) =>
+    fs.length ? `<details><summary>${esc(label)} (${fs.length})</summary>${tableHtml(fs)}</details>` : "";
+
+  const codeBody = undecided.code.length
+    ? entryPointsHtml(undecided.code) + tierHtml(loud(undecided.code), rem) + foldedTable("Lower-severity candidates", quiet(undecided.code))
+    : "";
+
+  const supplyBody = undecided.supply.length ? tableHtml(loud(undecided.supply)) + foldedTable("Lower-severity findings", quiet(undecided.supply)) : "";
+
+  const depsBody = undecided.deps.length
+    ? `<details><summary>Show ${undecided.deps.length} advisor${undecided.deps.length === 1 ? "y" : "ies"}, rolled up per package</summary>
+      <p class="msg prose">One row per package &mdash; the unit you actually upgrade. Work the list in risk order and stop when the rest are below your bar:
+        KEV first, then EPSS, then severity. Open a row to see its individual advisories.</p>
+      ${depsHtml(undecided.deps)}</details>`
+    : "";
+
+  const tools = d.manifest.toolStatus?.length ? toolStatusLines(d.manifest.toolStatus).join(" \u00b7 ") : d.manifest.toolsRun.join(", ") || "none";
+  const rail = railHtml(railSections, actionable);
 
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ultrasec — security audit</title>
+<title>ultrasec \u2014 security audit</title>
 <style>${CSS}${hasNarrativeContent(narrative) ? AI_CSS : ""}</style></head>
 <body>
 <div class="wrap">
   <header class="masthead">
-    <div class="eyebrow">Security audit · ultrasec ${esc(d.manifest.version)}</div>
+    <div class="eyebrow">Security audit \u00b7 ultrasec ${esc(d.manifest.version)}</div>
     <h1>${esc(d.manifest.repo)}</h1>
     <div class="meta-line">
       <span>${d.manifest.counts.findings} candidate(s)</span>
@@ -447,11 +720,12 @@ export function renderHtml(d: Dossier, narrative?: Narrative): string {
     </div>
     <div class="meta-line"><span>tools: ${esc(tools)}</span></div>
   </header>
-  <div class="cols">
-  ${railHtml(actionable)}
-  <main>
+  <div class="cols${rail ? "" : " norail"}">
+  ${rail}
+  <main>${bannerHtml(unread)}
     <section id="summary">
       <h2>Summary</h2>
+      ${surfacesHtml(undecided)}
       <div class="band">${tiles}</div>
     </section>${execSummaryHtml(narrative)}${chainsHtml(narrative)}${positivePatternsHtml(narrative)}${section(
       "confirmed",
@@ -459,22 +733,27 @@ export function renderHtml(d: Dossier, narrative?: Narrative): string {
       "",
       confirmed.length ? tierHtml(confirmed, rem) : "",
     )}${section("needs-human", `Needs human review (${needsHuman.length})`, "Uncertain, and too severe to dismiss without proof.", needsHuman.length ? tierHtml(needsHuman, rem) : "")}${section(
-      "open",
-      `Unadjudicated candidates (${open.length})`,
-      "Enumerated but not yet decided. Recall-oriented by design — many are false positives.",
-      open.length ? tableHtml(open) : "",
-    )}${
+      "code",
+      `${SURFACE_TITLE.code} \u2014 undecided (${undecided.code.length})`,
+      "Flows and unsafe operations in code this repository owns. Recall-oriented by design: each one is decided by opening the file and following the path, not from this page.",
+      codeBody,
+    )}${section(
+      "supply",
+      `${SURFACE_TITLE.supply} \u2014 undecided (${undecided.supply.length})`,
+      "Credentials committed to the tree, CI workflows and infrastructure-as-code. Also this repository's own code, but read as a diff rather than a data-flow.",
+      supplyBody,
+    )}${section("deps", `${SURFACE_TITLE.deps} \u2014 undecided (${undecided.deps.length})`, "", depsBody)}${
       dismissed.length
         ? `\n  <section id="dismissed"><h2>Refuted (${dismissed.length})</h2>
       <details><summary>Show the ${dismissed.length} candidate(s) this audit refuted, and on what ground</summary>
-      <p class="msg">Kept because an audit that hides its refutations cannot be checked. The <em>ground</em> column names why each was dismissed.</p>
+      <p class="msg prose">Kept because an audit that hides its refutations cannot be checked. The <em>why</em> column names the ground and the argument that was made.</p>
       ${tableHtml(dismissed)}</details></section>`
         : ""
     }${rootCausesHtml(narrative)}${hardeningNotesHtml(narrative)}
     ${coverageHtml(d)}
     <footer>
-      <span>ultrasec ${esc(d.manifest.version)} · ${esc(d.manifest.generatedNote)}</span>
-      <span>Every finding cites a resolvable file:line — \`ultrasec check\` fails the audit otherwise.</span>
+      <span>ultrasec ${esc(d.manifest.version)} \u00b7 ${esc(d.manifest.generatedNote)}</span>
+      <span>Every finding cites a resolvable file:line \u2014 \`ultrasec check\` fails the audit otherwise.</span>
     </footer>
   </main>
   </div>

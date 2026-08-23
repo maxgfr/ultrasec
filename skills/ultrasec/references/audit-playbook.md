@@ -61,22 +61,70 @@ high/critical it is **ignored by design** and the finding goes to full verify. D
 in [adjudication.md](adjudication.md#triage-noise-vs-keep). If deciding needs the code, it isn't
 triage — leave it `keep`.
 
-## 5. Read the dossier, then adjudicate each candidate
+## 5. Read the dossier, then adjudicate each candidate — the CODE first
 
 ```
-ultrasec paths --run .ultrasec                 # the candidate chains
-ultrasec dossier <id> --run .ultrasec          # the grounding packet (id may be a prefix)
+ultrasec paths   --run .ultrasec --surface code   # YOUR code's chains, without the CVE wall
+ultrasec dossier <id> --run .ultrasec             # the grounding packet (id may be a prefix)
 ```
 
-For each candidate, answer the four questions from the code in the packet:
+**Two halves, two methods.** `--surface` splits the open tier the way the report does:
+
+| surface | what it holds | how it is worked |
+|---|---|---|
+| `code` | `taint`, `sast`, `authz`, `crypto`, `logs`, `privacy` — code you wrote | **read one at a time**, from the packet |
+| `supply` | `secret`, `config` — your repo's credentials, CI and IaC | read as a diff: rotate, or change the setting |
+| `deps` | `dep` — advisories on packages you installed | **triaged as a ranked list** (step 6c) |
+
+Skipping the split is how one audit ended with 882 candidates in one table: the KEV floor pins an
+exploited CVE at risk 95, so 190 `pnpm-lock.yaml` rows sat above every real flow in the repo.
+
+For each **code** candidate, answer the four questions from the code in the packet:
 
 1. **Source** — is it genuinely attacker-controlled (request, CLI, env, file, queue)?
 2. **Propagation** — does the tainted value reach the sink through every hop, unchanged?
 3. **Sanitizer/guard** — is it parameterized / escaped / validated / authz-checked on the path?
 4. **Sink** — is it exploitable with the value that arrives? Write the concrete trigger.
 
+The packet answers more than the path does. Beyond the cross-file chain it carries the **whole
+enclosing function** at the source and the sink (up to 80 lines; a wider window past that), and a
+**Who can reach this** block:
+
+- **route file** — which handler declarations matched, and whether the entry point is one of them.
+  A candidate, not a verdict: Next.js Pages Router has no marker beyond "default export under
+  `pages/api`", so the matcher over-accepts and says so.
+- **callers of the entry symbol** — from the same reverse call index the taint walk uses. Callers
+  in OTHER files mean more than one way in.
+- **auth and rate-limit markers in scope** — absence is not proof the route is public (the guard
+  may be middleware, a proxy, the platform), but it names what was checked.
+- **sanitizers near the path** — the catalog's patterns within 12 lines of any hop.
+
+`--brief` restores the narrow packet for batch fan-out, where one subagent reads eight at once.
+
+### Budget by family, not by finding
+
+Repeated candidates collapse on (title × path root × adjudication) and the report shows the fold.
+One read decides the whole family; recording it against each member is bookkeeping, not analysis.
+On the monorepo this method came from, **242 HIGH/CRITICAL code candidates were 62 families** —
+sixty-two reads, not two hundred and forty-two. Start at the top of `paths --surface code`, take
+the families in risk order, and stop when the remaining folds are below your bar — then say in the
+report that you stopped, and where.
+
 The false-positive taxonomy, the refutation bar, how to write an `exploitPath`, and three worked
 examples are in [adjudication.md](adjudication.md).
+
+## 5b. Triage the dependency half
+
+**Do not open a dossier per CVE.** The packet cannot help: there is no path to read, and the
+question is not "does this code do something dangerous" but "does my deployment reach it". Work
+the `dep` rows in composite-risk order — KEV, then EPSS, then severity — and stop at your bar. The
+report already rolls them up **one row per package**, with the installed versions, the advisory
+count, the version to upgrade to and the KEV/EPSS/dev-only signals. The five questions the score
+cannot answer, and the hostile-package class no CVE feed covers, are in
+[supply-chain.md](supply-chain.md).
+
+Leaving the tail `open` is the prescribed outcome, and the render gate does not hold it against
+you — it only counts unread HIGH/CRITICAL candidates in code you wrote.
 
 ## 6. Hunt what taint enumeration can't reach
 
@@ -139,6 +187,23 @@ and fix it, or drop the finding.
 ultrasec narrative --run .ultrasec                                # → author NARRATIVE.json
 ultrasec render --run .ultrasec --narrative NARRATIVE.json        # SUMMARY/REPORT.md + index.html
 ```
+
+The report is organised by the same three surfaces as step 5, in the order a reader needs them:
+
+1. **Incomplete-audit banner**, if any HIGH/CRITICAL code candidate is unread.
+2. **Summary** — one card per surface with its severity bar and adjudication state.
+3. **Confirmed** and **Needs human review** — full cards, every surface together, because these
+   are already decided and there are few of them.
+4. **Your source code** — the entry-point table first (one row per `path[0]`, so the attacker's
+   view opens the section), then a card with its source→sink diagram per HIGH/CRITICAL family,
+   then the lower severities in a fold.
+5. **Secrets & configuration**, then **Dependency advisories** in a closed fold, per package.
+6. **Refuted**, the AI narrative sections, and the coverage matrix.
+
+**`render` exits 1 while a HIGH/CRITICAL code candidate has no verdict.** It writes SUMMARY.md,
+REPORT.md and index.html anyway and stamps the same warning into all three — an exit code is gone
+the moment the terminal scrolls, and the HTML is what gets shared. Go back to step 5, or pass
+`--draft` if an incomplete audit is genuinely what you meant, and say so when you present it.
 
 Present the SUMMARY counts, each confirmed finding with its cross-file and exploit path, the
 needs-human list, the coverage caveats from step 3, and the run folder. Writing guidance:

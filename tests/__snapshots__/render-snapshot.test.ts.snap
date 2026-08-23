@@ -24,7 +24,7 @@ exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtm
   }
   *,*::before,*::after { box-sizing:border-box; }
   body { margin:0; background:var(--ground); color:var(--ink); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; }
-  .wrap { max-width:1180px; margin:0 auto; padding:0 24px 72px; }
+  .wrap { max-width:1600px; margin:0 auto; padding:0 24px 72px; }
   a { color:var(--accent); text-underline-offset:.15em; }
   code { font-family:var(--mono); font-size:.86em; background:var(--surface-alt); border:1px solid var(--rule-soft); border-radius:3px; padding:.08em .34em; }
   h1 { font-size:clamp(1.7rem,4vw,2.4rem); line-height:1.12; margin:0; letter-spacing:-.015em; }
@@ -36,7 +36,12 @@ exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtm
   .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); }
   .meta-line { font-family:var(--mono); font-size:12px; color:var(--ink-faint); display:flex; flex-wrap:wrap; gap:4px 22px; }
 
-  .cols { display:grid; grid-template-columns:230px minmax(0,1fr); gap:48px; align-items:start; padding-top:32px; }
+  .cols { display:grid; grid-template-columns:260px minmax(0,1fr); gap:56px; align-items:start; padding-top:32px; }
+  /* No rail to render -> ONE column. Without this the single <main> auto-places
+     into the first track and the whole report renders 260px wide. That is not a
+     hypothetical: a run with nothing confirmed and nothing needs-human has an
+     empty rail, which is exactly the run that most needs to be readable. */
+  .cols.norail { grid-template-columns:minmax(0,1fr); gap:0; }
   @media (max-width:939px) { .cols { grid-template-columns:1fr; gap:0; } .rail { display:none; } }
   .rail { position:sticky; top:20px; max-height:calc(100vh - 40px); overflow-y:auto; }
   .rail-title { font-family:var(--mono); font-size:11px; letter-spacing:.13em; text-transform:uppercase; color:var(--ink-faint); padding-bottom:8px; border-bottom:1px solid var(--rule); margin-bottom:10px; }
@@ -45,7 +50,12 @@ exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtm
   .rail a:hover { background:var(--surface-alt); color:var(--ink); }
   .rail .rt { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 
-  main { min-width:0; display:flex; flex-direction:column; gap:40px; }
+  /* Belt and braces with the .norail rule: pin <main> to the LAST track so
+     implicit placement can never put it in the rail's. */
+  main { min-width:0; grid-column:-2; display:flex; flex-direction:column; gap:40px; }
+  /* The page is wide so tables and flow diagrams can breathe; prose is not.
+     A 1500px line of running text is unreadable, so paragraphs keep a measure. */
+  .prose { max-width:78ch; }
   section { display:flex; flex-direction:column; gap:14px; scroll-margin-top:20px; }
 
   .band { display:grid; grid-template-columns:repeat(auto-fit,minmax(112px,1fr)); gap:1px; background:var(--rule); border:1px solid var(--rule); border-radius:6px; overflow:hidden; }
@@ -106,6 +116,30 @@ exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtm
   details.members > *:not(summary) { padding:0; }
 
   footer { margin-top:56px; padding-top:18px; border-top:1px solid var(--rule); font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); display:flex; flex-direction:column; gap:5px; }
+
+  .banner { background:var(--surface); border:2px solid var(--crit); border-radius:6px; padding:16px 20px; display:flex; flex-direction:column; gap:8px; }
+  .banner h2 { color:var(--crit); border-bottom:0; padding-bottom:0; font-size:1.15rem; }
+  .banner code { background:var(--ground); }
+  .banner .next { font-family:var(--mono); font-size:12px; color:var(--ink-soft); }
+
+  .surfaces { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:14px; }
+  .sf { background:var(--surface); border:1px solid var(--rule); border-radius:6px; padding:14px 16px; display:flex; flex-direction:column; gap:8px; }
+  .sf.lead { border-color:var(--ink); }
+  .sf-h { display:flex; align-items:baseline; justify-content:space-between; gap:10px; }
+  .sf-h .t { font-weight:700; font-size:.95rem; }
+  .sf-h .n { font-size:1.6rem; font-weight:700; line-height:1; font-variant-numeric:tabular-nums; }
+  .sf-sub { font-family:var(--mono); font-size:11px; color:var(--ink-faint); }
+  .sf-bar { display:flex; height:6px; border-radius:3px; overflow:hidden; background:var(--surface-alt); }
+  .sf-bar span { display:block; }
+  .sf-bar .c{background:var(--crit)} .sf-bar .h{background:var(--high)} .sf-bar .m{background:var(--med)} .sf-bar .l{background:var(--low)} .sf-bar .i{background:var(--info)}
+
+  td.num { font-variant-numeric:tabular-nums; white-space:nowrap; }
+  td.pkg { font-family:var(--mono); font-weight:600; word-break:break-all; }
+  .sig { font-family:var(--mono); font-size:10.5px; }
+  .sig .kev { color:var(--crit); font-weight:700; }
+  .sig .tc { color:var(--ink-faint); }
+  details.members ul { margin:4px 0 0; padding-left:1.1em; font-size:12.5px; }
+  details.members li { margin:1px 0; }
 </style></head>
 <body>
 <div class="wrap">
@@ -122,10 +156,18 @@ exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtm
     <div class="meta-line"><span>tools: semgrep, deepsec</span></div>
   </header>
   <div class="cols">
-  <nav class="rail" aria-label="Finding registry"><div class="rail-title">Registry</div><ol><li><a href="#conf1"><span class="dot h"></span><span class="rt">SQL injection in user lookup</span></a></li><li><a href="#nh1"><span class="dot c"></span><span class="rt">Possible missing authorization on /admin</span></a></li></ol></nav>
+  <nav class="rail" aria-label="Report navigation"><div class="rail-title">Sections</div><ol><li><a href="#summary"><span class="rt">Summary</span></a></li><li><a href="#confirmed"><span class="rt">Confirmed (1)</span></a></li><li><a href="#needs-human"><span class="rt">Needs human (1)</span></a></li><li><a href="#code"><span class="rt">Your source code (1)</span></a></li><li><a href="#dismissed"><span class="rt">Refuted (1)</span></a></li><li><a href="#coverage"><span class="rt">Coverage</span></a></li></ol><div class="rail-title">Registry</div><ol><li><a href="#conf1"><span class="dot h"></span><span class="rt">SQL injection in user lookup</span></a></li><li><a href="#nh1"><span class="dot c"></span><span class="rt">Possible missing authorization on /admin</span></a></li></ol></nav>
   <main>
     <section id="summary">
       <h2>Summary</h2>
+      <div class="surfaces">
+    <div class="sf lead"><div class="sf-h"><span class="t">Your source code</span><span class="n">1</span></div>
+      <div class="sf-bar"><span class="m" style="width:100.00%"></span></div><div class="sf-sub">1 undecided</div><div class="sf-sub">cross-file flows, missing guards, unsafe sinks - read one at a time</div></div>
+    <div class="sf"><div class="sf-h"><span class="t">Secrets &amp; configuration</span><span class="n">0</span></div>
+      <div class="sf-sub">none</div><div class="sf-sub">committed secrets, CI and IaC configuration - your repository</div></div>
+    <div class="sf"><div class="sf-h"><span class="t">Dependency advisories</span><span class="n">0</span></div>
+      <div class="sf-sub">none</div><div class="sf-sub">advisories on installed packages - triaged as a ranked list</div></div>
+  </div>
       <div class="band"><div class="tile c"><span class="n">1</span><span class="k">critical</span></div><div class="tile h"><span class="n">1</span><span class="k">high</span></div><div class="tile m"><span class="n">1</span><span class="k">medium</span></div><div class="tile l"><span class="n">1</span><span class="k">low</span></div><div class="tile i"><span class="n">0</span><span class="k">info</span></div></div>
     </section>
   <section id="confirmed"><h2>Confirmed (1)</h2>
@@ -140,7 +182,7 @@ exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtm
         
         <p class="refs"><a href="https://cwe.mitre.org/data/definitions/89.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/89.html</a></p>
       </article></section>
-  <section id="needs-human"><h2>Needs human review (1)</h2><p class="msg">Uncertain, and too severe to dismiss without proof.</p>
+  <section id="needs-human"><h2>Needs human review (1)</h2><p class="msg prose">Uncertain, and too severe to dismiss without proof.</p>
       <article class="find c" id="nh1">
         <div class="find-top"><span class="pill">CRITICAL</span><h3>Possible missing authorization on /admin</h3></div>
         <div class="meta"><code>nh1</code> · authz · needs-human · confidence medium · via deepsec</div>
@@ -152,11 +194,11 @@ exports[`render — byte-identical with NO narrative (Phase 3 guard) > renderHtm
         
         
       </article></section>
-  <section id="open"><h2>Unadjudicated candidates (1)</h2><p class="msg">Enumerated but not yet decided. Recall-oriented by design — many are false positives.</p><div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody><tr><td><span class="dot m"></span>MEDIUM</td><td>Reflected XSS candidate <code>open1</code></td><td class="at">src/view.js:20</td><td>—</td></tr></tbody></table></div></section>
+  <section id="code"><h2>Your source code — undecided (1)</h2><p class="msg prose">Flows and unsafe operations in code this repository owns. Recall-oriented by design: each one is decided by opening the file and following the path, not from this page.</p><details><summary>Lower-severity candidates (1)</summary><div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody><tr><td><span class="dot m"></span>MEDIUM</td><td>Reflected XSS candidate <code>open1</code></td><td class="at">src/view.js:20</td><td class="prose">—</td></tr></tbody></table></div></details></section>
   <section id="dismissed"><h2>Refuted (1)</h2>
       <details><summary>Show the 1 candidate(s) this audit refuted, and on what ground</summary>
-      <p class="msg">Kept because an audit that hides its refutations cannot be checked. The <em>ground</em> column names why each was dismissed.</p>
-      <div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody><tr><td><span class="dot l"></span>LOW</td><td>Dismissed false lead <code>dism1</code></td><td class="at">src/safe.js:1</td><td>refuted</td></tr></tbody></table></div></details></section>
+      <p class="msg prose">Kept because an audit that hides its refutations cannot be checked. The <em>why</em> column names the ground and the argument that was made.</p>
+      <div class="tw"><table><thead><tr><th>severity</th><th>finding</th><th>location</th><th>why</th></tr></thead><tbody><tr><td><span class="dot l"></span>LOW</td><td>Dismissed false lead <code>dism1</code></td><td class="at">src/safe.js:1</td><td class="prose">refuted</td></tr></tbody></table></div></details></section>
     
   <section id="coverage">
     <h2>Coverage — what was not looked at</h2>
@@ -222,9 +264,10 @@ References: <https://cwe.mitre.org/data/definitions/89.html>
 
 Admin route may lack an auth guard.
 
-## Unadjudicated candidates (1)
+## Your source code — undecided (1)
 
-Enumerated, not yet decided. Recall-oriented by design: many are false positives.
+Flows and unsafe operations in code this repository owns. Recall-oriented by design: each one is decided
+by opening the file and following the path, not from this table.
 
 | | finding | where | why |
 |---|---|---|---|
@@ -305,6 +348,8 @@ repo \`/repo\` · ultrasec 9.9.9
 findings: **4** — 🟥 CRITICAL 1 · 🟧 HIGH 1 · 🟨 MEDIUM 1 · 🟩 LOW 1 · ⬜ INFO 0  
 tools: semgrep, deepsec  
 _ranked by composite risk (severity ⊕ EPSS ⊕ KEV)_
+
+undecided by surface: Your source code **1**
 
 ## Confirmed (1)
 - 🟧 HIGH **SQL injection in user lookup** — \`src/server.js:10\` → \`src/db.js:6\` (CWE-89) · risk 72

@@ -5,8 +5,10 @@ import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.j
 import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from "../triage.js";
+import { SURFACE_FILTERS, type SurfaceFilter } from "../orchestrate.js";
+import { surfaceOf } from "../surface.js";
 
-// `ultrasec triage --run <dir>`                           → emit the open-candidate worklist
+// `ultrasec triage --run <dir> [--surface code]`          → emit the open-candidate worklist
 // `ultrasec triage --apply <file|dir|a,b,c> --run <dir>`  → fold noise/keep back in
 // The cheap first pass: clear obvious noise on low/med/info before the expensive
 // per-finding verify. A `noise` verdict on high/critical is ignored (kept open).
@@ -47,14 +49,23 @@ export function runTriage(args: ParsedArgs): number {
   }
 
   // Emit mode
-  const items = buildTriageWorklist(dossier);
+  const surfaceFlag = flagStr(args, "surface");
+  if (surfaceFlag !== undefined && !(SURFACE_FILTERS as readonly string[]).includes(surfaceFlag)) {
+    eprintln(`ultrasec triage: unknown --surface "${surfaceFlag}" — expected one of: ${SURFACE_FILTERS.join(", ")}.`);
+    return 2;
+  }
+  const surface = (surfaceFlag ?? "all") as SurfaceFilter;
+  // Narrowing the WORKLIST is safe; narrowing the fold is not, so `--apply`
+  // takes no surface. A verdict file names its ids and folds exactly those.
+  const scoped = surface === "all" ? dossier : { ...dossier, findings: dossier.findings.filter((f) => surfaceOf(f) === surface) };
+  const items = buildTriageWorklist(scoped);
   const todoPath = emitWorklist(run, stageFiles("TRIAGE"), items, renderTriageMd(items, loadContextDoc(run)));
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
-  println(`ultrasec triage → ${todoPath} (${items.length} open candidate${items.length === 1 ? "" : "s"})`);
+  println(`ultrasec triage → ${todoPath} (${items.length} open candidate${items.length === 1 ? "" : "s"}${surface === "all" ? "" : `, surface ${surface}`})`);
   if (!items.length) {
     println(`  no open candidates to triage.`);
   } else {

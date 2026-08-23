@@ -34,6 +34,10 @@ flows are real and exploitable, find the subtle bugs the tools miss, and verify.
 >    (who · what they send · what they get) — not "potentially". A gap another layer already
 >    prevents is a *hardening note*, not a finding:
 >    [references/severity-and-discipline.md](references/severity-and-discipline.md).
+> 6. **The code is READ; the CVEs are TRIAGED.** Advisories are a ranked list — work it in risk
+>    order, stop at your bar, leave the tail `open`. A code candidate is decided only by opening
+>    the file, so **never render while a HIGH/CRITICAL one in your own code has no verdict**:
+>    `render` exits 1 and stamps the report. Split them with `--surface code`.
 
 ## Running the engine
 
@@ -67,10 +71,12 @@ ultrasec scan    --repo . --out .ultrasec       # graph + cross-file taint + too
   #         --no-env-sources (drop env-rooted flows)  --strict-scope (drop cross-function-in-file)
   # net:    --offline / --no-enrich (no EPSS/KEV)      --docker (scanners without installing)
 ultrasec paths   --run .ultrasec                # the candidate chains  (--kind sql --severity high)
-ultrasec dossier <id> --run .ultrasec           # ONE finding's real code + path (id may be a prefix)
+  # --surface code|supply|deps|all              # YOUR code · secrets+CI/IaC · advisories  (also on triage/orchestrate)
+ultrasec dossier <id> --run .ultrasec           # ONE finding: enclosing function, callers, route, guards, sanitizers
+  # --brief                                     # the compact packet, for batch fan-out
 ultrasec graph   <file|symbol> --run .ultrasec  # cross-file links into/out of a node
 ultrasec assumptions --run .ultrasec            # what each unit trusts that NOTHING enforces (--apply)
-ultrasec triage  --run .ultrasec                # cheap noise|keep fast-lane  (--apply TRIAGE.json)
+ultrasec triage  --run .ultrasec                # cheap noise|keep fast-lane  (--apply TRIAGE.json, --surface code)
 ultrasec guards  --run .ultrasec                # entry point × auth guard — the MISSING check (--apply)
   # --lens throttle                             # …and the MISSING rate limit
 ultrasec investigate --run .ultrasec            # hunt authz/logic  (--apply INVESTIGATE.json)
@@ -84,9 +90,10 @@ ultrasec coverage --run .ultrasec               # standards matrix: what was NOT
 ultrasec check   --run .ultrasec --semantic     # THE GATE: grounded + adjudicated (--min-severity)
 ultrasec narrative --run .ultrasec              # → you author NARRATIVE.json
 ultrasec render  --run .ultrasec --narrative NARRATIVE.json  # SUMMARY/REPORT.md + index.html
+  # exits 1 while a HIGH/CRITICAL CODE candidate is unread (files still written); --draft to accept it
 ultrasec implement --run .ultrasec              # remediation-PRD draft → the `to-prd` skill
 ultrasec run     --repo . --out .ultrasec       # sequence every stage (ZERO external calls)
-ultrasec orchestrate --run .ultrasec --phase verify   # emit the multi-agent fan-out
+ultrasec orchestrate --run .ultrasec --phase verify   # emit the multi-agent fan-out (--surface code)
 ultrasec logs    ./var/log --out .ultrasec-logs # blue team: forensics over EXISTING log files
   # detections: --sigma → ultrasec-logs.sigma.yml (SIEM pack, like variants→semgrep)
   # anywhere: --report out.md|html|json (archive this output)  --no-journal (skip JOURNAL.md)
@@ -163,11 +170,15 @@ each: [references/schemas.md](references/schemas.md).
 5. **Triage (optional).** `triage --run <run>`, mark `noise|keep`, `triage --apply`. Clears only
    low/medium/info; a high/critical `noise` is **ignored** and goes to full verify.
 
-6. **Adjudicate each candidate from evidence.** `dossier <id>`, read the real code along the
-   path, and answer: is the SOURCE attacker-controlled? does the value reach the SINK through
-   every hop unchanged? is there a sanitizer/authz guard? is the SINK exploitable with the value
-   that arrives — can you write the PoC?
-   [references/adjudication.md](references/adjudication.md).
+6. **Adjudicate from evidence — the CODE first.** Work `paths --surface code`, not the whole open
+   tier; the dependency half is triaged as a list, never a dossier per CVE
+   ([references/supply-chain.md](references/supply-chain.md)). `dossier <id>` gives you the whole
+   enclosing function at both ends plus **Who can reach this** — route file, callers, auth and
+   rate-limit markers in scope, sanitizers near the path. Answer: is the SOURCE
+   attacker-controlled? does the value reach the SINK through every hop unchanged? is there a
+   sanitizer/authz guard? is the SINK exploitable with what arrives — can you write the PoC?
+   Budget **by family, not by finding**: one read decides a whole fold (242 candidates were 62 on
+   the run this came from). [references/adjudication.md](references/adjudication.md).
 
 6b. **Map the assumptions** *(before hunting)*. `assumptions --run <run>` — per unit, what it
    guarantees (cited) and what it depends on that nothing enforces. A `nothing-found` marks code
@@ -211,8 +222,11 @@ each: [references/schemas.md](references/schemas.md).
 
 11. **Narrate & render.** `narrative --run <run>`, author `NARRATIVE.json` (executive summary,
     `positivePatterns`, fixes, attack chains, root causes, `hardeningNotes`), then `render --run
-    <run> --narrative NARRATIVE.json`. Present the SUMMARY, the confirmed findings with their
-    exploit paths, the needs-human list and the run folder.
+    <run> --narrative NARRATIVE.json`. The report is organised by surface: your code first with
+    its entry-point table, then secrets/CI/IaC, then advisories folded one row per package.
+    **It exits 1 while a HIGH/CRITICAL code candidate is unread** — files still written, reason
+    stamped in them — so go back to step 6, or pass `--draft` and say so. Present the SUMMARY, the
+    confirmed findings with their exploit paths, the needs-human list and the run folder.
     [references/narrative-playbook.md](references/narrative-playbook.md).
 
 12. **Plan the fixes (optional).** `implement --run <run>` → `IMPLEMENT.md`, a remediation-PRD
@@ -273,6 +287,11 @@ idempotent); `--phase <p>` before its worklist exists fails and names the comman
 8. **Skipping `context`.** Without a trust model you are rating in the abstract.
 9. **Hunting only what the engine listed.** It finds PATTERNS, not ABSENCES — run `guards`, both
    lenses. A FAILED scanner is the same trap: a hole that reads like an empty result.
+10. **Rendering a dump, or spending the audit on the CVE list.** One run went `scan` → `guards`
+   → `render` and shipped 882 candidates, none adjudicated, every *why* cell a dash, under "No
+   confirmed issues" — which reads as a clean bill of health and meant nobody had looked. The
+   advisories were most of that count and the least of its value: they come ranked, the flows do
+   not. Read the code first; don't reach for `--draft` to silence the gate.
 
 ## Do not
 

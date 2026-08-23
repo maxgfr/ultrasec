@@ -71,15 +71,26 @@ COMMANDS
              with --run, else live-scans --repo. Flags: <file|symbol> · --depth n
              (default 1) · --run · --repo · --json.
   paths      List candidate cross-file source→sink chains.
-             Flags: --run · --kind <k> · --severity <s> · --json.
+             --surface narrows to one half of the report: 'code' (this repo's
+             own source), 'supply' (secrets + CI/IaC), 'deps' (advisories) or
+             'all' (default). Flags: --run · --kind <k> · --severity <s> ·
+             --surface <s> · --json.
   dossier    Print the grounding packet for one finding (real code + neighbours).
              The id may be a unique PREFIX. CONTEXT.md is reprinted before each
              finding: --compact keeps only the hunt-list/exposure/criticality
-             sections, --no-context drops it. Flags: <finding-id> · --run ·
-             --repo · --compact · --no-context.
+             sections, --no-context drops it. The packet carries the WHOLE
+             enclosing function at the source and the sink, plus 'Who can reach
+             this' — the route file, the callers of the entry symbol, the auth
+             and rate-limit markers in scope, the sanitizers near the path.
+             --brief restores the compact windows for batch fan-out.
+             Flags: <finding-id> · --run · --repo · --compact · --no-context ·
+             --brief.
   triage     Fast, code-free first pass over OPEN candidates: emit / apply
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
-             it is ignored (kept open for verify). Flags: --run · --apply · --json.
+             it is ignored (kept open for verify). --surface narrows the emitted
+             worklist (code | supply | deps | all); --apply never takes it, since
+             a verdict file names its own ids.
+             Flags: --run · --apply · --surface <s> · --json.
   verify     Emit / apply the adversarial finding↔evidence worklist. --shards n
              --shard i splits the emit across fan-out workers, writing
              VERIFY.todo.<i>.json (the .md brief always covers the FULL worklist).
@@ -144,9 +155,16 @@ COMMANDS
              findings, folding the grounded NARRATIVE.json (fixes, patches, root causes)
              when present. Emit-only — never changes a finding's status. Feed IMPLEMENT.md
              to the 'to-prd' skill or an implementer. Flags: --run · --narrative <file> · --json.
-  render     Render SUMMARY/REPORT.md + a self-contained index.html.
+  render     Render SUMMARY/REPORT.md + a self-contained index.html, organised by
+             SURFACE: this repo's own code first, then secrets/CI/IaC, then the
+             dependency advisories rolled up one row per package.
              --narrative <file> folds in AI-authored sections (exec summary, fixes,
              attack chains, root causes), clearly marked + grounding-checked.
+             EXITS 1 when a HIGH/CRITICAL source-code candidate was never read —
+             the files are still written, and carry the same warning as a banner.
+             Dependency advisories may stay open; that is what triage is for.
+             --draft acknowledges an incomplete audit and exits 0.
+             Flags: --run · --narrative <file> · --draft.
   coverage   The honest complement to 'only report what you can exploit': a
              standards matrix of what this audit looked at and what it did NOT.
              A short report reads as "nothing there" when it means "nothing
@@ -186,8 +204,11 @@ COMMANDS
              8/agent), the dispatch contracts (agents/<role>.md) and a sequential
              RUNBOOK.md fallback. Subagents RETURN verdict/discovery fragments;
              every conservative --apply fold stays with you (one writer).
-             Flags: --run · --phase <name> · --eco (runbook + contracts only) ·
-             --list (phase status as JSON).
+             --surface narrows the 'adjudicate' fan-out to code | supply | deps
+             (default all) — a fan-out over every open dependency advisory pays
+             for a dossier read that a ranked list already answers.
+             Flags: --run · --phase <name> · --surface <s> · --eco (runbook +
+             contracts only) · --list (phase status as JSON).
   mcp        Serve the audit over the Model Context Protocol, so a non-Claude-Code
              host (Cursor, Zed, Claude Desktop) gets the tools, the workflows as
              prompts, and SKILL.md + references/ as resources. Read-only unless

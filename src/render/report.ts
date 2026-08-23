@@ -6,6 +6,8 @@ import { groupFamilies, collapsedCount, familyCount } from "../family.js";
 import { stageNotes } from "../util.js";
 import { executiveSummaryMd, positivePatternsMd, suggestedFixMd, attackChainsMd, rootCausesMd, hardeningNotesMd, remediationMap } from "../narrative.js";
 import { buildCoverage, enumeratedKindsOf, renderCoverageMd } from "../coverage.js";
+import { groupAdvisoriesByPackage } from "../deps.js";
+import { bySurface, SURFACE_TITLE, unadjudicatedCode, type Surface } from "../surface.js";
 
 // The tiered Markdown report: SUMMARY (TL;DR) and REPORT — the complete audit,
 // every finding grouped by status (incl. dismissed), with the reasoning trail.
@@ -127,9 +129,21 @@ function summaryTier(findings: readonly Finding[], bold: boolean): string[] {
 export function renderSummary(d: Dossier, narrative?: Narrative): string {
   const confirmed = d.findings.filter((f) => f.status === "confirmed").sort(compareWithinStatus);
   const needs = d.findings.filter((f) => f.status === "needs-human").sort(compareWithinStatus);
-  const L: string[] = [`# Security audit — summary`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
+  const undecided = bySurface(d.findings.filter((f) => f.status === "open"));
+  const split = surfaceLine(undecided);
+  const L: string[] = [`# Security audit — summary`, "", header(d), ""];
+  if (split) L.push(split, "");
+  L.push(...incompleteBanner(d), ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative));
   if (!confirmed.length && !needs.length) {
-    L.push(d.findings.length ? `No confirmed issues. ${d.findings.length} candidate(s) — see REPORT.md.` : `No findings.`);
+    // "No confirmed issues" is the sentence a reader turns into "we're clean".
+    // With nothing adjudicated it means the opposite, so say which it is.
+    L.push(
+      d.findings.length
+        ? unadjudicatedCode(d.findings).length
+          ? `Nothing was confirmed because nothing was decided: ${d.findings.length} candidate(s) are still open — see REPORT.md.`
+          : `No confirmed issues. ${d.findings.length} candidate(s) — see REPORT.md.`
+        : `No findings.`,
+    );
     L.push("");
     L.push(...coverageCaveat(d));
     return L.join("\n") + "\n";
@@ -247,13 +261,26 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Reme
  */
 function tierTable(findings: readonly Finding[]): string[] {
   const L = [`| | finding | where | why |`, `|---|---|---|---|`];
-  for (const f of findings) {
+  const row = (f: Finding, count: number): string => {
     const ground = f.brocard ? `**${f.brocard}**` : (f.verdict ?? "");
     const note = stageNotes(f.message).replace(/\|/g, "\\|").replace(/\n+/g, " ");
     const why = [ground, note].filter(Boolean).join(" — ") || "—";
     const where = f.locations?.length ? locationsLine(f.locations) : pathLine(f);
-    L.push(`| ${badgeOf(f.severity)} | ${f.title} <code>${f.id}</code> | ${where} | ${why} |`);
-  }
+    const tally = count > 1 ? ` ×${count}` : "";
+    return `| ${badgeOf(f.severity)} | ${f.title}${tally} <code>${f.id}</code> | ${where} | ${why} |`;
+  };
+  // Families collapse in the tables too. The card tiers have folded repetitions
+  // since `family.ts` landed; the tables never did, which is how one audit's
+  // unadjudicated section became 882 rows where 60 restated one SQL-injection
+  // shape. Every member is still in `findings.json` with its own id.
+  const grouped = groupFamilies(findings);
+  const rows = [
+    ...grouped.families.map((fam) => ({ at: fam.lead, line: row(fam.lead, fam.members.length) })),
+    ...grouped.singles.map((f) => ({ at: f, line: row(f, 1) })),
+  ].sort((a, b) => compareWithinStatus(a.at, b.at));
+  for (const r of rows) L.push(r.line);
+  const folded = collapsedCount(grouped);
+  if (folded) L.push("", `_${folded} repeated occurrence(s) folded into the rows above; every one is in \`findings.json\`._`);
   return L;
 }
 
@@ -297,9 +324,117 @@ function tierSections(findings: readonly Finding[], rem: Map<string, Remediation
   return L;
 }
 
+/**
+ * The state of the audit, before any finding.
+ *
+ * A run where nobody adjudicated the code candidates produced a SUMMARY whose
+ * first sentence was "No confirmed issues" — true, and read by everyone as a
+ * clean bill of health. It was a scan. This block makes the two impossible to
+ * confuse, in the artifact itself rather than only in a terminal exit code that
+ * nobody sees again once the file is shared.
+ *
+ * Dependency advisories left open do not trigger it: working the ranked CVE
+ * list and stopping at the bar is the prescribed outcome. An unread cross-file
+ * flow is not — deciding it means opening the file.
+ */
+function incompleteBanner(d: Dossier): string[] {
+  const unread = unadjudicatedCode(d.findings);
+  if (!unread.length) return [];
+  const crit = unread.filter((f) => f.severity === "critical").length;
+  const high = unread.length - crit;
+  const tally = [crit ? `${crit} CRITICAL` : "", high ? `${high} HIGH` : ""].filter(Boolean).join(" and ");
+  return [
+    `> ## \u26a0\ufe0f Incomplete audit \u2014 ${unread.length} source-code candidate(s) were never read`,
+    `>`,
+    `> ${tally} candidate(s) in this repository's own code still have no verdict. Nobody opened the files and`,
+    `> followed the flows, so this document is engine output, not an audit: no confirmed findings below means`,
+    `> **undecided**, not **safe**.`,
+    `>`,
+    `> Dependency advisories are worked as a ranked list and may legitimately stay open. Source-code candidates`,
+    `> are read one at a time:`,
+    `> \`ultrasec paths --run <run> --surface code\` \u2192 \`ultrasec dossier <id> --run <run>\` \u2192 \`ultrasec verify --apply verdicts.json --run <run>\``,
+    ``,
+  ];
+}
+
+/** "code 618 \u00b7 supply 74 \u00b7 deps 190" — the split, in one line. */
+function surfaceLine(groups: Record<Surface, Finding[]>): string {
+  const bits = (["code", "supply", "deps"] as const).filter((sf) => groups[sf].length).map((sf) => `${SURFACE_TITLE[sf]} **${groups[sf].length}**`);
+  return bits.length ? `undecided by surface: ${bits.join(" \u00b7 ")}` : "";
+}
+
+/** One row per entry point: where an attacker gets in, and how many ways. */
+function entryPointTable(code: readonly Finding[]): string[] {
+  const flows = code.filter((f) => f.path && f.path.length > 0);
+  if (!flows.length) return [];
+  const byEntry = new Map<string, Finding[]>();
+  for (const f of flows) {
+    const at = f.path![0]!.file;
+    const list = byEntry.get(at);
+    if (list) list.push(f);
+    else byEntry.set(at, [f]);
+  }
+  const L = [
+    `**Attack surface** \u2014 ${byEntry.size} entry point(s) reaching a dangerous sink.`,
+    "",
+    `| worst | entry point | flows | classes |`,
+    `|---|---|---|---|`,
+  ];
+  const rows = [...byEntry.entries()]
+    .map(([file, fs]) => ({ file, fs, top: fs.slice().sort(compareWithinStatus)[0]! }))
+    .sort((a, b) => compareWithinStatus(a.top, b.top) || b.fs.length - a.fs.length);
+  for (const r of rows) {
+    const classes = [...new Set(r.fs.map((f) => f.vulnClass ?? f.sink?.kind ?? f.cwe ?? f.category))].sort().join(", ");
+    L.push(`| ${badgeOf(r.top.severity)} | \`${r.file}\` | ${r.fs.length} | ${classes} |`);
+  }
+  L.push("");
+  return L;
+}
+
+/** Dependency advisories as one row per package \u2014 the unit you upgrade. */
+function packageTable(deps: readonly Finding[]): string[] {
+  const rows = groupAdvisoriesByPackage(deps);
+  if (!rows.length) return [];
+  const L = [
+    `One row per package \u2014 the unit you actually upgrade. Work it in risk order and stop when the rest are`,
+    `below your bar: KEV first, then EPSS, then severity ([supply-chain.md](../references/supply-chain.md)).`,
+    "",
+    `| worst | package | installed | advisories | upgrade to | signals | where |`,
+    `|---|---|---|---|---|---|---|`,
+  ];
+  for (const r of rows) {
+    const versions = r.versions.length ? r.versions.slice(0, 3).join(", ") + (r.versions.length > 3 ? ` +${r.versions.length - 3}` : "") : "\u2014";
+    const sig =
+      [
+        r.kev ? `\ud83d\udea8 CISA KEV${r.kev > 1 ? ` \u00d7${r.kev}` : ""}` : "",
+        typeof r.maxEpss === "number" ? `EPSS ${(r.maxEpss * 100).toFixed(1)}%` : "",
+        r.reachability === "toolchain" ? `dev/toolchain` : "",
+      ]
+        .filter(Boolean)
+        .join(" \u00b7 ") || "\u2014";
+    // Every merged instance, not a count. A monorepo that bumps one workspace
+    // and not the other looks fixed and isn't, and the whole reason the
+    // correlator keeps `locations[]` is so the report can say which lockfiles.
+    const where = r.locations.length ? locationsLine(r.locations) : "—";
+    L.push(`| ${badgeOf(r.worst)} | \`${r.pkg}\` | ${versions} | ${r.count} | ${r.fixedVersion ?? "_no fix published_"} | ${sig} | ${where} |`);
+  }
+  L.push("");
+  L.push(`_Every advisory keeps its own id in \`findings.json\`; the rows above group them, they do not merge them._`);
+  L.push("");
+  return L;
+}
+
 export function renderReport(d: Dossier, narrative?: Narrative): string {
   const rem = remediationMap(narrative);
-  const L: string[] = [`# Security audit — report`, "", header(d), "", ...executiveSummaryMd(narrative), ...positivePatternsMd(narrative)];
+  const L: string[] = [
+    `# Security audit — report`,
+    "",
+    header(d),
+    "",
+    ...incompleteBanner(d),
+    ...executiveSummaryMd(narrative),
+    ...positivePatternsMd(narrative),
+  ];
   const byStatus = (s: Finding["status"]) => d.findings.filter((f) => f.status === s).sort(compareWithinStatus);
   const confirmed = byStatus("confirmed");
   const needs = byStatus("needs-human");
@@ -323,10 +458,34 @@ export function renderReport(d: Dossier, narrative?: Narrative): string {
   // …and tables for what is still a question or already answered. Both tiers
   // stay in the report — an audit trail that omits its refutations cannot be
   // checked — but neither earns a page of prose and a diagram per row.
-  if (open.length) {
-    L.push(`## Unadjudicated candidates (${open.length})`, "");
-    L.push(`Enumerated, not yet decided. Recall-oriented by design: many are false positives.`, "");
-    L.push(...tierTable(open), "");
+  //
+  // The undecided tier splits by SURFACE, because the two halves are worked
+  // differently: a cross-file flow is decided by opening the file, a dependency
+  // advisory by position in a ranked list. Merging them buried ~100 real flows
+  // under 190 lockfile rows that the KEV floor pushed to the top.
+  const undecided = bySurface(open);
+  if (undecided.code.length) {
+    L.push(`## ${SURFACE_TITLE.code} — undecided (${undecided.code.length})`, "");
+    L.push(
+      `Flows and unsafe operations in code this repository owns. Recall-oriented by design: each one is decided`,
+      `by opening the file and following the path, not from this table.`,
+      "",
+    );
+    L.push(...entryPointTable(undecided.code));
+    L.push(...tierTable(undecided.code), "");
+  }
+  if (undecided.supply.length) {
+    L.push(`## ${SURFACE_TITLE.supply} — undecided (${undecided.supply.length})`, "");
+    L.push(
+      `Credentials committed to the tree, CI workflows and infrastructure-as-code — this repository's own`,
+      `files, read as a diff rather than a data-flow.`,
+      "",
+    );
+    L.push(...tierTable(undecided.supply), "");
+  }
+  if (undecided.deps.length) {
+    L.push(`## ${SURFACE_TITLE.deps} — undecided (${undecided.deps.length})`, "");
+    L.push(...packageTable(undecided.deps));
   }
   if (dismissed.length) {
     L.push(`## Refuted (${dismissed.length})`, "");

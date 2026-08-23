@@ -30,6 +30,7 @@ export const trivy: ToolAdapter = {
             references: [v.PrimaryURL, ...(v.References ?? [])].filter(Boolean),
             pkg: v.PkgName,
             version: v.InstalledVersion,
+            ...(v.FixedVersion ? { fixedVersion: String(v.FixedVersion) } : {}),
             // VulnerabilityID may be a GHSA; surface any CVE in the refs so the
             // cross-tool correlator can match it against osv/grype on the CVE.
             aliases: [v.VulnerabilityID, ...cvesIn(v.PrimaryURL, v.References)],

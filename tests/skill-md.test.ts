@@ -130,9 +130,22 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
   //                 references/context-playbook.md and references/hunting-heuristics.md.
   //                 Paid for in part: five passages that duplicated a reference file or
   //                 repeated themselves were cut in the same change (-32 words).
+  //   2997 -> 3304: the code/deps SPLIT, from the audit that shipped 882 candidates with none
+  //                 adjudicated and an empty `why` column on every row. Three things in the
+  //                 body change what an agent DOES, so three things are paid for: a sixth
+  //                 cardinal rule (advisories are triaged as a ranked list, code candidates
+  //                 are read one at a time, and `render` exits 1 while a HIGH/CRITICAL code
+  //                 candidate has no verdict), a rewritten step 6 (work `--surface code`, and
+  //                 budget by FAMILY — 242 candidates were 62 folds on the run it came from),
+  //                 and a gated step 11. Plus one Common mistake and five cheat-sheet lines
+  //                 for `--surface`, `--brief` and `--draft`. Everything else went to
+  //                 references/: the per-surface report anatomy and the family budget to
+  //                 audit-playbook.md, the "do not open a dossier per CVE" ladder to
+  //                 supply-chain.md, the flags to commands.md. Paid for in part by merging the
+  //                 two candidate mistakes into one and tightening steps 6 and 11 (-43 words).
   it("keeps the SKILL.md body within its word budget", () => {
     const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
-    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(2997);
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(3304);
   });
 
   // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits

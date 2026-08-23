@@ -415,6 +415,16 @@ export interface Finding {
   /** Installed/affected version. */
   version?: string;
   /**
+   * The first version that fixes the advisory, when the scanner named one.
+   *
+   * Trivy and osv-scanner both know it and both used to spend it on prose —
+   * `(fixed in 10.2.3)` appended to `message` — which made "what do I upgrade
+   * to?" unanswerable without re-reading 190 sentences. Absent means no fix is
+   * published, which is a different remediation (pin, override, compensating
+   * control) and must not read as "unknown".
+   */
+  fixedVersion?: string;
+  /**
    * Per-instance evidence of a cross-version-merged dep advisory: every
    * lockfile location (and installed version) the advisory was reported at.
    * Grounding-gated like any citation (file must resolve). Set by the

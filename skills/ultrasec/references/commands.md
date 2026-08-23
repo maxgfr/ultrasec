@@ -197,7 +197,14 @@ target, an ambiguous symbol, or an unknown node.
 
 ### `paths`
 List the candidate source→sink **chains**. `--run` (default `.ultrasec`) · `--kind <k>` ·
-`--severity <s>` · `--json`.
+`--severity <s>` · `--surface code|supply|deps|all` · `--json`.
+
+`--surface` splits the candidates the way the report does — `code` is what you wrote (`taint`,
+`sast`, `authz`, `crypto`, `logs`, `privacy`), `supply` is your repo's credentials and CI/IaC
+(`secret`, `config`), `deps` is advisories on packages you installed. Default `all`; an unknown
+value exits 2 rather than silently widening back to everything. The same flag narrows `triage`'s
+emitted worklist and `orchestrate --phase adjudicate`'s fan-out. It never appears on an `--apply`:
+a verdict file names its own ids and folds exactly those.
 
 It lists chains and only chains, so an **orphan sink** — a dangerous callee the walk could not
 connect to a source — never appears here. `--kind X` printing nothing therefore does not mean
@@ -207,9 +214,26 @@ findings it could not list, `paths` now says how many rather than leaving the si
 as absence — then go to `DOSSIER.md` or `findings.json`.
 
 ### `dossier <finding-id>`
-The grounding packet for one finding: the real code at every hop, graph neighbours, and the four
-verification questions. **The id may be a unique prefix** (`dossier 7e51071c`). `--run` ·
-`--repo` (defaults to the manifest's repo). No `--json`. Read this before adjudicating anything.
+The grounding packet for one finding. **The id may be a unique prefix** (`dossier 7e51071c`).
+`--run` · `--repo` (defaults to the manifest's repo) · `--compact` / `--no-context` (how much of
+CONTEXT.md to reprint) · `--brief`. No `--json`. Read this before adjudicating anything.
+
+It carries, in order: the reachability evidence the engine computed, the cross-file path with the
+**whole enclosing function** at the source and the sink (up to 80 lines — past that, a 12-line
+window), a **Who can reach this** block, and the graph neighbours of the sink file.
+
+*Who can reach this* answers what a code window cannot, and states each as evidence rather than a
+verdict — which was checked, and what was found:
+
+| line | source | reads as |
+|---|---|---|
+| route file | `catalog.ts` handler patterns | a CANDIDATE: the matchers over-accept (a Next.js Pages-Router file has no marker beyond "default export under `pages/api`"), so it names the matched lines and whether the entry point is one |
+| callers of the entry symbol | `graph.callersBySymbol`, the same reverse index the taint walk uses | callers in OTHER files mean more than one way in |
+| auth / rate-limit markers in scope | the `AUTH_MARKER` / `THROTTLE_MARKER` vocabulary the guard matrix uses | NONE is not "public": the guard may be middleware, a proxy or the platform |
+| sanitizers near the path | the catalog's per-sink-kind patterns, within 12 lines of any hop | none found is absence of a known pattern, not proof the value is raw |
+
+`--brief` drops the enclosing bodies and this block and narrows the windows — the packet for a
+batch fan-out, where one subagent reads eight findings at once.
 
 ## Adjudicate
 
@@ -272,7 +296,20 @@ nothing.** See [implement-playbook.md](implement-playbook.md).
 ### `render --run <dir>`
 Writes `SUMMARY.md`, `REPORT.md` and a self-contained `index.html`. `--narrative <file>` folds in
 the AI-authored sections, clearly marked; sections citing unknown or non-confirmed ids are
-dropped. No `--json`. Without `--narrative` the output is byte-identical to a plain render.
+dropped. `--draft` accepts an incomplete audit. No `--json`. Without `--narrative` the output is
+byte-identical to a plain render.
+
+All three artifacts are organised by **surface** — your code (opening with an entry-point table,
+then a card per HIGH/CRITICAL family with its source→sink diagram), then secrets/CI/IaC, then the
+dependency advisories in a closed fold rolled up **one row per package**: installed versions,
+advisory count, highest fixed version, KEV/EPSS/dev-only signals, every merged lockfile location.
+
+**Exit codes: 0** ok · **1** a HIGH/CRITICAL candidate in code you wrote has no verdict · **2**
+unreadable run. On exit 1 the files are still written and carry the same warning as a banner —
+refusing to produce them would trade a misleading report for no report, and the exit code is gone
+the moment the terminal scrolls while the HTML is what gets shared. Open dependency advisories
+never trigger it: triaging the ranked list and stopping at the bar is the prescribed outcome
+([supply-chain.md](supply-chain.md)). `--draft` acknowledges the state and exits 0.
 
 ### `check --run <dir>`
 The exit gate. **Read-only — it writes nothing and changes no status.** Fails on any finding
@@ -337,8 +374,14 @@ order. `check` and `render` are unconditional post-steps and are **not** valid `
 ### `orchestrate --run <dir>`
 Emits the run's multi-agent fan-out from its **current** worklists.
 
-`--run` (**required**) · `--phase adjudicate|verify|revalidate|investigate` · `--eco` (RUNBOOK +
-contracts only) · `--list` (phase readiness as JSON)
+`--run` (**required**) · `--phase adjudicate|verify|revalidate|investigate` ·
+`--surface code|supply|deps|all` · `--eco` (RUNBOOK + contracts only) · `--list` (phase readiness
+as JSON)
+
+`--surface` narrows the **adjudicate** phase, which fans out over the dossier's open candidates.
+Default `all`, and the narrowing is the difference between a usable fan-out and an absurd one: on
+one monorepo the open tier was 882 candidates — 111 subagents at 8 per batch — of which 190 were
+dependency advisories a `dossier` read cannot help with. An unknown value exits 2.
 
 Writes into `<run>/orchestration/`: one `<phase>.workflow.mjs` per ready phase (real ids batched
 **8 per agent**, absolute paths baked in), the dispatch contracts

@@ -1,13 +1,22 @@
 import { resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
+import { SURFACE_FILTERS, type SurfaceFilter } from "../orchestrate.js";
+import { surfaceOf } from "../surface.js";
 
-// `ultrasec paths [--run .ultrasec] [--kind sql] [--severity high] [--json]`
+// `ultrasec paths [--run .ultrasec] [--kind sql] [--severity high] [--surface code] [--json]`
 // List the candidate cross-file source→sink chains from the dossier.
 export function runPaths(args: ParsedArgs): number {
   const run = resolve(flagStr(args, "run") ?? ".ultrasec");
   const kind = flagStr(args, "kind");
   const sev = flagStr(args, "severity");
+  // Fail closed on a typo rather than silently widening back to everything.
+  const surfaceFlag = flagStr(args, "surface");
+  if (surfaceFlag !== undefined && !(SURFACE_FILTERS as readonly string[]).includes(surfaceFlag)) {
+    eprintln(`ultrasec paths: unknown --surface "${surfaceFlag}" — expected one of: ${SURFACE_FILTERS.join(", ")}.`);
+    return 2;
+  }
+  const surface = (surfaceFlag ?? "all") as SurfaceFilter;
 
   let d: ReturnType<typeof loadDossier>;
   try {
@@ -19,6 +28,7 @@ export function runPaths(args: ParsedArgs): number {
 
   const chained = d.findings.filter((f) => f.path && f.path.length);
   let findings = chained;
+  if (surface !== "all") findings = findings.filter((f) => surfaceOf(f) === surface);
   if (kind) findings = findings.filter((f) => f.sink?.kind === kind);
   if (sev) findings = findings.filter((f) => f.severity === sev);
 

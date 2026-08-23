@@ -56,6 +56,8 @@ export interface ToolFindingInput {
   pkg?: string;
   /** Installed/affected version. */
   version?: string;
+  /** First version that fixes the advisory, when the scanner names one. */
+  fixedVersion?: string;
   /** Secret adapters: whether the credential was actively validated as live. */
   verified?: boolean;
   /** Commit a history-scanned citation belongs to. gitleaks reads every commit,
@@ -138,6 +140,7 @@ export function makeToolFinding(i: ToolFindingInput): Finding {
   }
   if (i.pkg) f.pkg = i.pkg;
   if (i.version) f.version = i.version;
+  if (i.fixedVersion) f.fixedVersion = i.fixedVersion;
   if (i.verified !== undefined) f.verified = i.verified;
   if (i.atCommit) f.atCommit = i.atCommit;
   if (i.file) {

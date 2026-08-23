@@ -3,6 +3,7 @@ import { join, resolve } from "node:path";
 import type { InvestigateRegion } from "./investigate.js";
 import { agentContracts, phaseWorkflowScript, runbookMd } from "./orchestrate-templates.js";
 import type { RevalidateItem } from "./revalidate.js";
+import { surfaceOf, SURFACES } from "./surface.js";
 import type { Finding } from "./types.js";
 import type { VerifyItem } from "./verify.js";
 
@@ -56,18 +57,29 @@ function readIds<T>(path: string, id: (item: T) => string): string[] | null {
   }
 }
 
-export function listPhases(runDir: string, engineAbs: string): PhaseInfo[] {
+/** `--surface` values: the three surfaces plus `all`, the default. */
+export const SURFACE_FILTERS = [...SURFACES, "all"] as const;
+export type SurfaceFilter = (typeof SURFACE_FILTERS)[number];
+
+export function listPhases(runDir: string, engineAbs: string, surface: SurfaceFilter = "all"): PhaseInfo[] {
   const run = resolve(runDir);
 
   // adjudicate fans out over the dossier's OPEN candidates — the scan's
   // recall-oriented candidate list itself (ids as accepted by `dossier <id>`).
+  //
+  // `--surface code` narrows it, and the narrowing is the difference between a
+  // usable fan-out and an absurd one: on a real monorepo the open tier was 882
+  // candidates — 111 subagents at 8 per batch — of which 190 were dependency
+  // advisories that a `dossier` read cannot help with. Those are triaged from a
+  // ranked list, not read one by one. Default stays `all` so nothing changes
+  // for a caller that does not ask.
   const findingsPath = join(run, "findings.json");
   const allIds = readIds<Finding>(findingsPath, (f) => f.id);
   let adjIds: string[] = [];
   if (allIds !== null) {
     try {
       const findings = JSON.parse(readFileSync(findingsPath, "utf8")) as Finding[];
-      adjIds = findings.filter((f) => f.status === "open").map((f) => f.id);
+      adjIds = findings.filter((f) => f.status === "open" && (surface === "all" || surfaceOf(f) === surface)).map((f) => f.id);
     } catch {
       /* readIds already vetted the file; keep [] on a racing rewrite */
     }
@@ -124,6 +136,8 @@ export interface OrchestrateOptions {
   phase?: string;
   /** Emit only the RUNBOOK + contracts (the explicit low-token sequential path). */
   eco?: boolean;
+  /** Narrow the `adjudicate` fan-out to one surface. Default `all`. */
+  surface?: SurfaceFilter;
 }
 
 export interface OrchestrateResult {
@@ -150,7 +164,7 @@ export function orchestrateRun(runDir: string, engineAbs: string, opts: Orchestr
   if (!existsSync(run)) {
     return { exitCode: 2, written: [], notices: [], errors: [`run dir not found: ${run}`], phases: [] };
   }
-  const phases = listPhases(run, engineAbs);
+  const phases = listPhases(run, engineAbs, opts.surface ?? "all");
 
   let selected = phases.filter((p) => p.ready);
   if (opts.phase !== undefined) {

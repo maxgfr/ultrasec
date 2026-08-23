@@ -42,6 +42,7 @@ export const osvScanner: ToolAdapter = {
               references: refs,
               pkg: name,
               version,
+              ...(fixed ? { fixedVersion: String(fixed) } : {}),
               // v.id is usually a GHSA; v.aliases carries the CVE — the join key.
               aliases: [...(v.aliases ?? []), ...cvesIn(refs)],
             }),

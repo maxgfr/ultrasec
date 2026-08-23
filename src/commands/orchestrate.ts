@@ -1,10 +1,10 @@
 import { existsSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { listPhases, orchestrateRun, PHASES } from "../orchestrate.js";
+import { listPhases, orchestrateRun, PHASES, SURFACE_FILTERS, type SurfaceFilter } from "../orchestrate.js";
 import { eprintln, flagBool, flagStr, println, type ParsedArgs } from "../util.js";
 
-// `ultrasec orchestrate --run <dir> [--phase <name>] [--eco] [--list]`
+// `ultrasec orchestrate --run <dir> [--phase <name>] [--surface <s>] [--eco] [--list]`
 // Emit the run's multi-agent orchestration from its CURRENT worklists: one
 // <phase>.workflow.mjs per ready phase (real ids batched in), the dispatch
 // contracts (agents/<role>.md) and a sequential RUNBOOK.md, all under
@@ -21,18 +21,29 @@ export function runOrchestrate(args: ParsedArgs): number {
   // `.bin` symlink npm/npx creates, same as the entrypoint guard in cli.ts.
   const engineAbs = realpathSync(fileURLToPath(import.meta.url));
 
+  // Fail closed on a typo: silently treating `--surface cdoe` as `all` would
+  // fan out over 882 candidates when the caller asked for 620, and the only
+  // symptom would be a bigger bill.
+  const surfaceFlag = flagStr(args, "surface");
+  if (surfaceFlag !== undefined && !(SURFACE_FILTERS as readonly string[]).includes(surfaceFlag)) {
+    eprintln(`ultrasec orchestrate: unknown --surface "${surfaceFlag}" — expected one of: ${SURFACE_FILTERS.join(", ")}.`);
+    return 2;
+  }
+  const surface = (surfaceFlag ?? "all") as SurfaceFilter;
+
   if (flagBool(args, "list")) {
     if (!existsSync(runFlag)) {
       eprintln(`ultrasec orchestrate: run dir not found: ${runFlag}.`);
       return 2;
     }
-    println(JSON.stringify({ phases: listPhases(runFlag, engineAbs) }, null, 2));
+    println(JSON.stringify({ surface, phases: listPhases(runFlag, engineAbs, surface) }, null, 2));
     return 0;
   }
 
   const res = orchestrateRun(runFlag, engineAbs, {
     phase: flagStr(args, "phase"),
     eco: flagBool(args, "eco"),
+    surface,
   });
   if (res.exitCode !== 0) {
     for (const e of res.errors) eprintln(`ultrasec orchestrate: ${e}`);
