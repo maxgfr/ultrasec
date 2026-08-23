@@ -20596,6 +20596,10 @@ function demoteNoise(findings, repo, opts = {}) {
   const counts = /* @__PURE__ */ new Map();
   const byId = new Map(RULES17.map((r) => [r.id, r]));
   const out2 = findings.map((f) => {
+    if (f.noise) {
+      counts.set(f.noise, (counts.get(f.noise) ?? 0) + 1);
+      return f;
+    }
     const cls = classifyNoise(f, repo, opts);
     if (!cls) return f;
     const rule = byId.get(cls);
@@ -24763,6 +24767,12 @@ async function runScan(args2) {
       const prev = loadDossier(out2);
       final = mergeDossier(prev, nextDossier);
       mergedNote = ` \xB7 merged into ${prev.findings.length} prior finding(s)`;
+      const reNoised = demoteNoise(final.findings, repo, { includeTests });
+      final = {
+        ...final,
+        findings: reNoised.findings,
+        manifest: { ...final.manifest, ...reNoised.downgraded.length ? { downgraded: reNoised.downgraded } : {} }
+      };
     } catch (e) {
       eprintln(
         `ultrasec: could not merge into the existing dossier at ${out2} (${e instanceof Error ? e.message : String(e)}); writing a fresh dossier instead.`

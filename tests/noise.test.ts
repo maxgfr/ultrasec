@@ -322,6 +322,36 @@ describe("demoteNoise — demote, never drop, always account", () => {
   });
 });
 
+describe("demoteNoise is idempotent", () => {
+  // A merged scan re-classifies the whole dossier, so the same finding goes
+  // through twice. Demotion appends to `message`; a second pass must not grow
+  // the sentence — the same non-idempotence `stageNotes` prevents for verdicts.
+  const sealed = finding({ category: "secret", severity: "high", sink: { file: "env/prod/x.sealed-secret.yaml", line: 9 } });
+
+  it("leaves an already-demoted finding byte-identical on a second pass", () => {
+    const once = demoteNoise([sealed], FIXTURE).findings;
+    const twice = demoteNoise(once, FIXTURE).findings;
+    expect(twice).toEqual(once);
+  });
+
+  it("still counts it, so the manifest tally covers the whole dossier", () => {
+    // The count is what `--merge` needs: findings carried over from a prior
+    // scan are already classified, and a tally that skipped them would report
+    // "0 de-prioritized" on a dossier full of de-prioritized findings.
+    const once = demoteNoise([sealed], FIXTURE).findings;
+    expect(demoteNoise(once, FIXTURE).downgraded).toEqual([{ reason: "encrypted-at-rest", count: 1 }]);
+  });
+
+  it("classifies a newcomer while leaving the carried-over one alone", () => {
+    const carried = demoteNoise([sealed], FIXTURE).findings[0]!;
+    const fresh = finding({ id: "b", category: "sast", cwe: "CWE-798", severity: "high", sink: { file: "env/dev/y.sealed-secret.yaml", line: 3 } });
+    const out = demoteNoise([carried, fresh], FIXTURE);
+    expect(out.findings[0]).toEqual(carried);
+    expect(out.findings[1]!.noise).toBe("encrypted-at-rest");
+    expect(out.downgraded).toEqual([{ reason: "encrypted-at-rest", count: 2 }]);
+  });
+});
+
 describe("NOISE_GROUND", () => {
   // The table is the argument: a reviewer disagrees with a row here rather than
   // with a new, unfalsifiable ground invented for the occasion.

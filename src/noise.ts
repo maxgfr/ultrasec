@@ -398,6 +398,16 @@ export function demoteNoise(
   const byId = new Map(RULES.map((r) => [r.id, r]));
 
   const out = findings.map((f) => {
+    // Already classified: count it, change nothing. Demotion appends to
+    // `message`, so a second pass over the same finding would grow the sentence
+    // every time — the same non-idempotence `stageNotes` exists to prevent for
+    // verdicts. Counting it keeps the manifest's `downgraded` an honest tally of
+    // the WHOLE dossier rather than of whichever findings this pass happened to
+    // produce, which is what a `--merge` run needs.
+    if (f.noise) {
+      counts.set(f.noise, (counts.get(f.noise) ?? 0) + 1);
+      return f;
+    }
     const cls = classifyNoise(f, repo, opts);
     if (!cls) return f;
     const rule = byId.get(cls)!;

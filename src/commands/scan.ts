@@ -382,6 +382,26 @@ export async function runScan(args: ParsedArgs): Promise<number> {
       const prev = loadDossier(out);
       final = mergeDossier(prev, nextDossier);
       mergedNote = ` · merged into ${prev.findings.length} prior finding(s)`;
+      // Re-classify the WHOLE merged set, not just this pass's findings.
+      //
+      // `demoteNoise` above ran before the prior dossier was folded back in, so
+      // a merged run shipped two generations of rules side by side: findings
+      // scanned today classified by today's rules, findings carried over
+      // classified by whatever was in force when they were first seen. On a
+      // real run that left 7 semgrep CWE-798 hits on `*.sealed-secret.yaml` at
+      // HIGH while 34 gitleaks hits on the same files sat at info — the report
+      // then listed the seven among the candidates nobody had read.
+      //
+      // Noise classification is a pure function of (finding, repo), so running
+      // it again over the final set is the right shape; `demoteNoise` skips
+      // anything already carrying `noise`, which makes it idempotent and keeps
+      // the manifest's tally a count of the whole dossier.
+      const reNoised = demoteNoise(final.findings, repo, { includeTests });
+      final = {
+        ...final,
+        findings: reNoised.findings,
+        manifest: { ...final.manifest, ...(reNoised.downgraded.length ? { downgraded: reNoised.downgraded } : {}) },
+      };
     } catch (e) {
       // Surface rather than hide — a present-but-unreadable dossier is a real problem.
       eprintln(
