@@ -30109,8 +30109,12 @@ function renderSummary(d, narrative) {
     return L.join("\n") + "\n";
   }
   if (confirmed.length) {
+    const g = bySurface(confirmed);
+    const own2 = [...g.code, ...g.supply].sort(compareWithinStatus);
     L.push(`## Confirmed (${confirmed.length})`);
-    L.push(...summaryTier(confirmed, true));
+    if (own2.length) L.push(...summaryTier(own2, true));
+    if (g.deps.length)
+      L.push(`- _\u2026and ${g.deps.length} confirmed dependency advisor${g.deps.length === 1 ? "y" : "ies"} \u2014 worked as a ranked upgrade list in REPORT.md._`);
     L.push("");
   }
   if (needs.length) {
@@ -30325,14 +30329,20 @@ function renderReport(d, narrative) {
     L.push(`No findings.`);
     return L.join("\n") + "\n";
   }
-  if (confirmed.length) {
-    L.push(`## Confirmed (${confirmed.length})`, "");
-    L.push(...tierSections(confirmed, rem, true));
-  }
-  if (needs.length) {
-    L.push(`## Needs human review (${needs.length})`, "");
-    L.push(...tierSections(needs, rem, true));
-  }
+  const decided = (fs2) => bySurface(fs2);
+  const tierWithDeps = (fs2, heading, depLabel) => {
+    if (!fs2.length) return;
+    const g = decided(fs2);
+    L.push(heading, "");
+    const own2 = [...g.code, ...g.supply].sort(compareWithinStatus);
+    if (own2.length) L.push(...tierSections(own2, rem, true));
+    if (g.deps.length) {
+      L.push(`### ${SURFACE_TITLE.deps} \u2014 ${g.deps.length} ${depLabel}`, "");
+      L.push(...packageTable(g.deps));
+    }
+  };
+  tierWithDeps(confirmed, `## Confirmed (${confirmed.length})`, "confirmed");
+  tierWithDeps(needs, `## Needs human review (${needs.length})`, "needing a decision");
   const undecided = bySurface(open);
   if (undecided.code.length) {
     L.push(`## ${SURFACE_TITLE.code} \u2014 undecided (${undecided.code.length})`, "");
@@ -30778,6 +30788,8 @@ function renderHtml(d, narrative) {
   const open = byStatus("open");
   const dismissed = byStatus("dismissed");
   const undecided = bySurface(open);
+  const confirmedBy = bySurface(confirmed);
+  const needsBy = bySurface(needsHuman);
   const unread = unadjudicatedCode(d.findings);
   const loud = (fs2) => fs2.filter((f) => f.severity === "critical" || f.severity === "high");
   const quiet = (fs2) => fs2.filter((f) => f.severity !== "critical" && f.severity !== "high");
@@ -30799,6 +30811,9 @@ function renderHtml(d, narrative) {
   const foldedTable = (label, fs2) => fs2.length ? `<details><summary>${esc2(label)} (${fs2.length})</summary>${tableHtml(fs2)}</details>` : "";
   const codeBody = undecided.code.length ? entryPointsHtml(undecided.code) + tierHtml(loud(undecided.code), rem) + foldedTable("Lower-severity candidates", quiet(undecided.code)) : "";
   const supplyBody = undecided.supply.length ? tableHtml(loud(undecided.supply)) + foldedTable("Lower-severity findings", quiet(undecided.supply)) : "";
+  const depsFold = (fs2, label) => fs2.length ? `<details><summary>${fs2.length} dependency advisor${fs2.length === 1 ? "y" : "ies"} ${esc2(label)}, rolled up per package</summary>
+      <p class="msg prose">Worked as a ranked upgrade list, not read as a flow. One row per package &mdash; the unit you actually bump.</p>
+      ${depsHtml(fs2)}</details>` : "";
   const depsBody = undecided.deps.length ? `<details><summary>Show ${undecided.deps.length} advisor${undecided.deps.length === 1 ? "y" : "ies"}, rolled up per package</summary>
       <p class="msg prose">One row per package &mdash; the unit you actually upgrade. Work the list in risk order and stop when the rest are below your bar:
         KEV first, then EPSS, then severity. Open a row to see its individual advisories.</p>
@@ -30835,8 +30850,13 @@ function renderHtml(d, narrative) {
     "confirmed",
     `Confirmed (${confirmed.length})`,
     "",
-    confirmed.length ? tierHtml(confirmed, rem) : ""
-  )}${section("needs-human", `Needs human review (${needsHuman.length})`, "Uncertain, and too severe to dismiss without proof.", needsHuman.length ? tierHtml(needsHuman, rem) : "")}${section(
+    confirmed.length ? tierHtml([...confirmedBy.code, ...confirmedBy.supply], rem) + depsFold(confirmedBy.deps, "confirmed") : ""
+  )}${section(
+    "needs-human",
+    `Needs human review (${needsHuman.length})`,
+    "Uncertain, and too severe to dismiss without proof.",
+    needsHuman.length ? tierHtml([...needsBy.code, ...needsBy.supply], rem) + depsFold(needsBy.deps, "needing a decision") : ""
+  )}${section(
     "code",
     `${SURFACE_TITLE.code} \u2014 undecided (${undecided.code.length})`,
     "Flows and unsafe operations in code this repository owns. Recall-oriented by design: each one is decided by opening the file and following the path, not from this page.",

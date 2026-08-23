@@ -59,12 +59,21 @@ describe("locations[] rendering", () => {
 
   // An advisory merged across versions cites ONE lockfile line and affects
   // several. REPORT.md must show every instance whichever tier the finding lands
-  // in — full write-up (confirmed/needs-human) or compact table (open/refuted).
-  // Compacting the refuted tier is what makes a 1000-finding report readable;
-  // losing the per-version evidence while doing it would make it wrong.
-  it("REPORT.md lists every merged instance on an 'Affects' line", () => {
+  // in. What carries them changed — a confirmed advisory is now rolled into the
+  // per-package table with the rest of the dependency half, instead of getting a
+  // prose write-up between two code findings — but the contract did not: the
+  // per-version evidence is still printed in full, and losing it while compacting
+  // would make the report wrong.
+  it("REPORT.md lists every merged instance for a CONFIRMED advisory", () => {
     const md = renderReport(dossier(depFinding({ locations: LOCS, status: "confirmed" })));
-    expect(md).toContain("**Affects:** v0.6.6 `package-lock.json:1` · v6.5.2 `app/package-lock.json:1`");
+    expect(md).toContain("v0.6.6 `package-lock.json:1` · v6.5.2 `app/package-lock.json:1`");
+  });
+
+  it("keeps a confirmed advisory out of the code write-ups, in its own section", () => {
+    const md = renderReport(dossier(depFinding({ locations: LOCS, status: "confirmed" })));
+    // The defect this prevents: composite risk weights EPSS, so a lockfile CVE
+    // opened the Confirmed section ahead of every source-code finding.
+    expect(md).toContain("### Dependency advisories — 1 confirmed");
   });
 
   it("REPORT.md keeps every merged instance in the compact tier too", () => {

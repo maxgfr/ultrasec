@@ -149,8 +149,14 @@ export function renderSummary(d: Dossier, narrative?: Narrative): string {
     return L.join("\n") + "\n";
   }
   if (confirmed.length) {
+    // The summary is the one screen most readers get, so it opens on the code
+    // this repo owns; the confirmed advisories are counted, not enumerated.
+    const g = bySurface(confirmed);
+    const own = [...g.code, ...g.supply].sort(compareWithinStatus);
     L.push(`## Confirmed (${confirmed.length})`);
-    L.push(...summaryTier(confirmed, true));
+    if (own.length) L.push(...summaryTier(own, true));
+    if (g.deps.length)
+      L.push(`- _…and ${g.deps.length} confirmed dependency advisor${g.deps.length === 1 ? "y" : "ies"} — worked as a ranked upgrade list in REPORT.md._`);
     L.push("");
   }
   if (needs.length) {
@@ -446,15 +452,25 @@ export function renderReport(d: Dossier, narrative?: Narrative): string {
     return L.join("\n") + "\n";
   }
 
-  // Full write-ups for what someone must act on…
-  if (confirmed.length) {
-    L.push(`## Confirmed (${confirmed.length})`, "");
-    L.push(...tierSections(confirmed, rem, true));
-  }
-  if (needs.length) {
-    L.push(`## Needs human review (${needs.length})`, "");
-    L.push(...tierSections(needs, rem, true));
-  }
+  // Full write-ups for what someone must act on — with the dependency half
+  // split out of EVERY tier, decided ones included. Confirming an audit produced
+  // 351 confirmed findings, 151 of them advisories, and the composite risk (which
+  // weights EPSS) put a `pnpm-lock.yaml` CVE at the very top of the section. A
+  // confirmed advisory is worked as a ranked upgrade, not read as a flow.
+  const decided = (fs: readonly Finding[]) => bySurface(fs);
+  const tierWithDeps = (fs: readonly Finding[], heading: string, depLabel: string): void => {
+    if (!fs.length) return;
+    const g = decided(fs);
+    L.push(heading, "");
+    const own = [...g.code, ...g.supply].sort(compareWithinStatus);
+    if (own.length) L.push(...tierSections(own, rem, true));
+    if (g.deps.length) {
+      L.push(`### ${SURFACE_TITLE.deps} — ${g.deps.length} ${depLabel}`, "");
+      L.push(...packageTable(g.deps));
+    }
+  };
+  tierWithDeps(confirmed, `## Confirmed (${confirmed.length})`, "confirmed");
+  tierWithDeps(needs, `## Needs human review (${needs.length})`, "needing a decision");
   // …and tables for what is still a question or already answered. Both tiers
   // stay in the report — an audit trail that omits its refutations cannot be
   // checked — but neither earns a page of prose and a diagram per row.

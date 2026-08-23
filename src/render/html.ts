@@ -651,10 +651,18 @@ export function renderHtml(d: Dossier, narrative?: Narrative): string {
   const open = byStatus("open");
   const dismissed = byStatus("dismissed");
 
-  // The undecided tier splits by SURFACE. Decided findings do not: `confirmed`
-  // and `needs-human` are short and already the answer, so a reader wants them
-  // together regardless of where they came from.
+  // EVERY tier splits dependencies out, decided ones included.
+  //
+  // The first cut only split the undecided tier, on the reasoning that
+  // confirmed findings are few and already the answer. That reasoning does not
+  // survive a finished audit: adjudicating one produced 351 confirmed, 151 of
+  // them dependency advisories, and because the composite risk weights EPSS a
+  // `pnpm-lock.yaml` CVE opened the section again — the exact complaint the
+  // surface split exists to fix, one tier over. A confirmed advisory is still
+  // worked as a ranked upgrade list, not read as a flow.
   const undecided = bySurface(open);
+  const confirmedBy = bySurface(confirmed);
+  const needsBy = bySurface(needsHuman);
   const unread = unadjudicatedCode(d.findings);
 
   // HIGH and above earn a card with their cross-file flow drawn; the rest go in
@@ -690,6 +698,15 @@ export function renderHtml(d: Dossier, narrative?: Narrative): string {
     : "";
 
   const supplyBody = undecided.supply.length ? tableHtml(loud(undecided.supply)) + foldedTable("Lower-severity findings", quiet(undecided.supply)) : "";
+
+  // A tier's dependency half, rolled up per package under a fold — so a decided
+  // advisory stays present and actionable without displacing the code findings.
+  const depsFold = (fs: readonly Finding[], label: string) =>
+    fs.length
+      ? `<details><summary>${fs.length} dependency advisor${fs.length === 1 ? "y" : "ies"} ${esc(label)}, rolled up per package</summary>
+      <p class="msg prose">Worked as a ranked upgrade list, not read as a flow. One row per package &mdash; the unit you actually bump.</p>
+      ${depsHtml(fs)}</details>`
+      : "";
 
   const depsBody = undecided.deps.length
     ? `<details><summary>Show ${undecided.deps.length} advisor${undecided.deps.length === 1 ? "y" : "ies"}, rolled up per package</summary>
@@ -731,8 +748,13 @@ export function renderHtml(d: Dossier, narrative?: Narrative): string {
       "confirmed",
       `Confirmed (${confirmed.length})`,
       "",
-      confirmed.length ? tierHtml(confirmed, rem) : "",
-    )}${section("needs-human", `Needs human review (${needsHuman.length})`, "Uncertain, and too severe to dismiss without proof.", needsHuman.length ? tierHtml(needsHuman, rem) : "")}${section(
+      confirmed.length ? tierHtml([...confirmedBy.code, ...confirmedBy.supply], rem) + depsFold(confirmedBy.deps, "confirmed") : "",
+    )}${section(
+      "needs-human",
+      `Needs human review (${needsHuman.length})`,
+      "Uncertain, and too severe to dismiss without proof.",
+      needsHuman.length ? tierHtml([...needsBy.code, ...needsBy.supply], rem) + depsFold(needsBy.deps, "needing a decision") : "",
+    )}${section(
       "code",
       `${SURFACE_TITLE.code} \u2014 undecided (${undecided.code.length})`,
       "Flows and unsafe operations in code this repository owns. Recall-oriented by design: each one is decided by opening the file and following the path, not from this page.",
