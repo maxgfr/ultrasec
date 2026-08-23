@@ -242,7 +242,10 @@ describe("buildGraph — unresolvable imports stay permissive", () => {
   beforeAll(() => {
     dir = mkdtempSync(join(tmpdir(), "ultrasec-blind-"));
     // Every specifier is an alias or a package: nothing resolves to a repo file.
-    writeFileSync(join(dir, "handler.js"), `import { isSafe } from "src/lib/secu";\nimport fs from "fs";\nexport function upload(req) { return isSafe(req.body); }\n`);
+    writeFileSync(
+      join(dir, "handler.js"),
+      `import { isSafe } from "src/lib/secu";\nimport fs from "fs";\nexport function upload(req) { return isSafe(req.body); }\n`,
+    );
     writeFileSync(join(dir, "secu.js"), `export function isSafe(p) { return readFileSync(p); }\n`);
   });
   afterAll(() => rmSync(dir, { recursive: true, force: true }));

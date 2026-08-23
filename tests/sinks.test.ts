@@ -264,12 +264,14 @@ describe("a URL/HTML attribute assigned a CONSTANT is not a sink", () => {
 
   it("keeps a dynamic one", () => {
     expect(findTextSinks(js, "script.src = userUrl;")).toHaveLength(1);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the placeholder IS the fixture — this string is JS source under scan, not a template.
     expect(findTextSinks(js, "script.src = `${base}/x.js`;")).toHaveLength(1);
     expect(findTextSinks(js, 'script.src = "https://cdn/" + name;')).toHaveLength(1);
   });
 
   it("drops a literal innerHTML but keeps an interpolated one", () => {
     expect(findTextSinks(js, 'el.innerHTML = "<b>static</b>";')).toEqual([]);
+    // biome-ignore lint/suspicious/noTemplateCurlyInString: the placeholder IS the fixture — this string is JS source under scan, not a template.
     expect(findTextSinks(js, "el.innerHTML = `<b>${name}</b>`;")).toHaveLength(1);
   });
 
