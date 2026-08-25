@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.41.1](https://github.com/maxgfr/ultrasec/compare/v1.41.0...v1.41.1) (2026-08-25)
+
+
+### Bug Fixes
+
+* make ultrasec compatible with Codex ([17d43d7](https://github.com/maxgfr/ultrasec/commit/17d43d79980752b27d00840bce2ed3a6e45839f5))
+
 # [1.41.0](https://github.com/maxgfr/ultrasec/compare/v1.40.2...v1.41.0) (2026-08-23)
 
 
