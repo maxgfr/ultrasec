@@ -1,6 +1,6 @@
 ---
 name: ultrasec
-description: "Use when the user wants a SECURITY AUDIT of a codebase — find real, exploitable bugs by tracing how untrusted data flows ACROSS functions and files, not file-by-file. A deterministic zero-dep engine (no keys/install) builds a cross-file link-graph, enumerates source→sink paths (SQLi, command/argument/code injection, path traversal, SSRF, XSS incl. DOM, SSTI, XXE, prototype pollution, prompt injection), runs scanners (Trivy, Semgrep, gitleaks…), correlates them, ranks by EPSS/KEV/CVSS; YOU read the code along each path and judge reachability/exploitability — authz/IDOR, business logic, auth/JWT/crypto, races, CI/supply-chain — then adversarially verify each into a cited report. Every finding cites resolvable [file:line] (`check` fails otherwise); an uncertain high-severity one stays needs-human. Triggers: 'audit this repo for security', 'find vulnerabilities', 'security review', 'is this vulnerable to SQLi/XSS/SSRF', 'taint analysis', 'check dependencies for CVEs', 'scan for secrets'."
+description: "Audit a codebase for exploitable security issues by tracing untrusted data across files and adjudicating scanner findings. Use for vulnerability, taint, dependency, secrets, auth, business-logic, or supply-chain audits."
 license: MIT
 metadata:
   version: 1.41.0
@@ -44,7 +44,7 @@ flows are real and exploitable, find the subtle bugs the tools miss, and verify.
 One committed, dependency-free bundle — no `npm install`, no API keys.
 
 > **Use an absolute path.** An installed skill lives away from the user's project (e.g.
-> `~/.claude/skills/ultrasec/`), so a cwd-relative `scripts/ultrasec.mjs` will NOT resolve.
+> `~/.agents/skills/ultrasec/`), so a cwd-relative `scripts/ultrasec.mjs` will NOT resolve.
 > Resolve `<skill-dir>/scripts/ultrasec.mjs` once and reuse it — and give **subagents the
 > absolute path**, since they don't share your cwd. Below, `ultrasec` means exactly that path.
 
@@ -246,8 +246,8 @@ ultrasec orchestrate --run <dir> [--phase adjudicate|verify|revalidate|investiga
 
 | Your harness | How to run each judgment phase |
 |---|---|
-| Has the Workflow tool | `orchestrate --run <RUN> --phase <p>`, then `Workflow({ scriptPath: "<RUN>/orchestration/<p>.workflow.mjs" })`. Subagents RETURN verdict/discovery fragments; merge them into one apply file yourself, then run the `--apply` fold shown at the end of the workflow. |
-| Subagents but no Workflow tool | Same `orchestrate`; dispatch one subagent per batch following `<RUN>/orchestration/agents/<role>.md` (the workflow script shows batches + prompts). One writer: you merge and fold. |
+| Claude Code exposes Workflow | `orchestrate --run <RUN> --phase <p>`, then `Workflow({ scriptPath: "<RUN>/orchestration/<p>.workflow.mjs" })`. Subagents RETURN verdict/discovery fragments; merge them into one apply file yourself, then run the `--apply` fold shown at the end of the workflow. |
+| Codex/other host has subagents | Same `orchestrate`; dispatch one subagent per batch following `<RUN>/orchestration/agents/<role>.md` (the workflow script shows batches + prompts). One writer: you merge and fold. |
 | Eco mode, or no subagents | `orchestrate --run <RUN> --eco` → follow `<RUN>/orchestration/RUNBOOK.md` sequentially, playing each role yourself. Correctness-identical; only wall-clock differs. |
 
 Fan-out is an optimization, never a requirement — every phase has a sequential fallback with

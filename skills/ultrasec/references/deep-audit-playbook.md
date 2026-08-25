@@ -27,7 +27,7 @@ gate). No LLM calls and no API keys are added by the engine.
 Every step is a plain `ultrasec …` call. Parallel subagents are
 an **optimization, not a requirement**:
 
-- **Harness with subagents** (e.g. Claude Code): one analyzer subagent per facet,
+- **Harness with subagents** (for example Codex or Claude Code): one analyzer subagent per facet,
   and one skeptic subagent per `verify` shard.
 - **No subagents**: run the same commands in a sequential loop. Identical
   artifacts; only wall-clock differs.
