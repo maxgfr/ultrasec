@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.41.2](https://github.com/maxgfr/ultrasec/compare/v1.41.1...v1.41.2) (2026-08-25)
+
+
+### Bug Fixes
+
+* ship ultrasec maintainer references ([5c845f8](https://github.com/maxgfr/ultrasec/commit/5c845f8d4211ac0b129ce2ce4f9f56d992dbad25))
+
 ## [1.41.1](https://github.com/maxgfr/ultrasec/compare/v1.41.0...v1.41.1) (2026-08-25)
 
 
