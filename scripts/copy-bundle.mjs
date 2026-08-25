@@ -10,10 +10,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const source = join(root, "scripts", "ultrasec.mjs");
-const targets = [join(root, "skills", "ultrasec", "scripts", "ultrasec.mjs")];
+const copies = [
+  [join(root, "scripts", "ultrasec.mjs"), join(root, "skills", "ultrasec", "scripts", "ultrasec.mjs")],
+  [join(root, "docs", "BENCHMARK.md"), join(root, "skills", "ultrasec", "references", "BENCHMARK.md")],
+  [join(root, "docs", "tooling-internals.md"), join(root, "skills", "ultrasec", "references", "tooling-internals.md")],
+];
 
-for (const target of targets) {
+for (const [source, target] of copies) {
   mkdirSync(dirname(target), { recursive: true });
   copyFileSync(source, target);
   console.log(`copy-bundle: ${source} -> ${target}`);

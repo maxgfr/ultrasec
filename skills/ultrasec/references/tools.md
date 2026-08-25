@@ -133,8 +133,8 @@ Run `tools` at audit start; with the user's consent (or a standing preference), 
 
 The origin-inference table, the package-checker vendoring/feed-poisoning guard, the Docker image
 list and toolbox build, the researched-but-not-yet-built adapters, and the `ToolAdapter` contract
-for adding one are all in [`docs/tooling-internals.md`](../../../docs/tooling-internals.md)
-(maintainer reference, not shipped with the skill).
+for adding one are all in [`tooling-internals.md`](tooling-internals.md)
+(maintainer reference shipped with the skill).
 
 ## Triaging tool findings
 

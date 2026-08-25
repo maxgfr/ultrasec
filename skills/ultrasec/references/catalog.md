@@ -42,7 +42,7 @@ you a glance; a missed flow is a missed bug.
 Coverage per language is uneven, and the numbers say where: the JVM rows above exist because
 `pnpm bench:public` measured **0% detection** on OWASP Benchmark for command injection, XSS, path
 traversal and weak crypto — the self-written fixtures had all scored 100% and hidden it. See
-[../../../docs/BENCHMARK.md](../../../docs/BENCHMARK.md).
+[`BENCHMARK.md`](BENCHMARK.md).
 
 Three of these deserve a word.
 

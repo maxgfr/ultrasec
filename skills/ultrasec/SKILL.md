@@ -318,7 +318,8 @@ idempotent); `--phase <p>` before its worklist exists fails and names the comman
 - **What it does not do:** no DAST, no fuzzing, no authenticated crawling, no runtime testing.
   Every class in [references/attack-classes.md](references/attack-classes.md) is manual, and one
   pass reads only the paths you dug into — recommend a `--merge` re-run.
-- **Measured, not asserted.** Per-CWE scores on OWASP Benchmark: `docs/BENCHMARK.md`, gaps
+- **Measured.** Per-CWE scores on OWASP Benchmark:
+  [references/BENCHMARK.md](references/BENCHMARK.md), gaps
   included — strong on injection, **zero** on what is not a source→sink shape. `coverage` says which.
 - **Not a substitute for judgement.** ultrasec narrows a huge repo to a handful of evidence-backed
   candidates and proves the boring half mechanically; the security call is yours.
@@ -353,4 +354,5 @@ retention, pseudonymisation) ·
 [powered-mode.md](references/powered-mode.md) (autonomy).
 
 **Engine** — [commands.md](references/commands.md) (full CLI) ·
-[tools.md](references/tools.md) (scanner belt).
+[tools.md](references/tools.md) (scanner belt) ·
+[tooling-internals.md](references/tooling-internals.md).

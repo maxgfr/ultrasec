@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { COMMAND_HANDLERS, HELP } from "../src/cli.js";
 import { ALL_STAGES } from "../src/powered/pipeline.js";
 import { VERSION } from "../src/types.js";
@@ -68,6 +68,26 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
     const files = readdirSync(join(SKILL_DIR, "references")).filter((f) => f.endsWith(".md"));
     expect(files.length).toBeGreaterThan(0);
     for (const f of files) expect(raw.includes(`references/${f}`), `references/${f} exists but SKILL.md never mentions it`).toBe(true);
+  });
+
+  it("keeps every relative Markdown link inside the installed package", () => {
+    const docs = [
+      ["SKILL.md", raw],
+      ...readdirSync(join(SKILL_DIR, "references"))
+        .filter((f) => f.endsWith(".md"))
+        .map((f) => [`references/${f}`, readFileSync(join(SKILL_DIR, "references", f), "utf8")] as const),
+    ] as const;
+
+    for (const [name, text] of docs) {
+      for (const match of text.matchAll(/\[[^\]]*\]\(([^)]+)\)/g)) {
+        const href = match[1] ?? "";
+        if (!href || href.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(href)) continue;
+        const target = href.split("#", 1)[0]?.split("?", 1)[0] ?? "";
+        const resolved = resolve(SKILL_DIR, name, "..", target);
+        expect(resolved.startsWith(resolve(SKILL_DIR) + sep), `${name} links outside the installed package: ${href}`).toBe(true);
+        expect(existsSync(resolved), `${name} links to missing package file ${href}`).toBe(true);
+      }
+    }
   });
 
   it("keeps version in lockstep across SKILL.md, package.json and src/types.ts", () => {

@@ -74,6 +74,17 @@ else readFileSync(rootEngine).equals(readFileSync(pkgEngine))
   ? ok(`embedded engine skills/${name}/${engine} is byte-identical to ${engine}`)
   : bad(`skills/${name}/${engine} differs from ${engine} — run \`node scripts/copy-bundle.mjs\` and commit`);
 
+// 5. Maintainer evidence linked by the shipped references must travel with the
+// installed package and remain byte-identical to its canonical source.
+for (const file of ["BENCHMARK.md", "tooling-internals.md"]) {
+  const source = join(root, "docs", file);
+  const bundled = join(skillDir, "references", file);
+  if (!existsSync(bundled)) bad(`missing skills/${name}/references/${file} — run \`node scripts/copy-bundle.mjs\``);
+  else readFileSync(source).equals(readFileSync(bundled))
+    ? ok(`bundled references/${file} is byte-identical to docs/${file}`)
+    : bad(`skills/${name}/references/${file} differs from docs/${file} — run \`node scripts/copy-bundle.mjs\``);
+}
+
 if (errors.length) {
   console.error(`\nverify-skill-bundle: ${errors.length} problem(s) — the published skill would not install correctly.`);
   process.exit(1);
