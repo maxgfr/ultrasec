@@ -17,6 +17,15 @@
       "cwe": "CWE-89",
       "at": "src/server.js:10 → src/server.js:11 → src/db.js:6",
       "status": "confirmed"
+    },
+    {
+      "id": "698ed561f7dd",
+      "severity": "low",
+      "title": "Web misconfig — No security-headers middleware where the app is built",
+      "category": "config",
+      "cwe": "CWE-693",
+      "at": "src/server.js:5",
+      "status": "needs-human"
     }
   ],
   "scaffold": {

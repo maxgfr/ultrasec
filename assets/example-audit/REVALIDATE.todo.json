@@ -32,5 +32,22 @@
     "renamedTo": null,
     "verdict": null,
     "note": ""
+  },
+  {
+    "id": "698ed561f7dd",
+    "severity": "low",
+    "title": "Web misconfig — No security-headers middleware where the app is built",
+    "at": "src/server.js:5",
+    "fileExists": true,
+    "currentLine": "const app = express();",
+    "commitsSinceFinding": null,
+    "lineLastChanged": {
+      "commit": "4926462",
+      "author": "ultrasec example",
+      "date": "2026-01-15"
+    },
+    "renamedTo": null,
+    "verdict": null,
+    "note": ""
   }
 ]

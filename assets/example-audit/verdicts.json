@@ -12,6 +12,11 @@
     "exploitPath": "GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`, proving the value is parsed as SQL, not data"
   },
   {
+    "id": "698ed561f7dd",
+    "verdict": "partial",
+    "note": "server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options. Real, but a hardening gap rather than an exploit on its own: what it costs depends on whether a reverse proxy in front sets these headers, which the repo cannot show."
+  },
+  {
     "id": "9b0bcc91ea6a",
     "verdict": "unsupported",
     "note": "The argument to res.send() at server.js:20 is `out` — the return value of runReport() — not req.query.name, so the query parameter is never reflected. The attacker does control that output, but only by way of the command injection at report.js:5, whose impact (RCE) subsumes it; reporting a separate MEDIUM XSS would double-count one bug. Tracked by 3ffa0917b004."

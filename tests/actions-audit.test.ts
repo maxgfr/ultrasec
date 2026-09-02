@@ -106,8 +106,34 @@ describe("agentic CI audit", () => {
     }
   });
 
-  it("files everything under CWE-1427 (prompt injection)", () => {
-    expect(findings.every((f) => f.cwe === "CWE-1427")).toBe(true);
+  it("files the agent vectors under CWE-1427 (prompt injection), the supply-chain ones under their own CWE", () => {
+    for (const f of findings) {
+      const v = /vector ([A-Z]):/.exec(f.title)![1]!;
+      if (v === "J") expect(f.cwe).toBe("CWE-829");
+      else if (v === "K") expect(f.cwe).toBe("CWE-250");
+      else expect(f.cwe, f.title).toBe("CWE-1427");
+    }
+  });
+
+  it("J: flags every action pinned to a tag or branch, never a full commit SHA, and never a local/docker action", () => {
+    const j = vec("J").filter((f) => f.sink?.file.endsWith("unpinned.yml"));
+    // checkout@v4, setup-node@main, ref-less action, claude-code-action@v1 —
+    // and NOT the SHA-pinned one, the `./local` one or the `docker://` one.
+    expect(j.map((f) => f.sink!.line).sort((a, b) => a - b)).toEqual([12, 13, 14, 20]);
+    expect(j.every((f) => f.severity === "medium")).toBe(true);
+    expect(vec("J").filter((f) => f.sink?.file === ".github/workflows/pinned.yml")).toEqual([]);
+  });
+
+  it("K: flags a workflow with no permissions block, or with write-all, on a citable line", () => {
+    const unpinned = vec("K").filter((f) => f.sink?.file.endsWith("unpinned.yml"));
+    expect(unpinned).toHaveLength(1);
+    expect(unpinned[0]!.severity).toBe("high");
+    expect(unpinned[0]!.message).toMatch(/write-all/);
+    expect(vec("K").filter((f) => f.sink?.file === ".github/workflows/pinned.yml")).toEqual([]);
+    // The vulnerable fixture has no permissions block at all: cited on `on:`.
+    const vulnerable = vec("K").filter((f) => f.sink?.file.endsWith("vulnerable.yml"));
+    expect(vulnerable).toHaveLength(1);
+    expect(vulnerable[0]!.message).toMatch(/no permissions: block/);
   });
 
   it("reports nothing on a repo with no workflows", () => {

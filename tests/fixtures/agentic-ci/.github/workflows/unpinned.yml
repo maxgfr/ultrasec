@@ -1,0 +1,23 @@
+name: CI
+on:
+  push:
+permissions: write-all
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # Movable refs: a tag, a branch, no ref at all — each one is whatever the
+      # upstream repository says it is on the day the job runs.
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@main
+      - uses: some-org/some-action
+      # Pinned to a full commit SHA: immutable, fine.
+      - uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
+      # Local and docker actions have no tag to pin.
+      - uses: ./.github/actions/local
+      - uses: docker://alpine:3.19
+      - uses: anthropics/claude-code-action@v1
+        with:
+          prompt: "Say hello"
+          allowed_tools: "Read"

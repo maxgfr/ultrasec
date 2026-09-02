@@ -106,6 +106,26 @@
     "exploitPath": "GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`, proving the value is parsed as SQL, not data"
   },
   {
+    "id": "698ed561f7dd",
+    "category": "config",
+    "title": "Web misconfig — No security-headers middleware where the app is built",
+    "severity": "low",
+    "confidence": "medium",
+    "message": "The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to check.\n\nEvidence: `const app = express();`\n\nVerdict (partial): server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options. Real, but a hardening gap rather than an exploit on its own: what it costs depends on whether a reverse proxy in front sets these headers, which the repo cannot show.",
+    "tool": "ultrasec",
+    "sources": [
+      "ultrasec"
+    ],
+    "status": "needs-human",
+    "cwe": "CWE-693",
+    "sink": {
+      "file": "src/server.js",
+      "line": 5
+    },
+    "risk": 15,
+    "verdict": "partial"
+  },
+  {
     "id": "9b0bcc91ea6a",
     "category": "taint",
     "cwe": "CWE-79",

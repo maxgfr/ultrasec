@@ -67,17 +67,26 @@ async function makeRun(opts: RunOpts = {}): Promise<string> {
 
   if (opts.confirm) {
     // Deterministic verdicts over the fixture's 3 taint candidates, by severity.
-    const bySev = new Map(findings(run).map((f) => [f.severity, f.id]));
+    // The always-on web-config pass also files a LOW hardening note on the
+    // fixture (no helmet where the app is built); it is settled here so the
+    // counts below stay about the three taint candidates.
+    const all = findings(run);
+    const bySev = new Map(all.map((f) => [f.severity, f.id]));
+    const hardening = all
+      .filter((f) => f.category === "config" && f.severity === "low")
+      .map((f) => ({ id: f.id, verdict: "refuted", note: "hardening note — out of scope for this run" }));
     const verdicts =
       opts.confirm === "all"
         ? [
             { id: bySev.get("critical"), verdict: "supported", note: "t", exploitPath: "GET /report?name=;id" },
             { id: bySev.get("high"), verdict: "supported", note: "t", exploitPath: "GET /user?id=1 OR 1=1" },
             { id: bySev.get("medium"), verdict: "partial", note: "t" },
+            ...hardening,
           ]
         : [
             { id: bySev.get("critical"), verdict: "supported", note: "t", exploitPath: "GET /report?name=;id" },
             { id: bySev.get("high"), verdict: "partial", note: "t" },
+            ...hardening,
           ];
     const p = join(run, "seed.verdicts.json");
     writeFileSync(p, JSON.stringify(verdicts));
@@ -227,15 +236,20 @@ describe("orchestrate — emitted workflow", () => {
     const m = src.match(/const BATCHES = (\[.*?\])\n/s);
     expect(m).not.toBeNull();
     const batches = JSON.parse(m![1]!) as string[][];
-    expect(batches.length).toBe(Math.ceil(20 / BATCH_SIZE));
-    expect(batches.flat().length).toBe(20);
+    // Every open finding — the fixture's own candidates plus the 17 ingested.
+    const open = findings(run).filter((f) => f.status === "open").length;
+    expect(open).toBeGreaterThan(BATCH_SIZE * 2);
+    expect(batches.length).toBe(Math.ceil(open / BATCH_SIZE));
+    expect(batches.flat().length).toBe(open);
     expect(src).toContain("pipeline(BATCHES");
     expect(src).toContain("agentType: 'general-purpose'");
     expect(src).toContain("schema: SCHEMA");
   });
 
   it("small worklist (≤ SMALL_WORKLIST) → single agent + an eco notice", async () => {
-    const run = await makeRun({ scan: true, verify: true });
+    // confirm "some" settles two of the taint candidates and the hardening note,
+    // leaving one open — comfortably under SMALL_WORKLIST.
+    const run = await makeRun({ scan: true, confirm: "some", verify: true });
     const res = orchestrateRun(run, ENGINE);
     const m = readWf(run, "verify").match(/const BATCHES = (\[.*?\])\n/s);
     expect((JSON.parse(m![1]!) as string[][]).length).toBe(1);

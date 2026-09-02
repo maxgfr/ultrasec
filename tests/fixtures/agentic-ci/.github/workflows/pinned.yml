@@ -1,0 +1,14 @@
+name: CI
+on:
+  push:
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
+      - uses: ./.github/actions/local
+      - uses: docker://alpine:3.19
+      - run: npm test

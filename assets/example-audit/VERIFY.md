@@ -1,4 +1,4 @@
-# ultrasec verification worklist (3)
+# ultrasec verification worklist (4)
 
 For each item: open the cited code (`ultrasec dossier <id>`), decide whether
 the flow is **real and exploitable**, and set a verdict:
@@ -47,6 +47,13 @@ NOT exploitable — do not flag it.
 - files: `src/server.js:10`, `src/server.js:11`, `src/db.js:6`
 - claim: Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 - reachability (engine evidence, not a verdict): scope symbol · def-use linked
+
+## 698ed561f7dd — [low] Web misconfig — No security-headers middleware where the app is built
+- CWE-693 · config
+- files: `src/server.js:5`
+- claim: The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to check.
+
+Evidence: `const app = express();`
 
 ## 9b0bcc91ea6a — [medium] Cross-site scripting (reflected): untrusted input reaches send()
 - CWE-79 · taint

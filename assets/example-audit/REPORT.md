@@ -1,7 +1,7 @@
 # Security audit — report
 
 repo `examples/vuln-express` · ultrasec 0.0.0-development  
-findings: **3** — 🟥 CRITICAL 1 · 🟧 HIGH 1 · 🟨 MEDIUM 1 · 🟩 LOW 0 · ⬜ INFO 0  
+findings: **4** — 🟥 CRITICAL 1 · 🟧 HIGH 1 · 🟨 MEDIUM 1 · 🟩 LOW 1 · ⬜ INFO 0  
 tools: none (graph + taint only)  
 _ranked by composite risk (severity ⊕ EPSS ⊕ KEV)_
 
@@ -94,6 +94,22 @@ flowchart LR
 
 References: <https://cwe.mitre.org/data/definitions/89.html>
 
+## Needs human review (1)
+
+### 🟩 LOW Web misconfig — No security-headers middleware where the app is built
+
+`698ed561f7dd` · [CWE-693](https://cwe.mitre.org/) · config · status **needs-human** · verdict partial · confidence medium
+
+**Risk:** risk 15
+
+**Path:** `src/server.js:5`
+
+The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to check.
+
+Evidence: `const app = express();`
+
+Verdict (partial): server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options. Real, but a hardening gap rather than an exploit on its own: what it costs depends on whether a reverse proxy in front sets these headers, which the repo cannot show.
+
 ## Refuted (1)
 
 Kept so the refutations can be disagreed with: **why** carries the named ground and the
@@ -148,9 +164,9 @@ a clean bill of health — it is a gap in the audit, and it belongs in the repor
 | V11 | Business logic | ⬜ **not examined** | — |
 | V12 | Files & resources | ⬜ **not examined** | — |
 | V13 | API & web service | ⬜ **not examined** | — |
-| V14 | Configuration & supply chain | ⬜ **not examined** | — |
+| V14 | Configuration & supply chain | ✅ examined | 1 |
 
-### Not examined (12)
+### Not examined (11)
 
 - **V1 Architecture & threat modelling** — Did CONTEXT.md establish a trust model and a threat model, or was severity rated in the abstract?
 - **V2 Authentication** — Password/OTP/session-establishment paths read? Credential comparison constant-time?
@@ -163,7 +179,6 @@ a clean bill of health — it is a gap in the audit, and it belongs in the repor
 - **V11 Business logic** — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance. Anti-automation is partly enumerated: `scan` finds unbounded similarity/distance calls (CWE-407), `guards --lens throttle` finds handlers nothing rate-limits.
 - **V12 Files & resources** — Traversal and zip-slip are enumerated; upload type/size/AV policy is not.
 - **V13 API & web service** — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.
-- **V14 Configuration & supply chain** — Dependencies, secrets, IaC, CI — including workflows that hand an agent the repo.
 
 ### Answer these explicitly (9)
 

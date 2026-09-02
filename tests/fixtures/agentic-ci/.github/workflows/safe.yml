@@ -1,14 +1,17 @@
 name: AI docs
 on:
   workflow_dispatch:
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      # Constant prompt, no event data, sandbox left on.
-      - uses: anthropics/claude-code-action@v1
+      - uses: actions/checkout@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9
+      # Constant prompt, no event data, sandbox left on, action pinned to a SHA.
+      - uses: anthropics/claude-code-action@a1b2c3d4e5f60718293a4b5c6d7e8f9012345678
         with:
           prompt: "Regenerate the API reference from src/ and open a PR."
           allowed_tools: "Read,Write,Bash(pnpm build)"

@@ -24,8 +24,11 @@ you know which this is.
 | **G** | `eval` / `exec` over an AI step's output | prompt injection becomes code execution in the runner |
 | **H** | sandbox disabled — `danger-full-access`, `--yolo`, `Bash(*)` | removes the boundary that makes an injected instruction survivable |
 | **I** | wildcard allow-list — `allowed_non_write_users: "*"` | any first-time contributor can drive the agent |
+| **J** | `uses: owner/repo@v1` — a movable tag or branch, not a 40-hex commit SHA | whoever controls (or compromises) the upstream repository replaces what runs in this job, with this job's token; applies to every workflow, agent or not |
+| **K** | no `permissions:` block, or `permissions: write-all` | the GITHUB_TOKEN carries the repository default — historically write to contents, packages, pull requests — for every step, injected instruction or compromised action included |
 
-**A, B, C, D, G, H and I are detected mechanically.** E and F need judgment: whether a log line
+**A, B, C, D, G, H, I, J and K are detected mechanically** (J and K on every workflow in the tree,
+filed under CWE-829 and CWE-250 rather than prompt injection). E and F need judgment: whether a log line
 carries user data, and whether a permitted command can be made to expand a subshell, are questions
 about the rest of the repo.
 

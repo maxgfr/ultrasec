@@ -23072,6 +23072,21 @@ var VECTORS = {
     title: "Wildcard user allow-list",
     severity: "high",
     note: "Any account \u2014 including a first-time contributor \u2014 can trigger the agent."
+  },
+  // J and K are not agent-specific — they apply to every workflow in the tree
+  // — and they are the two shapes that turn an injected instruction, or a
+  // compromised upstream action, into something the job token can act on.
+  J: {
+    id: "J",
+    title: "Action not pinned to a commit SHA",
+    severity: "medium",
+    note: "`uses: owner/repo@v1` resolves a MOVABLE tag: whoever controls that repository (or compromises it \u2014 tj-actions/changed-files, 2025) can replace what runs in this job, with this job's token and secrets. Pin to a full 40-hex commit SHA and let Dependabot/Renovate bump it."
+  },
+  K: {
+    id: "K",
+    title: "Job token permissions not restricted",
+    severity: "high",
+    note: "No `permissions:` block, or `permissions: write-all`: the GITHUB_TOKEN carries whatever the repository default grants \u2014 historically write to contents, packages and pull requests. Every step, including an injected instruction or a compromised action, gets it. Declare the minimum (`permissions: contents: read`) at the workflow level and widen per job only where a write is needed."
   }
 };
 function lines(content) {
@@ -23132,6 +23147,7 @@ function promptValue(ls, start2) {
   }
   return parts2.join("\n");
 }
+var VECTOR_CWE = { J: "CWE-829", K: "CWE-250" };
 function hit(rel2, line, v, evidence) {
   return makeToolFinding({
     tool: "ultrasec",
@@ -23144,8 +23160,16 @@ function hit(rel2, line, v, evidence) {
 Evidence: \`${evidence.trim().slice(0, 160)}\``,
     file: rel2,
     line,
-    cwe: "CWE-1427"
+    cwe: VECTOR_CWE[v.id] ?? "CWE-1427"
   });
+}
+var USES_LINE = /^\s*(?:-\s+)?uses\s*:\s*['"]?([^\s'"#]+)/;
+var FULL_SHA = /^[0-9a-f]{40}$/i;
+function unpinnedRef(usesValue) {
+  if (usesValue.startsWith("./") || usesValue.startsWith("docker://")) return false;
+  const at = usesValue.lastIndexOf("@");
+  if (at === -1) return true;
+  return !FULL_SHA.test(usesValue.slice(at + 1));
 }
 function auditAgenticWorkflows(repo, prune, tree) {
   const findings = [];
@@ -23162,6 +23186,17 @@ function auditAgenticWorkflows(repo, prune, tree) {
       if (headCheckout) findings.push(hit(rel2, headCheckout.n, VECTORS.D, headCheckout.text));
     }
     for (const l of ls) if (WILDCARD_ALLOWLIST.test(l.text)) findings.push(hit(rel2, l.n, VECTORS.I, l.text));
+    for (const l of ls) {
+      const m = USES_LINE.exec(l.text);
+      if (m && unpinnedRef(m[1])) findings.push(hit(rel2, l.n, VECTORS.J, l.text));
+    }
+    const permissionLines = ls.filter((l) => /^\s*permissions\s*:/.test(l.text));
+    if (!permissionLines.length) {
+      const onLine = ls.find((l) => /^on\s*:/.test(l.text)) ?? ls[0];
+      if (onLine) findings.push(hit(rel2, onLine.n, VECTORS.K, `${onLine.text}   (no permissions: block anywhere in the workflow)`));
+    } else {
+      for (const l of permissionLines) if (/^\s*permissions\s*:\s*write-all\b/.test(l.text)) findings.push(hit(rel2, l.n, VECTORS.K, l.text));
+    }
     if (!usesAi) continue;
     const envKeys = taintedEnvKeys(ls);
     const aiIds = aiStepIds(ls);
@@ -23301,8 +23336,38 @@ var WEBCONFIG_SHAPES = {
     severity: "medium",
     cwe: "CWE-200",
     note: "Introspection (or GraphiQL/Playground) hands an attacker the whole schema. Disable it in production."
+  },
+  // ── Hardening absent where the app is constructed ─────────────────────────
+  // The three below are ABSENCES, which this detector otherwise avoids (an
+  // absence has no line to cite). They are grounded on the one line that does
+  // exist: the `express()` / `new Hono()` / `FastAPI()` call that builds the
+  // app, in the file that builds it — where the middleware would be registered.
+  "helmet-missing": {
+    id: "helmet-missing",
+    title: "No security-headers middleware where the app is built",
+    severity: "low",
+    cwe: "CWE-693",
+    note: "The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route \u2014 unless a reverse proxy in front sets these headers, which is the thing to check."
+  },
+  "trust-proxy": {
+    id: "trust-proxy",
+    title: "`trust proxy` enabled",
+    severity: "low",
+    cwe: "CWE-290",
+    note: "`app.set('trust proxy', \u2026)` makes `req.ip`, `req.protocol` and `req.hostname` come from X-Forwarded-* headers. Correct behind a proxy that strips and rewrites them; when the app is reachable directly, any client can forge its IP (rate limits, allow-lists, audit logs) and its scheme. Confirm the deployment topology and prefer a hop count or an address list over `true`."
+  },
+  "body-limit-missing": {
+    id: "body-limit-missing",
+    title: "Body parser registered without a size limit",
+    severity: "low",
+    cwe: "CWE-770",
+    note: "`express.json()` / `express.urlencoded()` / `bodyParser.*()` with no `limit`. The default (100 kB) is small, so this is a hardening note rather than a hole \u2014 but a raised default elsewhere, or a `text()`/`raw()` parser, makes an unbounded body a memory-exhaustion vector. State the limit explicitly."
   }
 };
+var APP_CTOR = /\b(?:express|fastify|Fastify)\s*\(\s*\)|\bnew\s+(?:Hono|Koa|Elysia)\s*\(|\bFastAPI\s*\(/;
+var HEADERS_MIDDLEWARE = /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
+var TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
+var BODY_PARSER = /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\(([^)]*)\)/g;
 function lines2(content) {
   return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
 }
@@ -23430,6 +23495,14 @@ function auditWebConfig(repo, prune, tree) {
       if (/^\s*autoindex\s+on\b/i.test(l.text) || /\bserve-index\s*\(/.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["dir-listing"], l.text));
       if (/\b(?:introspection|graphiql|playground)\s*:\s*true\b/.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["graphql-introspection"], l.text));
       for (const r of CSRF_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["csrf-disabled"], l.text));
+      if (TRUST_PROXY.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["trust-proxy"], l.text));
+      for (const m of l.text.matchAll(BODY_PARSER)) {
+        if (!/\blimit\s*:/.test(m[1] ?? "")) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["body-limit-missing"], m[0]));
+      }
+    }
+    if (!HEADERS_MIDDLEWARE.test(content)) {
+      const ctor = ls.find((l) => APP_CTOR.test(l.text));
+      if (ctor) out2.push(hit2(rel2, ctor.n, WEBCONFIG_SHAPES["helmet-missing"], ctor.text));
     }
     scanCors(rel2, content, out2);
     scanCookies(rel2, content, out2);

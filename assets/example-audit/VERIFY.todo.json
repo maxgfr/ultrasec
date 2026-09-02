@@ -34,6 +34,20 @@
     "reachability": "scope symbol · def-use linked"
   },
   {
+    "id": "698ed561f7dd",
+    "severity": "low",
+    "cwe": "CWE-693",
+    "title": "Web misconfig — No security-headers middleware where the app is built",
+    "category": "config",
+    "claim": "The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to check.\n\nEvidence: `const app = express();`",
+    "files": [
+      "src/server.js:5"
+    ],
+    "verdict": null,
+    "note": "",
+    "brocard": null
+  },
+  {
     "id": "9b0bcc91ea6a",
     "severity": "medium",
     "cwe": "CWE-79",

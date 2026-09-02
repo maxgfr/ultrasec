@@ -135,7 +135,42 @@ export const WEBCONFIG_SHAPES: Record<string, WebConfigShape> = {
     cwe: "CWE-200",
     note: "Introspection (or GraphiQL/Playground) hands an attacker the whole schema. Disable it in production.",
   },
+  // ── Hardening absent where the app is constructed ─────────────────────────
+  // The three below are ABSENCES, which this detector otherwise avoids (an
+  // absence has no line to cite). They are grounded on the one line that does
+  // exist: the `express()` / `new Hono()` / `FastAPI()` call that builds the
+  // app, in the file that builds it — where the middleware would be registered.
+  "helmet-missing": {
+    id: "helmet-missing",
+    title: "No security-headers middleware where the app is built",
+    severity: "low",
+    cwe: "CWE-693",
+    note: "The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to check.",
+  },
+  "trust-proxy": {
+    id: "trust-proxy",
+    title: "`trust proxy` enabled",
+    severity: "low",
+    cwe: "CWE-290",
+    note: "`app.set('trust proxy', …)` makes `req.ip`, `req.protocol` and `req.hostname` come from X-Forwarded-* headers. Correct behind a proxy that strips and rewrites them; when the app is reachable directly, any client can forge its IP (rate limits, allow-lists, audit logs) and its scheme. Confirm the deployment topology and prefer a hop count or an address list over `true`.",
+  },
+  "body-limit-missing": {
+    id: "body-limit-missing",
+    title: "Body parser registered without a size limit",
+    severity: "low",
+    cwe: "CWE-770",
+    note: "`express.json()` / `express.urlencoded()` / `bodyParser.*()` with no `limit`. The default (100 kB) is small, so this is a hardening note rather than a hole — but a raised default elsewhere, or a `text()`/`raw()` parser, makes an unbounded body a memory-exhaustion vector. State the limit explicitly.",
+  },
 };
+
+/** The line that constructs the app, per framework, for the absence shapes. */
+// Flask is deliberately absent: its header middleware (Talisman) is rare
+// enough that the absence would fire on nearly every Flask app.
+const APP_CTOR = /\b(?:express|fastify|Fastify)\s*\(\s*\)|\bnew\s+(?:Hono|Koa|Elysia)\s*\(|\bFastAPI\s*\(/;
+const HEADERS_MIDDLEWARE =
+  /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
+const TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
+const BODY_PARSER = /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\(([^)]*)\)/g;
 
 interface Line {
   n: number;
@@ -307,6 +342,18 @@ export function auditWebConfig(repo: string, prune?: (rel: string) => boolean, t
       // (A framework that never had one at all is an absence — that's the
       // access-control lens's job, not a groundable finding.)
       for (const r of CSRF_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["csrf-disabled"]!, l.text));
+
+      if (TRUST_PROXY.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["trust-proxy"]!, l.text));
+      for (const m of l.text.matchAll(BODY_PARSER)) {
+        if (!/\blimit\s*:/.test(m[1] ?? "")) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["body-limit-missing"]!, m[0]));
+      }
+    }
+
+    // Cited on the line that constructs the app — the one place a missing
+    // middleware can be grounded.
+    if (!HEADERS_MIDDLEWARE.test(content)) {
+      const ctor = ls.find((l) => APP_CTOR.test(l.text));
+      if (ctor) out.push(hit(rel, ctor.n, WEBCONFIG_SHAPES["helmet-missing"]!, ctor.text));
     }
 
     scanCors(rel, content, out);

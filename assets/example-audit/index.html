@@ -151,16 +151,16 @@
     <div class="eyebrow">Security audit · ultrasec 0.0.0-development</div>
     <h1>examples/vuln-express</h1>
     <div class="meta-line">
-      <span>3 candidate(s)</span>
+      <span>4 candidate(s)</span>
       <span>2 confirmed</span>
-      <span>0 needs human</span>
+      <span>1 needs human</span>
       <span>0 unadjudicated</span>
       <span>1 refuted</span>
     </div>
     <div class="meta-line"><span>tools: none</span></div>
   </header>
   <div class="cols">
-  <nav class="rail" aria-label="Report navigation"><div class="rail-title">Sections</div><ol><li><a href="#summary"><span class="rt">Summary</span></a></li><li><a href="#confirmed"><span class="rt">Confirmed (2)</span></a></li><li><a href="#dismissed"><span class="rt">Refuted (1)</span></a></li><li><a href="#coverage"><span class="rt">Coverage</span></a></li></ol><div class="rail-title">Registry</div><ol><li><a href="#3ffa0917b004"><span class="dot c"></span><span class="rt">OS command injection: untrusted input reaches execSync()</span></a></li><li><a href="#54b733703450"><span class="dot h"></span><span class="rt">SQL injection: untrusted input reaches query()</span></a></li></ol></nav>
+  <nav class="rail" aria-label="Report navigation"><div class="rail-title">Sections</div><ol><li><a href="#summary"><span class="rt">Summary</span></a></li><li><a href="#confirmed"><span class="rt">Confirmed (2)</span></a></li><li><a href="#needs-human"><span class="rt">Needs human (1)</span></a></li><li><a href="#dismissed"><span class="rt">Refuted (1)</span></a></li><li><a href="#coverage"><span class="rt">Coverage</span></a></li></ol><div class="rail-title">Registry</div><ol><li><a href="#3ffa0917b004"><span class="dot c"></span><span class="rt">OS command injection: untrusted input reaches execSync()</span></a></li><li><a href="#54b733703450"><span class="dot h"></span><span class="rt">SQL injection: untrusted input reaches query()</span></a></li><li><a href="#698ed561f7dd"><span class="dot l"></span><span class="rt">Web misconfig — No security-headers middleware where the app is built</span></a></li></ol></nav>
   <main>
     <section id="summary">
       <h2>Summary</h2>
@@ -172,7 +172,7 @@
     <div class="sf"><div class="sf-h"><span class="t">Dependency advisories</span><span class="n">0</span></div>
       <div class="sf-sub">none</div><div class="sf-sub">advisories on installed packages - triaged as a ranked list</div></div>
   </div>
-      <div class="band"><div class="tile c"><span class="n">1</span><span class="k">critical</span></div><div class="tile h"><span class="n">1</span><span class="k">high</span></div><div class="tile m"><span class="n">1</span><span class="k">medium</span></div><div class="tile l"><span class="n">0</span><span class="k">low</span></div><div class="tile i"><span class="n">0</span><span class="k">info</span></div></div>
+      <div class="band"><div class="tile c"><span class="n">1</span><span class="k">critical</span></div><div class="tile h"><span class="n">1</span><span class="k">high</span></div><div class="tile m"><span class="n">1</span><span class="k">medium</span></div><div class="tile l"><span class="n">1</span><span class="k">low</span></div><div class="tile i"><span class="n">0</span><span class="k">info</span></div></div>
     </section>
   <section class="ai-narrative"><h2>Executive summary <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><p>Two confirmed injection flaws in a public Express API. Untrusted req.query values cross file boundaries into a raw SQL statement and a shell command, with no validation on any hop and no authentication on either route, so both are exploitable by any unauthenticated client — command injection first, which yields code execution as the app user. Both come from the same habit: request values handed straight to a helper that builds an interpreter string.</p></section>
   <section id="chains"><h2>Attack chains <span class="ai-tag">AI</span></h2><p class="ai-note">AI-authored — verify against the cited findings before acting.</p><div class="chain"><h3>Unauthenticated code execution, then data access</h3><div class="meta"><a href="#3ffa0917b004"><code>3ffa0917b004</code></a> → <a href="#54b733703450"><code>54b733703450</code></a></div><p>Neither route requires authentication. GET /report gives shell execution as the app user (report.js:5), which already reaches the database file directly; GET /user independently returns arbitrary rows (db.js:6). Fixing only the SQL injection leaves the stronger path intact.</p></div></section>
@@ -212,6 +212,22 @@ Revalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation 
         
         <p class="refs"><a href="https://cwe.mitre.org/data/definitions/89.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/89.html</a></p>
       </article></section>
+  <section id="needs-human"><h2>Needs human review (1)</h2><p class="msg prose">Uncertain, and too severe to dismiss without proof.</p>
+      <article class="find l" id="698ed561f7dd">
+        <div class="find-top"><span class="pill">LOW</span><h3>Web misconfig — No security-headers middleware where the app is built</h3></div>
+        <div class="meta"><code>698ed561f7dd</code> · CWE-693 · config · needs-human · partial · confidence medium</div>
+        <div class="chips"><span class="chip risk">risk 15</span></div>
+        <p class="anchor"><code>src/server.js:5</code></p>
+        <p class="msg">The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to check.
+
+Evidence: `const app = express();`
+
+Verdict (partial): server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options. Real, but a hardening gap rather than an exploit on its own: what it costs depends on whether a reverse proxy in front sets these headers, which the repo cannot show.</p>
+        
+        
+        
+        
+      </article></section>
   <section id="dismissed"><h2>Refuted (1)</h2>
       <details><summary>Show the 1 candidate(s) this audit refuted, and on what ground</summary>
       <p class="msg prose">Kept because an audit that hides its refutations cannot be checked. The <em>why</em> column names the ground and the argument that was made.</p>
@@ -223,7 +239,7 @@ Revalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation 
     <h2>Coverage — what was not looked at</h2>
     <p>A category marked <strong>NOT examined</strong> is a gap in this audit, not a clean bill of health.</p>
     
-    <div class="tw"><table><thead><tr><th>#</th><th>category</th><th>state</th><th>findings</th></tr></thead><tbody><tr class="unexamined"><td class="at">V1</td><td>Architecture &amp; threat modelling</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V2</td><td>Authentication</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V3</td><td>Session management</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V4</td><td>Access control</td><td>NOT examined</td><td>—</td></tr><tr class="examined"><td class="at">V5</td><td>Validation, sanitization &amp; encoding</td><td>examined</td><td>3</td></tr><tr class="unexamined"><td class="at">V6</td><td>Stored cryptography</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V7</td><td>Error handling &amp; logging</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V8</td><td>Data protection &amp; privacy</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V9</td><td>Communications</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V11</td><td>Business logic</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V12</td><td>Files &amp; resources</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V13</td><td>API &amp; web service</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V14</td><td>Configuration &amp; supply chain</td><td>NOT examined</td><td>—</td></tr></tbody></table></div>
+    <div class="tw"><table><thead><tr><th>#</th><th>category</th><th>state</th><th>findings</th></tr></thead><tbody><tr class="unexamined"><td class="at">V1</td><td>Architecture &amp; threat modelling</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V2</td><td>Authentication</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V3</td><td>Session management</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V4</td><td>Access control</td><td>NOT examined</td><td>—</td></tr><tr class="examined"><td class="at">V5</td><td>Validation, sanitization &amp; encoding</td><td>examined</td><td>3</td></tr><tr class="unexamined"><td class="at">V6</td><td>Stored cryptography</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V7</td><td>Error handling &amp; logging</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V8</td><td>Data protection &amp; privacy</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V9</td><td>Communications</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V11</td><td>Business logic</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V12</td><td>Files &amp; resources</td><td>NOT examined</td><td>—</td></tr><tr class="unexamined"><td class="at">V13</td><td>API &amp; web service</td><td>NOT examined</td><td>—</td></tr><tr class="examined"><td class="at">V14</td><td>Configuration &amp; supply chain</td><td>examined</td><td>1</td></tr></tbody></table></div>
   </section>
     <footer>
       <span>ultrasec 0.0.0-development · Taint candidates are deterministic; external-tool results depend on installed scanners.</span>

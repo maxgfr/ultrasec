@@ -27,7 +27,18 @@
       "owner": "@backend"
     }
   ],
-  "investigations": [],
+  "investigations": [
+    {
+      "id": "698ed561f7dd",
+      "title": "Web misconfig — No security-headers middleware where the app is built",
+      "severity": "low",
+      "category": "config",
+      "cwe": "CWE-693",
+      "at": "src/server.js:5",
+      "status": "needs-human",
+      "kind": "investigate"
+    }
+  ],
   "rootCauses": [
     {
       "cause": "Request values handed to a helper that builds an interpreter string",

@@ -1,5 +1,5 @@
 <!-- ultrasec IMPLEMENT draft — feed this file to the `to-prd` skill to author the remediation PRD, or hand it to an implementer/AI. Every item is grounded in a confirmed [file:line]. -->
-# Remediation PRD draft — 2 fixes, 0 to investigate
+# Remediation PRD draft — 2 fixes, 1 to investigate
 _AI-authored — verify against the cited findings before acting._
 
 > Deterministic draft from the ultrasec dossier. Feed it to the **`to-prd`** skill to
@@ -28,6 +28,8 @@ NOT exploitable — do not flag it.
 ## Problem statement
 
 The audit confirmed **2** exploitable finding(s) (1 critical, 1 high) that must be remediated.
+
+A further **1** finding(s) (1 low) are uncertain and need human investigation before a fix can be scoped.
 
 ## Solution
 
@@ -60,6 +62,10 @@ Fix at the root cause where possible:
    - Acceptance criteria:
      - [ ] The cited line `src/server.js:10 → src/server.js:11 → src/db.js:6` is no longer exploitable for this finding.
      - [ ] A regression test reproduces the issue before the fix and passes after it.
+
+## Investigation items (needs-human — resolve before scoping a fix)
+
+1. Investigate `Web misconfig — No security-headers middleware where the app is built` at `src/server.js:5` _([low] CWE-693 · `698ed561f7dd`)_ — confirm whether it is exploitable, then route to fix or dismiss.
 
 ## Out of scope
 - 1 finding(s) were dismissed during the audit — not in scope for this work.

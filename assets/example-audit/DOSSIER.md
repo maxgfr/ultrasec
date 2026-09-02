@@ -3,7 +3,7 @@
 - repo: `examples/vuln-express`
 - languages: javascript
 - external tools run: none (graph + taint only)
-- findings: **3** — 🟥 CRIT 1  🟧 HIGH 1  🟨 MED 1  🟩 LOW 0  ⬜ INFO 0
+- findings: **4** — 🟥 CRIT 1  🟧 HIGH 1  🟨 MED 1  🟩 LOW 1  ⬜ INFO 0
 
 > Candidates are deterministic and **recall-oriented** — every one needs
 > adjudication. Open each with `ultrasec dossier <id>` (real code + the
@@ -34,6 +34,17 @@ Revalidation (still-valid): report.js:5 is unchanged at HEAD — still execSync 
 Verdict (supported): req.query.id is concatenated into SQL at db.js:5 and reaches sqlite.query() with no parameter array. The parameterized sibling getUserSafe (db.js:11) is NOT on this path.
 
 Revalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation it consumes is still at db.js:5.
+
+### 698ed561f7dd — 🟩 LOW Web misconfig — No security-headers middleware where the app is built
+
+- category: config · CWE-693 · confidence medium · status needs-human
+- risk 15
+- at: `src/server.js:5`
+- The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to check.
+
+Evidence: `const app = express();`
+
+Verdict (partial): server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options. Real, but a hardening gap rather than an exploit on its own: what it costs depends on whether a reverse proxy in front sets these headers, which the repo cannot show.
 
 ### 9b0bcc91ea6a — 🟨 MED Cross-site scripting (reflected): untrusted input reaches send()
 

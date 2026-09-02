@@ -1,4 +1,4 @@
-# ultrasec revalidation worklist (2)
+# ultrasec revalidation worklist (3)
 
 Each finding below was already ranked **real** (confirmed / needs-human). Using the
 git facts, decide whether it is still a live issue and set a `verdict`:
@@ -37,5 +37,10 @@ NOT exploitable — do not flag it.
 ## 54b733703450 — [high] SQL injection: untrusted input reaches query()
 - at: `src/db.js:6` · file exists at HEAD: yes
 - current line: `return sqlite.query(sql);`
+- line last changed: `4926462` (2026-01-15) by ultrasec example
+
+## 698ed561f7dd — [low] Web misconfig — No security-headers middleware where the app is built
+- at: `src/server.js:5` · file exists at HEAD: yes
+- current line: `const app = express();`
 - line last changed: `4926462` (2026-01-15) by ultrasec example
 

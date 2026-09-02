@@ -1,6 +1,7 @@
 {
   "cors/reflect.js": [
-    "cors-reflect"
+    "cors-reflect",
+    "helmet-missing"
   ],
   "cors/wildcard-credentials.js": [
     "cors-wildcard-credentials"
@@ -67,5 +68,15 @@
   "csrf/django.py": [
     "csrf-disabled"
   ],
-  "csrf/safe.rb": []
+  "csrf/safe.rb": [],
+  "hardening/no-helmet.js": [
+    "helmet-missing"
+  ],
+  "hardening/trust-proxy.js": [
+    "trust-proxy"
+  ],
+  "hardening/body-limit.js": [
+    "body-limit-missing"
+  ],
+  "hardening/safe.js": []
 }

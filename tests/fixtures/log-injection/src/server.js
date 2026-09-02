@@ -1,7 +1,11 @@
 const express = require("express");
+const helmet = require("helmet");
 const logger = require("./logger");
 
 const app = express();
+// Security headers registered, so the always-on web-config pass has nothing to
+// say about this file and the fixture stays about logging only.
+app.use(helmet());
 
 // VULN (log injection, CWE-117 — opt-in `scan --log-hygiene` only): req.query.q
 // is untrusted and flows into a log call with no CRLF/newline stripping. The

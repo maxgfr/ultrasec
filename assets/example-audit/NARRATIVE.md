@@ -1,4 +1,4 @@
-# ultrasec report-narrative worklist (2)
+# ultrasec report-narrative worklist (3)
 
 Author **NARRATIVE.json** (a Narrative object), then fold it into the report with
 `ultrasec render --narrative NARRATIVE.json --run <run>`. Fields (all optional, all additive):
@@ -37,6 +37,7 @@ NOT exploitable — do not flag it.
 
 - `3ffa0917b004` — [critical] OS command injection: untrusted input reaches execSync() (CWE-78) · status confirmed · at src/server.js:18 → src/server.js:19 → src/report.js:5
 - `54b733703450` — [high] SQL injection: untrusted input reaches query() (CWE-89) · status confirmed · at src/server.js:10 → src/server.js:11 → src/db.js:6
+- `698ed561f7dd` — [low] Web misconfig — No security-headers middleware where the app is built (CWE-693) · status needs-human · at src/server.js:5
 
 ## Scaffold (starting point for NARRATIVE.json)
 ```json

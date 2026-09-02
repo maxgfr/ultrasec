@@ -52,7 +52,7 @@ export interface ActionsVector {
   note: string;
 }
 
-/** The nine shapes, kept as data so the reference doc and the engine cannot drift. */
+/** The shapes, kept as data so the reference doc and the engine cannot drift. */
 export const VECTORS: Record<string, ActionsVector> = {
   A: {
     id: "A",
@@ -95,6 +95,21 @@ export const VECTORS: Record<string, ActionsVector> = {
     title: "Wildcard user allow-list",
     severity: "high",
     note: "Any account — including a first-time contributor — can trigger the agent.",
+  },
+  // J and K are not agent-specific — they apply to every workflow in the tree
+  // — and they are the two shapes that turn an injected instruction, or a
+  // compromised upstream action, into something the job token can act on.
+  J: {
+    id: "J",
+    title: "Action not pinned to a commit SHA",
+    severity: "medium",
+    note: "`uses: owner/repo@v1` resolves a MOVABLE tag: whoever controls that repository (or compromises it — tj-actions/changed-files, 2025) can replace what runs in this job, with this job's token and secrets. Pin to a full 40-hex commit SHA and let Dependabot/Renovate bump it.",
+  },
+  K: {
+    id: "K",
+    title: "Job token permissions not restricted",
+    severity: "high",
+    note: "No `permissions:` block, or `permissions: write-all`: the GITHUB_TOKEN carries whatever the repository default grants — historically write to contents, packages and pull requests. Every step, including an injected instruction or a compromised action, gets it. Declare the minimum (`permissions: contents: read`) at the workflow level and widen per job only where a write is needed.",
   },
 };
 
@@ -186,6 +201,11 @@ function promptValue(ls: Line[], start: number): string {
   return parts.join("\n");
 }
 
+/** The CWE each vector files under: prompt injection for the agent vectors,
+ *  untrusted-component inclusion for the unpinned action, excess privilege for
+ *  the token. */
+const VECTOR_CWE: Record<string, string> = { J: "CWE-829", K: "CWE-250" };
+
 function hit(rel: string, line: number, v: ActionsVector, evidence: string): Finding {
   return makeToolFinding({
     tool: "ultrasec",
@@ -196,8 +216,20 @@ function hit(rel: string, line: number, v: ActionsVector, evidence: string): Fin
     message: `${v.note}\n\nEvidence: \`${evidence.trim().slice(0, 160)}\``,
     file: rel,
     line,
-    cwe: "CWE-1427",
+    cwe: VECTOR_CWE[v.id] ?? "CWE-1427",
   });
+}
+
+/** `uses: owner/repo[/path]@ref` — the ref, or undefined for a local (`./`) or
+ *  `docker://` action, which have no tag to pin. */
+const USES_LINE = /^\s*(?:-\s+)?uses\s*:\s*['"]?([^\s'"#]+)/;
+const FULL_SHA = /^[0-9a-f]{40}$/i;
+
+function unpinnedRef(usesValue: string): boolean {
+  if (usesValue.startsWith("./") || usesValue.startsWith("docker://")) return false;
+  const at = usesValue.lastIndexOf("@");
+  if (at === -1) return true; // no ref at all: the default branch
+  return !FULL_SHA.test(usesValue.slice(at + 1));
 }
 
 /**
@@ -224,6 +256,21 @@ export function auditAgenticWorkflows(repo: string, prune?: (rel: string) => boo
       if (headCheckout) findings.push(hit(rel, headCheckout.n, VECTORS.D!, headCheckout.text));
     }
     for (const l of ls) if (WILDCARD_ALLOWLIST.test(l.text)) findings.push(hit(rel, l.n, VECTORS.I!, l.text));
+
+    // J: every third-party action must be pinned to a commit. K: the token's
+    // permissions must be declared, and not as write-all. Both hold for every
+    // workflow, model in the loop or not.
+    for (const l of ls) {
+      const m = USES_LINE.exec(l.text);
+      if (m && unpinnedRef(m[1]!)) findings.push(hit(rel, l.n, VECTORS.J!, l.text));
+    }
+    const permissionLines = ls.filter((l) => /^\s*permissions\s*:/.test(l.text));
+    if (!permissionLines.length) {
+      const onLine = ls.find((l) => /^on\s*:/.test(l.text)) ?? ls[0];
+      if (onLine) findings.push(hit(rel, onLine.n, VECTORS.K!, `${onLine.text}   (no permissions: block anywhere in the workflow)`));
+    } else {
+      for (const l of permissionLines) if (/^\s*permissions\s*:\s*write-all\b/.test(l.text)) findings.push(hit(rel, l.n, VECTORS.K!, l.text));
+    }
 
     if (!usesAi) continue;
 
