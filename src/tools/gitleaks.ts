@@ -15,6 +15,7 @@ import { makeToolFinding } from "./normalize.js";
 // tree) so the scan always works.
 export const gitleaks: ToolAdapter = {
   name: "gitleaks",
+  cacheable: true,
   category: "secret",
   dockerImage: "ghcr.io/gitleaks/gitleaks:latest",
   // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);

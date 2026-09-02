@@ -43,6 +43,25 @@ once per run; each builds a private one when none is passed. Per-stage wall-cloc
 or stdout, both of which are byte-compared.
 
 
+## The adapter pool and the result cache
+
+Adapters run in a small pool — `--tool-concurrency N`, default 4 (`DEFAULT_TOOL_CONCURRENCY`),
+`1` for the old serial run. Each scanner is its own process, so the pool costs nothing in-process,
+and 21 adapters at up to five minutes each in series were the whole wall-clock of a scan. The output
+stays deterministic: `orchestrate` fills `results` by adapter index and merges findings in that
+order, whatever order the processes finished in. `onProgress` fires as things happen, so with a pool
+the start/done lines interleave; `detect()` (the `--version` probe) is memoized per process and
+reset at the top of every `scan` and after `tools --upgrade`.
+
+Under `--resume`, an adapter that declares `cacheable` is replayed from `<run>/cache/tools-cache.json`
+when its key matches: adapter name, detected version, exact argv, `git rev-parse HEAD`, the walk
+digest (every file's path, size and mtime) and the prune flags. A hit carries `· cached (--resume)`
+in its note, visible in `toolStatus`. Only the scanners whose output is a pure function of the tree
+claim it — bandit, gosec, checkov, hadolint, cppcheck, kingfisher, gitleaks. Trivy, osv-scanner,
+grype, govulncheck and cargo-audit read a vulnerability database that refreshes, and semgrep pulls
+rules, so `!network` would be the wrong test and they are never cached. Docker runs are never cached
+either: the image is a rolling `latest`.
+
 ## Supply-chain audit: SBOM (syft) + package-checker
 
 When `syft` is installed, `scan` generates a CycloneDX SBOM (`sbom.cdx.json`)

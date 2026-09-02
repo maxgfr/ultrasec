@@ -30,16 +30,32 @@ describe("orchestrate reports each adapter starting and finishing", () => {
     applicable: () => "not applicable in this test",
   });
 
-  it("emits a start event and a completion event per adapter, in order", () => {
+  it("emits a start event and a completion event per adapter, in order (serial pool)", async () => {
     const seen: ToolProgress[] = [];
-    orchestrate([fake("alpha"), fake("beta")], FIXTURE, { onProgress: (e) => seen.push(e) });
+    await orchestrate([fake("alpha"), fake("beta")], FIXTURE, { concurrency: 1, onProgress: (e) => seen.push(e) });
 
     expect(seen.map((e) => `${e.tool}:${e.result ? "done" : "start"}`)).toEqual(["alpha:start", "alpha:done", "beta:start", "beta:done"]);
   });
 
-  it("carries position, result and elapsed time on completion", () => {
+  it("with a pool, still exactly one start and one completion per adapter, results by index", async () => {
     const seen: ToolProgress[] = [];
-    orchestrate([fake("alpha"), fake("beta")], FIXTURE, { onProgress: (e) => seen.push(e) });
+    const names = ["alpha", "beta", "gamma", "delta", "epsilon"];
+    const r = await orchestrate(
+      names.map((n) => fake(n)),
+      FIXTURE,
+      { concurrency: 4, onProgress: (e) => seen.push(e) },
+    );
+    for (const n of names) {
+      expect(seen.filter((e) => e.tool === n && !e.result)).toHaveLength(1);
+      expect(seen.filter((e) => e.tool === n && e.result)).toHaveLength(1);
+    }
+    expect(r.results.map((x) => x.name)).toEqual(names);
+    expect(seen.filter((e) => e.result).map((e) => e.total)).toEqual([5, 5, 5, 5, 5]);
+  });
+
+  it("carries position, result and elapsed time on completion", async () => {
+    const seen: ToolProgress[] = [];
+    await orchestrate([fake("alpha"), fake("beta")], FIXTURE, { concurrency: 1, onProgress: (e) => seen.push(e) });
 
     const done = seen.filter((e) => e.result);
     expect(done.map((e) => `${e.index}/${e.total}`)).toEqual(["1/2", "2/2"]);
@@ -49,8 +65,8 @@ describe("orchestrate reports each adapter starting and finishing", () => {
     }
   });
 
-  it("is optional — omitting it changes nothing", () => {
-    expect(() => orchestrate([fake("alpha")], FIXTURE, {})).not.toThrow();
+  it("is optional — omitting it changes nothing", async () => {
+    await expect(orchestrate([fake("alpha")], FIXTURE, {})).resolves.toBeTruthy();
   });
 });
 

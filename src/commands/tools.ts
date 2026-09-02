@@ -1,6 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { flagBool, println, type ParsedArgs } from "../util.js";
-import { toolStatuses, detect, resolveBinaryPath, type ToolStatus } from "../tools/registry.js";
+import { toolStatuses, detect, resetDetectCache, resolveBinaryPath, type ToolStatus } from "../tools/registry.js";
 import { inferOrigin, type Manager } from "../tools/origin.js";
 import { TIMEOUT_MS, MAX_BUFFER } from "../tools/run.js";
 
@@ -161,6 +161,9 @@ function executeUpgrade(plans: UpgradePlan[]): void {
       println(`${label}  failed — ${detail}`);
       continue;
     }
+    // The binary just changed under us: forget the memoized probe before
+    // reading the new version, or "upgraded" could never be reported.
+    resetDetectCache();
     const after = detect(p.probeName).version;
     if (p.before && after && p.before !== after) println(`${label}  upgraded — ${p.before} → ${after}`);
     else println(`${label}  already-latest${after ? ` (${after})` : ""}`);

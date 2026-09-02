@@ -10,6 +10,7 @@ import { parseSarif } from "./sarif.js";
 // Emits SARIF, so the shared parser handles it. CWE-798 (hardcoded credentials).
 export const kingfisher: ToolAdapter = {
   name: "kingfisher",
+  cacheable: true,
   category: "secret",
   argv: (target) => ["scan", target, "--format", "sarif", "--no-validate"],
   parse: (raw): Finding[] => parseSarif(raw, { tool: "kingfisher", category: "secret", defaultCwe: "CWE-798", defaultSeverity: "high" }),

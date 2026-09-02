@@ -61,7 +61,8 @@ cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 
 **Output** `--out` (default `.ultrasec`) · `--json` · `--quiet`
 **Tools** `--tools auto|none|<a,b>` (default `auto`) · `--no-tools` (= `--tools none`) ·
-`--docker` · `--offline` / `--no-enrich`
+`--docker` · `--offline` / `--no-enrich` · `--tool-concurrency N` (scanners run in a pool of N,
+default 4; `1` = serial)
 **Focus** `--scope` · `--include` · `--exclude` · `--max-files` · `--gitignore` · `--include-vendored`
 **Budget** `--budget quick|standard|thorough` · `--max-depth` · `--max-candidates`
 **Incremental** `--diff <ref>` / `--since <commit>` · `--merge` · `--resume`
@@ -125,7 +126,11 @@ Ranking is severity → scope → `unlinked` last → proximity → cross-file. 
 `unlinked` candidate is worth less of your attention, not zero: read the dossier before dropping it.
 
 Writes `manifest.json`, `findings.json`, `graph.json`, `DOSSIER.md`; plus `sbom.cdx.json` when
-`syft` is installed, and `cache/scan-cache.json` under `--resume`.
+`syft` is installed, `cache/timings.json` (per-stage wall-clock, never in the manifest), and under
+`--resume` both `cache/scan-cache.json` (the engine's extraction, keyed by content hash) and
+`cache/tools-cache.json` (the last result of every scanner whose output is a pure function of the
+tree — bandit, gosec, checkov, hadolint, cppcheck, kingfisher, gitleaks — replayed with a
+`· cached (--resume)` note when the tree, HEAD, tool version and argv are unchanged).
 
 | budget | max depth | max candidates |
 |---|---|---|

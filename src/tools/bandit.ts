@@ -9,6 +9,7 @@ import { makeToolFinding, normalizeSeverity } from "./normalize.js";
 // only medium+ severity AND medium+ confidence, keeping the AI tier's noise down.
 export const bandit: ToolAdapter = {
   name: "bandit",
+  cacheable: true,
   category: "sast",
   // NB the image lives at pycqa/bandit/bandit (the publish workflow appends the
   // repo name again under the org path) — a plain ghcr.io/pycqa/bandit:* tag 404s.

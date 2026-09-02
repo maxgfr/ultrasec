@@ -53,6 +53,7 @@ const C_EXT = /\.(?:c|cc|cpp|cxx|c\+\+|h|hh|hpp|hxx)$/i;
 
 export const cppcheck: ToolAdapter = {
   name: "cppcheck",
+  cacheable: true,
   category: "sast",
   stderr: true,
   applicable: (repo) => (walk(repo).some((f) => C_EXT.test(f.rel)) ? null : "no C/C++ sources"),

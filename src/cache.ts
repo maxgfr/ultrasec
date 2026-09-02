@@ -1,6 +1,8 @@
+import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { byStr } from "./util.js";
+import type { ToolCacheEntry } from "./tools/run.js";
 import { EXTRACTOR_VERSION, type FileRecord } from "./vendor/codeindex-engine.mjs";
 
 // A content-hash-keyed scan cache under the run dir (`<run>/cache/scan-cache.json`).
@@ -72,6 +74,62 @@ export function loadScanCache(run: string): Map<string, CacheEntry> {
   } catch {
     return new Map();
   }
+}
+
+// ── External-scanner results (`--resume`) ────────────────────────────────────
+// `<run>/cache/tools-cache.json`: the last result of every `cacheable` adapter,
+// with the key it was computed under (see `ToolResultCache` in tools/run.ts).
+// Same `cacheVersion` guard as the scan cache; an entry with the wrong shape is
+// dropped, never replayed.
+
+interface ToolsCacheFile {
+  cacheVersion: number;
+  entries: Record<string, ToolCacheEntry>;
+}
+
+function toolsCachePath(run: string): string {
+  return join(run, "cache", "tools-cache.json");
+}
+
+function isToolCacheEntry(name: string, v: unknown): v is ToolCacheEntry {
+  if (!v || typeof v !== "object") return false;
+  const e = v as { key?: unknown; result?: unknown };
+  if (typeof e.key !== "string" || !e.key) return false;
+  if (!e.result || typeof e.result !== "object") return false;
+  const r = e.result as Record<string, unknown>;
+  return r.name === name && typeof r.ran === "boolean" && typeof r.ok === "boolean" && Array.isArray(r.findings) && typeof r.note === "string";
+}
+
+export function loadToolsCache(run: string): Map<string, ToolCacheEntry> {
+  try {
+    const data = JSON.parse(readFileSync(toolsCachePath(run), "utf8")) as ToolsCacheFile;
+    if (!data || data.cacheVersion !== CACHE_VERSION) return new Map();
+    if (!data.entries || typeof data.entries !== "object" || Array.isArray(data.entries)) return new Map();
+    const out = new Map<string, ToolCacheEntry>();
+    for (const [k, v] of Object.entries(data.entries)) if (isToolCacheEntry(k, v)) out.set(k, v);
+    return out;
+  } catch {
+    return new Map();
+  }
+}
+
+export function saveToolsCache(run: string, cache: Map<string, ToolCacheEntry>): void {
+  const dir = join(run, "cache");
+  mkdirSync(dir, { recursive: true });
+  const entries: Record<string, ToolCacheEntry> = {};
+  for (const [k, v] of [...cache.entries()].sort((a, b) => byStr(a[0], b[0]))) entries[k] = v;
+  writeFileSync(toolsCachePath(run), JSON.stringify({ cacheVersion: CACHE_VERSION, entries } satisfies ToolsCacheFile, null, 2));
+}
+
+/**
+ * A digest of the tree the walk saw — every file's path, size and mtime — so a
+ * scanner result can be keyed on "the same files, unchanged". Cheap: no content
+ * is read, the walk already has the stats.
+ */
+export function treeDigest(files: readonly { rel: string; bytes: number; mtimeMs: number }[]): string {
+  const h = createHash("sha256");
+  for (const f of files) h.update(`${f.rel}\0${f.bytes}\0${Math.round(f.mtimeMs)}\n`);
+  return h.digest("hex");
 }
 
 // ── Stage timings ────────────────────────────────────────────────────────────

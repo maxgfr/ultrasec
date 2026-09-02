@@ -289,8 +289,25 @@ function whichPath(name: string): string | undefined {
   }
 }
 
-/** Probe whether a binary is on PATH (and grab a version line if cheap). */
+// One `--version` spawn per binary per process. `detect` is called from the
+// registry listing, from every adapter's native run and from the result-cache
+// key, and a spawn is milliseconds each — 21 tools × 3 call sites is a visible
+// slice of a small scan. Reset at the top of every `scan` and after `tools
+// --upgrade` changes what is installed.
+const detectCache = new Map<string, { installed: boolean; version?: string }>();
+
+export function resetDetectCache(): void {
+  detectCache.clear();
+}
+
+/** Probe whether a binary is on PATH (and grab a version line if cheap). Memoized per process. */
 export function detect(name: string): { installed: boolean; version?: string } {
+  let hit = detectCache.get(name);
+  if (!hit) detectCache.set(name, (hit = probe(name)));
+  return hit;
+}
+
+function probe(name: string): { installed: boolean; version?: string } {
   try {
     // `--version` is the most portable; fall back to presence-only on failure.
     const out = execFileSync(name, ["--version"], {

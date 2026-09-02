@@ -11,6 +11,7 @@ import { walk } from "../walk.js";
 // NB gosec emits line/column/cwe.id as STRINGS.
 export const gosec: ToolAdapter = {
   name: "gosec",
+  cacheable: true,
   category: "sast",
   dockerImage: "ghcr.io/securego/gosec:latest",
   // gosec exits 1 with EMPTY stdout and EMPTY stderr on a repo that has no Go —

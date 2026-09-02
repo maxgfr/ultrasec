@@ -18,6 +18,12 @@ function git(repo: string, args: string[]): string | null {
 }
 
 /** True when `repo` is inside a git work tree. */
+/** The checked-out commit, or null outside a git repo (or before the first commit). */
+export function headCommit(repo: string): string | null {
+  const out = git(repo, ["rev-parse", "--verify", "--quiet", "HEAD"])?.trim();
+  return out ? out : null;
+}
+
 export function isGitRepo(repo: string): boolean {
   return git(repo, ["rev-parse", "--is-inside-work-tree"])?.trim() === "true";
 }

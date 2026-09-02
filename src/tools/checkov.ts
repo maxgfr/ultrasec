@@ -10,6 +10,7 @@ import { makeToolFinding, normalizeSeverity } from "./normalize.js";
 // Per-finding severity is null without a Prisma key ⇒ default to medium.
 export const checkov: ToolAdapter = {
   name: "checkov",
+  cacheable: true,
   category: "config",
   dockerImage: "bridgecrew/checkov:latest",
   argv: (target) => ["-d", target, "-o", "json", "--compact", "--quiet", "--soft-fail"],

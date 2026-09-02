@@ -130,7 +130,10 @@ cannot come back in through a tool that had the raw repo bind-mounted;
 `--budget quick|standard|thorough` (and `--max-candidates`/`--max-depth`)
 rank-then-cap candidates (truncation is reported, never silent); `--merge` folds a
 scoped pass into one dossier (preserving prior verdicts); `--resume` reuses a
-content-hashed scan cache. Full loop: [scale-audit playbook](skills/ultrasec/references/scale-audit-playbook.md).
+content-hashed scan cache and replays the scanners whose output is a pure function of the tree
+(bandit, gosec, checkov, hadolint, cppcheck, kingfisher, gitleaks) when nothing changed;
+`--tool-concurrency N` runs the external scanners in a pool (default 4).
+Full loop: [scale-audit playbook](skills/ultrasec/references/scale-audit-playbook.md).
 
 ## Use it as an MCP server
 

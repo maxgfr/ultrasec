@@ -18,6 +18,7 @@ function isDockerfile(rel: string): boolean {
 
 export const hadolint: ToolAdapter = {
   name: "hadolint",
+  cacheable: true,
   category: "config",
   dockerImage: "hadolint/hadolint:latest",
   // The image's entrypoint is a shell, not hadolint, so an argv starting with a

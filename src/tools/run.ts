@@ -1,5 +1,6 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { join, relative } from "node:path";
+import { execFile } from "node:child_process";
+import { createHash } from "node:crypto";
+import { relative } from "node:path";
 import type { Category, Finding, PathStep, CodeLoc } from "../types.js";
 import { detect } from "./registry.js";
 import { correlate } from "./correlate.js";
@@ -44,6 +45,37 @@ export interface RunContext {
    * Absent ⇒ nothing is pruned, byte-identical to before this field existed.
    */
   pruned?: (rel: string) => boolean;
+  /**
+   * Result cache for `cacheable` adapters (`scan --resume`). Absent ⇒ every
+   * adapter runs, as before.
+   */
+  cache?: ToolResultCache;
+}
+
+/** One cached scanner result, keyed on everything that could change its output. */
+export interface ToolCacheEntry {
+  key: string;
+  result: ToolRunResult;
+}
+
+/**
+ * What `--resume` remembers about the external scanners.
+ *
+ * Only an adapter that declares `cacheable` is ever served from here, and only
+ * when its key matches: the adapter name, the detected version, the exact
+ * argv, the repository's HEAD (for a history scanner), the walk digest (every
+ * file's path, size and mtime) and the caller's salt (the prune flags). A
+ * scanner whose output depends on anything else — a vulnerability database
+ * that refreshes, a rule set pulled from the network — must not be cacheable.
+ */
+export interface ToolResultCache {
+  entries: Map<string, ToolCacheEntry>;
+  /** `sha256(rel\0size\0mtimeMs\n …)` over the run's walk. */
+  treeDigest: string;
+  /** `git rev-parse HEAD`, when the repo is a git checkout. */
+  head?: string;
+  /** Anything else that shapes a result — the prune flags, for one. */
+  salt?: string;
 }
 
 export interface ToolAdapter {
@@ -92,6 +124,15 @@ export interface ToolAdapter {
    * must not have.
    */
   stderr?: boolean;
+  /**
+   * The result is a pure function of the tree, the tool version and the argv,
+   * so `--resume` may replay it when none of those changed. Claim it ONLY for
+   * a scanner with no external state: bandit, gosec, checkov, hadolint,
+   * cppcheck, kingfisher, gitleaks (keyed on HEAD too). Trivy/osv/grype/
+   * govulncheck/cargo-audit consult a database that refreshes and semgrep
+   * pulls rules, so `!network` would be the wrong test — they stay uncached.
+   */
+  cacheable?: boolean;
 }
 
 export interface ToolRunResult {
@@ -127,30 +168,43 @@ export const TIMEOUT_MS = 300_000;
 export const MAX_BUFFER = 64 * 1024 * 1024;
 const MOUNT = "/work";
 
-function exec(name: string, args: string[], cwd: string, useStderr = false): { stdout: string; failed: boolean; err?: string } {
-  const capture = { cwd, encoding: "utf8" as const, timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER };
-  try {
-    if (useStderr) {
-      // Capture both; the diagnostics live on fd 2 for these tools.
-      const res = spawnSync(name, args, { ...capture, stdio: ["ignore", "pipe", "pipe"] });
-      if (res.error) return { stdout: "", failed: true, err: res.error.message };
-      return { stdout: String(res.stderr ?? ""), failed: false };
-    }
-    // stderr is PIPED, not ignored: on the happy path it is discarded either
-    // way, but when the tool fails it holds the only thing that tells a user
-    // what to do. Without it `gosec` and `hadolint` failing on a real repo
-    // reported "Command failed: docker run --rm --pull always -v …" and nothing
-    // else — the command line, which the user already knew, and no reason.
-    const stdout = execFileSync(name, args, { ...capture, stdio: ["ignore", "pipe", "pipe"] });
-    return { stdout, failed: false };
-  } catch (e: unknown) {
-    // execFileSync throws on non-zero exit — but scanners exit non-zero WHEN they
-    // find issues, and still print JSON to stdout. Recover it.
-    const err = e as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
-    const stdout = err.stdout ? err.stdout.toString() : "";
-    if (stdout.trim()) return { stdout, failed: false };
-    return { stdout: "", failed: true, err: withDiagnostic(err.message, err.stderr) };
-  }
+interface ExecResult {
+  stdout: string;
+  failed: boolean;
+  err?: string;
+}
+
+/**
+ * Spawn one scanner and collect its output. Asynchronous, so several scanners
+ * can run at once (see `orchestrate`); the semantics are exactly the old
+ * synchronous ones:
+ *
+ * - stderr is PIPED, not ignored: on the happy path it is discarded either way,
+ *   but when the tool fails it holds the only thing that tells a user what to
+ *   do. Without it `gosec` and `hadolint` failing on a real repo reported
+ *   "Command failed: docker run --rm --pull always -v …" and nothing else.
+ * - a non-zero exit is NOT a failure when stdout carries a report: scanners
+ *   exit non-zero WHEN they find issues, and still print JSON.
+ * - `useStderr` returns fd 2 as the report (cppcheck writes there by convention).
+ */
+function execAsync(name: string, args: string[], cwd: string, useStderr = false): Promise<ExecResult> {
+  return new Promise((resolve) => {
+    execFile(name, args, { cwd, encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER, windowsHide: true }, (error, stdout, stderr) => {
+      const out = String(stdout ?? "");
+      const errText = String(stderr ?? "");
+      if (useStderr) {
+        // The report lives on fd 2, whatever the exit code. Only a failure to
+        // run at all (ENOENT/EACCES — a string code — or a timeout, no code)
+        // is a failure.
+        const code = (error as { code?: unknown } | null)?.code;
+        if (error && typeof code !== "number") return resolve({ stdout: "", failed: true, err: error.message });
+        return resolve({ stdout: errText, failed: false });
+      }
+      if (!error) return resolve({ stdout: out, failed: false });
+      if (out.trim()) return resolve({ stdout: out, failed: false });
+      resolve({ stdout: "", failed: true, err: withDiagnostic(error.message, errText) });
+    });
+  });
 }
 
 /** Longest single stderr line kept in a failure note. */
@@ -234,8 +288,18 @@ function blockedOffline(adapter: ToolAdapter, ctx: RunContext): boolean {
   return typeof adapter.network === "function" ? adapter.network() : adapter.network === true;
 }
 
+/** The suffix a replayed result carries in its note, so `toolStatus` says so. */
+export const CACHED_NOTE = "cached (--resume)";
+
+/** The cache key for one native run — see `ToolResultCache` for what goes in. */
+function cacheKey(adapter: ToolAdapter, cmd: string[], argv: string[], cache: ToolResultCache): string {
+  const version = adapter.command ? cmd.join(" ") : (detect(adapter.name).version ?? "");
+  const parts = [adapter.name, version, cmd.join("\0"), argv.join("\0"), cache.head ?? "", cache.treeDigest, cache.salt ?? ""];
+  return createHash("sha256").update(parts.join("\n")).digest("hex");
+}
+
 /** Run one adapter natively if its binary (or `command` override) is present. Never throws. */
-function runNative(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRunResult {
+async function runNative(adapter: ToolAdapter, repo: string, ctx: RunContext): Promise<ToolRunResult> {
   if (blockedOffline(adapter, ctx)) {
     return { name: adapter.name, ran: false, ok: false, findings: [], note: "offline (network required)" };
   }
@@ -261,8 +325,21 @@ function runNative(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
   const dirs = adapter.workspaces?.(repo) ?? [];
   if (dirs.length) return runEachWorkspace(adapter, repo, cmd, argv, dirs, ctx);
 
-  const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], repo, adapter.stderr);
-  return finish(adapter, repo, stdout, failed, err, false, ctx);
+  // Replay a previous run when nothing that could change its output has.
+  const cache = adapter.cacheable ? ctx.cache : undefined;
+  const key = cache ? cacheKey(adapter, cmd, argv, cache) : undefined;
+  if (cache && key) {
+    const hit = cache.entries.get(adapter.name);
+    if (hit && hit.key === key) return { ...hit.result, findings: [...hit.result.findings], note: `${hit.result.note} · ${CACHED_NOTE}` };
+  }
+
+  const { stdout, failed, err } = await execAsync(cmd[0]!, [...cmd.slice(1), ...argv], repo, adapter.stderr);
+  const result = finish(adapter, repo, stdout, failed, err, false, ctx);
+  // Only a run that actually produced a report is worth replaying: a failure
+  // is re-attempted next time, and "0 findings" from a crash never becomes
+  // "0 findings" from a scan.
+  if (cache && key && result.ran && result.ok) cache.entries.set(adapter.name, { key, result });
+  return result;
 }
 
 /**
@@ -273,13 +350,13 @@ function runNative(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
  * names each directory audited: a monorepo where only some workspaces were
  * covered must never read like a full pass.
  */
-function runEachWorkspace(adapter: ToolAdapter, repo: string, cmd: string[], argv: string[], dirs: string[], ctx: RunContext): ToolRunResult {
+async function runEachWorkspace(adapter: ToolAdapter, repo: string, cmd: string[], argv: string[], dirs: string[], ctx: RunContext): Promise<ToolRunResult> {
   const findings: Finding[] = [];
   const covered: string[] = [];
   const failures: string[] = [];
   for (const dir of dirs) {
     const rel = relative(repo, dir);
-    const { stdout, failed, err } = exec(cmd[0]!, [...cmd.slice(1), ...argv], dir, adapter.stderr);
+    const { stdout, failed, err } = await execAsync(cmd[0]!, [...cmd.slice(1), ...argv], dir, adapter.stderr);
     // Relativize against the REPO, and tell the adapter which workspace it is in,
     // so the path it records — and therefore the finding id — is repo-relative
     // from the start.
@@ -298,8 +375,9 @@ function runEachWorkspace(adapter: ToolAdapter, repo: string, cmd: string[], arg
   return { name: adapter.name, ran: covered.length > 0, ok: covered.length > 0, findings, note };
 }
 
-/** Run one adapter via its official Docker image. Never throws. */
-function runDocker(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRunResult {
+/** Run one adapter via its official Docker image. Never throws. Never cached:
+ *  the image is a rolling `latest`, so the same argv can mean a different tool. */
+async function runDocker(adapter: ToolAdapter, repo: string, ctx: RunContext): Promise<ToolRunResult> {
   if (blockedOffline(adapter, ctx)) {
     return { name: adapter.name, ran: false, ok: false, findings: [], note: "offline (network required)" };
   }
@@ -310,7 +388,7 @@ function runDocker(adapter: ToolAdapter, repo: string, ctx: RunContext): ToolRun
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
   const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
   const args = ["run", "--rm", "--pull", "always", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
-  const { stdout, failed, err } = exec("docker", args, repo, adapter.stderr);
+  const { stdout, failed, err } = await execAsync("docker", args, repo, adapter.stderr);
   return finish(adapter, repo, stdout, failed, err, true, ctx);
 }
 
@@ -340,7 +418,7 @@ function finish(
   }
 }
 
-export function runAdapter(adapter: ToolAdapter, repo: string, useDocker = false, ctx: RunContext = {}): ToolRunResult {
+export function runAdapter(adapter: ToolAdapter, repo: string, useDocker = false, ctx: RunContext = {}): Promise<ToolRunResult> {
   return useDocker ? runDocker(adapter, repo, ctx) : runNative(adapter, repo, ctx);
 }
 
@@ -380,11 +458,19 @@ export interface OrchestrateOptions {
   /** "The walk pruned this path" — forwarded into the per-run RunContext so a
    *  scanner's results honour `--gitignore`/`--exclude` like the walk does. */
   pruned?: (rel: string) => boolean;
-  /** Called as each adapter starts and finishes. Adapters run SERIALLY, and one
-   *  of them can take twenty minutes walking git history, so without this a scan
-   *  is indistinguishable from a hang. */
+  /** Called as each adapter starts and finishes — in the order they happen,
+   *  which with `concurrency` > 1 is not the adapter order. One adapter can take
+   *  twenty minutes walking git history, so without this a scan is
+   *  indistinguishable from a hang. */
   onProgress?: (e: ToolProgress) => void;
+  /** How many adapters run at once (default 4). `1` reproduces the old serial run. */
+  concurrency?: number;
+  /** Result cache for `cacheable` adapters (`scan --resume`). */
+  cache?: ToolResultCache;
 }
+
+/** How many scanners run at once when the caller does not say. */
+export const DEFAULT_TOOL_CONCURRENCY = 4;
 
 /**
  * Run a set of adapters and merge their findings via cross-tool correlation
@@ -392,24 +478,38 @@ export interface OrchestrateOptions {
  * finding whose `sources` lists every producer. `which` selects adapters by
  * name; default = all. In docker mode only adapters with an official image run.
  * Missing tools are skipped gracefully (recorded, not fatal).
+ *
+ * Adapters run in a small pool (`concurrency`, default 4): each scanner is its
+ * own process, most are I/O- and CPU-bound elsewhere, and 21 of them at up to
+ * five minutes each in series was the whole wall-clock of a scan. The OUTPUT is
+ * still deterministic: `results` is filled by index, so the merged finding list
+ * is the same whatever order the processes finished in.
  */
-export function orchestrate(adapters: ToolAdapter[], repo: string, opts: OrchestrateOptions = {}): OrchestrateResult {
+export async function orchestrate(adapters: ToolAdapter[], repo: string, opts: OrchestrateOptions = {}): Promise<OrchestrateResult> {
   let selected = opts.which?.length ? adapters.filter((a) => opts.which!.includes(a.name)) : adapters;
   if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
 
-  const ctx: RunContext = { offline: opts.offline, sbom: opts.sbom, pruned: opts.pruned };
-  const results: ToolRunResult[] = [];
-  const all: Finding[] = [];
+  const ctx: RunContext = { offline: opts.offline, sbom: opts.sbom, pruned: opts.pruned, ...(opts.cache ? { cache: opts.cache } : {}) };
   const total = selected.length;
-  for (let i = 0; i < total; i++) {
-    const a = selected[i]!;
-    opts.onProgress?.({ tool: a.name, index: i + 1, total });
-    const started = Date.now();
-    const r = runAdapter(a, repo, opts.useDocker, ctx);
-    opts.onProgress?.({ tool: a.name, index: i + 1, total, result: r, ms: Date.now() - started });
-    results.push(r);
-    all.push(...r.findings);
-  }
+  const results: ToolRunResult[] = new Array(total);
+  const concurrency = Math.max(1, Math.floor(opts.concurrency ?? DEFAULT_TOOL_CONCURRENCY));
+
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < total) {
+      const i = next++;
+      const a = selected[i]!;
+      opts.onProgress?.({ tool: a.name, index: i + 1, total });
+      const started = Date.now();
+      const r = await runAdapter(a, repo, opts.useDocker, ctx);
+      results[i] = r;
+      opts.onProgress?.({ tool: a.name, index: i + 1, total, result: r, ms: Date.now() - started });
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, total) }, worker));
+
+  const all: Finding[] = [];
+  for (const r of results) all.push(...r.findings);
   const findings = correlate(all);
   const toolsRun = results.filter((r) => r.ran && r.ok).map((r) => r.name);
   return { findings, toolsRun, results };

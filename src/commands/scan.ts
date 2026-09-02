@@ -17,8 +17,10 @@ import { auditSecrets } from "../secrets.js";
 import { demoteNoise } from "../noise.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
-import { loadScanCache, saveScanCache, saveTimings, stageTimer } from "../cache.js";
-import { orchestrate, toolStatus } from "../tools/run.js";
+import { loadScanCache, saveScanCache, loadToolsCache, saveToolsCache, saveTimings, stageTimer, treeDigest } from "../cache.js";
+import { orchestrate, toolStatus, DEFAULT_TOOL_CONCURRENCY } from "../tools/run.js";
+import { resetDetectCache } from "../tools/registry.js";
+import { headCommit } from "../git.js";
 import { correlate } from "../tools/correlate.js";
 import { enrichFindings } from "../tools/scoring.js";
 import { generateSbom } from "../tools/sbom.js";
@@ -56,6 +58,9 @@ const REVDEP_DEPTH = 2; // how far to expand changed files to their callers for 
 export async function runScan(args: ParsedArgs): Promise<number> {
   const repo = resolve(flagStr(args, "repo") ?? ".");
   const out = resolve(flagStr(args, "out") ?? ".ultrasec");
+  // Tool presence is memoized per process; a long-lived MCP server must
+  // re-probe per scan so a tool installed since the last one is picked up.
+  resetDetectCache();
 
   // A path that doesn't exist must NEVER read as a clean audit — a typo'd --repo
   // used to walk zero files and exit 0 with "0 findings", the most dangerous
@@ -294,18 +299,36 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const sbomResult = skipTools ? undefined : generateSbom(repo, out);
   timer.mark("tools");
   if (skipTools) step(`external scanners skipped`);
+  // `--resume` also replays the external scanners whose output is a pure
+  // function of the tree (see `ToolAdapter.cacheable`): keyed on the walk
+  // digest, HEAD and the prune flags, so an unchanged checkout skips the
+  // five-minute tools and a changed one re-runs them.
+  const toolsCache = resume && !skipTools ? loadToolsCache(out) : undefined;
+  const toolConcurrency = numFlag(args, "tool-concurrency") ?? DEFAULT_TOOL_CONCURRENCY;
   const tool = skipTools
     ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] }
-    : orchestrate(ADAPTERS, repo, {
+    : await orchestrate(ADAPTERS, repo, {
         which,
         useDocker,
         offline,
         sbom: sbomResult?.path,
         pruned: prune,
-        // Adapters run serially, so this is a running commentary, not a bar.
-        // Naming the tool that is currently blocking is the whole point: when a
-        // scan sits silent for twenty minutes, the last line printed is what
-        // tells you it is trufflehog walking git history rather than a hang.
+        concurrency: toolConcurrency,
+        ...(toolsCache
+          ? {
+              cache: {
+                entries: toolsCache,
+                treeDigest: treeDigest(tree.files),
+                head: headCommit(repo) ?? undefined,
+                salt: JSON.stringify({ gitignore, exclude: exclude ?? [], includeVendored }),
+              },
+            }
+          : {}),
+        // Adapters run in a small pool (`--tool-concurrency`, default 4), so
+        // this is a running commentary, not a bar. Naming the tool that is
+        // currently blocking is the whole point: when a scan sits silent for
+        // twenty minutes, the last lines printed are what tell you it is
+        // trufflehog walking git history rather than a hang.
         onProgress: (e) => {
           const at = `[${e.index}/${e.total}] ${e.tool}`;
           if (!e.result) return step(`${at} …`);
@@ -444,6 +467,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   stage("write", `writing the dossier to ${out}…`);
   writeDossier(out, final);
   if (cache) saveScanCache(out, cache);
+  if (toolsCache) saveToolsCache(out, toolsCache);
   saveTimings(out, timer.finish());
 
   const fm = final.manifest;
