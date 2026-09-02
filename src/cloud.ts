@@ -1,4 +1,4 @@
-import { readText, walk } from "./walk.js";
+import { readText, walk, type RepoTree } from "./walk.js";
 import type { Finding, Severity } from "./types.js";
 import { makeToolFinding } from "./tools/normalize.js";
 
@@ -189,13 +189,14 @@ function isEgressRule(ls: Line[], line: number): boolean {
 }
 
 /** Audit a repo for cloud / K8s / IaC misconfiguration. Returns candidates. */
-export function auditCloud(repo: string, prune?: (rel: string) => boolean): Finding[] {
+export function auditCloud(repo: string, prune?: (rel: string) => boolean, tree?: RepoTree): Finding[] {
   const out: Finding[] = [];
-  for (const wf of walk(repo)) {
+  const read = tree?.read ?? readText;
+  for (const wf of tree?.files ?? walk(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
     if (!SCAN.has(ext)) continue;
-    const content = readText(wf.abs);
+    const content = read(wf.abs);
     if (!content) continue;
     const rel = wf.rel;
     const ls = lines(content);

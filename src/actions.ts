@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { readText, walk } from "./walk.js";
+import { readText, walk, type RepoTree } from "./walk.js";
 import type { Finding } from "./types.js";
 import { makeToolFinding } from "./tools/normalize.js";
 
@@ -206,14 +206,13 @@ function hit(rel: string, line: number, v: ActionsVector, evidence: string): Fin
  * risk from the same workflow on a public one, and only the auditor knows which
  * this is.
  */
-export function auditAgenticWorkflows(repo: string, prune?: (rel: string) => boolean): Finding[] {
+export function auditAgenticWorkflows(repo: string, prune?: (rel: string) => boolean, tree?: RepoTree): Finding[] {
   const findings: Finding[] = [];
-  const files = walk(repo)
-    .map((f) => f.rel)
-    .filter((rel) => WORKFLOW.test(rel) && !prune?.(rel));
+  const read = tree?.read ?? readText;
+  const files = (tree?.files ?? walk(repo)).map((f) => f.rel).filter((rel) => WORKFLOW.test(rel) && !prune?.(rel));
 
   for (const rel of files) {
-    const content = readText(join(repo, rel));
+    const content = read(join(repo, rel));
     if (!content) continue;
     const usesAi = AI_ACTIONS.some((a) => content.includes(a));
     const ls = lines(content);

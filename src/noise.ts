@@ -69,14 +69,31 @@ const MINIFIED = /\.min\.(js|mjs|cjs|css)$/i;
 /** Classes `test-only-path` may demote. `secret` is deliberately absent (see the rule). */
 const TEST_DEMOTABLE: ReadonlySet<Finding["category"]> = new Set(["taint", "sast", "crypto", "authz", "config"]);
 
+/**
+ * The file reads one classification pass shares. Created per `demoteNoise` /
+ * `classifyNoise` call and discarded with it: a module-level cache keyed on
+ * `repo + rel` was never invalidated, and the MCP server runs `scan`
+ * in-process for as long as it lives — every audited repo's line tables stayed
+ * resident, and a file edited between two scans was classified from its old
+ * content.
+ */
+interface NoiseCtx {
+  lines: Map<string, string[] | undefined>;
+  shapes: Map<string, ReturnType<typeof encryptedShapeOf>>;
+}
+
+function newNoiseCtx(): NoiseCtx {
+  return { lines: new Map(), shapes: new Map() };
+}
+
 interface NoiseRule {
   id: NoiseClass;
   /** Severity floor. Never raises a finding — `worstOf` keeps the lower of the two. */
   severity: Severity;
   confidence: Confidence;
   /** Names what was checked, appended to the finding's message. */
-  why: (f: Finding, repo: string) => string;
-  matches: (f: Finding, repo: string) => boolean;
+  why: (f: Finding, repo: string, ctx: NoiseCtx) => string;
+  matches: (f: Finding, repo: string, ctx: NoiseCtx) => boolean;
 }
 
 /** Every repo-relative location a finding cites. */
@@ -93,8 +110,8 @@ const RULES: NoiseRule[] = [
     id: "encrypted-at-rest",
     severity: "info",
     confidence: "low",
-    why: (f, repo) => {
-      const shape = f.sink?.file ? shapeOf(repo, f.sink.file, f.atCommit) : undefined;
+    why: (f, repo, ctx) => {
+      const shape = f.sink?.file ? shapeOf(ctx, repo, f.sink.file, f.atCommit) : undefined;
       return `de-prioritized: ${f.sink?.file} is a ${shape?.label ?? "ciphertext-by-design file"}, where ciphertext is the point of the file. Check that the ENCRYPTION KEY is not also committed, and that this really is the format it claims.`;
     },
     // Keyed on the CLAIM, not on which tool made it.
@@ -113,7 +130,8 @@ const RULES: NoiseRule[] = [
     // A SAST finding on a sealed-secret file that claims something ELSE — a
     // malformed manifest, a bad apiVersion — carries a different CWE and is
     // still left at full severity, which is what the original note meant.
-    matches: (f, repo) => (f.category === "secret" || f.cwe?.toUpperCase() === "CWE-798") && !!f.sink?.file && !!shapeOf(repo, f.sink.file, f.atCommit),
+    matches: (f, repo, ctx) =>
+      (f.category === "secret" || f.cwe?.toUpperCase() === "CWE-798") && !!f.sink?.file && !!shapeOf(ctx, repo, f.sink.file, f.atCommit),
   },
   {
     id: "test-only-path",
@@ -152,9 +170,9 @@ const RULES: NoiseRule[] = [
     confidence: "low",
     why: (f) =>
       `de-prioritized: ${f.sink?.file}:${f.sink?.line} assigns a resource/document identifier, not a credential — possessing the id is not possessing access. CHECK the document's sharing setting and whether its contents are sensitive; that is not knowable from this repo.`,
-    matches: (f, repo) => {
+    matches: (f, repo, ctx) => {
       if (f.category !== "secret" || !f.sink?.file) return false;
-      const line = lineAt(repo, f.sink.file, f.sink.line, f.atCommit);
+      const line = lineAt(ctx, repo, f.sink.file, f.sink.line, f.atCommit);
       if (!line) return false;
       // Both must hold: a name that says "document", and a value that is not a
       // recognisable credential. A real key in a badly-named variable still fires.
@@ -178,11 +196,11 @@ const RULES: NoiseRule[] = [
     confidence: "low",
     why: (f) =>
       `de-prioritized: ${f.sink?.file}:${f.sink?.line} declares a pattern rather than performing the operation — it is a rule/metadata field, a bare regex literal, or a comment. Confirm the value is not ALSO applied somewhere — a rule file that configures the running system is both.`,
-    matches: (f, repo) => {
+    matches: (f, repo, ctx) => {
       // Dep advisories key on the package; taint paths are multi-node and this
       // asks about ONE cited line.
       if (f.category === "dep" || !f.sink?.file) return false;
-      const line = lineAt(repo, f.sink.file, f.sink.line, f.atCommit);
+      const line = lineAt(ctx, repo, f.sink.file, f.sink.line, f.atCommit);
       return !!line && (PATTERN_METADATA.test(line) || BARE_REGEX_LINE.test(line) || WHOLE_LINE_COMMENT.test(line));
     },
   },
@@ -244,10 +262,10 @@ const BARE_REGEX_LINE = /^\s*\/(?:[^/\\\n]|\\.)+\/[gimsuy]*\s*,?\s*$/;
  * exactly the population they exist for: a scanner reads every commit, and the
  * secrets worth classifying are usually the ones someone already deleted.
  */
-const lineCache = new Map<string, string[] | undefined>();
-function lineAt(repo: string, rel: string, line: number, commit?: string): string | undefined {
+function lineAt(ctx: NoiseCtx, repo: string, rel: string, line: number, commit?: string): string | undefined {
   if (commit) return lineContentAtCommit(repo, commit, rel, line) ?? undefined;
   const key = `${repo}\u0000${rel}`;
+  const lineCache = ctx.lines;
   if (!lineCache.has(key)) {
     try {
       lineCache.set(key, readText(join(repo, rel)).split(/\r?\n/));
@@ -259,9 +277,9 @@ function lineAt(repo: string, rel: string, line: number, commit?: string): strin
 }
 
 /** Cached `encryptedShapeOf` — it reads the file to test the content marker. */
-const shapeCache = new Map<string, ReturnType<typeof encryptedShapeOf>>();
-function shapeOf(repo: string, rel: string, commit?: string): ReturnType<typeof encryptedShapeOf> {
+function shapeOf(ctx: NoiseCtx, repo: string, rel: string, commit?: string): ReturnType<typeof encryptedShapeOf> {
   const key = `${repo}\u0000${commit ?? ""}\u0000${rel}`;
+  const shapeCache = ctx.shapes;
   if (!shapeCache.has(key)) {
     let content: string | undefined;
     // A history-scanned finding cites a file that may be gone from HEAD, so read
@@ -374,12 +392,16 @@ export interface DemoteOptions {
 
 /** The class a finding belongs to, if any. First match wins, in RULES order. */
 export function classifyNoise(f: Finding, repo: string, opts: DemoteOptions = {}): NoiseClass | undefined {
+  return classifyWith(f, repo, opts, newNoiseCtx());
+}
+
+function classifyWith(f: Finding, repo: string, opts: DemoteOptions, ctx: NoiseCtx): NoiseClass | undefined {
   // A scanner that VERIFIED the credential against its provider has evidence no
   // file format can override: a live credential is live, wherever it sits.
   if (f.verified) return undefined;
   for (const rule of RULES) {
     if (rule.id === "test-only-path" && opts.includeTests) continue;
-    if (rule.matches(f, repo)) return rule.id;
+    if (rule.matches(f, repo, ctx)) return rule.id;
   }
   return undefined;
 }
@@ -403,6 +425,7 @@ export function demoteNoise(
 ): { findings: Finding[]; downgraded: { reason: string; count: number }[] } {
   const counts = new Map<NoiseClass, number>();
   const byId = new Map(RULES.map((r) => [r.id, r]));
+  const ctx = newNoiseCtx(); // one set of file reads for this pass, released with it
 
   const out = findings.map((f) => {
     // Already classified: count it, change nothing. Demotion appends to
@@ -415,7 +438,7 @@ export function demoteNoise(
       counts.set(f.noise, (counts.get(f.noise) ?? 0) + 1);
       return f;
     }
-    const cls = classifyNoise(f, repo, opts);
+    const cls = classifyWith(f, repo, opts, ctx);
     if (!cls) return f;
     const rule = byId.get(cls)!;
     counts.set(cls, (counts.get(cls) ?? 0) + 1);
@@ -424,7 +447,7 @@ export function demoteNoise(
       severity: floorOf(f.severity, rule.severity),
       confidence: rule.confidence,
       noise: cls,
-      message: `${f.message} — ${rule.why(f, repo)}`,
+      message: `${f.message} — ${rule.why(f, repo, ctx)}`,
     };
   });
 

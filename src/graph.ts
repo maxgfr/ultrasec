@@ -1,6 +1,7 @@
 import type { RepoScan } from "./scan.js";
 import { enclosingSymbolName } from "./scan.js";
 import { buildFileResolver } from "./resolve.js";
+import type { WalkedFile } from "./walk.js";
 import { langForFile } from "./lang.js";
 import { buildRawCallerIndex } from "./vendor/codeindex-engine.mjs";
 import { byStr } from "./util.js";
@@ -64,8 +65,15 @@ function sameLanguage(a: string, b: string): boolean {
   return !!la && la === lb;
 }
 
+export interface GraphOptions {
+  /** A walk of the repo already done by the caller (`scan` shares one across
+   *  every pass). The resolver's manifest discovery reads it instead of walking
+   *  the tree again. Omitted ⇒ the resolver walks, as before. */
+  tree?: readonly WalkedFile[];
+}
+
 /** Build the cross-file link-graph (import + resolved call edges). Deterministic. */
-export function buildGraph(scan: RepoScan): Graph {
+export function buildGraph(scan: RepoScan, opts: GraphOptions = {}): Graph {
   const fileSet = new Set(scan.files.map((f) => f.rel));
 
   // Index unique exported symbol definitions: name -> files defining it.
@@ -82,7 +90,7 @@ export function buildGraph(scan: RepoScan): Graph {
   for (const [name, files] of defs) symbolDefs[name] = [...files].sort(byStr);
 
   const edgeMap = new Map<string, Edge>();
-  const resolve = buildFileResolver(scan);
+  const resolve = buildFileResolver(scan, opts.tree);
 
   // Pass 1: import edges only. Call edges need the whole import graph to be
   // known before any of them can be judged (see importReaches), so they wait.

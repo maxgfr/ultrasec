@@ -7,12 +7,10 @@
 // parsers). Strictly opt-in (`scan --log-hygiene`) — never called from the
 // default pipeline.
 
-import { join } from "node:path";
-import { readText } from "../walk.js";
 import type { RepoScan, FileScan } from "../scan.js";
-import { localDefNames } from "../scan.js";
 import { langForFile } from "../lang.js";
-import { findSinks, LOG_SINKS, cweUrl } from "../catalog.js";
+import { LOG_SINKS, cweUrl } from "../catalog.js";
+import { createFileFacts, type FileFacts } from "../facts.js";
 import { shortHash, byStr } from "../util.js";
 import { SEVERITIES, type Finding, type Severity } from "../types.js";
 import { redact, truncateEvidence } from "./secrets.js";
@@ -29,6 +27,8 @@ const SENSITIVE_NAME_RE = /\b(pass(word|wd)?|secret|token|api[_-]?key|authorizat
 export interface SensitiveLogOptions {
   /** Keep at most this many ranked candidates (default 40). Excess is reported, not dropped silently. */
   maxCandidates?: number;
+  /** Per-file facts shared with the run's other passes (`createFileFacts`). Pure memoization. */
+  facts?: FileFacts;
 }
 
 export interface SensitiveLogResult {
@@ -60,19 +60,15 @@ function enclosingSymbol(file: FileScan, line: number): string | undefined {
 export function enumerateSensitiveLogCandidates(scan: RepoScan, opts: SensitiveLogOptions = {}): SensitiveLogResult {
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
 
-  const lineCache = new Map<string, string[]>();
-  const lines = (rel: string): string[] => {
-    let l = lineCache.get(rel);
-    if (!l) lineCache.set(rel, (l = readText(join(scan.repo, rel)).split(/\r?\n/)));
-    return l;
-  };
+  const facts = opts.facts ?? createFileFacts(scan);
+  const lines = facts.lines;
 
   const findings: Finding[] = [];
   for (const file of scan.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
 
-    for (const sink of findSinks(lang, file.calls, LOG_SINKS, file.imports, localDefNames(file.symbols))) {
+    for (const sink of facts.sinks(file.rel, LOG_SINKS)) {
       if (sink.kind !== "log") continue; // a default-catalog match on this call, not a log sink
 
       const raw = lines(file.rel)[sink.line - 1] ?? "";

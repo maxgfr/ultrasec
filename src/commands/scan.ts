@@ -11,12 +11,13 @@ import { auditAgenticWorkflows } from "../actions.js";
 import { auditWebConfig } from "../webconfig.js";
 import { auditAuthTokens } from "../authtokens.js";
 import { auditCloud } from "../cloud.js";
-import { buildPruneMatcher } from "../walk.js";
+import { buildPruneMatcher, snapshotTree } from "../walk.js";
+import { createFileFacts } from "../facts.js";
 import { auditSecrets } from "../secrets.js";
 import { demoteNoise } from "../noise.js";
 import { changedFiles } from "../git.js";
 import { addProvenance } from "../provenance.js";
-import { loadScanCache, saveScanCache } from "../cache.js";
+import { loadScanCache, saveScanCache, saveTimings, stageTimer } from "../cache.js";
 import { orchestrate, toolStatus } from "../tools/run.js";
 import { correlate } from "../tools/correlate.js";
 import { enrichFindings } from "../tools/scoring.js";
@@ -145,13 +146,34 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   };
   const secs = (ms: number): string => (ms >= 1000 ? ` in ${Math.round(ms / 1000)}s` : "");
 
+  // Per-stage wall-clock, for `cache/timings.json` and the progress stream. It
+  // lives OUTSIDE the dossier: `manifest.json` is byte-compared between runs and
+  // stdout must be identical with or without `--quiet`, so a duration can go on
+  // stderr and into the cache dir, and nowhere else.
+  const timer = stageTimer();
+  const stage = (name: string, msg: string): void => {
+    const closed = timer.mark(name);
+    if (closed && closed.ms >= 1000) step(`${closed.name} done${secs(closed.ms)}`);
+    step(msg);
+  };
+
   const scanOpts = { scope: effectiveScope, include, exclude, maxFiles, gitignore };
   const resume = flagBool(args, "resume");
   const cache = resume ? loadScanCache(out) : undefined;
-  step(`walking ${repo}${cache ? " (resuming from cache)" : ""}…`);
+  stage("walk", `walking ${repo}${cache ? " (resuming from cache)" : ""}…`);
   const scan = cache ? scanRepoCached(repo, scanOpts, cache) : scanRepo(repo, scanOpts);
-  step(`${scan.files.length} file(s) scanned · building the link-graph…`);
-  const graph = buildGraph(scan);
+  // ONE walk of the tree for every pass below that is not the engine's own scan:
+  // the resolver's manifest discovery and the five always-on auditors. Each of
+  // them used to walk (and re-read) the whole repo on its own — six walks per
+  // run, on a tree that does not change between them. Unscoped on purpose, as
+  // those passes always were (a root tsconfig must configure alias resolution
+  // even for a scoped scan; a workflow file is never inside `--scope src/`).
+  const tree = snapshotTree(repo);
+  // And ONE set of per-file facts (content, lines, sink hits) for the three
+  // passes that match calls against the sink catalog.
+  const facts = createFileFacts(scan);
+  stage("graph", `${scan.files.length} file(s) scanned · building the link-graph…`);
+  const graph = buildGraph(scan, { tree: tree.files });
   // Logging hygiene (opt-in `--log-hygiene`, CWE-117 + CWE-532): unions LOG_SINKS
   // into the taint sink catalog for this run only — default false keeps the
   // sink-matching step (and therefore every golden/snapshot) byte-identical.
@@ -163,7 +185,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // of the same file. Opt-in for the same reason as above — co-location is weak
   // evidence, not zero evidence (a value can travel through module state).
   const strictScope = flagBool(args, "strict-scope");
-  step(`enumerating source→sink taint paths…`);
+  stage("taint", `enumerating source→sink taint paths…`);
   const taint = enumerateTaint(scan, graph, {
     maxDepth,
     maxCandidates,
@@ -171,6 +193,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     excludeEnvSources,
     strictScope,
     includeTests: flagBool(args, "include-tests"),
+    facts,
   });
   const taintFindings = taint.findings;
   step(`${taintFindings.length} taint candidate(s)`);
@@ -186,8 +209,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // the docs use nowhere. One hit on that repo, zero on the other: the class
   // pays for itself, and the full recall pass stays opt-in.
   const sinksOn = flagBool(args, "sinks");
+  timer.mark("sinks");
   const sinkCand = enumerateSinkCandidates(scan, taintFindings, {
     maxCandidates,
+    facts,
     ...(sinksOn ? {} : { onlyKinds: SOURCELESS_SINK_KINDS }),
   });
 
@@ -198,8 +223,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // so "Raise --max-candidates" is true here too; absent that flag it keeps its own
   // tighter default (40, see src/logs/hygiene.ts) rather than inheriting the
   // budget-preset value (200/1000/5000), which would silently change today's cap.
+  timer.mark("hygiene");
   const hygieneCand = logHygieneOn
-    ? enumerateSensitiveLogCandidates(scan, { maxCandidates: explicitMaxCandidates })
+    ? enumerateSensitiveLogCandidates(scan, { maxCandidates: explicitMaxCandidates, facts })
     : { findings: [] as Finding[], truncated: 0, total: 0 };
 
   // ONE prune predicate for the whole run. `--gitignore` used to reach only the
@@ -216,31 +242,31 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const includeVendored = flagBool(args, "include-vendored");
   const prune = buildPruneMatcher(repo, { gitignore, exclude, includeVendored });
 
-  step(`agentic-CI, config, auth, cloud and credential detectors…`);
+  stage("auditors", `agentic-CI, config, auth, cloud and credential detectors…`);
   // Agentic CI: workflows that hand a coding agent the repo's own event data.
   // Always on — it reads only `.github/workflows/*.yml`, costs nothing when there
   // are none, and a repo that ships one of these has a live injection path that
   // no dependency scanner and no taint walk will report.
-  const agenticFindings = auditAgenticWorkflows(repo, prune);
+  const agenticFindings = auditAgenticWorkflows(repo, prune, tree);
 
   // API/web misconfiguration (CORS, cookie flags, security headers, TLS
   // verification disabled, debug mode, GraphQL introspection). Always on for the
   // same reason as the agentic-CI pass: it reads the source already walked, costs
   // nothing when the shapes are absent, and reports a live class no taint walk or
   // dependency scanner will. Every finding is grounded [file:line], category `config`.
-  const webConfigFindings = auditWebConfig(repo, prune);
+  const webConfigFindings = auditWebConfig(repo, prune, tree);
 
   // Authentication-token weaknesses (JWT alg/none, key confusion, decode-without-
   // verify, unenforced expiry, hardcoded/weak secrets; OAuth implicit flow, loose
   // redirect_uri, missing state/PKCE; SAML signature off; weak password hashing).
   // Always on, grounded [file:line], category crypto/authz.
-  const authTokenFindings = auditAuthTokens(repo, prune);
+  const authTokenFindings = auditAuthTokens(repo, prune, tree);
 
   // Cloud / K8s / IaC misconfiguration (privileged containers, host namespaces,
   // wildcard IAM, public principals/storage, open ingress, instance-metadata
   // endpoints). Zero-dependency baseline that fires without checkov and folds
   // into it via the correlator when present. Grounded [file:line], category config.
-  const cloudFindings = auditCloud(repo, prune);
+  const cloudFindings = auditCloud(repo, prune, tree);
 
   // Credentials embedded in connection strings (`scheme://user:secret@host`),
   // including — especially — the ones whose NEIGHBOURING components are
@@ -248,7 +274,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // configuration rather than as a credential, which is how it survives review
   // and why entropy/format heuristics skip it; gitleaks and trufflehog both
   // missed exactly that on a public repo. Always on, grounded [file:line].
-  const credentialFindings = auditSecrets(repo, prune);
+  const credentialFindings = auditSecrets(repo, prune, tree);
 
   // External tools: `--tools none`/`--no-tools` skips; `--tools a,b` selects; absent =
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
@@ -264,7 +290,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // adapters that can consume it faster than re-walking the tree themselves
   // (grype's `sbom:` mode, package-checker's `--source`) — skipped right along
   // with the adapters when tools aren't going to run this pass.
+  timer.mark("sbom");
   const sbomResult = skipTools ? undefined : generateSbom(repo, out);
+  timer.mark("tools");
   if (skipTools) step(`external scanners skipped`);
   const tool = skipTools
     ? { findings: [] as Finding[], toolsRun: [] as string[], results: [] }
@@ -292,6 +320,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // without this second (idempotent) pass a scanner finding sitting exactly on a
   // taint/orphan-sink/hygiene node would ship as a duplicate instead of
   // corroborating the candidate.
+  timer.mark("correlate");
   const merged = correlate([
     ...taintFindings,
     ...sinkCand.findings,
@@ -304,7 +333,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...tool.findings,
   ]);
 
-  step(`correlated ${merged.length} finding(s) · de-noising and ranking…`);
+  stage("noise", `correlated ${merged.length} finding(s) · de-noising and ranking…`);
 
   // Noise by construction: the match is REAL, but the code it sits in cannot
   // carry the risk described. Ciphertext in a ciphertext-by-design file
@@ -323,12 +352,15 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // the composite risk, and a score computed without it would rank a build-only
   // CVE beside a runtime one — which is what put four toolchain advisories in
   // the top severity tier of the first large audit.
+  timer.mark("reachability");
   const { findings: reachabilityMarked, toolchain: toolchainCount, sources: reachabilitySources } = classifyDependencyReachability(deNoised, repo);
 
   // Enrich CVE-bearing findings with EPSS/KEV and compute a risk score on every
   // finding. Network-tolerant (cached feeds); `--no-enrich`/`--offline` skips it.
   const enrich = !(flagBool(args, "no-enrich") || offline);
+  timer.mark("enrich");
   const { findings: enriched, note: riskNote } = await enrichFindings(reachabilityMarked, { enabled: enrich, context: loadContextDoc(out) });
+  timer.mark("provenance");
 
   // Provenance (opt-in `--blame`/`--provenance`): deterministic git-blame author/
   // date + CODEOWNERS owner per finding — a triage signal, never a suppression
@@ -409,9 +441,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
       );
     }
   }
-  step(`writing the dossier to ${out}…`);
+  stage("write", `writing the dossier to ${out}…`);
   writeDossier(out, final);
   if (cache) saveScanCache(out, cache);
+  saveTimings(out, timer.finish());
 
   const fm = final.manifest;
   const fc = fm.counts.bySeverity;

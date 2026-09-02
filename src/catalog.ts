@@ -852,10 +852,11 @@ export function isConstantAssignment(rhs: string): boolean {
 export function findTextSinks(lang: LangSpec, content: string): SinkHit[] {
   const out: SinkHit[] = [];
   const lines = content.split(/\r?\n/);
+  const rules = byLanguage(textSinkByLang, TEXT_SINKS, lang.id);
+  if (!rules.length) return out;
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    for (const rule of TEXT_SINKS) {
-      if (!appliesTo(rule.languages, lang.id)) continue;
+    for (const rule of rules) {
       const m = rule.re.exec(line);
       if (!m) continue;
       // The match ends just past the `=`, so the remainder of the line is the
@@ -995,6 +996,57 @@ export interface SinkHit {
 const UNRESOLVED_SEVERITY: Severity = "medium";
 export const UNRESOLVED_RECEIVER = "unresolved-receiver";
 
+// ── Lookup indexes ───────────────────────────────────────────────────────────
+// Every matcher below used to scan its whole rule table for every call, line or
+// sanitizer probe. The tables are static, so each is indexed once — by callee
+// for the call sinks, by language for the line-shaped rules — and looked up
+// from then on. Keyed on the IDENTITY of the rule array (a WeakMap), so a table
+// that is rebuilt (a test that mutates `SINKS`, a per-run union) simply gets a
+// fresh index, and the index never outlives the array it describes. Iteration
+// order inside a bucket is the table's own, which is what keeps "first
+// matching rule wins" meaning the same rule as before.
+
+const sinkIndexes = new WeakMap<readonly SinkRule[], Map<string, SinkRule[]>>();
+
+/** `callee → rules naming it`, in table order. */
+function sinkIndex(rules: readonly SinkRule[]): Map<string, SinkRule[]> {
+  let idx = sinkIndexes.get(rules);
+  if (!idx) {
+    idx = new Map();
+    for (const rule of rules) {
+      for (const callee of rule.callees) {
+        let bucket = idx.get(callee);
+        if (!bucket) idx.set(callee, (bucket = []));
+        bucket.push(rule);
+      }
+    }
+    sinkIndexes.set(rules, idx);
+  }
+  return idx;
+}
+
+// `[...SINKS, ...extraSinks]` is rebuilt per call; memoized on the extras'
+// identity so the union — and therefore its index — is stable across a run.
+const mergedSinkTables = new WeakMap<readonly SinkRule[], SinkRule[]>();
+function mergedSinks(extraSinks: SinkRule[]): SinkRule[] {
+  let merged = mergedSinkTables.get(extraSinks);
+  if (!merged) mergedSinkTables.set(extraSinks, (merged = [...SINKS, ...extraSinks]));
+  return merged;
+}
+
+/** Per-language view of a line-shaped rule table (`*` rules included), table order kept. */
+function byLanguage<R extends { languages: string[] }>(store: WeakMap<readonly R[], Map<string, R[]>>, rules: readonly R[], langId: string): R[] {
+  let perLang = store.get(rules);
+  if (!perLang) store.set(rules, (perLang = new Map()));
+  let bucket = perLang.get(langId);
+  if (!bucket) perLang.set(langId, (bucket = rules.filter((r) => appliesTo(r.languages, langId))));
+  return bucket;
+}
+
+const textSinkByLang = new WeakMap<readonly TextSinkRule[], Map<string, TextSinkRule[]>>();
+const sourceByLang = new WeakMap<readonly SourceRule[], Map<string, SourceRule[]>>();
+const sanitizerByLang = new WeakMap<readonly SanitizerRule[], Map<string, SanitizerRule[]>>();
+
 /**
  * @param extraSinks Additional rules unioned in for this call ONLY (e.g.
  * `LOG_SINKS` under `scan --log-hygiene`). Omitted/empty ⇒ matches exactly
@@ -1014,10 +1066,15 @@ export function findSinks(
   imports?: readonly { spec: string }[],
   localDefs?: ReadonlySet<string>,
 ): SinkHit[] {
-  const rules = extraSinks && extraSinks.length ? [...SINKS, ...extraSinks] : SINKS;
+  const byCallee = sinkIndex(extraSinks && extraSinks.length ? mergedSinks(extraSinks) : SINKS);
   const out: SinkHit[] = [];
   const specs = (imports ?? []).map((i) => i.spec.toLowerCase());
   for (const c of calls) {
+    // Only the rules naming this callee, in catalog order — the linear scan of
+    // ~150 rules per call was the taint pass's second-hottest loop. Order is
+    // preserved, so "first matching rule wins" below means the same rule.
+    const rules = byCallee.get(c.callee);
+    if (!rules) continue;
     // A call to a name this file defines resolves to that definition, whatever
     // the catalog thinks the name means. Applied to `ambiguous` rules only, and
     // for a reason worth stating: "no receiver" does NOT mean "bare call". The
@@ -1030,7 +1087,6 @@ export function findSinks(
     const shadowed = !c.receiver && localDefs?.has(c.callee) === true;
     for (const rule of rules) {
       if (!appliesTo(rule.languages, lang.id)) continue;
-      if (!rule.callees.includes(c.callee)) continue;
       // Verb-shaped callees (get/post/…) are only a sink as a MEMBER call
       // (`axios.get`) — a bare `get(x)` is a generic getter, so skip it.
       if (rule.requireReceiver && !c.receiver) continue;
@@ -1389,10 +1445,10 @@ export function findRouteEntryPoints(rel: string, content: string): SourceHit[] 
 export function findSources(lang: LangSpec, content: string, rel?: string): SourceHit[] {
   const out: SourceHit[] = [];
   const lines = content.split(/\r?\n/);
+  const rules = byLanguage(sourceByLang, SOURCES, lang.id);
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]!;
-    for (const rule of SOURCES) {
-      if (!appliesTo(rule.languages, lang.id)) continue;
+    for (const rule of rules) {
       const m = rule.re.exec(line);
       if (m) out.push({ line: i + 1, kind: rule.kind, match: m[0], title: rule.title });
     }
@@ -1537,8 +1593,7 @@ export const SANITIZERS: SanitizerRule[] = [
 /** Sanitizer hints found on a given line of code (for the candidate's note). */
 export function findSanitizers(lang: LangSpec, line: string, sinkKind: string): string[] {
   const hints: string[] = [];
-  for (const rule of SANITIZERS) {
-    if (!appliesTo(rule.languages, lang.id)) continue;
+  for (const rule of byLanguage(sanitizerByLang, SANITIZERS, lang.id)) {
     if (rule.kind !== "*" && rule.kind !== sinkKind) continue;
     if (rule.exceptKinds?.includes(sinkKind)) continue;
     if (rule.re.test(line)) hints.push(rule.note);

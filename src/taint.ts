@@ -1,11 +1,10 @@
-import { join } from "node:path";
-import { readText } from "./walk.js";
 import type { RepoScan } from "./scan.js";
-import { enclosingSymbolName, localDefNames } from "./scan.js";
+import { enclosingSymbolName } from "./scan.js";
 import type { Graph } from "./graph.js";
 import { langForFile } from "./lang.js";
 import { isTestPath } from "./vendor/codeindex-engine.mjs";
-import { findSinks, findSources, findTextSinks, cweUrl, LOG_SINKS, UNRESOLVED_RECEIVER, type SinkHit, type SourceHit } from "./catalog.js";
+import { findSources, cweUrl, LOG_SINKS, UNRESOLVED_RECEIVER, type SinkHit, type SourceHit } from "./catalog.js";
+import { createFileFacts, type FileFacts } from "./facts.js";
 import { buildUnitMap, classifySourceScope, sanitizersAlongPath, scopeRank, traceDefUseDetail, type UnitMap } from "./dataflow.js";
 import { shortHash, byStr } from "./util.js";
 import { SEVERITIES, type Finding, type PathStep, type Severity, type SourceScope } from "./types.js";
@@ -50,6 +49,12 @@ export interface TaintOptions {
    * tail for a shorter queue.
    */
   strictScope?: boolean;
+  /**
+   * Per-file facts shared with the run's other passes (`createFileFacts`).
+   * Pure memoization: omitted ⇒ a private one is built, and the result is the
+   * same either way.
+   */
+  facts?: FileFacts;
 }
 
 export interface TaintResult {
@@ -94,21 +99,14 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
   const extraSinks = opts.includeLogSinks ? LOG_SINKS : undefined;
   const byRel = new Map(scan.files.map((f) => [f.rel, f]));
-  const contentCache = new Map<string, string>();
+  // Per-file facts (content, lines, sink hits) — shared across the run's passes
+  // when `scan` hands them in, private to this call otherwise.
+  const facts = opts.facts ?? createFileFacts(scan);
   const sourceCache = new Map<string, SourceHit[]>();
-  const lineCache = new Map<string, string[]>();
   const unitCache = new Map<string, UnitMap>();
 
-  const content = (rel: string): string => {
-    let c = contentCache.get(rel);
-    if (c === undefined) contentCache.set(rel, (c = readText(join(scan.repo, rel))));
-    return c;
-  };
-  const lines = (rel: string): string[] => {
-    let l = lineCache.get(rel);
-    if (!l) lineCache.set(rel, (l = content(rel).split(/\r?\n/)));
-    return l;
-  };
+  const content = facts.content;
+  const lines = facts.lines;
   /**
    * The untrusted-input sources a file offers — none, if it is a test.
    *
@@ -270,7 +268,7 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
     // Call sinks plus ASSIGNMENT sinks. `el.innerHTML = x` is the commonest DOM
     // XSS shape in the wild and is not a call at all, so a call-only catalog
     // could never see it.
-    const sinkHits = [...findSinks(lang, file.calls, extraSinks, file.imports, localDefNames(file.symbols)), ...findTextSinks(lang, content(file.rel))];
+    const sinkHits = [...facts.sinks(file.rel, extraSinks), ...facts.textSinks(file.rel)];
 
     for (const sink of sinkHits) {
       const sinkSym = enclosingSymbolName(file.symbols, sink.line);
@@ -286,8 +284,11 @@ export function enumerateTaint(scan: RepoScan, graph: Graph, opts: TaintOptions 
       const queue: Frame[] = [start];
       const visited = new Set<string>([`${file.rel}#${sinkSym ?? sink.line}`]);
 
-      while (queue.length) {
-        const fr = queue.shift()!;
+      // A read pointer instead of `shift()`: same FIFO order, no O(n) re-index
+      // of the array on every pop.
+      let head = 0;
+      while (head < queue.length) {
+        const fr = queue[head++]!;
 
         // A source at/above the entry line in this frame's file closes a path.
         // The nearest one wins; `emit` records how it is scoped relative to the

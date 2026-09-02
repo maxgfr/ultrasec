@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { readText, walk } from "./walk.js";
+import { readText, walk, type RepoTree } from "./walk.js";
 import type { Finding } from "./types.js";
 import { makeToolFinding } from "./tools/normalize.js";
 import { cweUrl } from "./catalog.js";
@@ -161,12 +161,13 @@ export function isLiteralSecret(password: string): boolean {
  * on the password segment ALONE: fully templated or placeholder-shaped stays
  * quiet, a literal does not.
  */
-export function auditSecrets(repo: string, prune?: (rel: string) => boolean): Finding[] {
+export function auditSecrets(repo: string, prune?: (rel: string) => boolean, tree?: RepoTree): Finding[] {
   const out: Finding[] = [];
-  for (const wf of walk(repo)) {
+  const read = tree?.read ?? readText;
+  for (const wf of tree?.files ?? walk(repo)) {
     if (prune?.(wf.rel)) continue;
     if (!TEXT_EXTS.has(extOf(wf.rel))) continue;
-    const content = readText(wf.abs);
+    const content = read(wf.abs);
     if (!content?.includes("://")) continue;
     // A credential inside an encrypted-at-rest file is ciphertext, not a leak.
     if (encryptedShapeOf(wf.rel, content)) continue;

@@ -1,9 +1,8 @@
-import { join } from "node:path";
-import { readText } from "./walk.js";
 import type { RepoScan } from "./scan.js";
-import { enclosingSymbolName, localDefNames } from "./scan.js";
+import { enclosingSymbolName } from "./scan.js";
 import { langForFile } from "./lang.js";
-import { findSinks, findTextSinks, findSanitizers, cweUrl, UNRESOLVED_RECEIVER, SOURCELESS_SINK_KINDS } from "./catalog.js";
+import { findSanitizers, cweUrl, UNRESOLVED_RECEIVER, SOURCELESS_SINK_KINDS } from "./catalog.js";
+import { createFileFacts, type FileFacts } from "./facts.js";
 import { shortHash, byStr } from "./util.js";
 import { SEVERITIES, type Finding, type Severity } from "./types.js";
 
@@ -19,6 +18,8 @@ export interface SinkCandidateOptions {
    * entirely rather than merely leaving them unproven.
    */
   onlyKinds?: ReadonlySet<string>;
+  /** Per-file facts shared with the run's other passes (`createFileFacts`). Pure memoization. */
+  facts?: FileFacts;
 }
 
 export interface SinkCandidateResult {
@@ -82,12 +83,8 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
   const taken = new Set<string>();
   for (const f of covered) if (f.sink) taken.add(`${f.sink.file}:${f.sink.line}:${f.sink.kind ?? ""}`);
 
-  const lineCache = new Map<string, string[]>();
-  const lines = (rel: string): string[] => {
-    let l = lineCache.get(rel);
-    if (!l) lineCache.set(rel, (l = readText(join(scan.repo, rel)).split(/\r?\n/)));
-    return l;
-  };
+  const facts = opts.facts ?? createFileFacts(scan);
+  const lines = facts.lines;
 
   const findings: Finding[] = [];
   for (const file of scan.files) {
@@ -109,8 +106,8 @@ export function enumerateSinkCandidates(scan: RepoScan, covered: Finding[], opts
     // different repo lost a latent `dangerouslySetInnerHTML` the same way.
     // The doc comment above says "every `findSinks` hit not already covered" —
     // it was accurate, and that was the bug.
-    const callSinks = findSinks(lang, file.calls, undefined, file.imports, localDefNames(file.symbols));
-    const textSinks = findTextSinks(lang, lines(file.rel).join("\n"));
+    const callSinks = facts.sinks(file.rel);
+    const textSinks = facts.textSinks(file.rel);
     const isAssignment = new Set(textSinks);
     for (const sink of [...callSinks, ...textSinks]) {
       // An assignment sink's `callee` is a LABEL ("framework HTML bypass"), not

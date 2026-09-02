@@ -1,4 +1,4 @@
-import { readText, walk } from "./walk.js";
+import { readText, walk, type RepoTree } from "./walk.js";
 import type { Finding, Severity } from "./types.js";
 import { makeToolFinding } from "./tools/normalize.js";
 
@@ -275,13 +275,14 @@ function scanCookies(rel: string, content: string, out: Finding[]): void {
  * CORS on an internal service is a different risk from the same on a public API,
  * and only the auditor knows which this is.
  */
-export function auditWebConfig(repo: string, prune?: (rel: string) => boolean): Finding[] {
+export function auditWebConfig(repo: string, prune?: (rel: string) => boolean, tree?: RepoTree): Finding[] {
   const out: Finding[] = [];
-  for (const wf of walk(repo)) {
+  const read = tree?.read ?? readText;
+  for (const wf of tree?.files ?? walk(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
     if (!SCAN.has(ext)) continue;
-    const content = readText(wf.abs);
+    const content = read(wf.abs);
     if (!content) continue;
     const rel = wf.rel;
     const ls = lines(content);

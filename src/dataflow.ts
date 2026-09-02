@@ -332,8 +332,28 @@ export function boundNames(lhs: string): string[] {
   return [...new Set(names)];
 }
 
+/**
+ * Word-boundary matcher per tracked name. The same handful of names is tested
+ * against every line between a source and its sink, and the def-use walk runs
+ * once per candidate, so compiling the regex on every call was the single
+ * hottest line of the taint pass. Bounded so a pathological repo cannot grow it
+ * without limit; a clear only costs a recompile.
+ */
+const MENTION_RE = new Map<string, RegExp>();
+const MENTION_RE_MAX = 4096;
+
+function mentionRe(name: string): RegExp {
+  let re = MENTION_RE.get(name);
+  if (!re) {
+    if (MENTION_RE.size >= MENTION_RE_MAX) MENTION_RE.clear();
+    re = new RegExp(`(?<![A-Za-z0-9_$])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_$])`);
+    MENTION_RE.set(name, re);
+  }
+  return re;
+}
+
 function mentions(line: string, name: string): boolean {
-  return new RegExp(`(?<![A-Za-z0-9_$])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_$])`).test(line);
+  return mentionRe(name).test(line);
 }
 
 /**
@@ -380,12 +400,16 @@ export function traceDefUseDetail(
   const tainted = new Set(boundNames(srcText.slice(0, op)));
   if (!tainted.size) return none;
 
+  // The tracked names, materialized once and refreshed only when the set grew —
+  // not re-spread on every line of the window.
+  let tracked = [...tainted];
   for (let l = sourceLine + 1; l < entryLine; l++) {
     const text = lines[l - 1] ?? "";
-    if (![...tainted].some((n) => mentions(text, n))) continue;
+    if (!tracked.some((n) => mentions(text, n))) continue;
     const assign = bindingOperatorBefore(text, text.length);
     if (assign < 0) continue;
     for (const n of boundNames(text.slice(0, assign))) tainted.add(n);
+    if (tainted.size !== tracked.length) tracked = [...tainted];
   }
 
   const target = lines[entryLine - 1] ?? "";

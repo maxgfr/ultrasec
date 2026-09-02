@@ -74,6 +74,52 @@ export function loadScanCache(run: string): Map<string, CacheEntry> {
   }
 }
 
+// ── Stage timings ────────────────────────────────────────────────────────────
+// Wall-clock per stage of a `scan`, written to `<run>/cache/timings.json`.
+// Deliberately in the cache dir and nowhere else: `manifest.json` is
+// byte-compared between runs and the example audit is committed, and a
+// duration in either would make every run a diff.
+
+export interface StageTimer {
+  /** Close the running stage (if any) and open `name`. Returns the closed stage. */
+  mark(name: string): { name: string; ms: number } | undefined;
+  /** Close the running stage and return every stage's duration plus `total`. */
+  finish(): Record<string, number>;
+}
+
+export function stageTimer(now: () => number = () => performance.now()): StageTimer {
+  const timings: Record<string, number> = {};
+  const t0 = now();
+  let current: string | undefined;
+  let started = t0;
+  const close = (): { name: string; ms: number } | undefined => {
+    if (current === undefined) return undefined;
+    const ms = Math.round(now() - started);
+    timings[current] = (timings[current] ?? 0) + ms;
+    const closed = { name: current, ms };
+    current = undefined;
+    return closed;
+  };
+  return {
+    mark(name) {
+      const closed = close();
+      current = name;
+      started = now();
+      return closed;
+    },
+    finish() {
+      close();
+      return { ...timings, total: Math.round(now() - t0) };
+    },
+  };
+}
+
+export function saveTimings(run: string, timings: Record<string, number>): void {
+  const dir = join(run, "cache");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "timings.json"), `${JSON.stringify(timings, null, 2)}\n`);
+}
+
 /** Persist the scan cache deterministically (entries sorted by path). */
 export function saveScanCache(run: string, cache: Map<string, CacheEntry>): void {
   const dir = join(run, "cache");

@@ -33,6 +33,42 @@ export interface WalkedFile {
   /** Absolute path. */
   abs: string;
   bytes: number;
+  /** Last-modification time (ms since epoch) — with `bytes`, the cheap
+   *  "did this tree change" digest a result cache keys on. */
+  mtimeMs: number;
+}
+
+/**
+ * One walk of the repository, shared by every pass of a run.
+ *
+ * `scan` used to walk the tree six times — once per always-on auditor and once
+ * for the import resolver's manifest discovery — each walk re-`stat`ing every
+ * file and each auditor re-reading the same sources. The tree does not change
+ * between two passes of the same run, so the walk is done once and its
+ * contents read once; the auditors take the snapshot as an optional argument
+ * and fall back to their own walk when called on their own (tests, MCP tools).
+ *
+ * Deliberately NOT a module-level memo: the MCP server is long-lived and runs
+ * scans in-process, and a cached walk would outlive the tree it describes.
+ */
+export interface RepoTree {
+  files: readonly WalkedFile[];
+  /** `readText`, memoized per absolute path for the life of the snapshot. */
+  read(abs: string): string;
+}
+
+/** Walk `root` once and memoize file reads for the life of the returned tree. */
+export function snapshotTree(root: string, opts: WalkOptions = {}): RepoTree {
+  const files = walk(root, opts);
+  const texts = new Map<string, string>();
+  return {
+    files,
+    read(abs: string): string {
+      let t = texts.get(abs);
+      if (t === undefined) texts.set(abs, (t = readText(abs)));
+      return t;
+    },
+  };
 }
 
 export interface WalkOptions {
@@ -484,7 +520,7 @@ export function walkWithMeta(root: string, opts: WalkOptions = {}): WalkResult {
           truncated = true;
           return;
         }
-        out.push({ rel, abs, bytes: st.size });
+        out.push({ rel, abs, bytes: st.size, mtimeMs: st.mtimeMs });
       }
     }
   };

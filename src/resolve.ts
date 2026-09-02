@@ -7,7 +7,7 @@
 // (verified differentially before adoption); on real repos it resolves strictly
 // more edges (documented as an accepted, more-correct divergence).
 import type { RepoScan } from "./scan.js";
-import { walk } from "./walk.js";
+import { walk, type WalkedFile } from "./walk.js";
 import { buildResolveContext, resolveImport as engineResolveImport, type ResolveContext } from "./vendor/codeindex-engine.mjs";
 
 function extOf(rel: string): string {
@@ -30,10 +30,10 @@ const MANIFEST_BASES = new Set(["tsconfig.json", "jsconfig.json", "package.json"
  *  tsconfig must configure alias resolution even when the scan is scoped to a
  *  subdirectory. Cast through the engine's expected type — the extra FileRecord
  *  fields are never touched. */
-function engineScan(scan: RepoScan): Parameters<typeof buildResolveContext>[0] {
+function engineScan(scan: RepoScan, tree?: readonly WalkedFile[]): Parameters<typeof buildResolveContext>[0] {
   const files: { rel: string; ext: string }[] = scan.files.map((f) => ({ rel: f.rel, ext: extOf(f.rel) }));
   const seen = new Set(scan.files.map((f) => f.rel));
-  for (const f of walk(scan.repo)) {
+  for (const f of tree ?? walk(scan.repo)) {
     const base = f.rel.slice(f.rel.lastIndexOf("/") + 1).toLowerCase();
     if (!MANIFEST_BASES.has(base) || seen.has(f.rel)) continue;
     seen.add(f.rel);
@@ -45,8 +45,8 @@ function engineScan(scan: RepoScan): Parameters<typeof buildResolveContext>[0] {
 /** A repo-file import resolver bound to a scan's full resolve context (tsconfig
  *  paths, workspace exports, module roots). Returns the resolved repo-relative
  *  target, or undefined for external/dangling specifiers. */
-export function buildFileResolver(scan: RepoScan): (fromRel: string, spec: string) => string | undefined {
-  const ctx = buildResolveContext(engineScan(scan));
+export function buildFileResolver(scan: RepoScan, tree?: readonly WalkedFile[]): (fromRel: string, spec: string) => string | undefined {
+  const ctx = buildResolveContext(engineScan(scan, tree));
   return (fromRel, spec) => {
     const r = engineResolveImport(fromRel, extOf(fromRel), spec, ctx);
     return r.kind === "resolved" && r.target !== fromRel ? r.target : undefined;

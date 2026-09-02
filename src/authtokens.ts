@@ -1,4 +1,4 @@
-import { readText, walk } from "./walk.js";
+import { readText, walk, type RepoTree } from "./walk.js";
 import type { Finding, Severity } from "./types.js";
 import { makeToolFinding } from "./tools/normalize.js";
 
@@ -288,15 +288,16 @@ function scanOAuthStatePkce(rel: string, content: string, out: Finding[]): void 
 }
 
 /** Audit a repo for authentication-token weaknesses. Returns candidates. */
-export function auditAuthTokens(repo: string, prune?: (rel: string) => boolean): Finding[] {
+export function auditAuthTokens(repo: string, prune?: (rel: string) => boolean, tree?: RepoTree): Finding[] {
   const out: Finding[] = [];
-  for (const wf of walk(repo)) {
+  const read = tree?.read ?? readText;
+  for (const wf of tree?.files ?? walk(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
     const isCode = CODE.has(ext);
     const seedable = SEEDED_CREDENTIAL_EXTS.has(ext);
     if (!isCode && !seedable) continue;
-    const content = readText(wf.abs);
+    const content = read(wf.abs);
     if (!content) continue;
     const rel = wf.rel;
 

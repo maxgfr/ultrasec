@@ -31,8 +31,16 @@ Two properties worth keeping if you touch it:
   `toolStatus` reports the post-filter number, so a filtered run does not read as a quiet one.
 
 The always-on auditors (`auditAgenticWorkflows`, `auditWebConfig`, `auditAuthTokens`, `auditCloud`,
-`auditSecrets`) take the same predicate as an optional second argument. They call `walk(repo)`
-directly, which knows nothing of the scan flags.
+`auditSecrets`) take the same predicate as an optional second argument, and a `RepoTree` snapshot
+(`snapshotTree(repo)`: one unscoped walk plus memoized file reads) as an optional third. `scan`
+walks the tree once and hands the same snapshot to all five and to the import resolver's manifest
+discovery (`buildGraph(scan, { tree })`); called on their own they still `walk(repo)` themselves,
+which knows nothing of the scan flags. Likewise the three passes that match calls against the sink
+catalog (`enumerateTaint`, `enumerateSinkCandidates`, `enumerateSensitiveLogCandidates`) accept a
+shared `FileFacts` (`createFileFacts(scan)`) so file contents, line tables and sink hits are computed
+once per run; each builds a private one when none is passed. Per-stage wall-clock is written to
+`<run>/cache/timings.json` and echoed on stderr for stages over a second — never into the manifest
+or stdout, both of which are byte-compared.
 
 
 ## Supply-chain audit: SBOM (syft) + package-checker

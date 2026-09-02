@@ -18872,6 +18872,18 @@ var DEFAULT_IGNORE_DIRS = /* @__PURE__ */ new Set([
   ".ultrasec"
 ]);
 var MAX_FILE_BYTES = 15e5;
+function snapshotTree(root, opts = {}) {
+  const files = walk2(root, opts);
+  const texts = /* @__PURE__ */ new Map();
+  return {
+    files,
+    read(abs) {
+      let t = texts.get(abs);
+      if (t === void 0) texts.set(abs, t = readText2(abs));
+      return t;
+    }
+  };
+}
 function globToRe(pattern) {
   let p = pattern.replace(/^\.\//, "").replace(/\/+$/g, (m) => m ? "/" : "");
   let dirMatch = false;
@@ -19156,7 +19168,7 @@ function walkWithMeta(root, opts = {}) {
           truncated = true;
           return;
         }
-        out2.push({ rel: rel2, abs, bytes: st.size });
+        out2.push({ rel: rel2, abs, bytes: st.size, mtimeMs: st.mtimeMs });
       }
     }
   };
@@ -19364,10 +19376,10 @@ function extOf(rel2) {
   return i2 < 0 ? "" : rel2.slice(i2).toLowerCase();
 }
 var MANIFEST_BASES = /* @__PURE__ */ new Set(["tsconfig.json", "jsconfig.json", "package.json", "go.mod", "cargo.toml", "composer.json", "pyproject.toml", "setup.py"]);
-function engineScan(scan2) {
+function engineScan(scan2, tree) {
   const files = scan2.files.map((f) => ({ rel: f.rel, ext: extOf(f.rel) }));
   const seen = new Set(scan2.files.map((f) => f.rel));
-  for (const f of walk2(scan2.repo)) {
+  for (const f of tree ?? walk2(scan2.repo)) {
     const base = f.rel.slice(f.rel.lastIndexOf("/") + 1).toLowerCase();
     if (!MANIFEST_BASES.has(base) || seen.has(f.rel)) continue;
     seen.add(f.rel);
@@ -19375,8 +19387,8 @@ function engineScan(scan2) {
   }
   return { root: scan2.repo, files };
 }
-function buildFileResolver(scan2) {
-  const ctx = buildResolveContext(engineScan(scan2));
+function buildFileResolver(scan2, tree) {
+  const ctx = buildResolveContext(engineScan(scan2, tree));
   return (fromRel, spec) => {
     const r = resolveImport(fromRel, extOf(fromRel), spec, ctx);
     return r.kind === "resolved" && r.target !== fromRel ? r.target : void 0;
@@ -19396,7 +19408,7 @@ function sameLanguage(a, b) {
   const lb = langForFile(b)?.id;
   return !!la && la === lb;
 }
-function buildGraph2(scan2) {
+function buildGraph2(scan2, opts = {}) {
   const fileSet = new Set(scan2.files.map((f) => f.rel));
   const defs = /* @__PURE__ */ new Map();
   for (const f of scan2.files) {
@@ -19410,7 +19422,7 @@ function buildGraph2(scan2) {
   const symbolDefs = {};
   for (const [name2, files] of defs) symbolDefs[name2] = [...files].sort(byStr2);
   const edgeMap = /* @__PURE__ */ new Map();
-  const resolve39 = buildFileResolver(scan2);
+  const resolve38 = buildFileResolver(scan2, opts.tree);
   const importsOf = /* @__PURE__ */ new Map();
   for (const f of scan2.files) {
     for (const imp of f.imports) {
@@ -20263,10 +20275,11 @@ function isConstantAssignment(rhs) {
 function findTextSinks(lang, content) {
   const out2 = [];
   const lines5 = content.split(/\r?\n/);
+  const rules = byLanguage(textSinkByLang, TEXT_SINKS, lang.id);
+  if (!rules.length) return out2;
   for (let i2 = 0; i2 < lines5.length; i2++) {
     const line = lines5[i2];
-    for (const rule of TEXT_SINKS) {
-      if (!appliesTo(rule.languages, lang.id)) continue;
+    for (const rule of rules) {
       const m = rule.re.exec(line);
       if (!m) continue;
       const rhs = rule.requiresDynamicValue ? line.slice(m.index + m[0].length).trim().replace(/[;,]\s*$/, "").trim() : void 0;
@@ -20356,15 +20369,48 @@ var LOG_SINKS = [
 ];
 var UNRESOLVED_SEVERITY = "medium";
 var UNRESOLVED_RECEIVER = "unresolved-receiver";
+var sinkIndexes = /* @__PURE__ */ new WeakMap();
+function sinkIndex(rules) {
+  let idx = sinkIndexes.get(rules);
+  if (!idx) {
+    idx = /* @__PURE__ */ new Map();
+    for (const rule of rules) {
+      for (const callee of rule.callees) {
+        let bucket = idx.get(callee);
+        if (!bucket) idx.set(callee, bucket = []);
+        bucket.push(rule);
+      }
+    }
+    sinkIndexes.set(rules, idx);
+  }
+  return idx;
+}
+var mergedSinkTables = /* @__PURE__ */ new WeakMap();
+function mergedSinks(extraSinks) {
+  let merged = mergedSinkTables.get(extraSinks);
+  if (!merged) mergedSinkTables.set(extraSinks, merged = [...SINKS, ...extraSinks]);
+  return merged;
+}
+function byLanguage(store, rules, langId) {
+  let perLang = store.get(rules);
+  if (!perLang) store.set(rules, perLang = /* @__PURE__ */ new Map());
+  let bucket = perLang.get(langId);
+  if (!bucket) perLang.set(langId, bucket = rules.filter((r) => appliesTo(r.languages, langId)));
+  return bucket;
+}
+var textSinkByLang = /* @__PURE__ */ new WeakMap();
+var sourceByLang = /* @__PURE__ */ new WeakMap();
+var sanitizerByLang = /* @__PURE__ */ new WeakMap();
 function findSinks(lang, calls, extraSinks, imports, localDefs) {
-  const rules = extraSinks && extraSinks.length ? [...SINKS, ...extraSinks] : SINKS;
+  const byCallee = sinkIndex(extraSinks && extraSinks.length ? mergedSinks(extraSinks) : SINKS);
   const out2 = [];
   const specs = (imports ?? []).map((i2) => i2.spec.toLowerCase());
   for (const c2 of calls) {
+    const rules = byCallee.get(c2.callee);
+    if (!rules) continue;
     const shadowed = !c2.receiver && localDefs?.has(c2.callee) === true;
     for (const rule of rules) {
       if (!appliesTo(rule.languages, lang.id)) continue;
-      if (!rule.callees.includes(c2.callee)) continue;
       if (rule.requireReceiver && !c2.receiver) continue;
       if (rule.receivers && c2.receiver && !rule.receivers.includes(c2.receiver)) continue;
       const moduleSeen = !!rule.requireModule && rule.requireModule.some((m) => specs.some((s) => s.includes(m.toLowerCase())));
@@ -20631,10 +20677,10 @@ function findRouteEntryPoints(rel2, content) {
 function findSources(lang, content, rel2) {
   const out2 = [];
   const lines5 = content.split(/\r?\n/);
+  const rules = byLanguage(sourceByLang, SOURCES, lang.id);
   for (let i2 = 0; i2 < lines5.length; i2++) {
     const line = lines5[i2];
-    for (const rule of SOURCES) {
-      if (!appliesTo(rule.languages, lang.id)) continue;
+    for (const rule of rules) {
       const m = rule.re.exec(line);
       if (m) out2.push({ line: i2 + 1, kind: rule.kind, match: m[0], title: rule.title });
     }
@@ -20740,8 +20786,7 @@ var SANITIZERS = [
 ];
 function findSanitizers(lang, line, sinkKind) {
   const hints = [];
-  for (const rule of SANITIZERS) {
-    if (!appliesTo(rule.languages, lang.id)) continue;
+  for (const rule of byLanguage(sanitizerByLang, SANITIZERS, lang.id)) {
     if (rule.kind !== "*" && rule.kind !== sinkKind) continue;
     if (rule.exceptKinds?.includes(sinkKind)) continue;
     if (rule.re.test(line)) hints.push(rule.note);
@@ -20831,12 +20876,13 @@ function isLiteralSecret(password) {
   if (/\$\{|\$\(|\{\{|%\(/.test(p)) return false;
   return true;
 }
-function auditSecrets(repo, prune) {
+function auditSecrets(repo, prune, tree) {
   const out2 = [];
-  for (const wf of walk2(repo)) {
+  const read = tree?.read ?? readText2;
+  for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     if (!TEXT_EXTS.has(extOf2(wf.rel))) continue;
-    const content = readText2(wf.abs);
+    const content = read(wf.abs);
     if (!content?.includes("://")) continue;
     if (encryptedShapeOf(wf.rel, content)) continue;
     const lines5 = content.split(/\r?\n/);
@@ -21000,6 +21046,9 @@ function fileRenamedTo(repo, file) {
 var VENDORED_DIR = /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules|\.pnpm|bower_components|site-packages|\.venv|venv|__pycache__|\.tox|\.ipynb_checkpoints|dist|build|out|target|coverage|\.next|\.nuxt|\.svelte-kit|\.turbo|\.gradle)\//i;
 var MINIFIED = /\.min\.(js|mjs|cjs|css)$/i;
 var TEST_DEMOTABLE = /* @__PURE__ */ new Set(["taint", "sast", "crypto", "authz", "config"]);
+function newNoiseCtx() {
+  return { lines: /* @__PURE__ */ new Map(), shapes: /* @__PURE__ */ new Map() };
+}
 function locationsOf(f) {
   const out2 = [];
   if (f.source?.file) out2.push(f.source.file);
@@ -21012,8 +21061,8 @@ var RULES17 = [
     id: "encrypted-at-rest",
     severity: "info",
     confidence: "low",
-    why: (f, repo) => {
-      const shape = f.sink?.file ? shapeOf(repo, f.sink.file, f.atCommit) : void 0;
+    why: (f, repo, ctx) => {
+      const shape = f.sink?.file ? shapeOf(ctx, repo, f.sink.file, f.atCommit) : void 0;
       return `de-prioritized: ${f.sink?.file} is a ${shape?.label ?? "ciphertext-by-design file"}, where ciphertext is the point of the file. Check that the ENCRYPTION KEY is not also committed, and that this really is the format it claims.`;
     },
     // Keyed on the CLAIM, not on which tool made it.
@@ -21032,7 +21081,7 @@ var RULES17 = [
     // A SAST finding on a sealed-secret file that claims something ELSE — a
     // malformed manifest, a bad apiVersion — carries a different CWE and is
     // still left at full severity, which is what the original note meant.
-    matches: (f, repo) => (f.category === "secret" || f.cwe?.toUpperCase() === "CWE-798") && !!f.sink?.file && !!shapeOf(repo, f.sink.file, f.atCommit)
+    matches: (f, repo, ctx) => (f.category === "secret" || f.cwe?.toUpperCase() === "CWE-798") && !!f.sink?.file && !!shapeOf(ctx, repo, f.sink.file, f.atCommit)
   },
   {
     id: "test-only-path",
@@ -21069,9 +21118,9 @@ var RULES17 = [
     severity: "low",
     confidence: "low",
     why: (f) => `de-prioritized: ${f.sink?.file}:${f.sink?.line} assigns a resource/document identifier, not a credential \u2014 possessing the id is not possessing access. CHECK the document's sharing setting and whether its contents are sensitive; that is not knowable from this repo.`,
-    matches: (f, repo) => {
+    matches: (f, repo, ctx) => {
       if (f.category !== "secret" || !f.sink?.file) return false;
-      const line = lineAt(repo, f.sink.file, f.sink.line, f.atCommit);
+      const line = lineAt(ctx, repo, f.sink.file, f.sink.line, f.atCommit);
       if (!line) return false;
       return RESOURCE_NAME.test(line) && !CREDENTIAL_SHAPE.test(line);
     }
@@ -21092,9 +21141,9 @@ var RULES17 = [
     severity: "info",
     confidence: "low",
     why: (f) => `de-prioritized: ${f.sink?.file}:${f.sink?.line} declares a pattern rather than performing the operation \u2014 it is a rule/metadata field, a bare regex literal, or a comment. Confirm the value is not ALSO applied somewhere \u2014 a rule file that configures the running system is both.`,
-    matches: (f, repo) => {
+    matches: (f, repo, ctx) => {
       if (f.category === "dep" || !f.sink?.file) return false;
-      const line = lineAt(repo, f.sink.file, f.sink.line, f.atCommit);
+      const line = lineAt(ctx, repo, f.sink.file, f.sink.line, f.atCommit);
       return !!line && (PATTERN_METADATA.test(line) || BARE_REGEX_LINE.test(line) || WHOLE_LINE_COMMENT.test(line));
     }
   },
@@ -21115,10 +21164,10 @@ var RESOURCE_NAME = /\b(?:SPREADSHEET|SHEET|WORKSHEET|DOC|DOCUMENT|FOLDER|DRIVE|
 var CREDENTIAL_SHAPE = /-----BEGIN|\beyJ[A-Za-z0-9_-]{10,}|\bAKIA[0-9A-Z]{12,}|\b(?:sk|rk)-[A-Za-z0-9]{16,}|\bgh[pousr]_[A-Za-z0-9]{20,}|\bxox[baprs]-|\bAIza[0-9A-Za-z_-]{30,}/;
 var WHOLE_LINE_COMMENT = /^\s*(?:\/\/|#|\*|<!--)/;
 var BARE_REGEX_LINE = /^\s*\/(?:[^/\\\n]|\\.)+\/[gimsuy]*\s*,?\s*$/;
-var lineCache = /* @__PURE__ */ new Map();
-function lineAt(repo, rel2, line, commit) {
+function lineAt(ctx, repo, rel2, line, commit) {
   if (commit) return lineContentAtCommit(repo, commit, rel2, line) ?? void 0;
   const key = `${repo}\0${rel2}`;
+  const lineCache = ctx.lines;
   if (!lineCache.has(key)) {
     try {
       lineCache.set(key, readText2(join30(repo, rel2)).split(/\r?\n/));
@@ -21128,9 +21177,9 @@ function lineAt(repo, rel2, line, commit) {
   }
   return lineCache.get(key)?.[line - 1];
 }
-var shapeCache = /* @__PURE__ */ new Map();
-function shapeOf(repo, rel2, commit) {
+function shapeOf(ctx, repo, rel2, commit) {
   const key = `${repo}\0${commit ?? ""}\0${rel2}`;
+  const shapeCache = ctx.shapes;
   if (!shapeCache.has(key)) {
     let content;
     if (commit) content = fileContentAtCommit(repo, commit, rel2) ?? void 0;
@@ -21183,11 +21232,11 @@ var PROPOSAL_WHY = {
   "pattern-declaration": "the cited line declares the pattern (rule metadata or a bare regex) rather than performing the operation",
   "resource-identifier": "the value addresses a document, it is not a credential \u2014 but confirm the document's sharing setting, which this repo cannot tell you"
 };
-function classifyNoise(f, repo, opts = {}) {
+function classifyWith(f, repo, opts, ctx) {
   if (f.verified) return void 0;
   for (const rule of RULES17) {
     if (rule.id === "test-only-path" && opts.includeTests) continue;
-    if (rule.matches(f, repo)) return rule.id;
+    if (rule.matches(f, repo, ctx)) return rule.id;
   }
   return void 0;
 }
@@ -21198,12 +21247,13 @@ function floorOf(current, floor) {
 function demoteNoise(findings, repo, opts = {}) {
   const counts = /* @__PURE__ */ new Map();
   const byId = new Map(RULES17.map((r) => [r.id, r]));
+  const ctx = newNoiseCtx();
   const out2 = findings.map((f) => {
     if (f.noise) {
       counts.set(f.noise, (counts.get(f.noise) ?? 0) + 1);
       return f;
     }
-    const cls = classifyNoise(f, repo, opts);
+    const cls = classifyWith(f, repo, opts, ctx);
     if (!cls) return f;
     const rule = byId.get(cls);
     counts.set(cls, (counts.get(cls) ?? 0) + 1);
@@ -21212,7 +21262,7 @@ function demoteNoise(findings, repo, opts = {}) {
       severity: floorOf(f.severity, rule.severity),
       confidence: rule.confidence,
       noise: cls,
-      message: `${f.message} \u2014 ${rule.why(f, repo)}`
+      message: `${f.message} \u2014 ${rule.why(f, repo, ctx)}`
     };
   });
   const downgraded = NOISE_CLASSES.filter((c2) => counts.has(c2)).map((c2) => ({ reason: c2, count: counts.get(c2) }));
@@ -21600,7 +21650,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
     (a, b) => SEVERITIES2.indexOf(a.severity) - SEVERITIES2.indexOf(b.severity) || b.count - a.count || byStr2(a.kind, b.kind)
   );
   for (const s of sinks) s.samples.sort((a, b) => byStr2(a.file, b.file) || a.line - b.line);
-  const byLanguage = [...langAgg.values()].sort((a, b) => byStr2(a.lang, b.lang));
+  const byLanguage2 = [...langAgg.values()].sort((a, b) => byStr2(a.lang, b.lang));
   const byTopDir = [...dirAgg.values()].sort((a, b) => b.score - a.score || b.sinks - a.sinks || byStr2(a.dir, b.dir));
   const byFile = fileAgg.sort((a, b) => b.score - a.score || b.sinks - a.sinks || byStr2(a.file, b.file));
   const suggestedTargets = byTopDir.filter((d) => d.sinks > 0 || d.sources > 0).map((d) => ({
@@ -21615,7 +21665,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
     totals: { files: scan2.files.length, sources: totalSources, sinks: totalSinks, truncated: !!scan2.truncated },
     entryPoints,
     sinks,
-    byLanguage,
+    byLanguage: byLanguage2,
     byTopDir,
     byFile,
     suggestedTargets
@@ -21716,11 +21766,63 @@ wrote ${join33(resolve9(out2), "MAP.md")} + attack-surface.json`);
 }
 
 // src/commands/scan.ts
-import { resolve as resolve12, join as join49, relative as relative4 } from "path";
-import { existsSync as existsSync25 } from "fs";
+import { resolve as resolve11, join as join48, relative as relative4 } from "path";
+import { existsSync as existsSync24 } from "fs";
 
-// src/taint.ts
-import { join as join34 } from "path";
+// src/facts.ts
+import { join as join35 } from "path";
+var NO_EXTRA = [];
+var EMPTY_HITS = [];
+var EMPTY_DEFS = /* @__PURE__ */ new Set();
+function createFileFacts(scan2) {
+  const byRel = new Map(scan2.files.map((f) => [f.rel, f]));
+  const contents = /* @__PURE__ */ new Map();
+  const lineCache = /* @__PURE__ */ new Map();
+  const defCache = /* @__PURE__ */ new Map();
+  const textSinkCache = /* @__PURE__ */ new Map();
+  const sinkCache = /* @__PURE__ */ new Map();
+  const content = (rel2) => {
+    let c2 = contents.get(rel2);
+    if (c2 === void 0) contents.set(rel2, c2 = readText2(join35(scan2.repo, rel2)));
+    return c2;
+  };
+  const lines5 = (rel2) => {
+    let l = lineCache.get(rel2);
+    if (!l) lineCache.set(rel2, l = content(rel2).split(/\r?\n/));
+    return l;
+  };
+  const localDefs = (rel2) => {
+    let d = defCache.get(rel2);
+    if (!d) {
+      const file = byRel.get(rel2);
+      defCache.set(rel2, d = file ? localDefNames(file.symbols) : EMPTY_DEFS);
+    }
+    return d;
+  };
+  const sinks = (rel2, extraSinks) => {
+    const key = extraSinks && extraSinks.length ? extraSinks : NO_EXTRA;
+    let bucket = sinkCache.get(key);
+    if (!bucket) sinkCache.set(key, bucket = /* @__PURE__ */ new Map());
+    let hits = bucket.get(rel2);
+    if (!hits) {
+      const file = byRel.get(rel2);
+      const lang = langForFile(rel2);
+      hits = file && lang ? findSinks(lang, file.calls, extraSinks, file.imports, localDefs(rel2)) : EMPTY_HITS;
+      bucket.set(rel2, hits);
+    }
+    return hits;
+  };
+  const textSinks = (rel2) => {
+    let hits = textSinkCache.get(rel2);
+    if (!hits) {
+      const lang = langForFile(rel2);
+      hits = lang ? findTextSinks(lang, content(rel2)) : EMPTY_HITS;
+      textSinkCache.set(rel2, hits);
+    }
+    return hits;
+  };
+  return { content, lines: lines5, sinks, textSinks, localDefs };
+}
 
 // src/dataflow.ts
 var CONTROL_OPEN = /^\s*(?:\}\s*)?(?:else\s+)?(?:if|for|while|switch|case|catch|try|do|finally|with|using|lock|unsafe|synchronized|match|loop|unless|begin)\b/;
@@ -21900,8 +22002,19 @@ function boundNames2(lhs) {
   }
   return [...new Set(names)];
 }
+var MENTION_RE = /* @__PURE__ */ new Map();
+var MENTION_RE_MAX = 4096;
+function mentionRe(name2) {
+  let re = MENTION_RE.get(name2);
+  if (!re) {
+    if (MENTION_RE.size >= MENTION_RE_MAX) MENTION_RE.clear();
+    re = new RegExp(`(?<![A-Za-z0-9_$])${name2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_$])`);
+    MENTION_RE.set(name2, re);
+  }
+  return re;
+}
 function mentions(line, name2) {
-  return new RegExp(`(?<![A-Za-z0-9_$])${name2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9_$])`).test(line);
+  return mentionRe(name2).test(line);
 }
 function traceDefUseDetail(lines5, sourceLine, sourceMatch, entryLine) {
   const none = { verdict: void 0, tainted: [] };
@@ -21913,12 +22026,14 @@ function traceDefUseDetail(lines5, sourceLine, sourceMatch, entryLine) {
   if (op < 0) return none;
   const tainted = new Set(boundNames2(srcText.slice(0, op)));
   if (!tainted.size) return none;
+  let tracked = [...tainted];
   for (let l = sourceLine + 1; l < entryLine; l++) {
     const text = lines5[l - 1] ?? "";
-    if (![...tainted].some((n) => mentions(text, n))) continue;
+    if (!tracked.some((n) => mentions(text, n))) continue;
     const assign = bindingOperatorBefore(text, text.length);
     if (assign < 0) continue;
     for (const n of boundNames2(text.slice(0, assign))) tainted.add(n);
+    if (tainted.size !== tracked.length) tracked = [...tainted];
   }
   const target = lines5[entryLine - 1] ?? "";
   const names = [...tainted].sort();
@@ -21947,20 +22062,11 @@ function enumerateTaint(scan2, graph, opts = {}) {
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES;
   const extraSinks = opts.includeLogSinks ? LOG_SINKS : void 0;
   const byRel = new Map(scan2.files.map((f) => [f.rel, f]));
-  const contentCache = /* @__PURE__ */ new Map();
+  const facts = opts.facts ?? createFileFacts(scan2);
   const sourceCache = /* @__PURE__ */ new Map();
-  const lineCache2 = /* @__PURE__ */ new Map();
   const unitCache = /* @__PURE__ */ new Map();
-  const content = (rel2) => {
-    let c2 = contentCache.get(rel2);
-    if (c2 === void 0) contentCache.set(rel2, c2 = readText2(join34(scan2.repo, rel2)));
-    return c2;
-  };
-  const lines5 = (rel2) => {
-    let l = lineCache2.get(rel2);
-    if (!l) lineCache2.set(rel2, l = content(rel2).split(/\r?\n/));
-    return l;
-  };
+  const content = facts.content;
+  const lines5 = facts.lines;
   const sourcesOf = (rel2) => {
     let s = sourceCache.get(rel2);
     if (!s) {
@@ -22039,7 +22145,7 @@ function enumerateTaint(scan2, graph, opts = {}) {
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    const sinkHits = [...findSinks(lang, file.calls, extraSinks, file.imports, localDefNames(file.symbols)), ...findTextSinks(lang, content(file.rel))];
+    const sinkHits = [...facts.sinks(file.rel, extraSinks), ...facts.textSinks(file.rel)];
     for (const sink of sinkHits) {
       const sinkSym = enclosingSymbolName(file.symbols, sink.line);
       const sinkStep = {
@@ -22051,8 +22157,9 @@ function enumerateTaint(scan2, graph, opts = {}) {
       const start2 = { file: file.rel, sym: sinkSym, entryLine: sink.line, hops: [sinkStep], depth: 0 };
       const queue = [start2];
       const visited = /* @__PURE__ */ new Set([`${file.rel}#${sinkSym ?? sink.line}`]);
-      while (queue.length) {
-        const fr = queue.shift();
+      let head = 0;
+      while (head < queue.length) {
+        const fr = queue[head++];
         const above = sourcesOf(fr.file).filter((s) => s.line <= fr.entryLine);
         if (above.length) {
           const nearest = above.reduce((a, b) => b.line > a.line ? b : a);
@@ -22087,7 +22194,6 @@ function enumerateTaint(scan2, graph, opts = {}) {
 }
 
 // src/sinks.ts
-import { join as join35 } from "path";
 var DEFAULT_MAX_CANDIDATES2 = 1e3;
 function severityRank3(s) {
   return SEVERITIES2.indexOf(s);
@@ -22100,18 +22206,14 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES2;
   const taken = /* @__PURE__ */ new Set();
   for (const f of covered) if (f.sink) taken.add(`${f.sink.file}:${f.sink.line}:${f.sink.kind ?? ""}`);
-  const lineCache2 = /* @__PURE__ */ new Map();
-  const lines5 = (rel2) => {
-    let l = lineCache2.get(rel2);
-    if (!l) lineCache2.set(rel2, l = readText2(join35(scan2.repo, rel2)).split(/\r?\n/));
-    return l;
-  };
+  const facts = opts.facts ?? createFileFacts(scan2);
+  const lines5 = facts.lines;
   const findings = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    const callSinks = findSinks(lang, file.calls, void 0, file.imports, localDefNames(file.symbols));
-    const textSinks = findTextSinks(lang, lines5(file.rel).join("\n"));
+    const callSinks = facts.sinks(file.rel);
+    const textSinks = facts.textSinks(file.rel);
     const isAssignment = new Set(textSinks);
     for (const sink of [...callSinks, ...textSinks]) {
       const what = isAssignment.has(sink) ? `\`${sink.callee}\`` : `${sink.callee}()`;
@@ -22149,9 +22251,6 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
   const kept = total > maxCandidates ? findings.slice(0, maxCandidates) : findings;
   return { findings: kept, truncated: total - kept.length, total };
 }
-
-// src/logs/hygiene.ts
-import { join as join36 } from "path";
 
 // src/logs/secrets.ts
 var SECRET_PATTERNS = [
@@ -22228,17 +22327,13 @@ function enclosingSymbol2(file, line) {
 }
 function enumerateSensitiveLogCandidates(scan2, opts = {}) {
   const maxCandidates = opts.maxCandidates ?? DEFAULT_MAX_CANDIDATES3;
-  const lineCache2 = /* @__PURE__ */ new Map();
-  const lines5 = (rel2) => {
-    let l = lineCache2.get(rel2);
-    if (!l) lineCache2.set(rel2, l = readText2(join36(scan2.repo, rel2)).split(/\r?\n/));
-    return l;
-  };
+  const facts = opts.facts ?? createFileFacts(scan2);
+  const lines5 = facts.lines;
   const findings = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    for (const sink of findSinks(lang, file.calls, LOG_SINKS, file.imports, localDefNames(file.symbols))) {
+    for (const sink of facts.sinks(file.rel, LOG_SINKS)) {
       if (sink.kind !== "log") continue;
       const raw = lines5(file.rel)[sink.line - 1] ?? "";
       const nameHit = SENSITIVE_NAME_RE.test(raw);
@@ -22269,7 +22364,7 @@ function enumerateSensitiveLogCandidates(scan2, opts = {}) {
 }
 
 // src/actions.ts
-import { join as join37 } from "path";
+import { join as join36 } from "path";
 var AI_ACTIONS = [
   "anthropics/claude-code-action",
   "anthropics/claude-code-base-action",
@@ -22401,11 +22496,12 @@ Evidence: \`${evidence.trim().slice(0, 160)}\``,
     cwe: "CWE-1427"
   });
 }
-function auditAgenticWorkflows(repo, prune) {
+function auditAgenticWorkflows(repo, prune, tree) {
   const findings = [];
-  const files = walk2(repo).map((f) => f.rel).filter((rel2) => WORKFLOW.test(rel2) && !prune?.(rel2));
+  const read = tree?.read ?? readText2;
+  const files = (tree?.files ?? walk2(repo)).map((f) => f.rel).filter((rel2) => WORKFLOW.test(rel2) && !prune?.(rel2));
   for (const rel2 of files) {
-    const content = readText2(join37(repo, rel2));
+    const content = read(join36(repo, rel2));
     if (!content) continue;
     const usesAi = AI_ACTIONS.some((a) => content.includes(a));
     const ls = lines(content);
@@ -22660,13 +22756,14 @@ function scanCookies(rel2, content, out2) {
     else if (sameSite[1]?.toLowerCase() === "none" && !hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-samesite-none-insecure"], m[0]));
   }
 }
-function auditWebConfig(repo, prune) {
+function auditWebConfig(repo, prune, tree) {
   const out2 = [];
-  for (const wf of walk2(repo)) {
+  const read = tree?.read ?? readText2;
+  for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf3(wf.rel);
     if (!SCAN.has(ext)) continue;
-    const content = readText2(wf.abs);
+    const content = read(wf.abs);
     if (!content) continue;
     const rel2 = wf.rel;
     const ls = lines2(content);
@@ -22906,15 +23003,16 @@ function scanOAuthStatePkce(rel2, content, out2) {
   f.confidence = "low";
   out2.push(f);
 }
-function auditAuthTokens(repo, prune) {
+function auditAuthTokens(repo, prune, tree) {
   const out2 = [];
-  for (const wf of walk2(repo)) {
+  const read = tree?.read ?? readText2;
+  for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf4(wf.rel);
     const isCode2 = CODE2.has(ext);
     const seedable = SEEDED_CREDENTIAL_EXTS.has(ext);
     if (!isCode2 && !seedable) continue;
-    const content = readText2(wf.abs);
+    const content = read(wf.abs);
     if (!content) continue;
     const rel2 = wf.rel;
     if (PASSWORD_HASH_LITERAL.test(content)) {
@@ -23068,13 +23166,14 @@ function isEgressRule(ls, line) {
   }
   return false;
 }
-function auditCloud(repo, prune) {
+function auditCloud(repo, prune, tree) {
   const out2 = [];
-  for (const wf of walk2(repo)) {
+  const read = tree?.read ?? readText2;
+  for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf5(wf.rel);
     if (!SCAN2.has(ext)) continue;
-    const content = readText2(wf.abs);
+    const content = read(wf.abs);
     if (!content) continue;
     const rel2 = wf.rel;
     const ls = lines4(content);
@@ -23116,8 +23215,8 @@ function auditCloud(repo, prune) {
 }
 
 // src/provenance.ts
-import { existsSync as existsSync16, readFileSync as readFileSync17 } from "fs";
-import { join as join38 } from "path";
+import { existsSync as existsSync15, readFileSync as readFileSync17 } from "fs";
+import { join as join37 } from "path";
 function compileCodeowner(pattern) {
   const dirOnly = pattern.endsWith("/") && pattern.length > 1;
   let core = dirOnly ? pattern.slice(0, -1) : pattern;
@@ -23148,8 +23247,8 @@ function ownerFor(rules, file) {
 var CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
 function loadCodeowners(repo) {
   for (const p of CODEOWNERS_PATHS) {
-    const abs = join38(repo, p);
-    if (existsSync16(abs)) {
+    const abs = join37(repo, p);
+    if (existsSync15(abs)) {
       try {
         return parseCodeowners(readFileSync17(abs, "utf8"));
       } catch {
@@ -23190,10 +23289,10 @@ function addProvenance(findings, repo, opts = {}) {
 
 // src/cache.ts
 import { mkdirSync as mkdirSync8, writeFileSync as writeFileSync9, readFileSync as readFileSync18 } from "fs";
-import { join as join39 } from "path";
+import { join as join38 } from "path";
 var CACHE_VERSION = 2;
 function cachePath(run2) {
-  return join39(run2, "cache", "scan-cache.json");
+  return join38(run2, "cache", "scan-cache.json");
 }
 function isCacheEntry(key, v) {
   if (!v || typeof v !== "object") return false;
@@ -23220,8 +23319,40 @@ function loadScanCache(run2) {
     return /* @__PURE__ */ new Map();
   }
 }
+function stageTimer(now = () => performance.now()) {
+  const timings = {};
+  const t0 = now();
+  let current;
+  let started = t0;
+  const close = () => {
+    if (current === void 0) return void 0;
+    const ms = Math.round(now() - started);
+    timings[current] = (timings[current] ?? 0) + ms;
+    const closed = { name: current, ms };
+    current = void 0;
+    return closed;
+  };
+  return {
+    mark(name2) {
+      const closed = close();
+      current = name2;
+      started = now();
+      return closed;
+    },
+    finish() {
+      close();
+      return { ...timings, total: Math.round(now() - t0) };
+    }
+  };
+}
+function saveTimings(run2, timings) {
+  const dir = join38(run2, "cache");
+  mkdirSync8(dir, { recursive: true });
+  writeFileSync9(join38(dir, "timings.json"), `${JSON.stringify(timings, null, 2)}
+`);
+}
 function saveScanCache(run2, cache) {
-  const dir = join39(run2, "cache");
+  const dir = join38(run2, "cache");
   mkdirSync8(dir, { recursive: true });
   const entries = {};
   for (const [k, v] of [...cache.entries()].sort((a, b) => byStr2(a[0], b[0]))) entries[k] = v;
@@ -23232,7 +23363,7 @@ function saveScanCache(run2, cache) {
 import { existsSync as existsSync17, mkdirSync as mkdirSync9, readFileSync as readFileSync19, statSync as statSync12, writeFileSync as writeFileSync10 } from "fs";
 import { gunzipSync as gunzipSync2 } from "zlib";
 import { homedir as homedir3 } from "os";
-import { join as join40 } from "path";
+import { join as join39 } from "path";
 var SEVERITY_WEIGHT = {
   critical: 1,
   high: 0.8,
@@ -23324,7 +23455,7 @@ var KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vu
 var TTL_MS = 24 * 60 * 60 * 1e3;
 var FETCH_TIMEOUT_MS = 2e4;
 function cacheDir() {
-  return process.env.ULTRASEC_CACHE_DIR || join40(homedir3(), ".cache", "ultrasec");
+  return process.env.ULTRASEC_CACHE_DIR || join39(homedir3(), ".cache", "ultrasec");
 }
 function fresh(path) {
   try {
@@ -23346,7 +23477,7 @@ async function fetchBuf(url) {
 }
 async function loadCached(url, file, gz) {
   const dir = cacheDir();
-  const path = join40(dir, file);
+  const path = join39(dir, file);
   if (fresh(path)) {
     try {
       return readFileSync19(path, "utf8");
@@ -23402,7 +23533,7 @@ function deploymentNote(d) {
 // src/tools/sbom.ts
 import { execFileSync as execFileSync6 } from "child_process";
 import { mkdirSync as mkdirSync10, writeFileSync as writeFileSync11 } from "fs";
-import { join as join41, relative as relative3, resolve as resolve10 } from "path";
+import { join as join40, relative as relative3, resolve as resolve9 } from "path";
 function componentCount(cdxJson) {
   try {
     const data = JSON.parse(cdxJson);
@@ -23426,7 +23557,7 @@ function generateSbom(repo, outDir) {
       stdio: ["ignore", "pipe", "ignore"]
     });
     mkdirSync10(outDir, { recursive: true });
-    const path = join41(outDir, "sbom.cdx.json");
+    const path = join40(outDir, "sbom.cdx.json");
     writeFileSync11(path, stdout);
     const count = componentCount(stdout);
     return { path: resolve10(path), note: `sbom.cdx.json${count !== void 0 ? ` (${count} components)` : ""}` };
@@ -23504,8 +23635,8 @@ var trivy = {
 };
 
 // src/tools/gitleaks.ts
-import { existsSync as existsSync18 } from "fs";
-import { join as join42 } from "path";
+import { existsSync as existsSync17 } from "fs";
+import { join as join41 } from "path";
 var gitleaks = {
   name: "gitleaks",
   category: "secret",
@@ -23513,8 +23644,8 @@ var gitleaks = {
   // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);
   // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
   argv: (target) => {
-    const onHost = existsSync18(target);
-    const hasGit = onHost && existsSync18(join42(target, ".git"));
+    const onHost = existsSync17(target);
+    const hasGit = onHost && existsSync17(join41(target, ".git"));
     const base = ["detect", "--source", target, "--report-format", "json", "--report-path", "-", "--no-banner", "--redact", "--exit-code", "0"];
     return hasGit ? base : [...base, "--no-git"];
   },
@@ -24052,8 +24183,8 @@ var trufflehog = {
 };
 
 // src/tools/guarddog.ts
-import { existsSync as existsSync19 } from "fs";
-import { join as join43 } from "path";
+import { existsSync as existsSync18 } from "fs";
+import { join as join42 } from "path";
 var MANIFESTS = {
   npm: ["package.json"],
   pypi: ["requirements.txt", "pyproject.toml", "setup.py"],
@@ -24061,7 +24192,7 @@ var MANIFESTS = {
   github_action: [".github"]
 };
 function ecosystems(repo) {
-  return Object.entries(MANIFESTS).filter(([, names]) => names.some((n) => existsSync19(join43(repo, n)) || findManifestDirs(repo, [n]).length > 0)).map(([eco]) => eco);
+  return Object.entries(MANIFESTS).filter(([, names]) => names.some((n) => existsSync18(join42(repo, n)) || findManifestDirs(repo, [n]).length > 0)).map(([eco]) => eco);
 }
 var SEV2 = { critical: "critical", high: "high", medium: "medium" };
 var guarddog = {
@@ -24233,13 +24364,13 @@ var grype = {
 };
 
 // src/tools/pip-audit.ts
-import { existsSync as existsSync20 } from "fs";
-import { join as join44 } from "path";
+import { existsSync as existsSync19 } from "fs";
+import { join as join43 } from "path";
 var pipAudit = {
   name: "pip-audit",
   category: "dep",
   network: true,
-  applicable: (repo) => existsSync20(join44(repo, "requirements.txt")) ? null : "no requirements.txt",
+  applicable: (repo) => existsSync19(join43(repo, "requirements.txt")) ? null : "no requirements.txt",
   argv: () => ["-r", "requirements.txt", "-f", "json", "--progress-spinner", "off"],
   parse(raw) {
     let data;
@@ -24280,8 +24411,8 @@ var pipAudit = {
 };
 
 // src/tools/pm-audit.ts
-import { existsSync as existsSync21 } from "fs";
-import { join as join45 } from "path";
+import { existsSync as existsSync20 } from "fs";
+import { join as join44 } from "path";
 import { execFileSync as execFileSync7 } from "child_process";
 var NPM_LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json"];
 var PNPM_LOCKFILES = ["pnpm-lock.yaml"];
@@ -24368,7 +24499,7 @@ function parseNpmV7(data, lockfile) {
   return out2;
 }
 function npmLockfileName(dir) {
-  if (!existsSync21(join45(dir, "package-lock.json")) && existsSync21(join45(dir, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
+  if (!existsSync20(join44(dir, "package-lock.json")) && existsSync20(join44(dir, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
   return "package-lock.json";
 }
 function lockfileIn(ctx, name2) {
@@ -24376,7 +24507,7 @@ function lockfileIn(ctx, name2) {
   return ws ? `${ws}/${name2}` : name2;
 }
 function auditedDir(repo, ctx) {
-  return ctx?.workspace ? join45(repo, ctx.workspace) : repo;
+  return ctx?.workspace ? join44(repo, ctx.workspace) : repo;
 }
 var npmAudit = {
   name: "npm-audit",
@@ -24489,21 +24620,21 @@ var yarnAudit = {
 // src/tools/package-checker.ts
 import { execFileSync as execFileSync8 } from "child_process";
 import { createHash as createHash5 } from "crypto";
-import { existsSync as existsSync22, mkdirSync as mkdirSync11, readFileSync as readFileSync20, readdirSync as readdirSync5, rmSync as rmSync5, writeFileSync as writeFileSync12 } from "fs";
-import { join as join46 } from "path";
+import { existsSync as existsSync21, mkdirSync as mkdirSync11, readFileSync as readFileSync20, readdirSync as readdirSync5, rmSync as rmSync5, writeFileSync as writeFileSync12 } from "fs";
+import { join as join45 } from "path";
 function hasRepoLocalPurlFeed(repo) {
   let entries;
   try {
-    entries = readdirSync5(join46(repo, "data"));
+    entries = readdirSync5(join45(repo, "data"));
   } catch {
     return false;
   }
   return entries.some((e) => e.toLowerCase().endsWith(".purl"));
 }
 function scriptPath() {
-  const dir = join46(cacheDir(), "package-checker");
-  const path = join46(dir, `script-${PACKAGE_CHECKER_SHA256.slice(0, 12)}.sh`);
-  if (!existsSync22(path)) {
+  const dir = join45(cacheDir(), "package-checker");
+  const path = join45(dir, `script-${PACKAGE_CHECKER_SHA256.slice(0, 12)}.sh`);
+  if (!existsSync21(path)) {
     mkdirSync11(dir, { recursive: true });
     writeFileSync12(path, PACKAGE_CHECKER_SH);
   }
@@ -24542,8 +24673,8 @@ function fetchAndCacheScript(tag) {
   const buf = curlFetch(`${rawBase()}/${UPSTREAM_REPO}/${tag}/script.sh`);
   if (!buf?.length) return null;
   const sha12 = createHash5("sha256").update(buf).digest("hex").slice(0, 12);
-  const dir = join46(cacheDir(), "package-checker");
-  const path = join46(dir, `script-${tag}-${sha12}.sh`);
+  const dir = join45(cacheDir(), "package-checker");
+  const path = join45(dir, `script-${tag}-${sha12}.sh`);
   try {
     if (!existsSync22(path)) {
       mkdirSync11(dir, { recursive: true });
@@ -24567,7 +24698,7 @@ function resolveScriptSource() {
 }
 var cachedExportPath;
 function exportPath() {
-  if (!cachedExportPath) cachedExportPath = join46(cacheDir(), "package-checker", `export-${process.pid}.json`);
+  if (!cachedExportPath) cachedExportPath = join45(cacheDir(), "package-checker", `export-${process.pid}.json`);
   return cachedExportPath;
 }
 function splitPkgVersion(raw) {
@@ -24678,8 +24809,8 @@ var ADAPTERS = [
 ];
 
 // src/context.ts
-import { existsSync as existsSync23, readFileSync as readFileSync21 } from "fs";
-import { join as join47, resolve as resolve11 } from "path";
+import { existsSync as existsSync22, readFileSync as readFileSync21 } from "fs";
+import { join as join46, resolve as resolve10 } from "path";
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
 var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
@@ -24815,8 +24946,8 @@ function manifestDirs(repo, names) {
   const dirs = new Set(findManifestDirs(repo, names));
   try {
     for (const w of detectWorkspaces(repo).packages) {
-      const dir = resolve11(repo, w.dir);
-      for (const name2 of names) if (existsSync23(join47(dir, name2))) dirs.add(dir);
+      const dir = resolve10(repo, w.dir);
+      for (const name2 of names) if (existsSync22(join46(dir, name2))) dirs.add(dir);
     }
   } catch {
   }
@@ -24826,7 +24957,7 @@ function detectFrameworks(repo) {
   const found = /* @__PURE__ */ new Set();
   for (const dir of manifestDirs(repo, ["package.json"])) {
     try {
-      const pkg = JSON.parse(readFileSync21(join47(dir, "package.json"), "utf8"));
+      const pkg = JSON.parse(readFileSync21(join46(dir, "package.json"), "utf8"));
       const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {}, ...pkg.peerDependencies ?? {} };
       for (const name2 of Object.keys(deps)) {
         const label = Object.hasOwn(JS_FRAMEWORKS, name2) ? JS_FRAMEWORKS[name2] : void 0;
@@ -24839,7 +24970,7 @@ function detectFrameworks(repo) {
     for (const dir of manifestDirs(repo, [m.file])) {
       let raw;
       try {
-        raw = readFileSync21(join47(dir, m.file), "utf8");
+        raw = readFileSync21(join46(dir, m.file), "utf8");
       } catch {
         continue;
       }
@@ -24936,7 +25067,7 @@ function buildContextScaffold(repo, scan2, surface) {
   for (const fileScan of scan2.files) {
     const spec = langForFile(fileScan.rel);
     if (!spec) continue;
-    const lines5 = readText2(join47(repo, fileScan.rel)).split(/\r?\n/);
+    const lines5 = readText2(join46(repo, fileScan.rel)).split(/\r?\n/);
     for (let i2 = 0; i2 < lines5.length; i2++) {
       const line = lines5[i2];
       const am = AUTH_MARKER.exec(line);
@@ -24976,7 +25107,7 @@ function renderContextScaffoldMd(repo, run2, s) {
   L.push("");
   L.push(`- repo: \`${repo}\``);
   L.push("");
-  L.push(`> The deterministic scaffold below is a STARTING POINT. Author **\`${join47(run2, "CONTEXT.md")}\`**`);
+  L.push(`> The deterministic scaffold below is a STARTING POINT. Author **\`${join46(run2, "CONTEXT.md")}\`**`);
   L.push(`> describing the project's purpose, trust model, auth/authorization scheme, and any`);
   L.push(`> framework-provided protections. ultrasec injects CONTEXT.md into every \`dossier\` and the`);
   L.push(`> \`verify\` worklist, so later stages reason WITH your threat model. CONTEXT.md is **additive`);
@@ -25034,8 +25165,8 @@ function compactContextDoc(doc) {
   return kept.length ? kept : void 0;
 }
 function loadContextDoc(run2) {
-  const p = join47(run2, "CONTEXT.md");
-  if (!existsSync23(p)) return void 0;
+  const p = join46(run2, "CONTEXT.md");
+  if (!existsSync22(p)) return void 0;
   try {
     const s = readFileSync21(p, "utf8").trim();
     return s.length ? s : void 0;
@@ -25135,8 +25266,8 @@ function contradictedClaims(repo, claims, opts = {}) {
 }
 
 // src/reachability.ts
-import { existsSync as existsSync24, readFileSync as readFileSync22 } from "fs";
-import { join as join48 } from "path";
+import { existsSync as existsSync23, readFileSync as readFileSync22 } from "fs";
+import { join as join47 } from "path";
 var NPM_LOCKFILES2 = ["package-lock.json", "npm-shrinkwrap.json"];
 function packageNameFromLockKey(key) {
   const at = key.lastIndexOf("node_modules/");
@@ -25150,8 +25281,8 @@ function devOnlyPackages(repo) {
   const sources = [];
   for (const dir of findManifestDirs(repo, NPM_LOCKFILES2)) {
     for (const file of NPM_LOCKFILES2) {
-      const path = join48(dir, file);
-      if (!existsSync24(path)) continue;
+      const path = join47(dir, file);
+      if (!existsSync23(path)) continue;
       let lock;
       try {
         lock = JSON.parse(readFileSync22(path, "utf8"));
@@ -25173,7 +25304,7 @@ function devOnlyPackages(repo) {
   for (const dir of manifestDirs2) {
     let pkg;
     try {
-      pkg = JSON.parse(readFileSync22(join48(dir, "package.json"), "utf8"));
+      pkg = JSON.parse(readFileSync22(join47(dir, "package.json"), "utf8"));
     } catch {
       continue;
     }
@@ -25243,7 +25374,7 @@ async function runScan(args2) {
     const relOut = relative4(repo, out2);
     const changed = relOut && relOut !== "." && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
-    if (existsSync25(join49(out2, "graph.json"))) {
+    if (existsSync24(join48(out2, "graph.json"))) {
       try {
         targets = reverseDependents(loadDossier(out2).graph, changed, REVDEP_DEPTH);
         const downstream = targets.length - changed.length;
@@ -25266,41 +25397,53 @@ async function runScan(args2) {
     if (!quiet) eprintln(`ultrasec \xB7 ${msg}`);
   };
   const secs = (ms) => ms >= 1e3 ? ` in ${Math.round(ms / 1e3)}s` : "";
+  const timer = stageTimer();
+  const stage = (name2, msg) => {
+    const closed = timer.mark(name2);
+    if (closed && closed.ms >= 1e3) step(`${closed.name} done${secs(closed.ms)}`);
+    step(msg);
+  };
   const scanOpts = { scope: effectiveScope, include, exclude, maxFiles, gitignore };
   const resume = flagBool(args2, "resume");
   const cache = resume ? loadScanCache(out2) : void 0;
-  step(`walking ${repo}${cache ? " (resuming from cache)" : ""}\u2026`);
+  stage("walk", `walking ${repo}${cache ? " (resuming from cache)" : ""}\u2026`);
   const scan2 = cache ? scanRepoCached(repo, scanOpts, cache) : scanRepo2(repo, scanOpts);
-  step(`${scan2.files.length} file(s) scanned \xB7 building the link-graph\u2026`);
-  const graph = buildGraph2(scan2);
+  const tree = snapshotTree(repo);
+  const facts = createFileFacts(scan2);
+  stage("graph", `${scan2.files.length} file(s) scanned \xB7 building the link-graph\u2026`);
+  const graph = buildGraph2(scan2, { tree: tree.files });
   const logHygieneOn = flagBool(args2, "log-hygiene");
   const excludeEnvSources = flagBool(args2, "no-env-sources");
   const strictScope = flagBool(args2, "strict-scope");
-  step(`enumerating source\u2192sink taint paths\u2026`);
+  stage("taint", `enumerating source\u2192sink taint paths\u2026`);
   const taint = enumerateTaint(scan2, graph, {
     maxDepth,
     maxCandidates,
     includeLogSinks: logHygieneOn,
     excludeEnvSources,
     strictScope,
-    includeTests: flagBool(args2, "include-tests")
+    includeTests: flagBool(args2, "include-tests"),
+    facts
   });
   const taintFindings = taint.findings;
   step(`${taintFindings.length} taint candidate(s)`);
   const sinksOn = flagBool(args2, "sinks");
+  timer.mark("sinks");
   const sinkCand = enumerateSinkCandidates(scan2, taintFindings, {
     maxCandidates,
+    facts,
     ...sinksOn ? {} : { onlyKinds: SOURCELESS_SINK_KINDS }
   });
-  const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan2, { maxCandidates: explicitMaxCandidates }) : { findings: [], truncated: 0, total: 0 };
+  timer.mark("hygiene");
+  const hygieneCand = logHygieneOn ? enumerateSensitiveLogCandidates(scan2, { maxCandidates: explicitMaxCandidates, facts }) : { findings: [], truncated: 0, total: 0 };
   const includeVendored = flagBool(args2, "include-vendored");
   const prune = buildPruneMatcher(repo, { gitignore, exclude, includeVendored });
-  step(`agentic-CI, config, auth, cloud and credential detectors\u2026`);
-  const agenticFindings = auditAgenticWorkflows(repo, prune);
-  const webConfigFindings = auditWebConfig(repo, prune);
-  const authTokenFindings = auditAuthTokens(repo, prune);
-  const cloudFindings = auditCloud(repo, prune);
-  const credentialFindings = auditSecrets(repo, prune);
+  stage("auditors", `agentic-CI, config, auth, cloud and credential detectors\u2026`);
+  const agenticFindings = auditAgenticWorkflows(repo, prune, tree);
+  const webConfigFindings = auditWebConfig(repo, prune, tree);
+  const authTokenFindings = auditAuthTokens(repo, prune, tree);
+  const cloudFindings = auditCloud(repo, prune, tree);
+  const credentialFindings = auditSecrets(repo, prune, tree);
   const scopedScan = !!(effectiveScope && effectiveScope.length || include?.length || exclude?.length || diffRef);
   const toolsFlag = flagStr(args2, "tools");
   const toolsAutoSkipped = scopedScan && toolsFlag === void 0 && !flagBool(args2, "no-tools");
@@ -25308,7 +25451,9 @@ async function runScan(args2) {
   const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
   const useDocker = flagBool(args2, "docker");
   const offline = flagBool(args2, "offline");
+  timer.mark("sbom");
   const sbomResult = skipTools ? void 0 : generateSbom(repo, out2);
+  timer.mark("tools");
   if (skipTools) step(`external scanners skipped`);
   const tool = skipTools ? { findings: [], toolsRun: [], results: [] } : orchestrate(ADAPTERS, repo, {
     which,
@@ -25327,6 +25472,7 @@ async function runScan(args2) {
       step(`${at} ${mark} ${e.result.note}${secs(e.ms ?? 0)}`);
     }
   });
+  timer.mark("correlate");
   const merged = correlate([
     ...taintFindings,
     ...sinkCand.findings,
@@ -25338,12 +25484,15 @@ async function runScan(args2) {
     ...credentialFindings,
     ...tool.findings
   ]);
-  step(`correlated ${merged.length} finding(s) \xB7 de-noising and ranking\u2026`);
+  stage("noise", `correlated ${merged.length} finding(s) \xB7 de-noising and ranking\u2026`);
   const includeTests = flagBool(args2, "include-tests");
   const { findings: deNoised, downgraded: noiseDowngrades } = demoteNoise(merged, repo, { includeTests });
+  timer.mark("reachability");
   const { findings: reachabilityMarked, toolchain: toolchainCount, sources: reachabilitySources } = classifyDependencyReachability(deNoised, repo);
   const enrich = !(flagBool(args2, "no-enrich") || offline);
+  timer.mark("enrich");
   const { findings: enriched, note: riskNote } = await enrichFindings(reachabilityMarked, { enabled: enrich, context: loadContextDoc(out2) });
+  timer.mark("provenance");
   const blameOn = flagBool(args2, "blame") || flagBool(args2, "provenance");
   const findings = blameOn ? addProvenance(enriched, repo, { blame: true }) : enriched;
   const languages = [...new Set(scan2.files.map((f) => f.lang))].sort();
@@ -25381,7 +25530,7 @@ async function runScan(args2) {
   const nextDossier = { manifest, findings, graph };
   let final = nextDossier;
   let mergedNote = "";
-  if (flagBool(args2, "merge") && existsSync25(join49(out2, "findings.json"))) {
+  if (flagBool(args2, "merge") && existsSync24(join48(out2, "findings.json"))) {
     try {
       const prev = loadDossier(out2);
       final = mergeDossier(prev, nextDossier);
@@ -25398,9 +25547,10 @@ async function runScan(args2) {
       );
     }
   }
-  step(`writing the dossier to ${out2}\u2026`);
+  stage("write", `writing the dossier to ${out2}\u2026`);
   writeDossier(out2, final);
   if (cache) saveScanCache(out2, cache);
+  saveTimings(out2, timer.finish());
   const fm = final.manifest;
   const fc = fm.counts.bySeverity;
   if (flagBool(args2, "json")) {
@@ -25481,7 +25631,7 @@ async function runScan(args2) {
 
 // src/commands/context.ts
 import { mkdirSync as mkdirSync12, writeFileSync as writeFileSync13 } from "fs";
-import { join as join50, resolve as resolve13 } from "path";
+import { join as join49, resolve as resolve12 } from "path";
 function runContext(args2) {
   const repo = resolve13(flagStr(args2, "repo") ?? ".");
   const out2 = resolve13(flagStr(args2, "out") ?? ".ultrasec");
@@ -25510,24 +25660,24 @@ function runContext(args2) {
   const shown = scaffold.entryPoints.length;
   const entryNote = shown < totalSources ? `${shown} file(s) shown of ${totalSources} site(s)` : `${shown}`;
   mkdirSync12(out2, { recursive: true });
-  writeFileSync13(join50(out2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
-  writeFileSync13(join50(out2, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out2, scaffold));
+  writeFileSync13(join49(out2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
+  writeFileSync13(join49(out2, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out2, scaffold));
   if (flagBool(args2, "json")) {
     println(JSON.stringify(scaffold, null, 2));
     return 0;
   }
   println(`ultrasec context \u2192 ${out2}`);
-  println(`  ${join50(out2, "CONTEXT.scaffold.json")}  \xB7  ${join50(out2, "CONTEXT.todo.md")}`);
+  println(`  ${join49(out2, "CONTEXT.scaffold.json")}  \xB7  ${join49(out2, "CONTEXT.todo.md")}`);
   println(
     `  frameworks: ${scaffold.frameworks.join(", ") || "\u2014"}  \xB7  entry points: ${entryNote}  \xB7  auth sites: ${scaffold.authMiddleware.length}  \xB7  sanitizers: ${scaffold.sanitizers.length}`
   );
-  println(`  next: author ${join50(out2, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` \u2014 it's injected into every dossier.`);
+  println(`  next: author ${join49(out2, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` \u2014 it's injected into every dossier.`);
   return 0;
 }
 
 // src/commands/import.ts
-import { resolve as resolve14, join as join51 } from "path";
-import { existsSync as existsSync26, readFileSync as readFileSync23 } from "fs";
+import { resolve as resolve13, join as join50 } from "path";
+import { existsSync as existsSync25, readFileSync as readFileSync23 } from "fs";
 
 // src/tools/deepsec.ts
 function slugToCategory(slug) {
@@ -25617,7 +25767,7 @@ async function runImport(args2) {
     return 1;
   }
   let prev;
-  if (existsSync26(join51(run2, "findings.json"))) {
+  if (existsSync25(join50(run2, "findings.json"))) {
     try {
       prev = loadDossier(run2);
     } catch (e) {
@@ -25665,8 +25815,8 @@ async function runImport(args2) {
 }
 
 // src/commands/logs.ts
-import { resolve as resolve15, join as join52, dirname as dirname9, extname as extname3, sep as sep5 } from "path";
-import { existsSync as existsSync27, statSync as statSync14, readdirSync as readdirSync6, mkdirSync as mkdirSync13, writeFileSync as writeFileSync14, openSync, readSync, closeSync } from "fs";
+import { resolve as resolve14, join as join51, dirname as dirname9, extname as extname3, sep as sep5 } from "path";
+import { existsSync as existsSync26, statSync as statSync14, readdirSync as readdirSync6, mkdirSync as mkdirSync13, writeFileSync as writeFileSync14, openSync, readSync, closeSync } from "fs";
 
 // src/logs/analyze.ts
 import { createReadStream, statSync as statSync13 } from "fs";
@@ -26633,13 +26783,13 @@ async function runLogs(args2) {
   };
   writeDossier(out2, { manifest, findings, graph });
   mkdirSync13(out2, { recursive: true });
-  writeFileSync14(join52(out2, "LOGSTATS.json"), JSON.stringify(stats, null, 2));
+  writeFileSync14(join51(out2, "LOGSTATS.json"), JSON.stringify(stats, null, 2));
   const sigmaOn = flagBool(args2, "sigma");
   let sigmaPath;
   if (sigmaOn) {
     const rules = renderSigmaRules();
     if (rules) {
-      sigmaPath = join52(out2, "ultrasec-logs.sigma.yml");
+      sigmaPath = join51(out2, "ultrasec-logs.sigma.yml");
       writeFileSync14(sigmaPath, rules);
     }
   }
@@ -26682,7 +26832,7 @@ async function runLogs(args2) {
     if (truncation.length > 10) println(`    - \u2026and ${truncation.length - 10} more`);
   }
   if (sigmaPath) println(`  sigma rules \u2192 ${sigmaPath}  (import into your SIEM; thresholds/correlation are the SIEM's job)`);
-  println(`  next: read ${join52(out2, "DOSSIER.md")}; triage with the log-forensics playbook; verify with \`ultrasec verify --run ${out2}\`.`);
+  println(`  next: read ${join51(out2, "DOSSIER.md")}; triage with the log-forensics playbook; verify with \`ultrasec verify --run ${out2}\`.`);
   return 0;
 }
 var LOG_EXTENSIONS = /* @__PURE__ */ new Set([".log", ".jsonl", ".txt"]);
@@ -26711,7 +26861,7 @@ function expandInputs(inputs) {
     const st = statSync14(p);
     if (st.isDirectory()) {
       for (const entry of readdirSync6(p).sort(byStr2)) {
-        const full = join52(p, entry);
+        const full = join51(p, entry);
         let est;
         try {
           est = statSync14(full);
@@ -26755,11 +26905,11 @@ function computeBase(absFiles) {
 import { resolve as resolve16 } from "path";
 
 // src/dossier.ts
-import { extname as extname4, join as join53 } from "path";
+import { extname as extname4, join as join52 } from "path";
 var CTX = 12;
 var MAX_ENCLOSING = 80;
 function fileLines(repo, file) {
-  return readText2(join53(repo, file)).split(/\r?\n/);
+  return readText2(join52(repo, file)).split(/\r?\n/);
 }
 function numbered(lines5, from, to, mark) {
   const out2 = [];
@@ -26834,7 +26984,7 @@ function reachability(repo, graph, f) {
   if (entry) {
     let routes = [];
     try {
-      routes = findRouteEntryPoints(entry.file, readText2(join53(repo, entry.file)));
+      routes = findRouteEntryPoints(entry.file, readText2(join52(repo, entry.file)));
     } catch {
     }
     if (routes.length) {
@@ -26867,7 +27017,7 @@ function reachability(repo, graph, f) {
       said = true;
     }
     try {
-      const text = readText2(join53(repo, entry.file));
+      const text = readText2(join52(repo, entry.file));
       const hit5 = text.split(/\r?\n/).findIndex((l) => AUTH_MARKER.test(l));
       L.push(
         hit5 >= 0 ? `- **auth marker in this file**: \`${entry.file}:${hit5 + 1}\` \u2014 a CANDIDATE guard; confirm it runs before the object is touched, on this path.` : `- **auth marker in this file**: NONE. Not proof the route is public \u2014 the guard may be middleware, a proxy or the platform \u2014 but nothing in this file authenticates the caller.`
@@ -27013,15 +27163,15 @@ import { resolve as resolve19 } from "path";
 
 // src/stage.ts
 import { mkdirSync as mkdirSync14, writeFileSync as writeFileSync15, readFileSync as readFileSync24, readdirSync as readdirSync7, statSync as statSync15 } from "fs";
-import { join as join54, resolve as resolve17 } from "path";
+import { join as join53, resolve as resolve16 } from "path";
 function stageFiles(stem) {
   return { todo: `${stem}.todo.json`, md: `${stem}.md` };
 }
 function emitWorklist(run2, files, items, md) {
   mkdirSync14(run2, { recursive: true });
-  const todoPath = join54(run2, files.todo);
+  const todoPath = join53(run2, files.todo);
   writeFileSync15(todoPath, JSON.stringify(items, null, 2));
-  writeFileSync15(join54(run2, files.md), md);
+  writeFileSync15(join53(run2, files.md), md);
   return todoPath;
 }
 function collectApplyFiles(applyPath, dirRegex) {
@@ -27033,7 +27183,7 @@ function collectApplyFiles(applyPath, dirRegex) {
   } catch {
   }
   if (isDir) {
-    const matches = readdirSync7(abs).filter((n) => dirRegex.test(n)).sort().map((n) => join54(abs, n));
+    const matches = readdirSync7(abs).filter((n) => dirRegex.test(n)).sort().map((n) => join53(abs, n));
     if (matches.length === 0) throw new Error(`${abs}: no apply file matching ${dirRegex} in this directory \u2014 nothing to fold (fail-closed)`);
     return matches;
   }
@@ -27502,11 +27652,11 @@ function parseTriage(raw) {
 }
 
 // src/orchestrate.ts
-import { existsSync as existsSync28, mkdirSync as mkdirSync15, readFileSync as readFileSync25, writeFileSync as writeFileSync16 } from "fs";
-import { join as join56, resolve as resolve18 } from "path";
+import { existsSync as existsSync27, mkdirSync as mkdirSync15, readFileSync as readFileSync25, writeFileSync as writeFileSync16 } from "fs";
+import { join as join55, resolve as resolve17 } from "path";
 
 // src/orchestrate-templates.ts
-import { join as join55 } from "path";
+import { join as join54 } from "path";
 
 // src/revalidate.ts
 var REVALIDATION_VERDICTS = ["still-valid", "fixed", "false-positive", "uncertain"];
@@ -27740,32 +27890,32 @@ var PHASE_SPECS = {
     title: "Adjudicate",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adjudicate the ${n} open candidate(s) of an ultrasec audit from dossier evidence (analyzer fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run2) => `node ${engine} verify --apply ${join55(run2, "orchestration", "out", "adjudicate", "verdicts.json")} --run ${run2}`,
-    fragmentFile: (run2) => join55(run2, "orchestration", "out", "adjudicate", "verdicts.json")
+    applyHint: (engine, _worklist, run2) => `node ${engine} verify --apply ${join54(run2, "orchestration", "out", "adjudicate", "verdicts.json")} --run ${run2}`,
+    fragmentFile: (run2) => join54(run2, "orchestration", "out", "adjudicate", "verdicts.json")
   },
   verify: {
     role: "skeptic",
     title: "Verify",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adversarially verify the ${n} pending finding(s) of an ultrasec audit (skeptic fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run2) => `node ${engine} verify --apply ${join55(run2, "orchestration", "out", "verify", "verdicts.json")} --run ${run2}`,
-    fragmentFile: (run2) => join55(run2, "orchestration", "out", "verify", "verdicts.json")
+    applyHint: (engine, _worklist, run2) => `node ${engine} verify --apply ${join54(run2, "orchestration", "out", "verify", "verdicts.json")} --run ${run2}`,
+    fragmentFile: (run2) => join54(run2, "orchestration", "out", "verify", "verdicts.json")
   },
   revalidate: {
     role: "revalidator",
     title: "Revalidate",
     schema: REVALIDATE_SCHEMA,
     description: (n) => `Revalidate the ${n} confirmed/needs-human finding(s) against git history (false-positive cut, conservative fold)`,
-    applyHint: (engine, _worklist, run2) => `node ${engine} revalidate --apply ${join55(run2, "orchestration", "out", "revalidate", "REVALIDATE.json")} --run ${run2}`,
-    fragmentFile: (run2) => join55(run2, "orchestration", "out", "revalidate", "REVALIDATE.json")
+    applyHint: (engine, _worklist, run2) => `node ${engine} revalidate --apply ${join54(run2, "orchestration", "out", "revalidate", "REVALIDATE.json")} --run ${run2}`,
+    fragmentFile: (run2) => join54(run2, "orchestration", "out", "revalidate", "REVALIDATE.json")
   },
   investigate: {
     role: "hunter",
     title: "Investigate",
     schema: INVESTIGATE_SCHEMA,
     description: (n) => `Hunt authz/IDOR, business-logic and multi-hop bugs across ${n} attack-surface region(s) (hunter fan-out, citation-checked ingest)`,
-    applyHint: (engine, _worklist, run2) => `node ${engine} investigate --apply ${join55(run2, "orchestration", "out", "investigate", "INVESTIGATE.json")} --run ${run2}`,
-    fragmentFile: (run2) => join55(run2, "orchestration", "out", "investigate", "INVESTIGATE.json")
+    applyHint: (engine, _worklist, run2) => `node ${engine} investigate --apply ${join54(run2, "orchestration", "out", "investigate", "INVESTIGATE.json")} --run ${run2}`,
+    fragmentFile: (run2) => join54(run2, "orchestration", "out", "investigate", "INVESTIGATE.json")
   }
 };
 function phaseSpec(name2) {
@@ -27783,7 +27933,7 @@ function oneLine(s) {
 }
 function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize) {
   const spec = phaseSpec(ph.name);
-  const scriptPath2 = join55(runAbs, "orchestration", `${ph.name}.workflow.mjs`);
+  const scriptPath2 = join54(runAbs, "orchestration", `${ph.name}.workflow.mjs`);
   const meta = { name: `ultrasec-${ph.name}`, description: spec.description(ph.items), phases: [{ title: spec.title }] };
   const fragmentKey = ph.name === "investigate" ? "discoveries" : "verdicts";
   return [
@@ -27828,7 +27978,7 @@ function agentContracts(runAbs, engineAbs, repoAbs) {
 
 You are auditing ONE batch of candidates of an ultrasec security review \u2014 the OPEN candidates the deterministic engine enumerated. They are recall-oriented: many are false positives by design; you decide, from the real code.
 
-Worklist: \`${join55(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Worklist: \`${join54(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your candidate ids:
 
@@ -27848,7 +27998,7 @@ ${footer}`,
 
 You are an adversarial skeptic verifying the pending findings of an ultrasec audit. Assume each claim is wrong until the source proves it \u2014 try to REFUTE it.
 
-Worklist: \`${join55(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Worklist: \`${join54(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 
@@ -27867,7 +28017,7 @@ ${footer}`,
 
 You revalidate findings already ranked real (confirmed / needs-human) against git history \u2014 the false-positive cut.
 
-Worklist: \`${join55(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Worklist: \`${join54(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 
@@ -27886,7 +28036,7 @@ ${footer}`,
 
 You hunt the bugs the deterministic engine can't enumerate \u2014 missing/incorrect **authz** & **IDOR**, **business-logic** flaws, and multi-hop taint \u2014 one attack-surface region at a time.
 
-Worklist: \`${join55(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,\u2026>\`). If an \`ITEMS\` region is no longer in the worklist, skip it and say so in your note.
+Worklist: \`${join54(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,\u2026>\`). If an \`ITEMS\` region is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your regions:
 
@@ -27904,7 +28054,7 @@ ${footer}`
 function runbookMd(phases, runAbs, engineAbs, repoAbs) {
   const status = phases.map((p) => `| ${p.name} | \`${p.worklist}\` | ${p.ready ? `ready (${p.items} item(s))` : "not ready"} | \`${p.prerequisite}\` |`).join("\n");
   const engine = `node ${engineAbs}`;
-  const agents = (role) => join55(runAbs, "orchestration", "agents", `${role}.md`);
+  const agents = (role) => join54(runAbs, "orchestration", "agents", `${role}.md`);
   const frag = (name2) => phaseSpec(name2).fragmentFile(runAbs);
   return `# ultrasec \u2014 sequential RUNBOOK (eco / no-subagent fallback)
 
@@ -27922,15 +28072,15 @@ ${status}
 
 ## The loop (play every role yourself, one item at a time)
 
-1. **Scan** (if not done): \`${engine} scan --repo ${repoAbs} --out ${runAbs}\` \u2192 \`${join55(runAbs, "findings.json")}\` (+ optionally prime \`${engine} context\`).
-2. **Investigate the attack surface** (discovery) \u2014 \`${engine} investigate --run ${runAbs}\` writes \`${join55(runAbs, "INVESTIGATE.todo.json")}\`. For EVERY region, apply \`${agents("hunter")}\` yourself; merge the grounded Discovery[] into \`${frag("investigate")}\`. Then ingest (citation-checked): \`${phaseSpec("investigate").applyHint(engineAbs, "", runAbs)}\`.
-3. **Adjudicate the open candidates** \u2014 the worklist is \`${join55(runAbs, "findings.json")}\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`${agents("analyzer")}\` yourself (\`${engine} dossier <id> --run ${runAbs}\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`${frag("adjudicate")}\`. Then fold, conservatively: \`${phaseSpec("adjudicate").applyHint(engineAbs, "", runAbs)}\`.
-4. **Verify adversarially** \u2014 \`${engine} verify --run ${runAbs}\` writes \`${join55(runAbs, "VERIFY.todo.json")}\` (the still-pending findings). For EVERY entry, apply \`${agents("skeptic")}\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`${frag("verify")}\`. Then: \`${phaseSpec("verify").applyHint(engineAbs, "", runAbs)}\`.
-5. **Revalidate against git history** \u2014 \`${engine} revalidate --run ${runAbs}\` writes \`${join55(runAbs, "REVALIDATE.todo.json")}\`. For EVERY entry, apply \`${agents("revalidator")}\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`${frag("revalidate")}\`. Then: \`${phaseSpec("revalidate").applyHint(engineAbs, "", runAbs)}\`.
+1. **Scan** (if not done): \`${engine} scan --repo ${repoAbs} --out ${runAbs}\` \u2192 \`${join54(runAbs, "findings.json")}\` (+ optionally prime \`${engine} context\`).
+2. **Investigate the attack surface** (discovery) \u2014 \`${engine} investigate --run ${runAbs}\` writes \`${join54(runAbs, "INVESTIGATE.todo.json")}\`. For EVERY region, apply \`${agents("hunter")}\` yourself; merge the grounded Discovery[] into \`${frag("investigate")}\`. Then ingest (citation-checked): \`${phaseSpec("investigate").applyHint(engineAbs, "", runAbs)}\`.
+3. **Adjudicate the open candidates** \u2014 the worklist is \`${join54(runAbs, "findings.json")}\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`${agents("analyzer")}\` yourself (\`${engine} dossier <id> --run ${runAbs}\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`${frag("adjudicate")}\`. Then fold, conservatively: \`${phaseSpec("adjudicate").applyHint(engineAbs, "", runAbs)}\`.
+4. **Verify adversarially** \u2014 \`${engine} verify --run ${runAbs}\` writes \`${join54(runAbs, "VERIFY.todo.json")}\` (the still-pending findings). For EVERY entry, apply \`${agents("skeptic")}\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`${frag("verify")}\`. Then: \`${phaseSpec("verify").applyHint(engineAbs, "", runAbs)}\`.
+5. **Revalidate against git history** \u2014 \`${engine} revalidate --run ${runAbs}\` writes \`${join54(runAbs, "REVALIDATE.todo.json")}\`. For EVERY entry, apply \`${agents("revalidator")}\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`${frag("revalidate")}\`. Then: \`${phaseSpec("revalidate").applyHint(engineAbs, "", runAbs)}\`.
 6. **Gate**: \`${engine} check --run ${runAbs} --semantic\` must exit 0 before presenting anything.
 7. **Render**: \`${engine} render --run ${runAbs}\` (optionally author the narrative first: \`${engine} narrative --run ${runAbs}\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
 
-With subagents available, prefer the emitted workflows instead: \`orchestrate --run ${runAbs} --phase <p>\` then \`Workflow({ scriptPath: "${join55(runAbs, "orchestration", "<p>.workflow.mjs")}" })\` \u2014 you stay the sole writer either way.
+With subagents available, prefer the emitted workflows instead: \`orchestrate --run ${runAbs} --phase <p>\` then \`Workflow({ scriptPath: "${join54(runAbs, "orchestration", "<p>.workflow.mjs")}" })\` \u2014 you stay the sole writer either way.
 `;
 }
 
@@ -27982,8 +28132,8 @@ function readIds(path, id) {
 }
 var SURFACE_FILTERS = [...SURFACES, "all"];
 function listPhases(runDir, engineAbs, surface = "all") {
-  const run2 = resolve18(runDir);
-  const findingsPath = join56(run2, "findings.json");
+  const run2 = resolve17(runDir);
+  const findingsPath = join55(run2, "findings.json");
   const allIds = readIds(findingsPath, (f) => f.id);
   let adjIds = [];
   if (allIds !== null) {
@@ -27993,11 +28143,11 @@ function listPhases(runDir, engineAbs, surface = "all") {
     } catch {
     }
   }
-  const verPath = join56(run2, "VERIFY.todo.json");
+  const verPath = join55(run2, "VERIFY.todo.json");
   const verIds = readIds(verPath, (i2) => i2.id);
-  const revPath = join56(run2, "REVALIDATE.todo.json");
+  const revPath = join55(run2, "REVALIDATE.todo.json");
   const revIds = readIds(revPath, (i2) => i2.id);
-  const invPath = join56(run2, "INVESTIGATE.todo.json");
+  const invPath = join55(run2, "INVESTIGATE.todo.json");
   const invIds = readIds(invPath, (r) => r.region);
   return [
     {
@@ -28037,7 +28187,7 @@ function listPhases(runDir, engineAbs, surface = "all") {
 }
 function repoOf(run2) {
   try {
-    const m = JSON.parse(readFileSync25(join56(run2, "manifest.json"), "utf8"));
+    const m = JSON.parse(readFileSync25(join55(run2, "manifest.json"), "utf8"));
     if (typeof m.repo === "string" && m.repo) return m.repo;
   } catch {
   }
@@ -28073,14 +28223,14 @@ function orchestrateRun(runDir, engineAbs, opts = {}) {
     selected = [ph];
   }
   const repoAbs = repoOf(run2);
-  const orchDir = join56(run2, "orchestration");
-  const agentsDir = join56(orchDir, "agents");
-  for (const p of PHASES) mkdirSync15(join56(orchDir, "out", p), { recursive: true });
+  const orchDir = join55(run2, "orchestration");
+  const agentsDir = join55(orchDir, "agents");
+  for (const p of PHASES) mkdirSync15(join55(orchDir, "out", p), { recursive: true });
   mkdirSync15(agentsDir, { recursive: true });
   const written = [];
   const notices = [];
   for (const [name2, content] of Object.entries(agentContracts(run2, engineAbs, repoAbs))) {
-    const p = join56(agentsDir, `${name2}.md`);
+    const p = join55(agentsDir, `${name2}.md`);
     writeFileSync16(p, content);
     written.push(p);
   }
@@ -28093,12 +28243,12 @@ function orchestrateRun(runDir, engineAbs, opts = {}) {
       if (ph.items <= SMALL_WORKLIST) {
         notices.push(`phase "${ph.name}": only ${ph.items} item(s) \u2014 the sequential --eco path is equivalent and cheaper.`);
       }
-      const p = join56(orchDir, `${ph.name}.workflow.mjs`);
+      const p = join55(orchDir, `${ph.name}.workflow.mjs`);
       writeFileSync16(p, phaseWorkflowScript(ph, run2, engineAbs, BATCH_SIZE));
       written.push(p);
     }
   }
-  const rb = join56(orchDir, "RUNBOOK.md");
+  const rb = join55(orchDir, "RUNBOOK.md");
   writeFileSync16(rb, runbookMd(phases, run2, engineAbs, repoAbs));
   written.push(rb);
   return { exitCode: 0, written, notices, errors: [], phases };
@@ -28163,11 +28313,11 @@ function runTriage(args2) {
 
 // src/commands/investigate.ts
 import { readFileSync as readFileSync26 } from "fs";
-import { join as join59, resolve as resolve21 } from "path";
+import { join as join58, resolve as resolve20 } from "path";
 
 // src/check.ts
-import { existsSync as existsSync29, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
-import { join as join57, resolve as resolve20, sep as sep6 } from "path";
+import { existsSync as existsSync28, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
+import { join as join56, resolve as resolve19, sep as sep6 } from "path";
 function insideRepo(repo, file) {
   const base = resolve20(repo);
   const abs = resolve20(base, file);
@@ -28186,8 +28336,8 @@ function countNewlines(fd, chunkBytes = LINE_COUNT_CHUNK_BYTES) {
 }
 function lineCountDetailed(repo, file) {
   if (!insideRepo(repo, file)) return { status: "missing" };
-  const abs = join57(repo, file);
-  if (!existsSync29(abs)) return { status: "missing" };
+  const abs = join56(repo, file);
+  if (!existsSync28(abs)) return { status: "missing" };
   let fd;
   try {
     fd = openSync2(abs, "r");
@@ -28222,10 +28372,10 @@ function check(dossier, opts = {}) {
   const floor = opts.minSeverity;
   const findings = floor ? dossier.findings.filter((f) => atLeast(f.severity, floor)) : dossier.findings;
   const dangling = [];
-  const lineCache2 = /* @__PURE__ */ new Map();
+  const lineCache = /* @__PURE__ */ new Map();
   const linesOf = (file) => {
-    if (!lineCache2.has(file)) lineCache2.set(file, lineCountDetailed(repo, file));
-    return lineCache2.get(file);
+    if (!lineCache.has(file)) lineCache.set(file, lineCountDetailed(repo, file));
+    return lineCache.get(file);
   };
   let historical = 0;
   for (const f of findings) {
@@ -28311,14 +28461,14 @@ function contradicted(repo, run2) {
 }
 
 // src/assumptions.ts
-import { join as join58 } from "path";
+import { join as join57 } from "path";
 var MAX_UNITS = 120;
 function buildAssumptionWorklist(scan2) {
   const items = [];
   for (const f of scan2.files) {
     const lang = langForFile(f.rel);
     if (!lang) continue;
-    const text = readText2(join58(scan2.repo, f.rel));
+    const text = readText2(join57(scan2.repo, f.rel));
     const sources = findSources(lang, text).length;
     const sinks = findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols)).length;
     if (!sources && !sinks) continue;
@@ -28698,7 +28848,7 @@ function runInvestigate(args2) {
   };
   let leads = [];
   try {
-    leads = JSON.parse(readFileSync26(join59(run2, LEADS_FILE), "utf8"));
+    leads = JSON.parse(readFileSync26(join58(run2, LEADS_FILE), "utf8"));
     if (!Array.isArray(leads)) leads = [];
   } catch {
     leads = [];
@@ -28785,7 +28935,7 @@ function runPaths(args2) {
 }
 
 // src/commands/verify.ts
-import { join as join60, resolve as resolve23 } from "path";
+import { join as join59, resolve as resolve22 } from "path";
 function runVerify(args2) {
   const run2 = resolve23(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
@@ -28853,7 +29003,7 @@ function applyMode(run2, dossier, applyPath, args2) {
     );
     return strict && (parsed.dropped.length > 0 || res.reVerdicted.length > 0 && !reVerdictOk) ? 1 : 0;
   }
-  println(`ultrasec verify --apply \u2192 updated ${join60(run2, "findings.json")}`);
+  println(`ultrasec verify --apply \u2192 updated ${join59(run2, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
   if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
   if (res.keptForHuman.length) {
@@ -28951,7 +29101,7 @@ function runRevalidate(args2) {
 
 // src/commands/variants.ts
 import { writeFileSync as writeFileSync17 } from "fs";
-import { join as join61, resolve as resolve25 } from "path";
+import { join as join60, resolve as resolve24 } from "path";
 
 // src/variants.ts
 function sinkOf(f) {
@@ -29139,7 +29289,7 @@ function runVariants(args2) {
     const res = ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run2) });
     persistFindings(run2, dossier, res.findings);
     const rules = renderRegressionRules(parsed.rows);
-    const rulePath = join61(run2, "ultrasec-variants.yaml");
+    const rulePath = join60(run2, "ultrasec-variants.yaml");
     if (rules) writeFileSync17(rulePath, rules);
     if (flagBool(args2, "json")) {
       println(
@@ -29181,7 +29331,7 @@ function runVariants(args2) {
 import { resolve as resolve26 } from "path";
 
 // src/guards.ts
-import { join as join62 } from "path";
+import { join as join61 } from "path";
 var REQUEST_KINDS = /* @__PURE__ */ new Set(["http", "ws"]);
 var MODULE_SCOPE = "(module scope)";
 var GUARD_LENSES = ["auth", "throttle"];
@@ -29233,7 +29383,7 @@ function buildGuardMatrix(scan2, lens = "auth") {
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
-    const text = readText2(join62(scan2.repo, file.rel));
+    const text = readText2(join61(scan2.repo, file.rel));
     const sources = findSources(lang, text, file.rel).filter((s) => REQUEST_KINDS.has(s.kind));
     if (!sources.length) continue;
     const lines5 = text.split(/\r?\n/);
@@ -29537,7 +29687,7 @@ function runGuards(args2) {
 
 // src/commands/assumptions.ts
 import { writeFileSync as writeFileSync18 } from "fs";
-import { join as join63, resolve as resolve27 } from "path";
+import { join as join62, resolve as resolve26 } from "path";
 function runAssumptions(args2) {
   const run2 = resolve27(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
@@ -29559,9 +29709,9 @@ function runAssumptions(args2) {
     }
     const strict = flagBool(args2, "strict");
     const leads = unenforced(parsed.rows);
-    const mapPath = join63(run2, "ASSUMPTIONS.md");
+    const mapPath = join62(run2, "ASSUMPTIONS.md");
     writeFileSync18(mapPath, renderAssumptionMap(parsed.rows));
-    const leadsPath = join63(run2, LEADS_FILE);
+    const leadsPath = join62(run2, LEADS_FILE);
     writeFileSync18(leadsPath, JSON.stringify(leads, null, 2));
     if (flagBool(args2, "json")) {
       println(JSON.stringify({ units: parsed.rows.length, unenforced: leads.length, map: mapPath, leads: leadsPath, dropped: parsed.dropped }, null, 2));
@@ -29603,7 +29753,7 @@ function runAssumptions(args2) {
 
 // src/commands/coverage.ts
 import { writeFileSync as writeFileSync19 } from "fs";
-import { join as join64, resolve as resolve28 } from "path";
+import { join as join63, resolve as resolve27 } from "path";
 
 // src/coverage.ts
 var ASVS_CATEGORIES = [
@@ -30074,7 +30224,7 @@ function runCoverage(args2) {
     return 0;
   }
   if (flagBool(args2, "write")) {
-    const p = join64(run2, "COVERAGE.md");
+    const p = join63(run2, "COVERAGE.md");
     writeFileSync19(p, md);
     println(`ultrasec coverage \u2192 ${p}`);
   }
@@ -30291,11 +30441,11 @@ function runNarrative(args2) {
 import { resolve as resolve30 } from "path";
 
 // src/implement.ts
-import { existsSync as existsSync30, readFileSync as readFileSync27 } from "fs";
-import { join as join65 } from "path";
+import { existsSync as existsSync29, readFileSync as readFileSync27 } from "fs";
+import { join as join64 } from "path";
 function loadNarrative(run2, dossier, file) {
-  const p = file ?? join65(run2, "NARRATIVE.json");
-  if (!existsSync30(p)) return void 0;
+  const p = file ?? join64(run2, "NARRATIVE.json");
+  if (!existsSync29(p)) return void 0;
   try {
     const merged = mergeNarrative(parseNarrative(readFileSync27(p, "utf8")), dossier);
     return hasNarrativeContent(merged) ? merged : void 0;
@@ -30520,7 +30670,7 @@ function runCheck(args2) {
 
 // src/commands/render.ts
 import { readFileSync as readFileSync28, writeFileSync as writeFileSync20 } from "fs";
-import { join as join66, resolve as resolve32 } from "path";
+import { join as join65, resolve as resolve31 } from "path";
 
 // src/render/mermaid.ts
 function esc(s) {
@@ -31545,9 +31695,9 @@ function runRender(args2) {
     ["REPORT.md", renderReport(dossier, narrative)],
     ["index.html", renderHtml(dossier, narrative)]
   ];
-  for (const [name2, body2] of outputs) writeFileSync20(join66(run2, name2), body2);
+  for (const [name2, body2] of outputs) writeFileSync20(join65(run2, name2), body2);
   println(`ultrasec render \u2192 ${run2}`);
-  for (const [name2] of outputs) println(`  ${join66(run2, name2)}`);
+  for (const [name2] of outputs) println(`  ${join65(run2, name2)}`);
   if (narrativeNote) println(narrativeNote);
   const unread = unadjudicatedCode(dossier.findings);
   if (!unread.length) return 0;
@@ -31567,8 +31717,8 @@ function runRender(args2) {
 
 // src/commands/clean.ts
 import { execFileSync as execFileSync9 } from "child_process";
-import { existsSync as existsSync31, rmSync as rmSync6, readdirSync as readdirSync8 } from "fs";
-import { join as join67, resolve as resolve33 } from "path";
+import { existsSync as existsSync30, rmSync as rmSync6, readdirSync as readdirSync8 } from "fs";
+import { join as join66, resolve as resolve32 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 var DELIVERABLES = /* @__PURE__ */ new Set(["SUMMARY.md", "REPORT.md", "index.html", "findings.json", JOURNAL_FILE]);
@@ -31608,11 +31758,11 @@ function runClean(args2) {
       for (const entry of readdirSync8(run2)) {
         if (DELIVERABLES.has(entry)) {
           preservedAny = true;
-          kept.push(`deliverable  ${join67(run2, entry)}`);
+          kept.push(`deliverable  ${join66(run2, entry)}`);
           continue;
         }
-        if (!dry) rmSync6(join67(run2, entry), { recursive: true, force: true });
-        removed.push(`intermediate  ${join67(run2, entry)}`);
+        if (!dry) rmSync6(join66(run2, entry), { recursive: true, force: true });
+        removed.push(`intermediate  ${join66(run2, entry)}`);
       }
       if (!preservedAny) {
         if (!dry) rmSync6(run2, { recursive: true, force: true });
@@ -31654,8 +31804,8 @@ function runClean(args2) {
 }
 
 // src/commands/run.ts
-import { existsSync as existsSync33 } from "fs";
-import { join as join69, resolve as resolve34 } from "path";
+import { existsSync as existsSync32 } from "fs";
+import { join as join68, resolve as resolve33 } from "path";
 
 // src/powered/agent.ts
 import { spawnSync as spawnSync3 } from "child_process";
@@ -31708,7 +31858,7 @@ var CliAgentRunner = class {
 
 // src/powered/pipeline.ts
 import { readFileSync as readFileSync29, writeFileSync as writeFileSync21 } from "fs";
-import { join as join68 } from "path";
+import { join as join67 } from "path";
 var ALL_STAGES = [
   "context",
   "assumptions",
@@ -31734,8 +31884,8 @@ var STAGES = {
     emit(repo, run2) {
       const scan2 = scanRepo2(repo);
       const scaffold = buildContextScaffold(repo, scan2, buildAttackSurface(scan2));
-      writeFileSync21(join68(run2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
-      const wl = join68(run2, "CONTEXT.todo.md");
+      writeFileSync21(join67(run2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
+      const wl = join67(run2, "CONTEXT.todo.md");
       writeFileSync21(wl, renderContextScaffoldMd(repo, run2, scaffold));
       return { worklist: wl, outName: "CONTEXT.md" };
     },
@@ -31747,7 +31897,7 @@ var STAGES = {
       const items = buildAssumptionWorklist(scanRepo2(repo));
       const f = stageFiles("ASSUMPTIONS");
       emitWorklist(run2, f, items, renderAssumptionsMd(items, loadContextDoc(run2)));
-      return { worklist: join68(run2, f.md), outName: "ASSUMPTIONS.json" };
+      return { worklist: join67(run2, f.md), outName: "ASSUMPTIONS.json" };
     },
     // Deliberately no `applyPure`: this stage produces UNDERSTANDING, not
     // findings. Its output is the map plus the leads that `investigate` picks up
@@ -31755,8 +31905,8 @@ var STAGES = {
     // severity rubric exists to prevent.
     afterApply(run2, raw) {
       const rows = rowsOf("assumptions", parseAssumptionResults(raw));
-      writeFileSync21(join68(run2, "ASSUMPTIONS.md"), renderAssumptionMap(rows));
-      writeFileSync21(join68(run2, LEADS_FILE), JSON.stringify(unenforced(rows), null, 2));
+      writeFileSync21(join67(run2, "ASSUMPTIONS.md"), renderAssumptionMap(rows));
+      writeFileSync21(join67(run2, LEADS_FILE), JSON.stringify(unenforced(rows), null, 2));
     },
     instruction: (repo, run2, worklist, outPath) => `Read the assumption worklist at ${worklist}. Per unit record what it GUARANTEES (each with the line that establishes it) and what it ASSUMES without verifying \u2014 set enforcedAt to the file:line that enforces it, or to the literal "nothing-found" when nothing does. Write a JSON array of {at, guarantees, assumptions, calls, openQuestions} to ${outPath}. No severities, no findings: this stage builds understanding. ${UNTRUSTED}`
   },
@@ -31766,7 +31916,7 @@ var STAGES = {
       const items = buildTriageWorklist(dossier);
       const f = stageFiles("TRIAGE");
       emitWorklist(run2, f, items, renderTriageMd(items, loadContextDoc(run2)));
-      return { worklist: join68(run2, f.md), outName: "TRIAGE.json" };
+      return { worklist: join67(run2, f.md), outName: "TRIAGE.json" };
     },
     applyPure: (_repo, _run, dossier, raw) => applyTriage(dossier, rowsOf("triage", parseTriage(raw))).findings,
     instruction: (repo, run2, worklist, outPath) => `Read the triage worklist at ${worklist}. For each OPEN candidate decide noise|keep and write a JSON array of {id, verdict} to ${outPath}. 'noise' only for clear false positives. ${UNTRUSTED}`
@@ -31781,7 +31931,7 @@ var STAGES = {
       const rows = buildGuardMatrix(scanRepo2(repo));
       const f = stageFiles("GUARDS");
       emitWorklist(run2, f, rows, renderGuardsMd(rows, loadContextDoc(run2)));
-      return { worklist: join68(run2, f.md), outName: "GUARDS.json" };
+      return { worklist: join67(run2, f.md), outName: "GUARDS.json" };
     },
     applyPure: (repo, run2, dossier, raw) => {
       const byId = new Map(buildGuardMatrix(scanRepo2(repo)).map((r) => [r.id, r]));
@@ -31802,7 +31952,7 @@ var STAGES = {
       const rows = buildGuardMatrix(scanRepo2(repo), "throttle");
       const f = stageFiles(LENSES2.throttle.stem);
       emitWorklist(run2, f, rows, renderGuardsMd(rows, loadContextDoc(run2), "throttle"));
-      return { worklist: join68(run2, f.md), outName: "THROTTLE.json" };
+      return { worklist: join67(run2, f.md), outName: "THROTTLE.json" };
     },
     applyPure: (repo, run2, dossier, raw) => {
       const byId = new Map(buildGuardMatrix(scanRepo2(repo), "throttle").map((r) => [r.id, r]));
@@ -31820,7 +31970,7 @@ var STAGES = {
       const regions = buildInvestigateWorklist(buildAttackSurface(scanRepo2(repo)), dossier.graph);
       const f = stageFiles("INVESTIGATE");
       emitWorklist(run2, f, regions, renderInvestigateMd(regions, loadContextDoc(run2)));
-      return { worklist: join68(run2, f.md), outName: "INVESTIGATE.json" };
+      return { worklist: join67(run2, f.md), outName: "INVESTIGATE.json" };
     },
     applyPure: (repo, run2, dossier, raw) => ingestDiscoveries(dossier, rowsOf("investigate", parseDiscoveries(raw)), repo, { context: loadContextDoc(run2) }).findings,
     instruction: (repo, run2, worklist, outPath) => `Read the investigation worklist at ${worklist}. Find issues the deterministic engine can't (authz/IDOR, business logic, multi-hop) and write grounded Discovery[] {title,category,severity,cwe?,message,file,line,path?} to ${outPath}. Cite resolvable [file:line]. ${UNTRUSTED}`
@@ -31831,7 +31981,7 @@ var STAGES = {
       const items = buildWorklist(dossier);
       const f = stageFiles("VERIFY");
       emitWorklist(run2, f, items, renderWorklistMd(items, loadContextDoc(run2)));
-      return { worklist: join68(run2, f.md), outName: "verdicts.json" };
+      return { worklist: join67(run2, f.md), outName: "verdicts.json" };
     },
     applyPure: (_repo, _run, dossier, raw) => applyVerdicts(dossier, rowsOf("verify", parseVerdicts(raw))).findings,
     instruction: (repo, run2, worklist, outPath) => `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node <ultrasec> dossier <id> --run ${run2}\`) and write a verdicts.json array of {id, verdict, note, exploitPath} to ${outPath}. Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`
@@ -31842,7 +31992,7 @@ var STAGES = {
       const items = buildRevalidateWorklist(dossier, repo);
       const f = stageFiles("REVALIDATE");
       emitWorklist(run2, f, items, renderRevalidateMd(items, loadContextDoc(run2)));
-      return { worklist: join68(run2, f.md), outName: "REVALIDATE.json" };
+      return { worklist: join67(run2, f.md), outName: "REVALIDATE.json" };
     },
     applyPure: (repo, _run, dossier, raw) => applyRevalidations(dossier, rowsOf("revalidate", parseRevalidations(raw)), revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo))).findings,
     instruction: (repo, run2, worklist, outPath) => `Read the revalidation worklist at ${worklist}. Using the git facts, decide still-valid|fixed|false-positive|uncertain per finding and write a JSON array of {id, verdict, fixedIn?, note?} to ${outPath}. ${UNTRUSTED}`
@@ -31853,7 +32003,7 @@ var STAGES = {
       const items = buildVariantWorklist(dossier);
       const f = stageFiles("VARIANTS");
       emitWorklist(run2, f, items, renderVariantsMd(items, loadContextDoc(run2)));
-      return { worklist: join68(run2, f.md), outName: "VARIANTS.json" };
+      return { worklist: join67(run2, f.md), outName: "VARIANTS.json" };
     },
     applyPure: (repo, run2, dossier, raw) => ingestDiscoveries(
       dossier,
@@ -31863,7 +32013,7 @@ var STAGES = {
     ).findings,
     afterApply(run2, raw) {
       const rules = renderRegressionRules(rowsOf("variants", parseVariantResults(raw)));
-      if (rules) writeFileSync21(join68(run2, "ultrasec-variants.yaml"), rules);
+      if (rules) writeFileSync21(join67(run2, "ultrasec-variants.yaml"), rules);
     },
     instruction: (repo, run2, worklist, outPath) => `Read the variant worklist at ${worklist}. For each CONFIRMED seed, state the root cause (the why, not the what), build an EXACT match that finds the known instance \u2014 zero results means you have misunderstood the bug \u2014 then generalize ONE dimension at a time, stopping when over half the matches are false. Write a JSON array of {seedId, rootCause, patterns, variants: Discovery[], regressionRule} to ${outPath}. Cite resolvable [file:line]. ${UNTRUSTED}`
   },
@@ -31873,7 +32023,7 @@ var STAGES = {
       const wl = buildNarrativeWorklist(dossier);
       const f = stageFiles("NARRATIVE");
       emitWorklist(run2, f, wl, renderNarrativeWorklistMd(wl, loadContextDoc(run2)));
-      return { worklist: join68(run2, f.md), outName: "NARRATIVE.json" };
+      return { worklist: join67(run2, f.md), outName: "NARRATIVE.json" };
     },
     instruction: (repo, run2, worklist, outPath) => `Read the narrative worklist at ${worklist}. Author NARRATIVE.json (executiveSummary, remediations, attackChains, rootCauses) citing only confirmed finding ids, and write it to ${outPath}. ${UNTRUSTED}`
   },
@@ -31884,7 +32034,7 @@ var STAGES = {
       const wl = buildImplementWorklist(dossier, narrative);
       const f = stageFiles("IMPLEMENT");
       emitWorklist(run2, f, wl, renderImplementMd(wl, loadContextDoc(run2)));
-      return { worklist: join68(run2, f.md), outName: "REMEDIATION_PRD.md" };
+      return { worklist: join67(run2, f.md), outName: "REMEDIATION_PRD.md" };
     },
     instruction: (repo, run2, worklist, outPath) => `Read the remediation-PRD draft at ${worklist}. Author a complete remediation PRD in to-prd format (Problem Statement, Solution, User Stories, Implementation Decisions, Testing Decisions, Out of Scope) and write it as a LOCAL file at ${outPath} \u2014 do NOT publish to any tracker. Cite only the finding ids in the draft; never invent findings or change any finding's status. ${UNTRUSTED}`
   }
@@ -31937,7 +32087,7 @@ function runPipeline(opts) {
     actions.push(`emit:${name2}`);
     emitted.push({ stage: name2, worklist, outName });
     if (!opts.powered) continue;
-    const outPath = join68(opts.run, outName);
+    const outPath = join67(opts.run, outName);
     const instruction = `${stage.instruction(opts.repo, opts.run, worklist, outPath)} ${SOLE_OUTPUT(outPath)}`;
     const r = opts.runner.fill({ stage: name2, run: opts.run, worklist, outPath, instruction });
     externalCalls++;
@@ -31958,7 +32108,7 @@ function runPipeline(opts) {
     const after = loadDossier(opts.run);
     const primary = stage.applyPure(opts.repo, opts.run, after, readFileSync29(outPath, "utf8"));
     if (opts.crossRunner && stage.crossCheckable) {
-      const crossPath = join68(opts.run, `${outName}.cross.json`);
+      const crossPath = join67(opts.run, `${outName}.cross.json`);
       const crossInstr = `${stage.instruction(opts.repo, opts.run, worklist, crossPath)} ${SOLE_OUTPUT(crossPath)}`;
       const cr = opts.crossRunner.fill({ stage: `${name2}:cross`, run: opts.run, worklist, outPath: crossPath, instruction: crossInstr });
       externalCalls++;
@@ -31987,7 +32137,7 @@ function runPipeline(opts) {
   }
   actions.push("check");
   let narrative;
-  const narrPath = join68(opts.run, "NARRATIVE.json");
+  const narrPath = join67(opts.run, "NARRATIVE.json");
   if (opts.powered && opts.stages.includes("narrative")) {
     try {
       const merged = mergeNarrative(parseNarrative(readFileSync29(narrPath, "utf8")), dossier);
@@ -31995,9 +32145,9 @@ function runPipeline(opts) {
     } catch {
     }
   }
-  writeFileSync21(join68(opts.run, "SUMMARY.md"), renderSummary(dossier, narrative));
-  writeFileSync21(join68(opts.run, "REPORT.md"), renderReport(dossier, narrative));
-  writeFileSync21(join68(opts.run, "index.html"), renderHtml(dossier, narrative));
+  writeFileSync21(join67(opts.run, "SUMMARY.md"), renderSummary(dossier, narrative));
+  writeFileSync21(join67(opts.run, "REPORT.md"), renderReport(dossier, narrative));
+  writeFileSync21(join67(opts.run, "index.html"), renderHtml(dossier, narrative));
   actions.push("render");
   return { actions, emitted, externalCalls, escalated, errors, notices };
 }
@@ -32017,7 +32167,7 @@ function runRun(args2) {
     }
   }
   const stages = ALL_STAGES.filter((s) => !requested || requested.includes(s));
-  if (noScan && !existsSync33(join69(run2, "findings.json"))) {
+  if (noScan && !existsSync32(join68(run2, "findings.json"))) {
     eprintln(`ultrasec run: --no-scan but no dossier at ${run2} \u2014 run \`scan\` first or drop --no-scan.`);
     return 2;
   }
@@ -32063,7 +32213,7 @@ function runRun(args2) {
     for (const e of res.emitted) {
       const noApply = e.outName === "CONTEXT.md" || e.outName === "NARRATIVE.json" || e.outName === "REMEDIATION_PRD.md";
       const apply = noApply ? "" : ` \u2192 \`ultrasec ${e.stage} --apply ${e.outName} --run ${run2}\``;
-      println(`    - ${e.stage}: read ${e.worklist}, write ${join69(run2, e.outName)}${apply}`);
+      println(`    - ${e.stage}: read ${e.worklist}, write ${join68(run2, e.outName)}${apply}`);
     }
     println(`  then: ultrasec render${stages.includes("narrative") ? " --narrative NARRATIVE.json" : ""} --run ${run2}`);
     return 0;
@@ -32073,13 +32223,13 @@ function runRun(args2) {
   if (res.escalated.length) println(`  \u26A0\uFE0F  cross-check escalated ${res.escalated.length} finding(s) to needs-human: ${res.escalated.join(", ")}`);
   printNotices();
   for (const err2 of res.errors) println(`  \u2717 ${err2}`);
-  println(`  report: ${join69(run2, "REPORT.md")} \xB7 ${join69(run2, "index.html")}`);
+  println(`  report: ${join68(run2, "REPORT.md")} \xB7 ${join68(run2, "index.html")}`);
   return res.errors.length ? 1 : 0;
 }
 
 // src/commands/orchestrate.ts
-import { existsSync as existsSync34, realpathSync as realpathSync5 } from "fs";
-import { join as join70 } from "path";
+import { existsSync as existsSync33, realpathSync as realpathSync5 } from "fs";
+import { join as join69 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 function runOrchestrate(args2) {
   const runFlag = flagStr(args2, "run");
@@ -32120,7 +32270,7 @@ function runOrchestrate(args2) {
     for (const w of workflows) println(`Launch: Workflow({ scriptPath: ${JSON.stringify(w)} })`);
     println("Then merge the returned fragments into one apply file and run the `--apply` fold shown at the end of each workflow (you stay the sole writer).");
   } else {
-    println(`Follow ${join70(runFlag, "orchestration", "RUNBOOK.md")} sequentially (the eco path).`);
+    println(`Follow ${join69(runFlag, "orchestration", "RUNBOOK.md")} sequentially (the eco path).`);
   }
   if (flagStr(args2, "phase") === void 0 && workflows.length === 0 && !flagBool(args2, "eco")) {
     eprintln(`ultrasec orchestrate: no ready phase \u2014 phases are ${PHASES.join(", ")} (see --list).`);
@@ -32130,7 +32280,7 @@ function runOrchestrate(args2) {
 
 // src/commands/probe.ts
 import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync22 } from "fs";
-import { join as join71, resolve as resolve35 } from "path";
+import { join as join70, resolve as resolve34 } from "path";
 import { request as httpsRequest } from "https";
 import { request as httpRequest } from "http";
 import { lookup } from "dns/promises";
@@ -32540,15 +32690,15 @@ async function runProbe(args2, deps = {}) {
     findings: ctx.findings
   };
   mkdirSync16(out2, { recursive: true });
-  writeFileSync22(join71(out2, "PROBE.json"), `${JSON.stringify(report, null, 2)}
+  writeFileSync22(join70(out2, "PROBE.json"), `${JSON.stringify(report, null, 2)}
 `);
-  writeFileSync22(join71(out2, "PROBE.md"), renderProbeMd(report));
+  writeFileSync22(join70(out2, "PROBE.md"), renderProbeMd(report));
   const counts = {};
   for (const f of report.findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
   if (flagBool(args2, "json")) {
     println(JSON.stringify(report, null, 2));
   } else {
-    println(`ultrasec probe \u2192 ${join71(out2, "PROBE.md")} (+ PROBE.json)`);
+    println(`ultrasec probe \u2192 ${join70(out2, "PROBE.md")} (+ PROBE.json)`);
     println(`  target: ${report.target}  \xB7  status ${main2.status}  \xB7  TLS ${main2.tlsProtocol ?? "\u2014"}  \xB7  ${ctx.made} request(s)`);
     println(
       `  posture findings: ${report.findings.length}  (crit ${counts.critical ?? 0} \xB7 high ${counts.high ?? 0} \xB7 med ${counts.medium ?? 0} \xB7 low ${counts.low ?? 0})`
@@ -32562,7 +32712,7 @@ async function runProbe(args2, deps = {}) {
 
 // src/commands/route.ts
 import { mkdirSync as mkdirSync17, writeFileSync as writeFileSync23 } from "fs";
-import { join as join72, resolve as resolve36 } from "path";
+import { join as join71, resolve as resolve35 } from "path";
 var ROUTE_TABLE = [
   {
     id: "android-apk",
@@ -32825,7 +32975,7 @@ function runRoute(args2) {
   if (flagStr(args2, "out") !== void 0 || flagBool(args2, "write")) {
     const out2 = resolve36(flagStr(args2, "out") ?? ".");
     mkdirSync17(out2, { recursive: true });
-    const p = join72(out2, "ROUTE.md");
+    const p = join71(out2, "ROUTE.md");
     writeFileSync23(p, renderMd(result));
     if (!flagBool(args2, "json")) println(`ultrasec route \u2192 ${p}`);
   }
@@ -32885,8 +33035,8 @@ var COMMAND_HANDLERS = {
 import { createInterface as createInterface3 } from "readline";
 
 // src/mcp/handlers.ts
-import { existsSync as existsSync35, readFileSync as readFileSync30, realpathSync as realpathSync6, statSync as statSync17 } from "fs";
-import { isAbsolute as isAbsolute2, join as join73, resolve as resolve37, sep as sep7 } from "path";
+import { existsSync as existsSync34, readFileSync as readFileSync30, realpathSync as realpathSync6, statSync as statSync17 } from "fs";
+import { isAbsolute as isAbsolute2, join as join72, resolve as resolve36, sep as sep7 } from "path";
 
 // src/run-lock.ts
 var chains = /* @__PURE__ */ new Map();
@@ -32961,10 +33111,10 @@ function resolveRun(args2, repo) {
     if (!isAbsolute2(explicit)) throw new ToolError("`run` must be an absolute path.");
     return resolve37(explicit);
   }
-  return join73(repo, ".ultrasec");
+  return join72(repo, ".ultrasec");
 }
 function requireRun(run2) {
-  if (!existsSync35(join73(run2, "dossier.json")) && !existsSync35(join73(run2, "findings.json"))) {
+  if (!existsSync34(join72(run2, "dossier.json")) && !existsSync34(join72(run2, "findings.json"))) {
     throw new ToolError(`no audit run at ${run2} \u2014 scan the repo first with ultrasec_scan (it writes there). If the run lives elsewhere, pass \`run\`.`);
   }
 }
@@ -33100,18 +33250,18 @@ function outcome(name2, result) {
 function artifactFor(name2, flags2) {
   const run2 = typeof flags2.run === "string" ? flags2.run : typeof flags2.out === "string" ? flags2.out : void 0;
   if (!run2) return void 0;
-  if (name2 === "ultrasec_map") return join73(run2, "MAP.md");
-  if (name2 === "ultrasec_scan") return join73(run2, "findings.json");
-  if (name2 === "ultrasec_triage") return join73(run2, "TRIAGE.todo.json");
-  if (name2 === "ultrasec_guards") return join73(run2, flags2.lens === "throttle" ? "THROTTLE.todo.json" : "GUARDS.todo.json");
-  if (name2 === "ultrasec_verify") return join73(run2, "VERIFY.todo.json");
-  if (name2 === "ultrasec_investigate") return join73(run2, "INVESTIGATE.todo.json");
+  if (name2 === "ultrasec_map") return join72(run2, "MAP.md");
+  if (name2 === "ultrasec_scan") return join72(run2, "findings.json");
+  if (name2 === "ultrasec_triage") return join72(run2, "TRIAGE.todo.json");
+  if (name2 === "ultrasec_guards") return join72(run2, flags2.lens === "throttle" ? "THROTTLE.todo.json" : "GUARDS.todo.json");
+  if (name2 === "ultrasec_verify") return join72(run2, "VERIFY.todo.json");
+  if (name2 === "ultrasec_investigate") return join72(run2, "INVESTIGATE.todo.json");
   return void 0;
 }
 function handleRead(args2, repo, run2) {
   const raw = str2(args2.path);
   if (!raw) throw new ToolError("`path` is required \u2014 a repo-relative path, or an absolute path inside the repo or its run.");
-  const target = isAbsolute2(raw) ? raw : join73(repo, raw);
+  const target = isAbsolute2(raw) ? raw : join72(repo, raw);
   let real;
   try {
     real = realpathSync6(target);
@@ -33618,25 +33768,25 @@ function str3(v) {
 var DECLARED = new Set([...TOOLS3, ...WRITE_TOOLS].map((t) => t.name));
 
 // src/mcp/resources.ts
-import { existsSync as existsSync36, readdirSync as readdirSync9, readFileSync as readFileSync31, realpathSync as realpathSync7, statSync as statSync18 } from "fs";
-import { basename as basename5, dirname as dirname10, join as join74, resolve as resolve38, sep as sep8 } from "path";
+import { existsSync as existsSync35, readdirSync as readdirSync9, readFileSync as readFileSync31, realpathSync as realpathSync7, statSync as statSync18 } from "fs";
+import { basename as basename5, dirname as dirname10, join as join73, resolve as resolve37, sep as sep8 } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 var SKILL_NAME = "ultrasec";
 var URI_SCHEME = "skill://";
 function resolveSkillRoot(moduleDir) {
   const here = moduleDir ?? dirname10(fileURLToPath4(import.meta.url));
-  const candidates = [resolve38(here, ".."), resolve38(here, "..", "skills", SKILL_NAME), resolve38(here, "..", "..", "skills", SKILL_NAME)];
-  return candidates.find((dir) => existsSync36(join74(dir, "SKILL.md")));
+  const candidates = [resolve37(here, ".."), resolve37(here, "..", "skills", SKILL_NAME), resolve37(here, "..", "..", "skills", SKILL_NAME)];
+  return candidates.find((dir) => existsSync35(join73(dir, "SKILL.md")));
 }
 function listResources(moduleDir) {
   const root = resolveSkillRoot(moduleDir);
   if (!root) return [];
   const out2 = [describe(root, "SKILL.md", `${SKILL_NAME}: the skill`)];
-  const refDir = join74(root, "references");
-  if (!existsSync36(refDir)) return out2;
+  const refDir = join73(root, "references");
+  if (!existsSync35(refDir)) return out2;
   for (const file of readdirSync9(refDir).sort()) {
     if (!file.endsWith(".md")) continue;
-    out2.push(describe(root, join74("references", file), `${SKILL_NAME} reference: ${basename5(file, ".md")}`));
+    out2.push(describe(root, join73("references", file), `${SKILL_NAME} reference: ${basename5(file, ".md")}`));
   }
   return out2;
 }
@@ -33671,7 +33821,7 @@ function describe(root, rel2, fallbackTitle) {
     title: fallbackTitle,
     mimeType: "text/markdown"
   };
-  const summary = firstProse(join74(root, rel2));
+  const summary = firstProse(join73(root, rel2));
   if (summary) decl.description = summary;
   return decl;
 }
