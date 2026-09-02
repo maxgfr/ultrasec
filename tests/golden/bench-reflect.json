@@ -1,6 +1,53 @@
 {
   "findings": [
     {
+      "id": "36803235524b",
+      "category": "taint",
+      "cwe": "CWE-470",
+      "title": "Unsafe reflection: untrusted input reaches public_send()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.rb",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.rb",
+        "line": 5,
+        "kind": "reflect",
+        "symbol": "show"
+      },
+      "path": [
+        {
+          "file": "vuln.rb",
+          "line": 3,
+          "symbol": "show",
+          "why": "untrusted input (http): params["
+        },
+        {
+          "file": "vuln.rb",
+          "line": 5,
+          "symbol": "show",
+          "why": "reflect sink: public_send()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "field"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.rb:3 may reach the reflect sink public_send() at vuln.rb:5 through 1 hop(s). Tainted data selecting a method or constant by name. Map the input through an explicit allow-list of permitted targets instead of resolving it dynamically (`public_send` still reaches every public method). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/470.html"
+      ],
+      "status": "open",
+      "risk": 30
+    },
+    {
       "id": "620cb2284c2e",
       "category": "taint",
       "cwe": "CWE-502",
@@ -105,7 +152,9 @@
     "files": [
       "routes.py",
       "safe.py",
-      "sink.py"
+      "safe.rb",
+      "sink.py",
+      "vuln.rb"
     ],
     "edges": [
       {
@@ -129,6 +178,14 @@
       ],
       "safe": [
         "safe.py"
+      ],
+      "ReportsController": [
+        "safe.rb",
+        "vuln.rb"
+      ],
+      "show": [
+        "safe.rb",
+        "vuln.rb"
       ],
       "load": [
         "sink.py"
@@ -164,6 +221,13 @@
           "file": "routes.py",
           "line": 8,
           "symbol": "handler"
+        }
+      ],
+      "public_send": [
+        {
+          "file": "vuln.rb",
+          "line": 5,
+          "symbol": "show"
         }
       ]
     }

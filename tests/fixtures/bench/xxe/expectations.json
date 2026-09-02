@@ -1,15 +1,9 @@
 {
   "cwe": "CWE-611",
   "cases": [
-    {
-      "name": "vuln",
-      "file": "vuln.js",
-      "vulnerable": true
-    },
-    {
-      "name": "safe",
-      "file": "safe.js",
-      "vulnerable": false
-    }
+    { "name": "vuln", "file": "vuln.js", "vulnerable": true },
+    { "name": "safe", "file": "safe.js", "vulnerable": false },
+    { "name": "vuln-php", "file": "vuln.php", "vulnerable": true },
+    { "name": "safe-php", "file": "safe.php", "vulnerable": false }
   ]
 }

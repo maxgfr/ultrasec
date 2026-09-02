@@ -1,6 +1,50 @@
 {
   "findings": [
     {
+      "id": "466014e2585a",
+      "category": "taint",
+      "cwe": "CWE-611",
+      "title": "XML external entity (XXE): untrusted input reaches simplexml_load_string()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.php",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.php",
+        "line": 3,
+        "kind": "xxe"
+      },
+      "path": [
+        {
+          "file": "vuln.php",
+          "line": 2,
+          "why": "untrusted input (http): $_POST — at file scope"
+        },
+        {
+          "file": "vuln.php",
+          "line": 3,
+          "why": "xxe sink: simplexml_load_string()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$xml"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.php:2 may reach the xxe sink simplexml_load_string() at vuln.php:3 through 1 hop(s). Tainted XML parsed with external entities/DTDs enabled. Disable entity resolution (resolve_entities=False / FEATURE_SECURE_PROCESSING / noent off). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/611.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
       "id": "ad6c069e3cad",
       "category": "taint",
       "cwe": "CWE-611",
@@ -51,7 +95,9 @@
   "graph": {
     "files": [
       "safe.js",
-      "vuln.js"
+      "safe.php",
+      "vuln.js",
+      "vuln.php"
     ],
     "edges": [],
     "symbolDefs": {
@@ -61,6 +107,24 @@
       ]
     },
     "callersBySymbol": {
+      "http_response_code": [
+        {
+          "file": "safe.php",
+          "line": 5
+        }
+      ],
+      "is_array": [
+        {
+          "file": "safe.php",
+          "line": 5
+        }
+      ],
+      "json_decode": [
+        {
+          "file": "safe.php",
+          "line": 4
+        }
+      ],
       "parse": [
         {
           "file": "safe.js",
@@ -79,6 +143,12 @@
         {
           "file": "vuln.js",
           "line": 1
+        }
+      ],
+      "simplexml_load_string": [
+        {
+          "file": "vuln.php",
+          "line": 3
         }
       ]
     }

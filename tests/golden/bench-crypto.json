@@ -1,6 +1,53 @@
 {
   "findings": [
     {
+      "id": "13acb67a796f",
+      "category": "taint",
+      "cwe": "CWE-327",
+      "title": "Weak cryptography: untrusted input reaches NewCipher()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.go",
+        "line": 9,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.go",
+        "line": 10,
+        "kind": "crypto",
+        "symbol": "encrypt"
+      },
+      "path": [
+        {
+          "file": "vuln.go",
+          "line": 9,
+          "symbol": "encrypt",
+          "why": "untrusted input (http): r.URL"
+        },
+        {
+          "file": "vuln.go",
+          "line": 10,
+          "symbol": "encrypt",
+          "why": "crypto sink: NewCipher()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "key"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.go:9 may reach the crypto sink NewCipher() at vuln.go:10 through 1 hop(s). DES/3DES/RC4 from crypto/des or crypto/rc4 — broken primitives. Use AES-GCM (crypto/aes + cipher.NewGCM) or chacha20poly1305. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/327.html"
+      ],
+      "status": "open",
+      "risk": 30
+    },
+    {
       "id": "6aa8eaa9aee5",
       "category": "taint",
       "cwe": "CWE-327",
@@ -50,7 +97,9 @@
   ],
   "graph": {
     "files": [
+      "safe.go",
       "safe.js",
+      "vuln.go",
       "vuln.js"
     ],
     "edges": [],
@@ -61,6 +110,64 @@
       ]
     },
     "callersBySymbol": {
+      "Get": [
+        {
+          "file": "safe.go",
+          "line": 9,
+          "symbol": "encrypt"
+        },
+        {
+          "file": "vuln.go",
+          "line": 9,
+          "symbol": "encrypt"
+        }
+      ],
+      "NewCipher": [
+        {
+          "file": "safe.go",
+          "line": 11,
+          "symbol": "encrypt"
+        },
+        {
+          "file": "vuln.go",
+          "line": 10,
+          "symbol": "encrypt"
+        }
+      ],
+      "Query": [
+        {
+          "file": "safe.go",
+          "line": 9,
+          "symbol": "encrypt"
+        },
+        {
+          "file": "vuln.go",
+          "line": 9,
+          "symbol": "encrypt"
+        }
+      ],
+      "byte": [
+        {
+          "file": "safe.go",
+          "line": 11,
+          "symbol": "encrypt"
+        },
+        {
+          "file": "vuln.go",
+          "line": 10,
+          "symbol": "encrypt"
+        }
+      ],
+      "import": [
+        {
+          "file": "safe.go",
+          "line": 3
+        },
+        {
+          "file": "vuln.go",
+          "line": 3
+        }
+      ],
       "md5": [
         {
           "file": "vuln.js",

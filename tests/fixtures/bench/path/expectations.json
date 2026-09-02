@@ -1,16 +1,15 @@
 {
   "cwe": "CWE-22",
   "cases": [
-    {
-      "name": "vuln",
-      "file": "sink.js",
-      "vulnerable": true,
-      "crossFile": true
-    },
-    {
-      "name": "safe",
-      "file": "safe.js",
-      "vulnerable": false
-    }
+    { "name": "vuln", "file": "sink.js", "vulnerable": true, "crossFile": true },
+    { "name": "safe", "file": "safe.js", "vulnerable": false },
+    { "name": "vuln-go", "file": "vuln.go", "vulnerable": true },
+    { "name": "safe-go", "file": "safe.go", "vulnerable": false },
+    { "name": "vuln-php", "file": "vuln.php", "vulnerable": true },
+    { "name": "safe-php", "file": "safe.php", "vulnerable": false },
+    { "name": "vuln-rb", "file": "vuln.rb", "vulnerable": true },
+    { "name": "safe-rb", "file": "safe.rb", "vulnerable": false },
+    { "name": "vuln-py", "file": "vuln.py", "vulnerable": true },
+    { "name": "safe-py", "file": "safe.py", "vulnerable": false }
   ]
 }

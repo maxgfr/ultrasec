@@ -1,6 +1,234 @@
 {
   "findings": [
     {
+      "id": "261a66164765",
+      "category": "taint",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery (SSRF): untrusted input reaches getForObject()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.java",
+        "line": 9,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.java",
+        "line": 10,
+        "kind": "ssrf",
+        "symbol": "doGet"
+      },
+      "path": [
+        {
+          "file": "vuln.java",
+          "line": 9,
+          "symbol": "doGet",
+          "why": "untrusted input (http): .getParameter("
+        },
+        {
+          "file": "vuln.java",
+          "line": 10,
+          "symbol": "doGet",
+          "why": "ssrf sink: getForObject()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "url"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.java:9 may reach the ssrf sink getForObject() at vuln.java:10 through 1 hop(s). Tainted data used as a request URL/host via a JVM HTTP client (RestTemplate, WebClient, HttpClient, OkHttp, `URL.openStream`). Verify the destination is allow-listed (no internal/metadata endpoints). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/918.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "542ed5b9799f",
+      "category": "taint",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery (SSRF): untrusted input reaches curl_exec()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.php",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.php",
+        "line": 5,
+        "kind": "ssrf"
+      },
+      "path": [
+        {
+          "file": "vuln.php",
+          "line": 2,
+          "why": "untrusted input (http): $_GET — at file scope"
+        },
+        {
+          "file": "vuln.php",
+          "line": 5,
+          "why": "ssrf sink: curl_exec()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$ch",
+          "$url"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.php:2 may reach the ssrf sink curl_exec() at vuln.php:5 through 1 hop(s). Tainted data used as a cURL/socket destination. Verify the host is allow-listed (no internal/metadata endpoints), the scheme is http(s) only, and CURLOPT_FOLLOWLOCATION cannot walk to an internal address. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/918.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "7677609e9128",
+      "category": "taint",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery (SSRF): untrusted input reaches curl_setopt()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.php",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.php",
+        "line": 4,
+        "kind": "ssrf"
+      },
+      "path": [
+        {
+          "file": "vuln.php",
+          "line": 2,
+          "why": "untrusted input (http): $_GET — at file scope"
+        },
+        {
+          "file": "vuln.php",
+          "line": 4,
+          "why": "ssrf sink: curl_setopt()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$ch",
+          "$url"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.php:2 may reach the ssrf sink curl_setopt() at vuln.php:4 through 1 hop(s). Tainted data used as a cURL/socket destination. Verify the host is allow-listed (no internal/metadata endpoints), the scheme is http(s) only, and CURLOPT_FOLLOWLOCATION cannot walk to an internal address. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/918.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "7c0b12887852",
+      "category": "taint",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery (SSRF): untrusted input reaches curl_init()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.php",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.php",
+        "line": 3,
+        "kind": "ssrf"
+      },
+      "path": [
+        {
+          "file": "vuln.php",
+          "line": 2,
+          "why": "untrusted input (http): $_GET — at file scope"
+        },
+        {
+          "file": "vuln.php",
+          "line": 3,
+          "why": "ssrf sink: curl_init()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$url"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.php:2 may reach the ssrf sink curl_init() at vuln.php:3 through 1 hop(s). Tainted data used as a cURL/socket destination. Verify the host is allow-listed (no internal/metadata endpoints), the scheme is http(s) only, and CURLOPT_FOLLOWLOCATION cannot walk to an internal address. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/918.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "95af045b9307",
+      "category": "taint",
+      "cwe": "CWE-918",
+      "title": "Server-side request forgery (SSRF): untrusted input reaches get()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.rb",
+        "line": 5,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.rb",
+        "line": 6,
+        "kind": "ssrf",
+        "symbol": "fetch"
+      },
+      "path": [
+        {
+          "file": "vuln.rb",
+          "line": 5,
+          "symbol": "fetch",
+          "why": "untrusted input (http): params["
+        },
+        {
+          "file": "vuln.rb",
+          "line": 6,
+          "symbol": "fetch",
+          "why": "ssrf sink: get()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "url"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.rb:5 may reach the ssrf sink get() at vuln.rb:6 through 1 hop(s). Tainted data used as a request URL/host via a Ruby HTTP client (Net::HTTP, Faraday, RestClient, HTTParty…). Verify the destination is allow-listed (no internal/metadata endpoints) and redirects are not followed blindly. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/918.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
       "id": "ba35e7b1798c",
       "category": "taint",
       "cwe": "CWE-918",
@@ -105,8 +333,14 @@
     "files": [
       "app.py",
       "routes.js",
+      "safe.java",
       "safe.js",
-      "sink.js"
+      "safe.php",
+      "safe.rb",
+      "sink.js",
+      "vuln.java",
+      "vuln.php",
+      "vuln.rb"
     ],
     "edges": [
       {
@@ -131,14 +365,78 @@
       "handle": [
         "routes.js"
       ],
+      "Safe": [
+        "safe.java"
+      ],
+      "doGet": [
+        "safe.java",
+        "vuln.java"
+      ],
       "safe": [
         "safe.js"
       ],
+      "ProxyController": [
+        "safe.rb",
+        "vuln.rb"
+      ],
+      "fetch": [
+        "safe.rb",
+        "vuln.rb"
+      ],
       "fetchUrl": [
         "sink.js"
+      ],
+      "Vuln": [
+        "vuln.java"
       ]
     },
     "callersBySymbol": {
+      "RestTemplate": [
+        {
+          "file": "vuln.java",
+          "line": 6,
+          "symbol": "Vuln"
+        }
+      ],
+      "URI": [
+        {
+          "file": "vuln.rb",
+          "line": 6,
+          "symbol": "fetch"
+        }
+      ],
+      "contains": [
+        {
+          "file": "safe.java",
+          "line": 13,
+          "symbol": "doGet"
+        }
+      ],
+      "create": [
+        {
+          "file": "safe.java",
+          "line": 12,
+          "symbol": "doGet"
+        }
+      ],
+      "curl_exec": [
+        {
+          "file": "vuln.php",
+          "line": 5
+        }
+      ],
+      "curl_init": [
+        {
+          "file": "vuln.php",
+          "line": 3
+        }
+      ],
+      "curl_setopt": [
+        {
+          "file": "vuln.php",
+          "line": 4
+        }
+      ],
       "fetchUrl": [
         {
           "file": "routes.js",
@@ -166,6 +464,76 @@
           "file": "sink.js",
           "line": 3,
           "symbol": "fetchUrl"
+        },
+        {
+          "file": "vuln.rb",
+          "line": 6,
+          "symbol": "fetch"
+        }
+      ],
+      "getForObject": [
+        {
+          "file": "vuln.java",
+          "line": 10,
+          "symbol": "doGet"
+        }
+      ],
+      "getHost": [
+        {
+          "file": "safe.java",
+          "line": 13,
+          "symbol": "doGet"
+        }
+      ],
+      "getParameter": [
+        {
+          "file": "safe.java",
+          "line": 10,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 9,
+          "symbol": "doGet"
+        }
+      ],
+      "head": [
+        {
+          "file": "safe.rb",
+          "line": 10,
+          "symbol": "fetch"
+        }
+      ],
+      "http_response_code": [
+        {
+          "file": "safe.php",
+          "line": 7
+        }
+      ],
+      "in_array": [
+        {
+          "file": "safe.php",
+          "line": 6
+        }
+      ],
+      "length": [
+        {
+          "file": "vuln.java",
+          "line": 11,
+          "symbol": "doGet"
+        }
+      ],
+      "parse": [
+        {
+          "file": "safe.rb",
+          "line": 9,
+          "symbol": "fetch"
+        }
+      ],
+      "parse_url": [
+        {
+          "file": "safe.php",
+          "line": 5
         }
       ],
       "require": [
@@ -182,6 +550,20 @@
           "file": "sink.js",
           "line": 1,
           "symbol": "axios"
+        }
+      ],
+      "setContentLength": [
+        {
+          "file": "vuln.java",
+          "line": 11,
+          "symbol": "doGet"
+        }
+      ],
+      "setStatus": [
+        {
+          "file": "safe.java",
+          "line": 14,
+          "symbol": "doGet"
         }
       ]
     }

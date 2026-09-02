@@ -9,21 +9,22 @@ you a glance; a missed flow is a missed bug.
 
 | kind | CWE | severity | example callees |
 |------|-----|----------|-----------------|
-| sql | CWE-89 | high | `query`, `execute`, `raw`, `executemany` · JDBC/JPA: `prepareStatement`, `prepareCall`, `executeUpdate`, `addBatch`, `createQuery` |
+| sql | CWE-89 | high | `query`, `execute`, `raw`, `executemany` · JDBC/JPA: `prepareStatement`, `prepareCall`, `executeUpdate`, `addBatch`, `createQuery` · Go `db.Query|QueryRow|Exec|*Context` (receiver-gated) · PHP `mysqli_query`, `pg_query`, `mysqli_prepare` · Rails `Model.where|order|pluck|find_by_sql` (receiver-gated) |
 | nosql | CWE-943 | high | `db.find`, `collection.findOne`, `mapReduce`, `aggregate` (receiver-gated) |
 | command | CWE-78 | critical | `execSync`, `spawnSync`, `popen`, `Popen`, `shell_exec`, `passthru`, `proc_open`, `ProcessBuilder`, `Runtime.getRuntime` · plus `exec`/`spawn`/`run` **corroborated** (see below) |
-| code | CWE-94 | high | `eval`, `Function`, `runInThisContext`, `compile` · plus the **line shape** `.apply(eval)` / `.map(exec)`, where the interpreter is a *reference*, not a call |
-| ssti | CWE-1336 | high | `from_string`, `renderString`, `Template`, `compileString` |
-| path | CWE-22 | high | `readFile`, `writeFile`, `sendFile`, `open` · JVM/C# constructors: `new File`, `FileInputStream`, `newBufferedReader` · zip-slip: `extractall`, `extract`, `unzip` |
-| ssrf | CWE-918 | high | bare `fetch`, `request`, `urlopen`, `axios`, `got` · + member calls `axios.get`, `http.get`, `requests.get`, `session.post` (receiver-gated) |
-| xxe | CWE-611 | high | `parseString`, `parseFromString`, `fromstring`, `SAXParser`, `DocumentBuilder` |
-| ldap | CWE-90 | high | `ldap.search`, `client.bind` (receiver-gated) |
-| xss | CWE-79 | medium | `res.send`, `res.write`, `render_template_string` · JVM servlet writers: `println`, `print`, `write` (import-gated) |
+| code | CWE-94 | high | `eval`, `Function`, `runInThisContext`, `compile` · PHP `create_function`, `assert($x)` (line shape) · Ruby `instance_eval|class_eval|module_eval|*_exec` · plus the **line shape** `.apply(eval)` / `.map(exec)`, where the interpreter is a *reference*, not a call |
+| ssti | CWE-1336 | high | `from_string`, `renderString`, `Template`, `compileString` · JVM `Velocity.evaluate`, `template.process|merge` (receiver- + import-gated) |
+| path | CWE-22 | high | `readFile`, `writeFile`, `sendFile`, `send_from_directory`, `open` · JVM/C# constructors: `new File`, `FileInputStream`, `newBufferedReader` · Go `os.Open|ReadFile|WriteFile|Create` · PHP `fopen`, `file_get_contents`, `file_put_contents`, `readfile` · Ruby `File.read|IO.readlines|FileUtils.*` · Python `shutil.copy|move|rmtree` · zip-slip: `extractall`, `extract`, `unzip` |
+| include | CWE-98 | high | PHP `include`/`require`/`*_once` — call form, plus the **keyword form** `require $page;` as a line shape (a literal argument never matches) |
+| ssrf | CWE-918 | high | bare `fetch`, `request`, `urlopen`, `axios`, `got` · + member calls `axios.get`, `http.get`, `requests.get`, `session.post` (receiver-gated) · JVM `restTemplate.getForObject|exchange`, `httpClient.execute|send`, `url.openStream` (receiver- + import-gated) · PHP `curl_init`, `curl_setopt`, `curl_exec` · Ruby `Net::HTTP.get`, `Faraday|RestClient|HTTParty.get`, `URI.open` |
+| xxe | CWE-611 | high | `parseString`, `parseFromString`, `fromstring`, `SAXParser`, `DocumentBuilder` · PHP `simplexml_load_string|file`, `loadXML`, `loadHTML` |
+| ldap | CWE-90 | high | `ldap.search`, `client.bind` (receiver-gated) · JVM `ctx|ic|dirContext.search|bind` |
+| xss | CWE-79 | medium | `res.send`, `res.write`, `w.Write`, `render_template_string` · JVM servlet writers: `println`, `print`, `write`, chained `format` (import-gated) · Go `fmt.Fprintf|Fprint`, `io.WriteString`, and `template.HTML|JS|URL` (escaping bypass, high) · ASP.NET `Response.Write|WriteAsync` |
 | crlf | CWE-93 | medium | `res.setHeader`, `res.header`, `addHeader` (receiver-gated) |
 | proto | CWE-1321 | high | `_.merge`, `_.defaultsDeep`, `extend` (receiver-gated) |
-| deserialize | CWE-502 | high | `pickle.loads`, `yaml.load`, `unserialize`, `readObject` |
-| crypto | CWE-327 | medium | `md5`, `sha1`, `createCipher`, `DES` · JVM: `MessageDigest.getInstance`, `Cipher.getInstance` (receiver-gated; read the algorithm string) |
-| redirect | CWE-601 | medium | `res.redirect` |
+| deserialize | CWE-502 | high | `pickle.loads`, `yaml.load`, `unserialize`, `readObject` · .NET `BinaryFormatter|SoapFormatter|LosFormatter|JavaScriptSerializer.Deserialize`, `JsonConvert.DeserializeObject` (receiver-gated) |
+| crypto | CWE-327 | medium | `md5`, `sha1`, `createCipher`, `DES` · JVM: `MessageDigest.getInstance`, `Cipher.getInstance` (receiver-gated; read the algorithm string) · Go `md5|sha1.New|Sum` (CWE-328), `des|rc4.NewCipher` |
+| redirect | CWE-601 | medium | `res.redirect`, `window.open` · JVM `response.sendRedirect` · Go `http.Redirect` · ASP.NET `Response.Redirect`, bare `Redirect(returnUrl)`, `RedirectToAction` |
 | buffer | CWE-120 | high | C/C++ best-effort: `strcpy`, `strcat`, `sprintf`, `gets`, `memcpy` |
 | argv | CWE-88 | high | `execFile`, `execFileSync`, `execve`, `posix_spawn` |
 | domxss | CWE-79 | high | **assignments**, not calls: `.innerHTML =`, `dangerouslySetInnerHTML`, `v-html`, `.src =` |
@@ -31,8 +32,8 @@ you a glance; a missed flow is a missed bug.
 | redos | CWE-1333 | medium | `new RegExp`, `regexp.MustCompile`, `re.compile` (receiver-gated) |
 | algodos | CWE-407 | medium | `fuzz.extract`, `ratio`, `token_sort_ratio`, `distance`, `levenshtein`, `findBestMatch`, `get_close_matches` (import-gated) |
 | errleak | CWE-209 | low | **line shape**, not a call: `res.json({ error: err.message })`, `NextResponse.json({ message: String(error) })`, `jsonify({"error": str(e)})` |
-| reflect | CWE-470 | medium | `getattr`, `Class.forName`, `importlib.import_module`, `newInstance` |
-| xpath | CWE-643 | high | `selectNodes`, `xpath.select`, `evaluate` (receiver-gated) |
+| reflect | CWE-470 | medium | `getattr`, `Class.forName`, `importlib.import_module`, `newInstance` · Ruby `obj.send|public_send|const_get` (receiver-gated) |
+| xpath | CWE-643 | high | `selectNodes`, `xpath.select`, `xpath.compile`, `evaluate` (receiver-gated; `compile` is claimed here BEFORE the `code` rule can) |
 | massassign | CWE-915 | medium | `setAttributes`, `bulkCreate`, `fill`, `update_attributes` |
 | csv | CWE-1236 | medium | `writerow`, `to_csv`, `fputcsv`, `writeRecords` |
 | trustboundary | CWE-501 | medium | `session.setAttribute`, `putValue` (JVM) |
@@ -118,8 +119,9 @@ the candidate list. The SSRF member-call rule additionally *requires* a receiver
 a bare `get(x)` never matches. Coverage is deepest for the web stacks; `buffer` is a
 best-effort C/C++ scaffold — pair it with cppcheck/gosec.
 
-Every class above is exercised by a labelled per-CWE benchmark (`tests/fixtures/bench/`, 27
-classes), scored by `tests/bench.test.ts` for per-class TPR/FPR/Youden against a safe twin that
+Every class above is exercised by a labelled per-CWE benchmark (`tests/fixtures/bench/`, 28
+classes, with Java/Go/C#/PHP/Ruby/Python twins wherever a rule is language-specific), scored by
+`tests/bench.test.ts` for per-class TPR/FPR/Youden against a safe twin that
 must not be flagged — by ANY rule, not merely its own, so a new rule cannot buy recall with
 cross-class noise. A CI gate against class-specific detection regressions.
 
@@ -132,7 +134,12 @@ Django (`request.args/form/GET/POST`), Starlette/FastAPI (`request.query_params`
 (`Request.Query|Form|Headers`, `[FromBody]`), Rails `params`, Go `net/http` **plus gin/echo/fiber**
 (`c.Param|Query|ShouldBind`) and gorilla/chi route params, Rust axum/actix extractors (`Query<T>`,
 `Path<T>`, `Json<T>`), Phoenix (`conn.params`), NestJS decorators (`@Body`, `@Query`), Next.js
-(`searchParams.get`, `await req.json()`), Vapor/Swift.
+(`searchParams.get`, `await req.json()`), Hono (`c.req.query|param|json`), tRPC/oRPC (`.input(schema)`),
+GraphQL resolvers (`(parent, args)`), Spring mappings (`@GetMapping`…), Django REST framework
+(`@api_view`, `APIView`), Vapor/Swift. **By convention** (the path, not the content): Next/Nuxt/SvelteKit
+route files, serverless handlers, `*Controller` files, Django `views.py`, PHP web roots — and the
+route tables themselves, Laravel `routes/web.php|api.php` (`Route::get(...)`) and Rails
+`config/routes.rb` (`get "/x", to: ...`).
 
 **Client-side (DOM)** — `location.hash|search|href`, `document.URL|referrer|cookie`, `window.name`,
 `URLSearchParams`, `localStorage/sessionStorage.getItem`, `history.state`, and `event.data` from a
@@ -151,19 +158,25 @@ rather than attacker-typed, and the reason the `llm` class runs in both directio
 
 ## Sanitizers (hints)
 
-Parameterized queries (`?`/`$1`/`:name` placeholders), shell quoting
-(`shlex.quote`, `escapeshellarg` — note that argv-array exec neutralizes CWE-78 and
+Parameterized queries (`?`/`$1`/`:name` placeholders, and the **binding calls** that follow a
+prepare — `setString`, `bind_param`, `bindValue`, PDO `execute([...])`, `encodeForSQL`, the hash
+form of Rails `where`), shell quoting
+(`shlex.quote`, `escapeshellarg`, `execa`, `shell-quote` — note that argv-array exec neutralizes CWE-78 and
 raises CWE-88, so it annotates `command` and is itself the `argv` sink), path confinement (`basename`,
 `realpath`, `secure_filename`), HTML escaping (`escapeHtml`, `DOMPurify`,
-`bleach`, `markupsafe`), safe loaders (`yaml.safe_load`, `JSON.parse`),
-NoSQL operator-stripping (`mongo-sanitize`), XML entity-disabling
+`bleach`, `markupsafe`, and the JVM/.NET/Go encoders: ESAPI `encodeForHTML`, OWASP `Encode.forHtml`,
+`HtmlUtils.htmlEscape`, `HttpUtility.HtmlEncode`, `html.EscapeString`, `htmlspecialchars`), safe loaders
+(`yaml.safe_load`, `JSON.parse`), NoSQL operator-stripping (`mongo-sanitize`), XML entity-disabling
 (`resolve_entities=False`, `FEATURE_SECURE_PROCESSING`), LDAP escaping
-(`ldap.escape`), CR/LF stripping, prototype-pollution guards
-(`Object.create(null)`, `__proto__` checks), template autoescaping, and
-type-coercion/validation (`parseInt`, `Number`, `validator.*`, `zod`/`Joi`), and an input-length
-**bound** (`slice(0, n)`, `max(n)`, `maxLength`, `[:n]`) for `algodos`. These
-**lower confidence and annotate** a candidate — they do not auto-dismiss it; you
-confirm the sanitizer actually covers the flow.
+(`ldap.escape`, `encodeForLDAP`, `encodeForDN`), redirect/SSRF destination checks (`new URL(x)`,
+`url_has_allowed_host_and_scheme`, `IsLocalUrl`, an `allowedHosts` set), CR/LF stripping,
+prototype-pollution guards (`Object.create(null)`, `__proto__` checks), template autoescaping /
+sandboxing, and type-coercion/validation (`parseInt`, `Number`, `validator.*`, `zod`/`Joi`/`yup`/`ajv`,
+express-validator `body()`/`check()`, `class-validator`, `pydantic`, `marshmallow`, `@Valid`), and an
+input-length **bound** (`slice(0, n)`, `max(n)`, `maxLength`, `[:n]`) for `algodos`. The sink line, the
+three lines above it AND the three below it are inspected, because a prepared statement binds its
+parameters after the prepare. These **lower confidence and annotate** a candidate — they do not
+auto-dismiss it; you confirm the sanitizer actually covers the flow.
 
 One rule opts out of the general one, and the exception is the point: `algodos` never receives the
 "type-coercion/validation present" hint. A schema that checks the *type* says nothing about the

@@ -1,6 +1,100 @@
 {
   "findings": [
     {
+      "id": "566f3df2ae36",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "title": "Cross-site scripting (reflected): untrusted input reaches format()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.java",
+        "line": 6,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.java",
+        "line": 7,
+        "kind": "xss",
+        "symbol": "doGet"
+      },
+      "path": [
+        {
+          "file": "vuln.java",
+          "line": 6,
+          "symbol": "doGet",
+          "why": "untrusted input (http): .getParameter("
+        },
+        {
+          "file": "vuln.java",
+          "line": 7,
+          "symbol": "doGet",
+          "why": "xss sink: format()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "q"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.java:6 may reach the xss sink format() at vuln.java:7 through 1 hop(s). Tainted data formatted into a servlet response writer. Verify it is contextually escaped (OWASP Encoder / Spring's HtmlUtils) before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/79.html"
+      ],
+      "status": "open",
+      "risk": 30
+    },
+    {
+      "id": "668b926bdc16",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "title": "Cross-site scripting (reflected): untrusted input reaches WriteAsync()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.cs",
+        "line": 8,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.cs",
+        "line": 9,
+        "kind": "xss",
+        "symbol": "Index"
+      },
+      "path": [
+        {
+          "file": "vuln.cs",
+          "line": 8,
+          "symbol": "Index",
+          "why": "untrusted input (http): Request.Query — at file scope"
+        },
+        {
+          "file": "vuln.cs",
+          "line": 9,
+          "symbol": "Index",
+          "why": "xss sink: WriteAsync()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "q"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.cs:8 may reach the xss sink WriteAsync() at vuln.cs:9 through 1 hop(s). Tainted data written straight to the HTTP response. Encode with HttpUtility.HtmlEncode / the Razor `@` syntax, or return a typed result the framework encodes. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/79.html"
+      ],
+      "status": "open",
+      "risk": 30
+    },
+    {
       "id": "af5a6d6a1af5",
       "category": "taint",
       "cwe": "CWE-79",
@@ -52,13 +146,66 @@
       ],
       "status": "open",
       "risk": 30
+    },
+    {
+      "id": "e944005ae4af",
+      "category": "taint",
+      "cwe": "CWE-79",
+      "title": "Cross-site scripting (reflected): untrusted input reaches Fprintf()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.go",
+        "line": 9,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.go",
+        "line": 10,
+        "kind": "xss",
+        "symbol": "search"
+      },
+      "path": [
+        {
+          "file": "vuln.go",
+          "line": 9,
+          "symbol": "search",
+          "why": "untrusted input (http): r.URL"
+        },
+        {
+          "file": "vuln.go",
+          "line": 10,
+          "symbol": "search",
+          "why": "xss sink: Fprintf()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "q"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.go:9 may reach the xss sink Fprintf() at vuln.go:10 through 1 hop(s). Tainted data written through fmt/io. If the writer is the http.ResponseWriter this is reflected XSS: escape with html.EscapeString or render through html/template. A write to os.Stderr/a file is a different (log/injection) question. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/79.html"
+      ],
+      "status": "open",
+      "risk": 30
     }
   ],
   "graph": {
     "files": [
       "routes.js",
+      "safe.cs",
+      "safe.go",
+      "safe.java",
       "safe.js",
-      "sink.js"
+      "sink.js",
+      "vuln.cs",
+      "vuln.go",
+      "vuln.java"
     ],
     "edges": [
       {
@@ -80,19 +227,162 @@
       "handle": [
         "routes.js"
       ],
+      "SearchController": [
+        "safe.cs",
+        "vuln.cs"
+      ],
+      "Index": [
+        "safe.cs",
+        "vuln.cs"
+      ],
+      "Safe": [
+        "safe.java"
+      ],
+      "doGet": [
+        "safe.java",
+        "vuln.java"
+      ],
       "safe": [
         "safe.js"
       ],
       "renderSearch": [
         "sink.js"
+      ],
+      "Vuln": [
+        "vuln.java"
       ]
     },
     "callersBySymbol": {
+      "Content": [
+        {
+          "file": "safe.cs",
+          "line": 12,
+          "symbol": "Index"
+        }
+      ],
+      "Execute": [
+        {
+          "file": "safe.go",
+          "line": 13,
+          "symbol": "search"
+        }
+      ],
+      "Fprintf": [
+        {
+          "file": "vuln.go",
+          "line": 10,
+          "symbol": "search"
+        }
+      ],
+      "Get": [
+        {
+          "file": "safe.go",
+          "line": 11,
+          "symbol": "search"
+        },
+        {
+          "file": "vuln.go",
+          "line": 9,
+          "symbol": "search"
+        }
+      ],
+      "HtmlEncode": [
+        {
+          "file": "safe.cs",
+          "line": 11,
+          "symbol": "Index"
+        }
+      ],
+      "Must": [
+        {
+          "file": "safe.go",
+          "line": 8
+        }
+      ],
+      "New": [
+        {
+          "file": "safe.go",
+          "line": 8
+        }
+      ],
+      "Parse": [
+        {
+          "file": "safe.go",
+          "line": 8
+        }
+      ],
+      "Query": [
+        {
+          "file": "safe.go",
+          "line": 11,
+          "symbol": "search"
+        },
+        {
+          "file": "vuln.go",
+          "line": 9,
+          "symbol": "search"
+        }
+      ],
+      "WriteAsync": [
+        {
+          "file": "vuln.cs",
+          "line": 9,
+          "symbol": "Index"
+        }
+      ],
+      "format": [
+        {
+          "file": "safe.java",
+          "line": 8,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 7,
+          "symbol": "doGet"
+        }
+      ],
+      "getParameter": [
+        {
+          "file": "safe.java",
+          "line": 6,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 6,
+          "symbol": "doGet"
+        }
+      ],
+      "getWriter": [
+        {
+          "file": "vuln.java",
+          "line": 7,
+          "symbol": "doGet"
+        }
+      ],
+      "import": [
+        {
+          "file": "safe.go",
+          "line": 3
+        },
+        {
+          "file": "vuln.go",
+          "line": 3
+        }
+      ],
       "json": [
         {
           "file": "safe.js",
           "line": 3,
           "symbol": "safe"
+        }
+      ],
+      "length": [
+        {
+          "file": "safe.java",
+          "line": 9,
+          "symbol": "doGet"
         }
       ],
       "renderSearch": [
@@ -113,6 +403,20 @@
           "file": "sink.js",
           "line": 2,
           "symbol": "renderSearch"
+        }
+      ],
+      "setContentLength": [
+        {
+          "file": "safe.java",
+          "line": 9,
+          "symbol": "doGet"
+        }
+      ],
+      "setContentType": [
+        {
+          "file": "safe.java",
+          "line": 10,
+          "symbol": "doGet"
         }
       ]
     }

@@ -57,6 +57,35 @@ describe("traceDefUse", () => {
     expect(traceDefUse(src, 1, "req.query", 3)).toBe("unlinked");
   });
 
+  it("follows a StringBuilder: sb.append(param) then executeQuery(sb.toString()) is linked", () => {
+    const src = [
+      'String param = request.getParameter("id");',
+      "StringBuilder sb = new StringBuilder();",
+      'sb.append("SELECT * FROM users WHERE id = ");',
+      "sb.append(param);",
+      "ResultSet rs = stmt.executeQuery(sb.toString());",
+    ];
+    expect(traceDefUse(src, 1, "request.getParameter", 5)).toBe("linked");
+    expect(traceDefUseDetail(src, 1, "request.getParameter", 5).tainted).toEqual(["param", "sb"]);
+  });
+
+  it("follows a list/map that the tainted value was added to", () => {
+    const src = ["const q = req.query.q;", "const parts = [];", "parts.push(q);", "exec(parts.join(' '));"];
+    expect(traceDefUse(src, 1, "req.query", 4)).toBe("linked");
+  });
+
+  it("follows `+=` and PHP's `.=` as bindings", () => {
+    const js = ["const id = req.query.id;", 'let sql = "SELECT * FROM t";', 'sql += " WHERE id = " + id;', "db.query(sql);"];
+    expect(traceDefUse(js, 1, "req.query", 4)).toBe("linked");
+    const php = ['$id = $_GET["id"];', '$sql = "SELECT * FROM t";', '$sql .= " WHERE id = " . $id;', "mysqli_query($c, $sql);"];
+    expect(traceDefUse(php, 1, "$_GET", 4)).toBe("linked");
+  });
+
+  it("does NOT taint a receiver that merely mentions a tainted name in a non-mutating call", () => {
+    const src = ["const q = req.query.q;", "const out = [];", "logger.info(q);", "exec(out.join(' '));"];
+    expect(traceDefUse(src, 1, "req.query", 4)).toBe("unlinked");
+  });
+
   it("treats a source used on the sink line itself as linked", () => {
     expect(traceDefUse(["exec(req.query.cmd);"], 1, "req.query", 1)).toBe("linked");
   });

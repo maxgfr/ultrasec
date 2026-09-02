@@ -1,0 +1,115 @@
+{
+  "findings": [
+    {
+      "id": "aebbd758658c",
+      "category": "taint",
+      "cwe": "CWE-98",
+      "title": "File inclusion (LFI/RFI): untrusted input reaches include()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.php",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.php",
+        "line": 3,
+        "kind": "include"
+      },
+      "path": [
+        {
+          "file": "vuln.php",
+          "line": 2,
+          "why": "untrusted input (http): $_GET — at file scope"
+        },
+        {
+          "file": "vuln.php",
+          "line": 3,
+          "why": "include sink: include()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$page"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.php:2 may reach the include sink include() at vuln.php:3 through 1 hop(s). Tainted data selects a file to include — and an included file is executed. Map the input through an allow-list of known includes (a switch/array lookup), never build the path from it; disable allow_url_include. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/98.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "d9f4c7cabea8",
+      "category": "taint",
+      "cwe": "CWE-98",
+      "title": "File inclusion (LFI/RFI): untrusted input reaches include/require (keyword form)()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln-keyword.php",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln-keyword.php",
+        "line": 3,
+        "kind": "include"
+      },
+      "path": [
+        {
+          "file": "vuln-keyword.php",
+          "line": 2,
+          "why": "untrusted input (http): $_GET — at file scope"
+        },
+        {
+          "file": "vuln-keyword.php",
+          "line": 3,
+          "why": "include sink: include/require (keyword form)()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$page"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln-keyword.php:2 may reach the include sink include/require (keyword form)() at vuln-keyword.php:3 through 1 hop(s). A variable selects the file to include, and an included file is executed. Map the input through an allow-list of known includes, never build the path from it; disable allow_url_include. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/98.html"
+      ],
+      "status": "open",
+      "risk": 48
+    }
+  ],
+  "graph": {
+    "files": [
+      "safe.php",
+      "vuln-keyword.php",
+      "vuln.php"
+    ],
+    "edges": [],
+    "symbolDefs": {},
+    "callersBySymbol": {
+      "in_array": [
+        {
+          "file": "safe.php",
+          "line": 5
+        }
+      ],
+      "include": [
+        {
+          "file": "vuln.php",
+          "line": 3
+        }
+      ]
+    }
+  }
+}

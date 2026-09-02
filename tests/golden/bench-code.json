@@ -1,6 +1,50 @@
 {
   "findings": [
     {
+      "id": "05c0c4f2a31c",
+      "category": "taint",
+      "cwe": "CWE-94",
+      "title": "Code injection / eval: untrusted input reaches assert (string form)()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln-assert.php",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln-assert.php",
+        "line": 3,
+        "kind": "code"
+      },
+      "path": [
+        {
+          "file": "vuln-assert.php",
+          "line": 2,
+          "why": "untrusted input (http): $_GET — at file scope"
+        },
+        {
+          "file": "vuln-assert.php",
+          "line": 3,
+          "why": "code sink: assert (string form)()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$cond"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln-assert.php:2 may reach the code sink assert (string form)() at vuln-assert.php:3 through 1 hop(s). A variable passed to `assert` is evaluated as PHP code on PHP < 8 (and wherever zend.assertions is on). Assert an expression, never a string built from input. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/94.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
       "id": "3ab0ce0f1a22",
       "category": "taint",
       "cwe": "CWE-94",
@@ -52,13 +96,109 @@
       ],
       "status": "open",
       "risk": 48
+    },
+    {
+      "id": "de85d0b0b76b",
+      "category": "taint",
+      "cwe": "CWE-94",
+      "title": "Code injection / eval: untrusted input reaches instance_eval()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.rb",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.rb",
+        "line": 4,
+        "kind": "code",
+        "symbol": "run"
+      },
+      "path": [
+        {
+          "file": "vuln.rb",
+          "line": 3,
+          "symbol": "run",
+          "why": "untrusted input (http): params["
+        },
+        {
+          "file": "vuln.rb",
+          "line": 4,
+          "symbol": "run",
+          "why": "code sink: instance_eval()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "code"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.rb:3 may reach the code sink instance_eval() at vuln.rb:4 through 1 hop(s). Tainted data evaluated as Ruby (`*_eval` with a string argument). Use the block form with a fixed body, or a dispatch table keyed by an allow-listed name. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/94.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "e64dabd426af",
+      "category": "taint",
+      "cwe": "CWE-94",
+      "title": "Code injection / eval: untrusted input reaches create_function()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.php",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.php",
+        "line": 3,
+        "kind": "code"
+      },
+      "path": [
+        {
+          "file": "vuln.php",
+          "line": 2,
+          "why": "untrusted input (http): $_GET — at file scope"
+        },
+        {
+          "file": "vuln.php",
+          "line": 3,
+          "why": "code sink: create_function()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$body"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.php:2 may reach the code sink create_function() at vuln.php:3 through 1 hop(s). Tainted data compiled as PHP code (`create_function` body / `eval`). Almost never safe; replace with a closure or a fixed dispatch table. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/94.html"
+      ],
+      "status": "open",
+      "risk": 48
     }
   ],
   "graph": {
     "files": [
       "routes.js",
       "safe.js",
-      "sink.js"
+      "safe.php",
+      "safe.rb",
+      "sink.js",
+      "vuln-assert.php",
+      "vuln.php",
+      "vuln.rb"
     ],
     "edges": [
       {
@@ -83,11 +223,25 @@
       "safe": [
         "safe.js"
       ],
+      "RulesController": [
+        "safe.rb",
+        "vuln.rb"
+      ],
+      "run": [
+        "safe.rb",
+        "vuln.rb"
+      ],
       "evaluate": [
         "sink.js"
       ]
     },
     "callersBySymbol": {
+      "create_function": [
+        {
+          "file": "vuln.php",
+          "line": 3
+        }
+      ],
       "eval": [
         {
           "file": "sink.js",
@@ -100,6 +254,19 @@
           "file": "routes.js",
           "line": 4,
           "symbol": "handle"
+        }
+      ],
+      "http_response_code": [
+        {
+          "file": "safe.php",
+          "line": 6
+        }
+      ],
+      "instance_eval": [
+        {
+          "file": "vuln.rb",
+          "line": 4,
+          "symbol": "run"
         }
       ],
       "parse": [

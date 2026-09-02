@@ -23,6 +23,97 @@
       "risk": 34
     },
     {
+      "id": "38537ba4bc78",
+      "category": "taint",
+      "cwe": "CWE-89",
+      "title": "SQL injection: untrusted input reaches mysqli_query()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.php",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.php",
+        "line": 4,
+        "kind": "sql"
+      },
+      "path": [
+        {
+          "file": "vuln.php",
+          "line": 3,
+          "why": "untrusted input (http): $_GET — at file scope"
+        },
+        {
+          "file": "vuln.php",
+          "line": 4,
+          "why": "sql sink: mysqli_query()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$id"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.php:3 may reach the sql sink mysqli_query() at vuln.php:4 through 1 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Possible sanitizer along the path — vuln.php:1 (looks parameterized (placeholder present)) — confirm it actually neutralizes this flow. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "8a1f7e150ee8",
+      "category": "taint",
+      "cwe": "CWE-89",
+      "title": "SQL injection: untrusted input reaches executeQuery()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "routes.java",
+        "line": 12,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "sink.java",
+        "line": 13,
+        "kind": "sql",
+        "symbol": "lookup"
+      },
+      "path": [
+        {
+          "file": "routes.java",
+          "line": 12,
+          "symbol": "user",
+          "why": "untrusted input (http): @RequestParam"
+        },
+        {
+          "file": "routes.java",
+          "line": 13,
+          "symbol": "user",
+          "why": "calls lookup()"
+        },
+        {
+          "file": "sink.java",
+          "line": 13,
+          "symbol": "lookup",
+          "why": "sql sink: executeQuery()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "message": "Cross-file candidate: http input at routes.java:12 may reach the sql sink executeQuery() at sink.java:13 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Possible sanitizer along the path — routes.java:12 (looks parameterized (placeholder present)) — confirm it actually neutralizes this flow. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
       "id": "8b93be422154",
       "category": "taint",
       "cwe": "CWE-89",
@@ -74,22 +165,125 @@
       ],
       "status": "open",
       "risk": 48
+    },
+    {
+      "id": "c0757765f675",
+      "category": "taint",
+      "cwe": "CWE-89",
+      "title": "SQL injection: untrusted input reaches where()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.rb",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.rb",
+        "line": 4,
+        "kind": "sql",
+        "symbol": "index"
+      },
+      "path": [
+        {
+          "file": "vuln.rb",
+          "line": 3,
+          "symbol": "index",
+          "why": "untrusted input (http): params["
+        },
+        {
+          "file": "vuln.rb",
+          "line": 4,
+          "symbol": "index",
+          "why": "sql sink: where()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "q"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.rb:3 may reach the sql sink where() at vuln.rb:4 through 1 hop(s). Tainted data interpolated into an ActiveRecord/Sequel query fragment. Use the hash form (`where(name: q)`) or a placeholder (`where(\"name = ?\", q)`); `order`/`pluck` take column names — allow-list them. Possible sanitizer along the path — vuln.rb:3 (looks parameterized (placeholder present)); vuln.rb:4 (looks parameterized (placeholder present)) — confirm it actually neutralizes this flow. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "c52dd98e46b1",
+      "category": "taint",
+      "cwe": "CWE-89",
+      "title": "SQL injection: untrusted input reaches Query()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.go",
+        "line": 11,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.go",
+        "line": 12,
+        "kind": "sql",
+        "symbol": "lookup"
+      },
+      "path": [
+        {
+          "file": "vuln.go",
+          "line": 11,
+          "symbol": "lookup",
+          "why": "untrusted input (http): r.URL"
+        },
+        {
+          "file": "vuln.go",
+          "line": 12,
+          "symbol": "lookup",
+          "why": "sql sink: Query()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "id"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.go:11 may reach the sql sink Query() at vuln.go:12 through 1 hop(s). Tainted data concatenated into a database/sql statement. Verify the query uses `?`/`$1` placeholders with the value passed as an argument, not built with `+` or fmt.Sprintf. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/89.html"
+      ],
+      "status": "open",
+      "risk": 48
     }
   ],
   "graph": {
     "files": [
+      "routes.java",
       "routes.js",
+      "safe.go",
+      "safe.java",
       "safe.js",
-      "sink.js"
+      "safe.php",
+      "safe.rb",
+      "sink.java",
+      "sink.js",
+      "vuln.go",
+      "vuln.php",
+      "vuln.rb"
     ],
     "edges": [
       {
-        "from": "routes.js",
-        "to": "sink.js",
+        "from": "routes.java",
+        "to": "sink.java",
         "kind": "call",
         "weight": 1,
-        "fromSymbol": "handle",
-        "toSymbol": "lookup"
+        "fromSymbol": "UserController",
+        "toSymbol": "UserDao"
       },
       {
         "from": "routes.js",
@@ -99,22 +293,204 @@
       }
     ],
     "symbolDefs": {
+      "UserController": [
+        "routes.java"
+      ],
+      "user": [
+        "routes.java"
+      ],
       "handle": [
         "routes.js"
+      ],
+      "SafeServlet": [
+        "safe.java"
+      ],
+      "doGet": [
+        "safe.java"
       ],
       "safe": [
         "safe.js"
       ],
+      "UsersController": [
+        "safe.rb",
+        "vuln.rb"
+      ],
+      "show": [
+        "safe.rb"
+      ],
+      "UserDao": [
+        "sink.java"
+      ],
       "lookup": [
+        "sink.java",
         "sink.js"
+      ],
+      "index": [
+        "vuln.rb"
       ]
     },
     "callersBySymbol": {
+      "Atoi": [
+        {
+          "file": "safe.go",
+          "line": 11,
+          "symbol": "lookup"
+        }
+      ],
+      "Close": [
+        {
+          "file": "vuln.go",
+          "line": 16,
+          "symbol": "lookup"
+        }
+      ],
+      "Get": [
+        {
+          "file": "safe.go",
+          "line": 9,
+          "symbol": "lookup"
+        },
+        {
+          "file": "vuln.go",
+          "line": 11,
+          "symbol": "lookup"
+        }
+      ],
+      "GetMapping": [
+        {
+          "file": "routes.java",
+          "line": 11,
+          "symbol": "UserController"
+        }
+      ],
+      "PDO": [
+        {
+          "file": "safe.php",
+          "line": 2
+        }
+      ],
+      "Query": [
+        {
+          "file": "safe.go",
+          "line": 9,
+          "symbol": "lookup"
+        },
+        {
+          "file": "vuln.go",
+          "line": 11,
+          "symbol": "lookup"
+        },
+        {
+          "file": "vuln.go",
+          "line": 12,
+          "symbol": "lookup"
+        }
+      ],
+      "UserDao": [
+        {
+          "file": "routes.java",
+          "line": 9,
+          "symbol": "UserController"
+        }
+      ],
+      "WriteHeader": [
+        {
+          "file": "safe.go",
+          "line": 13,
+          "symbol": "lookup"
+        },
+        {
+          "file": "safe.go",
+          "line": 17,
+          "symbol": "lookup"
+        }
+      ],
+      "bindValue": [
+        {
+          "file": "safe.php",
+          "line": 6
+        }
+      ],
+      "createStatement": [
+        {
+          "file": "sink.java",
+          "line": 12,
+          "symbol": "lookup"
+        }
+      ],
+      "executeQuery": [
+        {
+          "file": "sink.java",
+          "line": 13,
+          "symbol": "lookup"
+        }
+      ],
+      "find": [
+        {
+          "file": "safe.rb",
+          "line": 5,
+          "symbol": "show"
+        }
+      ],
+      "getParameter": [
+        {
+          "file": "safe.java",
+          "line": 8,
+          "symbol": "doGet"
+        }
+      ],
+      "getString": [
+        {
+          "file": "sink.java",
+          "line": 14,
+          "symbol": "lookup"
+        }
+      ],
+      "import": [
+        {
+          "file": "safe.go",
+          "line": 3
+        },
+        {
+          "file": "vuln.go",
+          "line": 3
+        }
+      ],
       "lookup": [
+        {
+          "file": "routes.java",
+          "line": 13,
+          "symbol": "user"
+        },
         {
           "file": "routes.js",
           "line": 4,
           "symbol": "handle"
+        }
+      ],
+      "mysqli_connect": [
+        {
+          "file": "vuln.php",
+          "line": 2
+        }
+      ],
+      "mysqli_query": [
+        {
+          "file": "vuln.php",
+          "line": 4
+        }
+      ],
+      "parseInt": [
+        {
+          "file": "safe.java",
+          "line": 10,
+          "symbol": "doGet"
+        }
+      ],
+      "prepare": [
+        {
+          "file": "safe.php",
+          "line": 5
         }
       ],
       "query": [
@@ -143,6 +519,20 @@
           "file": "sink.js",
           "line": 1,
           "symbol": "db"
+        }
+      ],
+      "setStatus": [
+        {
+          "file": "safe.java",
+          "line": 11,
+          "symbol": "doGet"
+        }
+      ],
+      "where": [
+        {
+          "file": "vuln.rb",
+          "line": 4,
+          "symbol": "index"
         }
       ]
     }

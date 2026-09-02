@@ -68,21 +68,106 @@
       ],
       "status": "open",
       "risk": 34
+    },
+    {
+      "id": "a47937f24a02",
+      "category": "taint",
+      "cwe": "CWE-90",
+      "title": "LDAP injection: untrusted input reaches search()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.java",
+        "line": 10,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.java",
+        "line": 12,
+        "kind": "ldap",
+        "symbol": "doGet"
+      },
+      "path": [
+        {
+          "file": "vuln.java",
+          "line": 10,
+          "symbol": "doGet",
+          "why": "untrusted input (http): .getParameter("
+        },
+        {
+          "file": "vuln.java",
+          "line": 12,
+          "symbol": "doGet",
+          "why": "ldap sink: search()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "uid"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.java:10 may reach the ldap sink search() at vuln.java:12 through 1 hop(s). Tainted data concatenated into an LDAP filter/DN. Escape with the LDAP escaping API (ldap.escape / escapeFilter / escapeDN). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/90.html"
+      ],
+      "status": "open",
+      "risk": 48
     }
   ],
   "graph": {
     "files": [
+      "safe.java",
       "safe.js",
+      "vuln.java",
       "vuln.js"
     ],
     "edges": [],
     "symbolDefs": {
+      "Safe": [
+        "safe.java"
+      ],
+      "doGet": [
+        "safe.java",
+        "vuln.java"
+      ],
       "find": [
         "safe.js",
         "vuln.js"
+      ],
+      "Vuln": [
+        "vuln.java"
       ]
     },
     "callersBySymbol": {
+      "SearchControls": [
+        {
+          "file": "vuln.java",
+          "line": 11,
+          "symbol": "doGet"
+        }
+      ],
+      "getParameter": [
+        {
+          "file": "safe.java",
+          "line": 6,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 10,
+          "symbol": "doGet"
+        }
+      ],
+      "matches": [
+        {
+          "file": "safe.java",
+          "line": 8,
+          "symbol": "doGet"
+        }
+      ],
       "search": [
         {
           "file": "safe.js",
@@ -90,9 +175,26 @@
           "symbol": "find"
         },
         {
+          "file": "vuln.java",
+          "line": 12,
+          "symbol": "doGet"
+        },
+        {
           "file": "vuln.js",
           "line": 3,
           "symbol": "find"
+        }
+      ],
+      "setStatus": [
+        {
+          "file": "safe.java",
+          "line": 9,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 13,
+          "symbol": "doGet"
         }
       ]
     }

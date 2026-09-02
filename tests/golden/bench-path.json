@@ -54,6 +54,144 @@
       "risk": 48
     },
     {
+      "id": "7e8c209cb74a",
+      "category": "taint",
+      "cwe": "CWE-22",
+      "title": "Path traversal: untrusted input reaches read()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.rb",
+        "line": 3,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.rb",
+        "line": 4,
+        "kind": "path",
+        "symbol": "show"
+      },
+      "path": [
+        {
+          "file": "vuln.rb",
+          "line": 3,
+          "symbol": "show",
+          "why": "untrusted input (http): params["
+        },
+        {
+          "file": "vuln.rb",
+          "line": 4,
+          "symbol": "show",
+          "why": "path sink: read()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "name"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.rb:3 may reach the path sink read() at vuln.rb:4 through 1 hop(s). Tainted data used as a filesystem path via File/IO/Dir/FileUtils. Confine to a base dir (File.expand_path + start_with? against the base) and reject `..` before the call. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/22.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "99527ce34ac8",
+      "category": "taint",
+      "cwe": "CWE-22",
+      "title": "Path traversal: untrusted input reaches ReadFile()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.go",
+        "line": 9,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.go",
+        "line": 10,
+        "kind": "path",
+        "symbol": "download"
+      },
+      "path": [
+        {
+          "file": "vuln.go",
+          "line": 9,
+          "symbol": "download",
+          "why": "untrusted input (http): r.URL"
+        },
+        {
+          "file": "vuln.go",
+          "line": 10,
+          "symbol": "download",
+          "why": "path sink: ReadFile()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "name"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.go:9 may reach the path sink ReadFile() at vuln.go:10 through 1 hop(s). Tainted data used as a filesystem path. Confine to a base dir (filepath.Clean + a prefix check against the base, or os.Root / SecureJoin) and reject `..` segments before the call. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/22.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "c0b877b0fbb3",
+      "category": "taint",
+      "cwe": "CWE-22",
+      "title": "Path traversal: untrusted input reaches file_get_contents()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.php",
+        "line": 2,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.php",
+        "line": 3,
+        "kind": "path"
+      },
+      "path": [
+        {
+          "file": "vuln.php",
+          "line": 2,
+          "why": "untrusted input (http): $_GET — at file scope"
+        },
+        {
+          "file": "vuln.php",
+          "line": 3,
+          "why": "path sink: file_get_contents()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "$name"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.php:2 may reach the path sink file_get_contents() at vuln.php:3 through 1 hop(s). Tainted data used as a PHP filesystem path. `file_get_contents`/`fopen` also accept URLs (allow_url_fopen), so the same call may be an SSRF: allow-list the scheme AND confine the path (basename/realpath against a base dir). Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/22.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
       "id": "d4990e283537",
       "category": "sast",
       "cwe": "CWE-22",
@@ -74,13 +212,68 @@
       ],
       "status": "open",
       "risk": 34
+    },
+    {
+      "id": "f6ad199368b3",
+      "category": "taint",
+      "cwe": "CWE-22",
+      "title": "Path traversal: untrusted input reaches copy()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.py",
+        "line": 9,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.py",
+        "line": 10,
+        "kind": "path",
+        "symbol": "archive"
+      },
+      "path": [
+        {
+          "file": "vuln.py",
+          "line": 9,
+          "symbol": "archive",
+          "why": "untrusted input (http): request.args"
+        },
+        {
+          "file": "vuln.py",
+          "line": 10,
+          "symbol": "archive",
+          "why": "path sink: copy()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "name"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.py:9 may reach the path sink copy() at vuln.py:10 through 1 hop(s). Tainted data used as a filesystem path in a shutil copy/move/remove. Confine to a base dir (os.path.realpath + a commonpath check against the base) before the call. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/22.html"
+      ],
+      "status": "open",
+      "risk": 48
     }
   ],
   "graph": {
     "files": [
       "routes.js",
+      "safe.go",
       "safe.js",
-      "sink.js"
+      "safe.php",
+      "safe.py",
+      "safe.rb",
+      "sink.js",
+      "vuln.go",
+      "vuln.php",
+      "vuln.py",
+      "vuln.rb"
     ],
     "edges": [
       {
@@ -105,11 +298,167 @@
       "safe": [
         "safe.js"
       ],
+      "archive": [
+        "safe.py",
+        "vuln.py"
+      ],
+      "FilesController": [
+        "safe.rb",
+        "vuln.rb"
+      ],
+      "show": [
+        "safe.rb",
+        "vuln.rb"
+      ],
       "readDoc": [
         "sink.js"
       ]
     },
     "callersBySymbol": {
+      "Clean": [
+        {
+          "file": "safe.go",
+          "line": 12,
+          "symbol": "download"
+        }
+      ],
+      "Contains": [
+        {
+          "file": "safe.go",
+          "line": 13,
+          "symbol": "download"
+        }
+      ],
+      "Flask": [
+        {
+          "file": "safe.py",
+          "line": 4
+        },
+        {
+          "file": "vuln.py",
+          "line": 4
+        }
+      ],
+      "Get": [
+        {
+          "file": "safe.go",
+          "line": 10,
+          "symbol": "download"
+        },
+        {
+          "file": "vuln.go",
+          "line": 9,
+          "symbol": "download"
+        }
+      ],
+      "Query": [
+        {
+          "file": "safe.go",
+          "line": 10,
+          "symbol": "download"
+        },
+        {
+          "file": "vuln.go",
+          "line": 9,
+          "symbol": "download"
+        }
+      ],
+      "ReadFile": [
+        {
+          "file": "vuln.go",
+          "line": 10,
+          "symbol": "download"
+        }
+      ],
+      "WriteHeader": [
+        {
+          "file": "safe.go",
+          "line": 14,
+          "symbol": "download"
+        },
+        {
+          "file": "safe.go",
+          "line": 17,
+          "symbol": "download"
+        }
+      ],
+      "basename": [
+        {
+          "file": "safe.php",
+          "line": 3
+        },
+        {
+          "file": "safe.py",
+          "line": 11,
+          "symbol": "archive"
+        },
+        {
+          "file": "safe.rb",
+          "line": 5,
+          "symbol": "show"
+        }
+      ],
+      "copy": [
+        {
+          "file": "vuln.py",
+          "line": 10,
+          "symbol": "archive"
+        }
+      ],
+      "file_get_contents": [
+        {
+          "file": "vuln.php",
+          "line": 3
+        }
+      ],
+      "get": [
+        {
+          "file": "safe.py",
+          "line": 11,
+          "symbol": "archive"
+        },
+        {
+          "file": "vuln.py",
+          "line": 9,
+          "symbol": "archive"
+        }
+      ],
+      "head": [
+        {
+          "file": "safe.rb",
+          "line": 7,
+          "symbol": "show"
+        }
+      ],
+      "http_response_code": [
+        {
+          "file": "safe.php",
+          "line": 6
+        }
+      ],
+      "import": [
+        {
+          "file": "safe.go",
+          "line": 3
+        },
+        {
+          "file": "vuln.go",
+          "line": 3
+        }
+      ],
+      "in_array": [
+        {
+          "file": "safe.php",
+          "line": 5
+        }
+      ],
+      "read": [
+        {
+          "file": "vuln.rb",
+          "line": 4,
+          "symbol": "show"
+        }
+      ],
       "readDoc": [
         {
           "file": "routes.js",
@@ -143,6 +492,16 @@
           "file": "sink.js",
           "line": 1,
           "symbol": "fs"
+        }
+      ],
+      "route": [
+        {
+          "file": "safe.py",
+          "line": 9
+        },
+        {
+          "file": "vuln.py",
+          "line": 7
         }
       ]
     }

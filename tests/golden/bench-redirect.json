@@ -1,6 +1,100 @@
 {
   "findings": [
     {
+      "id": "3a578179b6a2",
+      "category": "taint",
+      "cwe": "CWE-601",
+      "title": "Open redirect: untrusted input reaches sendRedirect()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.java",
+        "line": 6,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.java",
+        "line": 7,
+        "kind": "redirect",
+        "symbol": "doGet"
+      },
+      "path": [
+        {
+          "file": "vuln.java",
+          "line": 6,
+          "symbol": "doGet",
+          "why": "untrusted input (http): .getParameter("
+        },
+        {
+          "file": "vuln.java",
+          "line": 7,
+          "symbol": "doGet",
+          "why": "redirect sink: sendRedirect()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "next"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.java:6 may reach the redirect sink sendRedirect() at vuln.java:7 through 1 hop(s). Tainted data used as a redirect target. Allow-list the destination host, or accept only a relative path (reject `//`, `\\`, and a scheme) — `LocalRedirect`/`Url.IsLocalUrl` in ASP.NET. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/601.html"
+      ],
+      "status": "open",
+      "risk": 30
+    },
+    {
+      "id": "6993de80f041",
+      "category": "taint",
+      "cwe": "CWE-601",
+      "title": "Open redirect: untrusted input reaches Redirect()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.cs",
+        "line": 8,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.cs",
+        "line": 9,
+        "kind": "redirect",
+        "symbol": "Login"
+      },
+      "path": [
+        {
+          "file": "vuln.cs",
+          "line": 8,
+          "symbol": "Login",
+          "why": "untrusted input (http): Request.Query — at file scope"
+        },
+        {
+          "file": "vuln.cs",
+          "line": 9,
+          "symbol": "Login",
+          "why": "redirect sink: Redirect()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "next"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.cs:8 may reach the redirect sink Redirect() at vuln.cs:9 through 1 hop(s). Tainted data used as a redirect target. Allow-list the destination host, or accept only a relative path (reject `//`, `\\`, and a scheme) — `LocalRedirect`/`Url.IsLocalUrl` in ASP.NET. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/601.html"
+      ],
+      "status": "open",
+      "risk": 30
+    },
+    {
       "id": "6cd1db9327e7",
       "category": "taint",
       "cwe": "CWE-601",
@@ -46,21 +140,168 @@
       ],
       "status": "open",
       "risk": 30
+    },
+    {
+      "id": "a3f177a4b309",
+      "category": "taint",
+      "cwe": "CWE-601",
+      "title": "Open redirect: untrusted input reaches Redirect()",
+      "severity": "medium",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.go",
+        "line": 6,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.go",
+        "line": 7,
+        "kind": "redirect",
+        "symbol": "login"
+      },
+      "path": [
+        {
+          "file": "vuln.go",
+          "line": 6,
+          "symbol": "login",
+          "why": "untrusted input (http): r.URL"
+        },
+        {
+          "file": "vuln.go",
+          "line": 7,
+          "symbol": "login",
+          "why": "redirect sink: Redirect()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "next"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.go:6 may reach the redirect sink Redirect() at vuln.go:7 through 1 hop(s). Tainted data used as a redirect target. Allow-list the destination host, or accept only a relative path (reject `//`, `\\`, and a scheme) — `LocalRedirect`/`Url.IsLocalUrl` in ASP.NET. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/601.html"
+      ],
+      "status": "open",
+      "risk": 30
     }
   ],
   "graph": {
     "files": [
+      "safe.cs",
+      "safe.go",
+      "safe.java",
       "safe.js",
+      "vuln.cs",
+      "vuln.go",
+      "vuln.java",
       "vuln.js"
     ],
     "edges": [],
     "symbolDefs": {
+      "AccountController": [
+        "safe.cs",
+        "vuln.cs"
+      ],
+      "Login": [
+        "safe.cs",
+        "vuln.cs"
+      ],
+      "Safe": [
+        "safe.java"
+      ],
+      "doGet": [
+        "safe.java",
+        "vuln.java"
+      ],
       "handle": [
         "safe.js",
         "vuln.js"
+      ],
+      "Vuln": [
+        "vuln.java"
       ]
     },
     "callersBySymbol": {
+      "Get": [
+        {
+          "file": "safe.go",
+          "line": 6,
+          "symbol": "login"
+        },
+        {
+          "file": "vuln.go",
+          "line": 6,
+          "symbol": "login"
+        }
+      ],
+      "Header": [
+        {
+          "file": "safe.go",
+          "line": 9,
+          "symbol": "login"
+        }
+      ],
+      "LocalRedirect": [
+        {
+          "file": "safe.cs",
+          "line": 10,
+          "symbol": "Login"
+        }
+      ],
+      "Query": [
+        {
+          "file": "safe.go",
+          "line": 6,
+          "symbol": "login"
+        },
+        {
+          "file": "vuln.go",
+          "line": 6,
+          "symbol": "login"
+        }
+      ],
+      "Redirect": [
+        {
+          "file": "vuln.cs",
+          "line": 9,
+          "symbol": "Login"
+        },
+        {
+          "file": "vuln.go",
+          "line": 7,
+          "symbol": "login"
+        }
+      ],
+      "Set": [
+        {
+          "file": "safe.go",
+          "line": 9,
+          "symbol": "login"
+        }
+      ],
+      "WriteHeader": [
+        {
+          "file": "safe.go",
+          "line": 10,
+          "symbol": "login"
+        }
+      ],
+      "getParameter": [
+        {
+          "file": "safe.java",
+          "line": 6,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 6,
+          "symbol": "doGet"
+        }
+      ],
       "redirect": [
         {
           "file": "vuln.js",
@@ -73,6 +314,27 @@
           "file": "safe.js",
           "line": 3,
           "symbol": "handle"
+        }
+      ],
+      "sendRedirect": [
+        {
+          "file": "vuln.java",
+          "line": 7,
+          "symbol": "doGet"
+        }
+      ],
+      "setContentType": [
+        {
+          "file": "safe.java",
+          "line": 9,
+          "symbol": "doGet"
+        }
+      ],
+      "setStatus": [
+        {
+          "file": "safe.java",
+          "line": 8,
+          "symbol": "doGet"
         }
       ]
     }

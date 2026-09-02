@@ -46,21 +46,128 @@
       ],
       "status": "open",
       "risk": 48
+    },
+    {
+      "id": "a0bd50e69ba1",
+      "category": "taint",
+      "cwe": "CWE-502",
+      "title": "Insecure deserialization: untrusted input reaches Deserialize()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.cs",
+        "line": 10,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.cs",
+        "line": 13,
+        "kind": "deserialize",
+        "symbol": "Restore"
+      },
+      "path": [
+        {
+          "file": "vuln.cs",
+          "line": 10,
+          "symbol": "Restore",
+          "why": "untrusted input (http): Request.Form — at file scope"
+        },
+        {
+          "file": "vuln.cs",
+          "line": 13,
+          "symbol": "Restore",
+          "why": "deserialize sink: Deserialize()"
+        }
+      ],
+      "sourceScope": "module",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "data",
+          "stream"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.cs:10 may reach the deserialize sink Deserialize() at vuln.cs:13 through 1 hop(s). Tainted data deserialized by a .NET formatter. BinaryFormatter/SoapFormatter/LosFormatter/NetDataContractSerializer are unfixable on untrusted input — replace them; for Json.NET verify TypeNameHandling is None, for XmlSerializer that the type is fixed. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/502.html"
+      ],
+      "status": "open",
+      "risk": 48
     }
   ],
   "graph": {
     "files": [
+      "safe.cs",
       "safe.py",
+      "vuln.cs",
       "vuln.py"
     ],
     "edges": [],
     "symbolDefs": {
+      "StateController": [
+        "safe.cs",
+        "vuln.cs"
+      ],
+      "Restore": [
+        "safe.cs",
+        "vuln.cs"
+      ],
       "handler": [
         "safe.py",
         "vuln.py"
       ]
     },
     "callersBySymbol": {
+      "BinaryFormatter": [
+        {
+          "file": "vuln.cs",
+          "line": 11,
+          "symbol": "Restore"
+        }
+      ],
+      "Deserialize": [
+        {
+          "file": "vuln.cs",
+          "line": 13,
+          "symbol": "Restore"
+        }
+      ],
+      "FromBase64String": [
+        {
+          "file": "vuln.cs",
+          "line": 12,
+          "symbol": "Restore"
+        }
+      ],
+      "GetInt32": [
+        {
+          "file": "safe.cs",
+          "line": 11,
+          "symbol": "Restore"
+        }
+      ],
+      "GetProperty": [
+        {
+          "file": "safe.cs",
+          "line": 11,
+          "symbol": "Restore"
+        }
+      ],
+      "MemoryStream": [
+        {
+          "file": "vuln.cs",
+          "line": 12,
+          "symbol": "Restore"
+        }
+      ],
+      "Parse": [
+        {
+          "file": "safe.cs",
+          "line": 10,
+          "symbol": "Restore"
+        }
+      ],
       "loads": [
         {
           "file": "safe.py",

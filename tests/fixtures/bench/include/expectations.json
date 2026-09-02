@@ -1,0 +1,8 @@
+{
+  "cwe": "CWE-98",
+  "cases": [
+    { "name": "vuln", "file": "vuln.php", "vulnerable": true },
+    { "name": "vuln-keyword", "file": "vuln-keyword.php", "vulnerable": true },
+    { "name": "safe", "file": "safe.php", "vulnerable": false }
+  ]
+}

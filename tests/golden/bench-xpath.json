@@ -45,7 +45,54 @@
           "user"
         ]
       },
-      "message": "Cross-file candidate: http input at routes.js:3 may reach the xpath sink selectNodes() at sink.js:5 through 2 hop(s). Tainted data concatenated into an XPath expression. Use variable binding (XPathVariableResolver / parameterised XPath); escaping quotes by hand is not sufficient. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "message": "Cross-file candidate: http input at routes.js:3 may reach the xpath sink selectNodes() at sink.js:5 through 2 hop(s). Tainted data compiled into an XPath expression. Use variable binding (XPathVariableResolver / parameterised XPath); escaping quotes by hand is not sufficient. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/643.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
+      "id": "b227f15aef0c",
+      "category": "taint",
+      "cwe": "CWE-643",
+      "title": "XPath injection: untrusted input reaches compile()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.java",
+        "line": 10,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.java",
+        "line": 11,
+        "kind": "xpath",
+        "symbol": "doGet"
+      },
+      "path": [
+        {
+          "file": "vuln.java",
+          "line": 10,
+          "symbol": "doGet",
+          "why": "untrusted input (http): .getParameter("
+        },
+        {
+          "file": "vuln.java",
+          "line": 11,
+          "symbol": "doGet",
+          "why": "xpath sink: compile()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "name"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.java:10 may reach the xpath sink compile() at vuln.java:11 through 1 hop(s). Tainted data compiled into an XPath expression. Use variable binding (XPathVariableResolver / parameterised XPath); escaping quotes by hand is not sufficient. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
       "tool": "ultrasec",
       "references": [
         "https://cwe.mitre.org/data/definitions/643.html"
@@ -57,8 +104,10 @@
   "graph": {
     "files": [
       "routes.js",
+      "safe.java",
       "safe.js",
-      "sink.js"
+      "sink.js",
+      "vuln.java"
     ],
     "edges": [
       {
@@ -80,11 +129,21 @@
       "handler": [
         "routes.js"
       ],
+      "Safe": [
+        "safe.java"
+      ],
+      "doGet": [
+        "safe.java",
+        "vuln.java"
+      ],
       "safe": [
         "safe.js"
       ],
       "lookup": [
         "sink.js"
+      ],
+      "Vuln": [
+        "vuln.java"
       ]
     },
     "callersBySymbol": {
@@ -93,6 +152,25 @@
           "file": "safe.js",
           "line": 4,
           "symbol": "safe"
+        }
+      ],
+      "compile": [
+        {
+          "file": "vuln.java",
+          "line": 11,
+          "symbol": "doGet"
+        }
+      ],
+      "getParameter": [
+        {
+          "file": "safe.java",
+          "line": 6,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 10,
+          "symbol": "doGet"
         }
       ],
       "json": [
@@ -107,6 +185,13 @@
           "file": "routes.js",
           "line": 4,
           "symbol": "handler"
+        }
+      ],
+      "matches": [
+        {
+          "file": "safe.java",
+          "line": 8,
+          "symbol": "doGet"
         }
       ],
       "record": [
@@ -137,6 +222,18 @@
           "file": "sink.js",
           "line": 5,
           "symbol": "lookup"
+        }
+      ],
+      "setStatus": [
+        {
+          "file": "safe.java",
+          "line": 9,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 12,
+          "symbol": "doGet"
         }
       ]
     }

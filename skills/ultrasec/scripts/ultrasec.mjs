@@ -19557,6 +19557,53 @@ function cweUrl(cwe) {
 }
 var SINKS = [
   {
+    // BEFORE `sql`, which also claims `execute`: `httpClient.execute(request)`
+    // is a network call, `stmt.execute(query)` is a query, and only the receiver
+    // tells them apart. Receiver-gated hard, so a `stmt`/`ps` receiver falls
+    // through to the SQL rule exactly as before; import-gated so a repo with no
+    // HTTP client never sees it. `openStream`/`getInputStream` on a `URL` are
+    // the JDK's own SSRF shape (OWASP Benchmark's CWE-918 cases).
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["java", "kotlin", "scala"],
+    callees: [
+      "getForObject",
+      "getForEntity",
+      "postForObject",
+      "postForEntity",
+      "exchange",
+      "openStream",
+      "getInputStream",
+      "send",
+      "sendAsync",
+      "execute",
+      "newCall",
+      "retrieve"
+    ],
+    receivers: [
+      "restTemplate",
+      "RestTemplate",
+      "template",
+      "client",
+      "httpClient",
+      "HttpClient",
+      "webClient",
+      "WebClient",
+      "url",
+      "URL",
+      "u",
+      "conn",
+      "connection",
+      "okHttpClient",
+      "http"
+    ],
+    requireReceiver: true,
+    requireModule: ["java.net", "springframework.web", "okhttp", "apache.http", "webflux", "java.net.http"],
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a request URL/host via a JVM HTTP client (RestTemplate, WebClient, HttpClient, OkHttp, `URL.openStream`). Verify the destination is allow-listed (no internal/metadata endpoints)."
+  },
+  {
     kind: "sql",
     cwe: "CWE-89",
     severity: "high",
@@ -19580,10 +19627,64 @@ var SINKS = [
       "addBatch",
       "nativeSQL",
       "createQuery",
-      "createNativeQuery"
+      "createNativeQuery",
+      // PHP's procedural drivers: bare names nothing else uses.
+      "mysqli_query",
+      "mysqli_real_query",
+      "mysqli_multi_query",
+      "mysqli_prepare",
+      "mysql_query",
+      "pg_query",
+      "pg_send_query",
+      "sqlite_query"
     ],
     title: "SQL injection",
     note: "Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query."
+  },
+  {
+    // Go's database/sql spells its verbs in CamelCase, so the rule above — all
+    // lowercase — never saw `db.Query(...)`, `tx.Exec(...)` or the *Context
+    // forms. Receiver-gated hard: `Exec` alone is a Redis pipeline, a Docker
+    // client, a template.
+    kind: "sql",
+    cwe: "CWE-89",
+    severity: "high",
+    languages: ["go"],
+    callees: [
+      "Query",
+      "QueryRow",
+      "QueryContext",
+      "QueryRowContext",
+      "Exec",
+      "ExecContext",
+      "Prepare",
+      "PrepareContext",
+      "Raw",
+      "NamedQuery",
+      "NamedExec",
+      "Select",
+      "Get"
+    ],
+    receivers: ["db", "DB", "tx", "Tx", "conn", "stmt", "pool", "sqlx", "database", "dbx", "gorm"],
+    requireReceiver: true,
+    title: "SQL injection",
+    note: "Tainted data concatenated into a database/sql statement. Verify the query uses `?`/`$1` placeholders with the value passed as an argument, not built with `+` or fmt.Sprintf."
+  },
+  {
+    // ActiveRecord's string-argument forms. `where("name = '#{q}'")`,
+    // `order(params[:sort])` and `pluck(params[:col])` are the Rails injection
+    // shapes; the hash/placeholder forms (`where(name: q)`, `where("n = ?", q)`)
+    // are the fix and are noted by the sanitizer hint. Receiver-gated so a bare
+    // `where(...)` helper does not match; `select` is deliberately absent — in
+    // Ruby that is Array#select far more often than a projection.
+    kind: "sql",
+    cwe: "CWE-89",
+    severity: "high",
+    languages: ["ruby"],
+    callees: ["where", "find_by_sql", "order", "pluck", "joins", "group", "having", "reorder", "count_by_sql", "exists?", "update_all", "delete_all"],
+    requireReceiver: true,
+    title: "SQL injection",
+    note: 'Tainted data interpolated into an ActiveRecord/Sequel query fragment. Use the hash form (`where(name: q)`) or a placeholder (`where("name = ?", q)`); `order`/`pluck` take column names \u2014 allow-list them.'
   },
   // -- OS command injection (CWE-78) -----------------------------------------
   // Split into an unambiguous rule plus per-language gated ones, because the two
@@ -19770,6 +19871,22 @@ var SINKS = [
     note: "Tainted data handed to a string-distance / fuzzy-match routine whose cost is super-linear in the input length (Levenshtein DP is O(n\xB7m)) and linear again in the size of the candidate set. Unbounded, a single request can block the event loop for seconds. Bound the input length BEFORE the call (a `max` on the schema, a hard slice) \u2014 a MINIMUM length is not a bound."
   },
   {
+    // BEFORE `code`, which also claims `compile` with no receiver gate at all:
+    // `xpath.compile(expr)` was reported as CWE-94 code injection, which sends
+    // the adjudicator to the wrong remediation (and scored zero on the OWASP
+    // Benchmark's CWE-643 cases that compile before they evaluate). Gated on the
+    // XPath receivers the rule below already trusts.
+    kind: "xpath",
+    cwe: "CWE-643",
+    severity: "high",
+    languages: ["*"],
+    callees: ["compile", "evaluate", "selectNodes", "selectSingleNode"],
+    receivers: ["xpath", "XPath", "xp", "xPath", "xpathObj", "xpathExpression", "xPathExpression", "expr"],
+    requireReceiver: true,
+    title: "XPath injection",
+    note: "Tainted data compiled into an XPath expression. Use variable binding (XPathVariableResolver / parameterised XPath); escaping quotes by hand is not sufficient."
+  },
+  {
     kind: "code",
     cwe: "CWE-94",
     severity: "high",
@@ -19777,6 +19894,43 @@ var SINKS = [
     callees: ["eval", "Function", "runInThisContext", "runInContext", "compile", "execfile"],
     title: "Code injection / eval",
     note: "Tainted data evaluated as code. Almost never safe; verify the argument is a constant."
+  },
+  {
+    // PHP-only: `create_function` compiles its second argument as code (removed
+    // in PHP 8 and still shipped in plenty of 7.x). `assert` is a keyword-shaped
+    // construct the extractor never records as a call, so its string form is a
+    // TEXT_SINKS line rule instead.
+    kind: "code",
+    cwe: "CWE-94",
+    severity: "high",
+    languages: ["php"],
+    callees: ["create_function", "eval"],
+    title: "Code injection / eval",
+    note: "Tainted data compiled as PHP code (`create_function` body / `eval`). Almost never safe; replace with a closure or a fixed dispatch table."
+  },
+  {
+    // Ruby's metaprogramming evaluators. Unambiguous names — nothing else is
+    // called `instance_eval` — so no receiver gate is needed.
+    kind: "code",
+    cwe: "CWE-94",
+    severity: "high",
+    languages: ["ruby"],
+    callees: ["instance_eval", "class_eval", "module_eval", "instance_exec", "class_exec", "module_exec"],
+    title: "Code injection / eval",
+    note: "Tainted data evaluated as Ruby (`*_eval` with a string argument). Use the block form with a fixed body, or a dispatch table keyed by an allow-listed name."
+  },
+  {
+    // `obj.send(params[:m])` lets the caller pick the method — any method,
+    // private ones included. Receiver-gated: a bare `send(x)` inside a class is
+    // ordinary Ruby, and Rails mailers/sockets use the name for other things.
+    kind: "reflect",
+    cwe: "CWE-470",
+    severity: "medium",
+    languages: ["ruby"],
+    callees: ["send", "public_send", "__send__", "const_get", "method"],
+    requireReceiver: true,
+    title: "Unsafe reflection",
+    note: "Tainted data selecting a method or constant by name. Map the input through an explicit allow-list of permitted targets instead of resolving it dynamically (`public_send` still reaches every public method)."
   },
   {
     // BEFORE the `path` rule, which also claims `open`.
@@ -19800,6 +19954,19 @@ var SINKS = [
     requireReceiver: true,
     title: "Open redirect / reverse tabnabbing via window.open",
     note: "Tainted data used as a navigation target. Allow-list the destination host (or permit only relative paths), and keep `noopener,noreferrer` on the feature string."
+  },
+  {
+    // BEFORE `path`, which claims `open` for every receiver: `URI.open(url)`
+    // (Ruby's open-uri) is a network fetch, not a file read.
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["ruby"],
+    callees: ["open", "open_uri"],
+    receivers: ["URI", "OpenURI"],
+    requireReceiver: true,
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as an open-uri URL. Verify the destination is allow-listed (no internal/metadata endpoints) \u2014 and that a `file://` scheme cannot reach it."
   },
   {
     kind: "path",
@@ -19831,10 +19998,93 @@ var SINKS = [
       "RandomAccessFile",
       "newInputStream",
       "newOutputStream",
-      "newBufferedReader"
+      "newBufferedReader",
+      // Flask's file responses and PHP's `readfile`: bare names nothing else uses.
+      "send_from_directory",
+      "send_file",
+      "readfile"
     ],
     title: "Path traversal / archive extraction (zip-slip)",
     note: "Tainted data used as a filesystem path, or an archive extracted without validating entry names (zip-slip). Confine to a base dir (basename/realpath + allow-list) and reject entries that escape it."
+  },
+  {
+    // Go's `os` package spells its verbs in CamelCase — `os.Open`, `os.ReadFile`
+    // — so the rule above never matched a single Go file read. Receiver-gated
+    // to `os`/`ioutil`: `Open` alone is a database handle, a window, a socket.
+    kind: "path",
+    cwe: "CWE-22",
+    severity: "high",
+    languages: ["go"],
+    callees: ["Open", "OpenFile", "ReadFile", "WriteFile", "Create", "Remove", "RemoveAll", "ReadDir", "Stat", "Rename", "Mkdir", "MkdirAll"],
+    receivers: ["os", "ioutil"],
+    requireReceiver: true,
+    title: "Path traversal",
+    note: "Tainted data used as a filesystem path. Confine to a base dir (filepath.Clean + a prefix check against the base, or os.Root / SecureJoin) and reject `..` segments before the call."
+  },
+  {
+    // PHP's file builtins. `file_get_contents` and `fopen` accept URLs as well
+    // as paths (allow_url_fopen), so the same line is also an SSRF question —
+    // the note says so rather than pretending to know which.
+    kind: "path",
+    cwe: "CWE-22",
+    severity: "high",
+    languages: ["php"],
+    callees: [
+      "fopen",
+      "file_get_contents",
+      "file_put_contents",
+      "file",
+      "unlink",
+      "rename",
+      "copy",
+      "scandir",
+      "opendir",
+      "move_uploaded_file",
+      "SplFileObject"
+    ],
+    title: "Path traversal",
+    note: "Tainted data used as a PHP filesystem path. `file_get_contents`/`fopen` also accept URLs (allow_url_fopen), so the same call may be an SSRF: allow-list the scheme AND confine the path (basename/realpath against a base dir)."
+  },
+  {
+    // Ruby's File/IO class methods. `File.open` is already caught by the
+    // generic rule (`open`, any receiver); `File.read`/`IO.readlines` were not.
+    kind: "path",
+    cwe: "CWE-22",
+    severity: "high",
+    languages: ["ruby"],
+    callees: ["read", "readlines", "write", "binread", "binwrite", "foreach", "delete", "rename", "readlink", "rm", "rm_rf", "cp", "mv"],
+    receivers: ["File", "IO", "Dir", "Pathname", "FileUtils"],
+    requireReceiver: true,
+    title: "Path traversal",
+    note: "Tainted data used as a filesystem path via File/IO/Dir/FileUtils. Confine to a base dir (File.expand_path + start_with? against the base) and reject `..` before the call."
+  },
+  {
+    // Python's `shutil` copies/moves by path; the source of the copy is as
+    // sensitive as the destination.
+    kind: "path",
+    cwe: "CWE-22",
+    severity: "high",
+    languages: ["python"],
+    callees: ["copy", "copyfile", "copy2", "copytree", "move", "rmtree"],
+    receivers: ["shutil", "os"],
+    requireReceiver: true,
+    title: "Path traversal",
+    note: "Tainted data used as a filesystem path in a shutil copy/move/remove. Confine to a base dir (os.path.realpath + a commonpath check against the base) before the call."
+  },
+  {
+    // CWE-98: PHP file inclusion. The included file is EXECUTED, so a traversal
+    // here is code execution (local: log poisoning, `php://filter`; remote:
+    // allow_url_include). Its own kind because the remediation is different
+    // from a read — an allow-list of includable names, never a path. The
+    // parenthesised call form arrives here; the keyword form (`require $x;`)
+    // is not a call to the extractor and is matched by a TEXT_SINKS line rule.
+    kind: "include",
+    cwe: "CWE-98",
+    severity: "high",
+    languages: ["php"],
+    callees: ["include", "require", "include_once", "require_once"],
+    title: "File inclusion (LFI/RFI)",
+    note: "Tainted data selects a file to include \u2014 and an included file is executed. Map the input through an allow-list of known includes (a switch/array lookup), never build the path from it; disable allow_url_include."
   },
   {
     kind: "ssrf",
@@ -19876,11 +20126,38 @@ var SINKS = [
     note: "Tainted data used as a request URL/host via an HTTP-client method. Verify the destination is allow-listed (no internal/metadata endpoints). Receiver is generic (an HTTP client vs. a cache/map getter) \u2014 confirm it is a network call."
   },
   {
+    // PHP's cURL: the URL goes into `curl_init($url)` or
+    // `curl_setopt($ch, CURLOPT_URL, $url)`, never into `curl_exec`. Bare
+    // builtins, so no receiver gate — nothing else is called `curl_init`.
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["php"],
+    callees: ["curl_init", "curl_setopt", "curl_setopt_array", "curl_exec", "curl_multi_add_handle", "get_headers", "fsockopen"],
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a cURL/socket destination. Verify the host is allow-listed (no internal/metadata endpoints), the scheme is http(s) only, and CURLOPT_FOLLOWLOCATION cannot walk to an internal address."
+  },
+  {
+    // Ruby's HTTP clients: `Net::HTTP.get(uri)` extracts as receiver `HTTP`,
+    // the gem clients under their own names.
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["ruby"],
+    callees: ["get", "post", "put", "patch", "delete", "head", "request", "start", "get_response", "post_form", "new", "call"],
+    receivers: ["HTTP", "Net", "Faraday", "RestClient", "HTTParty", "Excon", "Typhoeus", "HTTPClient", "http", "client", "conn"],
+    requireReceiver: true,
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a request URL/host via a Ruby HTTP client (Net::HTTP, Faraday, RestClient, HTTParty\u2026). Verify the destination is allow-listed (no internal/metadata endpoints) and redirects are not followed blindly."
+  },
+  {
     kind: "xss",
     cwe: "CWE-79",
     severity: "medium",
-    languages: ["javascript", "python", "php", "ruby"],
-    callees: ["send", "write", "end", "html", "render_template_string", "writeHead"],
+    // `w` is Go's http.ResponseWriter, and Go was missing from this list even
+    // though its receiver was: `w.Write([]byte(q))` never matched.
+    languages: ["javascript", "python", "php", "ruby", "go"],
+    callees: ["send", "write", "end", "html", "render_template_string", "writeHead", "Write"],
     receivers: ["res", "response", "resp", "w"],
     title: "Cross-site scripting (reflected)",
     note: "Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser."
@@ -19903,6 +20180,60 @@ var SINKS = [
     requireModule: ["javax.servlet", "jakarta.servlet", "springframework.web", "javax.ws.rs", "jakarta.ws.rs"],
     title: "Cross-site scripting (reflected)",
     note: "Tainted data written to a servlet response writer. Verify it is contextually escaped (OWASP Encoder / Spring's HtmlUtils) before reaching the browser."
+  },
+  {
+    // `response.getWriter().format("…%s…", bar)` extracts as a BARE `format`.
+    // Kept out of the rule above because `String.format` shares the name: this
+    // one lists the writer receivers, so `String.format`/`MessageFormat.format`
+    // (a different, known receiver) are skipped while the bare chained form
+    // and `out.format` match.
+    kind: "xss",
+    cwe: "CWE-79",
+    severity: "medium",
+    languages: ["java", "kotlin", "scala"],
+    callees: ["format"],
+    receivers: ["out", "writer", "pw", "printWriter", "w", "response", "resp", "os"],
+    requireModule: ["javax.servlet", "jakarta.servlet", "springframework.web", "javax.ws.rs", "jakarta.ws.rs"],
+    title: "Cross-site scripting (reflected)",
+    note: "Tainted data formatted into a servlet response writer. Verify it is contextually escaped (OWASP Encoder / Spring's HtmlUtils) before reaching the browser."
+  },
+  {
+    // Go writes its HTML with fmt/io onto the ResponseWriter. `fmt.Fprintf` is
+    // just as often a write to os.Stderr — the note says which to check.
+    kind: "xss",
+    cwe: "CWE-79",
+    severity: "medium",
+    languages: ["go"],
+    callees: ["Fprintf", "Fprint", "Fprintln", "WriteString", "Copy"],
+    receivers: ["fmt", "io"],
+    requireReceiver: true,
+    title: "Cross-site scripting (reflected)",
+    note: "Tainted data written through fmt/io. If the writer is the http.ResponseWriter this is reflected XSS: escape with html.EscapeString or render through html/template. A write to os.Stderr/a file is a different (log/injection) question."
+  },
+  {
+    // `template.HTML(s)` is the explicit escape hatch out of html/template's
+    // contextual escaping — the Go equivalent of dangerouslySetInnerHTML.
+    kind: "xss",
+    cwe: "CWE-79",
+    severity: "high",
+    languages: ["go"],
+    callees: ["HTML", "JS", "URL", "HTMLAttr", "CSS", "Srcset"],
+    receivers: ["template"],
+    requireReceiver: true,
+    title: "Cross-site scripting (html/template escaping bypass)",
+    note: "Tainted data wrapped in template.HTML/JS/URL, which tells html/template NOT to escape it. Render it as a plain string so the template escapes it, or sanitize with a real HTML sanitizer (bluemonday) first."
+  },
+  {
+    // ASP.NET's raw response writer.
+    kind: "xss",
+    cwe: "CWE-79",
+    severity: "medium",
+    languages: ["csharp"],
+    callees: ["Write", "WriteAsync", "BinaryWrite"],
+    receivers: ["Response", "response", "writer", "Output", "output"],
+    requireReceiver: true,
+    title: "Cross-site scripting (reflected)",
+    note: "Tainted data written straight to the HTTP response. Encode with HttpUtility.HtmlEncode / the Razor `@` syntax, or return a typed result the framework encodes."
   },
   {
     kind: "crypto",
@@ -19932,6 +20263,31 @@ var SINKS = [
     requireReceiver: true,
     title: "Weak hash",
     note: "A JVM digest chosen by string. MD5/SHA-1 for a signature, a password or any integrity claim is broken; for a password no plain hash is right at all \u2014 use bcrypt/scrypt/Argon2. SHA-256+ for integrity is not a finding."
+  },
+  {
+    // Go selects its primitive by PACKAGE, so the receiver is the algorithm:
+    // `md5.New()`, `sha1.Sum(data)`. `New` is the commonest constructor name in
+    // Go (`errors.New`) — the receiver gate is the whole rule.
+    kind: "crypto",
+    cwe: "CWE-328",
+    severity: "medium",
+    languages: ["go"],
+    callees: ["New", "Sum"],
+    receivers: ["md5", "sha1"],
+    requireReceiver: true,
+    title: "Weak hash",
+    note: "MD5/SHA-1 from crypto/md5 or crypto/sha1. For a signature, a password or any integrity claim these are broken; use sha256+ for integrity and bcrypt/scrypt/Argon2 for passwords. A checksum for cache keys is not a finding."
+  },
+  {
+    kind: "crypto",
+    cwe: "CWE-327",
+    severity: "medium",
+    languages: ["go"],
+    callees: ["NewCipher", "NewTripleDESCipher"],
+    receivers: ["des", "rc4"],
+    requireReceiver: true,
+    title: "Weak cryptography",
+    note: "DES/3DES/RC4 from crypto/des or crypto/rc4 \u2014 broken primitives. Use AES-GCM (crypto/aes + cipher.NewGCM) or chacha20poly1305."
   },
   {
     // CWE-501: request data written straight into session/context state. The
@@ -19965,6 +20321,33 @@ var SINKS = [
     note: "Tainted data deserialized into objects. Use a safe loader (yaml.safe_load, JSON) and never unpickle untrusted input."
   },
   {
+    // .NET's formatters capitalise the verb, and the dangerous ones are known by
+    // name: BinaryFormatter, SoapFormatter, LosFormatter, NetDataContractSerializer,
+    // JavaScriptSerializer with a resolver, Json.NET with TypeNameHandling.
+    kind: "deserialize",
+    cwe: "CWE-502",
+    severity: "high",
+    languages: ["csharp"],
+    callees: ["Deserialize", "DeserializeObject", "ReadObject", "UnsafeDeserialize", "Load"],
+    receivers: [
+      "BinaryFormatter",
+      "SoapFormatter",
+      "LosFormatter",
+      "ObjectStateFormatter",
+      "NetDataContractSerializer",
+      "JavaScriptSerializer",
+      "XmlSerializer",
+      "JsonConvert",
+      "JsonSerializer",
+      "formatter",
+      "serializer",
+      "bf"
+    ],
+    requireReceiver: true,
+    title: "Insecure deserialization",
+    note: "Tainted data deserialized by a .NET formatter. BinaryFormatter/SoapFormatter/LosFormatter/NetDataContractSerializer are unfixable on untrusted input \u2014 replace them; for Json.NET verify TypeNameHandling is None, for XmlSerializer that the type is fixed."
+  },
+  {
     kind: "crypto",
     cwe: "CWE-327",
     severity: "medium",
@@ -19982,6 +20365,22 @@ var SINKS = [
     receivers: ["res", "response", "resp"],
     title: "Open redirect",
     note: "Tainted data used as a redirect target. Allow-list the destination or only permit relative paths."
+  },
+  {
+    // The JVM, Go and .NET spellings. `response.sendRedirect(url)` (OWASP
+    // Benchmark's CWE-601 shape), `http.Redirect(w, r, url, code)`, ASP.NET's
+    // `Response.Redirect(url)` and the bare controller helper `return
+    // Redirect(returnUrl)` — the single most common .NET open redirect. Not
+    // receiver-gated, because that last form has no receiver; a DIFFERENT
+    // known receiver still skips (`router.Redirect`).
+    kind: "redirect",
+    cwe: "CWE-601",
+    severity: "medium",
+    languages: ["java", "kotlin", "scala", "go", "csharp"],
+    callees: ["sendRedirect", "Redirect", "RedirectPermanent", "RedirectToAction", "RedirectToRoute", "RedirectToPage"],
+    receivers: ["response", "resp", "res", "http", "Response", "ctx", "c", "w", "this"],
+    title: "Open redirect",
+    note: "Tainted data used as a redirect target. Allow-list the destination host, or accept only a relative path (reject `//`, `\\`, and a scheme) \u2014 `LocalRedirect`/`Url.IsLocalUrl` in ASP.NET."
   },
   {
     kind: "nosql",
@@ -20007,7 +20406,22 @@ var SINKS = [
     cwe: "CWE-611",
     severity: "high",
     languages: ["*"],
-    callees: ["parseString", "parseXml", "parseFromString", "fromstring", "SAXParser", "DocumentBuilder", "XMLReader", "createDocument"],
+    callees: [
+      "parseString",
+      "parseXml",
+      "parseFromString",
+      "fromstring",
+      "SAXParser",
+      "DocumentBuilder",
+      "XMLReader",
+      "createDocument",
+      // PHP: libxml entity loading is a global switch; these all honour it.
+      "simplexml_load_string",
+      "simplexml_load_file",
+      "loadXML",
+      "loadHTML",
+      "xml_parse"
+    ],
     title: "XML external entity (XXE)",
     note: "Tainted XML parsed with external entities/DTDs enabled. Disable entity resolution (resolve_entities=False / FEATURE_SECURE_PROCESSING / noent off)."
   },
@@ -20038,7 +20452,10 @@ var SINKS = [
     severity: "high",
     languages: ["java", "kotlin", "scala"],
     callees: ["search", "bind"],
-    receivers: ["idc", "dirContext", "dctx", "ldapContext", "initialDirContext", "dirCtx"],
+    // `ctx`/`ic`/`context` are what the JDK's own examples and the OWASP
+    // Benchmark name their InitialDirContext; `ldapCtx`/`ldap` are the other
+    // spellings seen in the wild.
+    receivers: ["idc", "dirContext", "dctx", "ldapContext", "initialDirContext", "dirCtx", "ctx", "ic", "context", "ldapCtx", "ldap", "ldapTemplate"],
     requireReceiver: true,
     title: "LDAP injection",
     note: "Tainted data concatenated into an LDAP filter or DN. Escape with the LDAP escaping API (ESAPI encodeForLDAP / encodeForDN); quoting by hand does not cover the filter metacharacters."
@@ -20132,6 +20549,22 @@ var SINKS = [
     requireReceiver: true,
     title: "XPath injection",
     note: "Tainted data concatenated into an XPath expression. Use variable binding (XPathVariableResolver / parameterised XPath); escaping quotes by hand is not sufficient."
+  },
+  {
+    // AFTER xpath, which also claims `evaluate`: `Velocity.evaluate(ctx, out,
+    // tag, userString)` and FreeMarker's `new Template(...).process` compile
+    // the untrusted string as a template. Receiver- and import-gated: the
+    // engine's own name is what says this `evaluate`/`process` is a template.
+    kind: "ssti",
+    cwe: "CWE-1336",
+    severity: "high",
+    languages: ["java", "kotlin", "scala"],
+    callees: ["evaluate", "process", "merge", "mergeTemplate", "parse"],
+    receivers: ["Velocity", "velocity", "velocityEngine", "engine", "template", "Template", "cfg", "configuration", "freemarker", "templateEngine", "ve"],
+    requireReceiver: true,
+    requireModule: ["velocity", "freemarker", "thymeleaf", "pebble", "jinjava", "mustache", "handlebars"],
+    title: "Server-side template injection (SSTI)",
+    note: "Tainted data compiled/evaluated as a JVM template (Velocity/FreeMarker/Thymeleaf). Render data as context VALUES on a fixed template, never build the template source from input; on Thymeleaf avoid `__${...}__` preprocessing with user data."
   },
   {
     kind: "massassign",
@@ -20228,6 +20661,33 @@ var TEXT_SINKS = [
     label: "eval as a callable",
     title: "Code injection (the interpreter applied to data)",
     note: "`eval`/`exec` passed as the function argument of an apply/map, so every value in the series is executed as Python. Nothing about the call site says which values those are \u2014 find where the column comes from before deciding this is safe. Parse with `ast.literal_eval` or `json.loads` instead."
+  },
+  {
+    // PHP's keyword form of inclusion — `require $page;`, `include_once $f;` —
+    // is not a call to the extractor (no parentheses), so the `include` sink
+    // rule never sees it. A literal argument stays out: `require_once
+    // __DIR__ . '/x.php'` is every PHP file's first line and cannot carry
+    // input. Only a variable directly after the keyword matches.
+    kind: "include",
+    cwe: "CWE-98",
+    severity: "high",
+    languages: ["php"],
+    re: /^\s*(?:include|require)(?:_once)?\s+\$\w+/,
+    label: "include/require (keyword form)",
+    title: "File inclusion (LFI/RFI)",
+    note: "A variable selects the file to include, and an included file is executed. Map the input through an allow-list of known includes, never build the path from it; disable allow_url_include."
+  },
+  {
+    // `assert($userString)` evaluates the string as PHP (before 8.0, and with
+    // zend.assertions on). Keyword-shaped to the extractor, so a line rule.
+    kind: "code",
+    cwe: "CWE-94",
+    severity: "high",
+    languages: ["php"],
+    re: /\bassert\s*\(\s*\$\w+/,
+    label: "assert (string form)",
+    title: "Code injection / eval",
+    note: "A variable passed to `assert` is evaluated as PHP code on PHP < 8 (and wherever zend.assertions is on). Assert an expression, never a string built from input."
   },
   // ── The caught error, handed straight to the caller (CWE-209) ─────────────
   //
@@ -20365,7 +20825,49 @@ var LOG_SINKS = [
     callees: ["info", "warning", "error", "debug"],
     title: "Log injection (unsanitized log write)",
     note: "Untrusted data written to a log without newline/CRLF stripping \u2014 verify neutralization; typically low severity."
+  },
+  {
+    // JVM: SLF4J/Log4j/JUL under the names people actually give the field.
+    kind: "log",
+    cwe: "CWE-117",
+    severity: "low",
+    languages: ["java", "kotlin", "scala"],
+    requireReceiver: true,
+    receivers: ["logger", "log", "LOGGER", "LOG", "logging", "slf4jLogger", "_logger"],
+    callees: ["info", "warn", "error", "debug", "trace", "fatal", "severe", "warning", "fine", "finer", "finest", "config"],
+    title: "Log injection (unsanitized log write)",
+    note: "Untrusted data written to a log without newline/CRLF stripping \u2014 verify neutralization (Log4j 2's `%enc{%m}{CRLF}`, or strip \\r\\n before the call); typically low severity."
+  },
+  {
+    // .NET: Microsoft.Extensions.Logging's `Log*` family, plus Console.
+    kind: "log",
+    cwe: "CWE-117",
+    severity: "low",
+    languages: ["csharp"],
+    requireReceiver: true,
+    receivers: ["_logger", "logger", "Logger", "Log", "log", "_log", "Console", "Trace", "Debug"],
+    callees: [
+      "LogInformation",
+      "LogWarning",
+      "LogError",
+      "LogDebug",
+      "LogCritical",
+      "LogTrace",
+      "Log",
+      "WriteLine",
+      "Write",
+      "Info",
+      "Warn",
+      "Error",
+      "Debug",
+      "Fatal"
+    ],
+    title: "Log injection (unsanitized log write)",
+    note: "Untrusted data written to a log without newline/CRLF stripping \u2014 verify neutralization (strip \\r\\n, or a structured logger with the value as a property, not in the template); typically low severity."
   }
+  // Rust is deliberately absent: `info!(...)`/`tracing::warn!(...)` are macros,
+  // which the extractor does not record as calls, so a rule here could never
+  // fire. Log-shaped macros need a line rule, not a call rule.
 ];
 var UNRESOLVED_SEVERITY = "medium";
 var UNRESOLVED_RECEIVER = "unresolved-receiver";
@@ -20591,6 +21093,45 @@ var SOURCES = [
   { kind: "http", languages: ["python"], re: /\brequest\s*\.\s*(?:query_params|path_params|body|stream|form\b)/, title: "Starlette/FastAPI request input" },
   { kind: "http", languages: ["javascript"], re: /@(?:Body|Query|Param|Headers|UploadedFile)\s*\(/, title: "NestJS parameter decorator" },
   {
+    // Hono: `c.req.query("q")`, `c.req.param("id")`, `await c.req.json()`.
+    kind: "http",
+    languages: ["javascript"],
+    re: /\b(?:c|ctx|context)\s*\.\s*req\s*\.\s*(?:query|queries|param|header|json|text|valid|raw|parseBody|formData|arrayBuffer|url|path)\b/,
+    title: "Hono request input"
+  },
+  {
+    // tRPC / oRPC procedures: everything after `.input(schema)` reads the
+    // caller's input. The schema validates its SHAPE, not its safety.
+    kind: "http",
+    languages: ["javascript"],
+    re: /\.\s*input\s*\(\s*(?:z\.|v\.|t\.|\w+Schema\b|\w+Input\b|\{)/,
+    title: "tRPC/oRPC procedure input"
+  },
+  {
+    // GraphQL resolvers: `(parent, args, ctx)` / `(_, { id })` — `args` is the
+    // client's variables, whatever the schema says about their type.
+    kind: "http",
+    languages: ["javascript"],
+    re: /\(\s*(?:parent|root|_|_parent|_root|obj|source)\w*\s*(?::[^,)]+)?\s*,\s*(?:args|_?input|\{[^}]*\})\s*(?::[^,)]+)?\s*[,)]/,
+    title: "GraphQL resolver arguments"
+  },
+  {
+    // Spring's mapping annotations mark the method below as an endpoint even
+    // when it binds nothing by name (a `@RequestBody`-less POST reading
+    // `HttpServletRequest` from a field, a `Map` parameter).
+    kind: "http",
+    languages: ["java", "kotlin", "scala"],
+    re: /@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/,
+    title: "Spring request mapping"
+  },
+  {
+    // Django REST framework: the decorated function IS the endpoint.
+    kind: "http",
+    languages: ["python"],
+    re: /@api_view\s*\(|@action\s*\(|\bAPIView\b|\bViewSet\b/,
+    title: "Django REST framework view"
+  },
+  {
     kind: "http",
     languages: ["javascript"],
     re: /\b(?:searchParams|nextUrl)\s*\.\s*get\s*\(|\bawait\s+(?:req|request)\s*\.\s*(?:json|formData|text)\s*\(/,
@@ -20655,6 +21196,23 @@ var ROUTE_FILES = [
     files: ["{public,web,htdocs,www,public_html}/**/*.php", "**/{public,web,htdocs,www}/**/*.php"],
     decl: /^\s*<\?php/,
     title: "Web-root PHP script"
+  },
+  // ── Route tables ──────────────────────────────────────────────────────────
+  // Laravel's `routes/web.php`/`routes/api.php` and Rails' `config/routes.rb`
+  // hold no handler bodies, but every `Route::get(...)` / `get "/x", to:` line
+  // names an endpoint — and a closure route (`Route::get('/u', function
+  // (Request $r) {...})`) IS the handler.
+  {
+    kind: "http",
+    files: ["routes/{web,api,channels,console}.php", "**/routes/{web,api}.php"],
+    decl: /^\s*Route\s*::\s*\w+\s*\(/,
+    title: "Laravel route declaration"
+  },
+  {
+    kind: "http",
+    files: ["config/routes.rb", "**/config/routes.rb", "**/config/routes/*.rb"],
+    decl: /^\s*(?:get|post|put|patch|delete|match|resources?|root|mount|namespace|scope)\b/,
+    title: "Rails route declaration"
   }
 ];
 var routeMatchers = ROUTE_FILES.map((r) => ({ rule: r, res: r.files.flatMap(expandBraces).map(globToRe) }));
@@ -20696,6 +21254,24 @@ var SANITIZERS = [
   // Placeholder shapes: meaningful ON a query line, meaningless anywhere else —
   // `?`, `:name` and `@scope` are ordinary TypeScript punctuation.
   { kind: "sql", languages: ["*"], re: /\?|\$\d+|:\w+|%s|@\w+/, note: "looks parameterized (placeholder present)", sinkLineOnly: true },
+  // The BINDING calls, which follow the prepare on the next line or two —
+  // `stmt.setString(1, name)`, `$stmt->bind_param("s", $x)`, `bindValue`,
+  // PDO's `execute([...])`, ESAPI's SQL encoder. OWASP Benchmark scored 0 for
+  // "FP w/ sanitizer noted" on CWE-89 because none of these was known.
+  {
+    kind: "sql",
+    languages: ["*"],
+    re: /\.\s*set(?:String|Int|Long|Object|Date|Timestamp|Boolean|Double|BigDecimal|Bytes)\s*\(|\bbind_?[Pp]aram\s*\(|\bbindValue\s*\(|\bexecute\s*\(\s*\[|\bexecute\s*\(\s*(?:array|\{)|encodeForSQL|\bsqlEscape|\bmysqli_real_escape_string\b|\bpg_escape_(?:string|literal)\b|\bquoteIdentifier\b|\bsanitize_sql\b/,
+    note: "parameter binding / SQL escaping present"
+  },
+  // ActiveRecord's safe forms: the hash argument or the placeholder form.
+  {
+    kind: "sql",
+    languages: ["ruby"],
+    re: /\bwhere\s*\(\s*(?:\w+\s*:|\{|["'][^"']*\?)/,
+    note: "hash / placeholder form of where (parameterized)",
+    sinkLineOnly: true
+  },
   { kind: "command", languages: ["*"], re: /\bexecFile\b|\bexecvp?\b|shlex\.quote|escapeshellarg/, note: "argv-array / quoting present" },
   { kind: "path", languages: ["*"], re: /\bbasename\b|\brealpath\b|secure_filename|path\.resolve|startsWith\(/, note: "path-confinement helper present" },
   // `escape(?:Html)?\b` could not match the camelCase family (`escapeAttrValue`),
@@ -20703,6 +21279,14 @@ var SANITIZERS = [
   // HTML sanitizer is `xssWrapper` wrapping `xss@1.0.15`, the brief that exists
   // to answer "which sanitizers does this project use?" named none of it.
   { kind: "xss", languages: ["*"], re: /\bescape[A-Z]?\w*\b|sanitize|DOMPurify|bleach|markupsafe|\bxss[A-Za-z]*\b/, note: "escaping/sanitizer present" },
+  // The JVM/.NET/Go encoders by name: ESAPI, OWASP Java Encoder, Spring's
+  // HtmlUtils, Commons Text, ASP.NET's HttpUtility/HtmlEncoder, Go's html.
+  {
+    kind: "xss",
+    languages: ["*"],
+    re: /encodeForHTML(?:Attribute)?|encodeForJavaScript|encodeForCSS|encodeForURL|\bEncode\s*\.\s*for(?:Html|JavaScript|Css|Uri)\w*|HtmlUtils\s*\.\s*htmlEscape|StringEscapeUtils\s*\.\s*escape\w*|HttpUtility\s*\.\s*(?:HtmlEncode|JavaScriptStringEncode|UrlEncode)|HtmlEncoder\s*\.\s*(?:Default\s*\.\s*)?Encode|WebUtility\s*\.\s*HtmlEncode|\bhtml\s*\.\s*EscapeString|\bhtmlspecialchars\b|\bhtmlentities\b|\bERB\s*::\s*Util\s*\.\s*(?:html_escape|h)\b|\bsanitize_html\b/,
+    note: "HTML output encoder present"
+  },
   { kind: "deserialize", languages: ["*"], re: /safe_load|safeLoad|JSON\.parse/, note: "safe loader present" },
   { kind: "nosql", languages: ["*"], re: /mongo-?[sS]anitize|sanitizeFilter|\$eq\b/, note: "operator-stripping sanitizer present" },
   {
@@ -20711,7 +21295,35 @@ var SANITIZERS = [
     re: /resolve_entities\s*=\s*False|feature_external_ges|FEATURE_SECURE_PROCESSING|noent\s*=\s*False|XMLConstants/,
     note: "external-entity resolution disabled"
   },
-  { kind: "ldap", languages: ["*"], re: /ldap\.escape|escapeDN|escapeFilter|escape_filter_chars/, note: "LDAP escaping present" },
+  {
+    kind: "ldap",
+    languages: ["*"],
+    re: /ldap\.escape|escapeDN|escapeFilter|escape_filter_chars|encodeForLDAP|encodeForDN|LdapEncoder|\bldap_escape\b|Rdn\s*\.\s*escapeValue|LdapNameBuilder/,
+    note: "LDAP escaping present"
+  },
+  // Destination allow-listing for redirects and outbound requests: a parsed
+  // URL (`new URL(x)`) compared against an allowed host set, Django's
+  // `url_has_allowed_host_and_scheme`, ASP.NET's `Url.IsLocalUrl`, a
+  // relative-path check.
+  {
+    kind: "redirect",
+    languages: ["*"],
+    re: /\bnew\s+URL\s*\(|\bisSafeRedirect\b|\bis_safe_url\b|url_has_allowed_host_and_scheme|\bIsLocalUrl\b|\bLocalRedirect\b|\ballowedHosts?\b|\bALLOWED_HOSTS\b|\bstartsWith\s*\(\s*['"]\/(?!\/)/,
+    note: "redirect destination validated (allow-list / local-path check present)"
+  },
+  {
+    kind: "ssrf",
+    languages: ["*"],
+    re: /\bnew\s+URL\s*\(|\bURL\s*\.\s*parse\b|\burlparse\b|\ballowedHosts?\b|\bALLOWED_HOSTS\b|\ballow_?list\b|\bisPrivate(?:Ip|Address|Host)\b|\bip\s*\.\s*isPrivate\b|\bssrf/i,
+    note: "destination parsed / allow-listed (SSRF guard present)"
+  },
+  // Argv-array runners that never spawn a shell, and quoting libraries.
+  {
+    kind: "command",
+    languages: ["*"],
+    re: /\bexeca\b|\bshell-quote\b|\bshellQuote\b|\bshlex\s*\.\s*(?:quote|split)\b|\bescapeshellcmd\b|\bspawn\s*\(\s*['"][^'"]+['"]\s*,\s*\[|\bexecFile(?:Sync)?\s*\(/,
+    note: "argv-array runner / shell quoting present"
+  },
   { kind: "crlf", languages: ["*"], re: /encodeURIComponent|stripCRLF|replace\(\s*\/[^/]*[\\]r/, note: "CR/LF stripping present" },
   {
     kind: "proto",
@@ -20719,7 +21331,12 @@ var SANITIZERS = [
     re: /__proto__|Object\.freeze|Object\.create\(\s*null|hasOwnProperty|structuredClone/,
     note: "prototype-pollution guard present"
   },
-  { kind: "ssti", languages: ["*"], re: /autoescape|markupsafe|\|\s*e\b|escape\(/, note: "template autoescaping present" },
+  {
+    kind: "ssti",
+    languages: ["*"],
+    re: /autoescape|markupsafe|\|\s*e\b|escape\(|DOMPurify|\bSandboxedEnvironment\b|\bImmutableSandboxedEnvironment\b|\bEscapeTool\b|\bTemplateClassResolver\b/,
+    note: "template autoescaping / sandbox present"
+  },
   {
     kind: "domxss",
     languages: ["*"],
@@ -20779,7 +21396,13 @@ var SANITIZERS = [
   {
     kind: "*",
     languages: ["*"],
-    re: /\bparseInt\b|\bNumber\(|\bInteger\.parse|validator\.|\bz\.|Joi\.|\bisInt\b|\bUUID\b/,
+    // The schema/validation libraries by name (zod, Joi, yup, ajv,
+    // express-validator, class-validator, pydantic, marshmallow, Bean
+    // Validation's @Valid) plus the type coercions. A schema says the value has
+    // the right SHAPE — which is evidence for most sinks and none for `algodos`.
+    // express-validator's `query('q')`/`param('id')` are deliberately absent:
+    // `db.query("SELECT…")` has the same shape and would read as validated.
+    re: /\bparseInt\b|\bNumber\(|\bInteger\.parse|\bLong\.parse|\bint\s*\(|validator\.|\bz\.|Joi\.|\byup\s*\.|\bajv\b|\bAjv\b|\bbody\s*\(\s*['"]|\bcheck\s*\(\s*['"]|validationResult|class-validator|\bpydantic\b|\bBaseModel\b|\bmarshmallow\b|@Valid\b|@Validated\b|\bisInt\b|\bUUID\b|\bmatches\s*\(\s*\/|\bPattern\s*\.\s*matches\b/,
     note: "type-coercion/validation present",
     exceptKinds: ["algodos"]
   }
@@ -21936,6 +22559,7 @@ function classifySourceScope(symbols, sourceLine, entryLine, units) {
   return srcSymbol === enclosingSymbolName(symbols, entryLine) ? "symbol" : "file";
 }
 var LOOKBEHIND = 3;
+var LOOKAHEAD = 3;
 function sanitizersAlongPath(path, sinkKind, lineAt2) {
   const out2 = [];
   const seen = /* @__PURE__ */ new Set();
@@ -21956,6 +22580,7 @@ function sanitizersAlongPath(path, sinkKind, lineAt2) {
   for (const step of path) inspect(step.file, step.line);
   if (sink) {
     for (let l = sink.line - LOOKBEHIND; l < sink.line; l++) inspect(sink.file, l);
+    for (let l = sink.line + 1; l <= sink.line + LOOKAHEAD; l++) inspect(sink.file, l);
   }
   return out2.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.note.localeCompare(b.note));
 }
@@ -21979,17 +22604,42 @@ var NOT_A_BINDING = /* @__PURE__ */ new Set([
   "set"
 ]);
 var IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/g;
+function quotedMask(line) {
+  let quote = null;
+  let any = false;
+  const mask = new Array(line.length).fill(false);
+  for (let i2 = 0; i2 < line.length; i2++) {
+    const ch = line[i2];
+    if (quote) {
+      mask[i2] = true;
+      if (ch === "\\") {
+        i2++;
+        if (i2 < line.length) mask[i2] = true;
+        continue;
+      }
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      mask[i2] = true;
+      any = true;
+    }
+  }
+  return any ? mask : void 0;
+}
 function bindingOperatorBefore(line, atIndex) {
+  const quoted = quotedMask(line);
   for (let i2 = Math.min(atIndex, line.length) - 1; i2 >= 0; i2--) {
-    if (line[i2] !== "=") continue;
+    if (line[i2] !== "=" || quoted?.[i2]) continue;
     const prev = line[i2 - 1] ?? "";
     const next = line[i2 + 1] ?? "";
     if (next === "=" || next === ">") continue;
-    if (prev === "=" || prev === "!" || prev === "<" || prev === ">" || prev === "+" || prev === "-" || prev === "*" || prev === "/") continue;
+    if (prev === "+" || prev === ".") return i2 - 1;
+    if (prev === "=" || prev === "!" || prev === "<" || prev === ">" || prev === "-" || prev === "*" || prev === "/") continue;
     return i2;
   }
   return -1;
 }
+var MUTATING_CALL = /^\s*(?:this\s*\.\s*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\.\s*(?:append|appendLine|add|addAll|put|putAll|push|unshift|write|writeln|print|format|concat|insert|set|extend|update|join)\s*\(/;
 function boundNames2(lhs) {
   const names = [];
   const destructured = /[{[]/.test(lhs);
@@ -22030,9 +22680,10 @@ function traceDefUseDetail(lines5, sourceLine, sourceMatch, entryLine) {
   for (let l = sourceLine + 1; l < entryLine; l++) {
     const text = lines5[l - 1] ?? "";
     if (!tracked.some((n) => mentions(text, n))) continue;
+    const mut = MUTATING_CALL.exec(text);
+    if (mut && !tainted.has(mut[1])) tainted.add(mut[1]);
     const assign = bindingOperatorBefore(text, text.length);
-    if (assign < 0) continue;
-    for (const n of boundNames2(text.slice(0, assign))) tainted.add(n);
+    if (assign >= 0) for (const n of boundNames2(text.slice(0, assign))) tainted.add(n);
     if (tainted.size !== tracked.length) tracked = [...tainted];
   }
   const target = lines5[entryLine - 1] ?? "";

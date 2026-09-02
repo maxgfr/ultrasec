@@ -110,6 +110,28 @@ describe("LOG_SINKS — receiver-gating is hard (bare log(x) must not match)", (
     const hits = findSinks(lang, [{ callee: "log", receiver: "console", line: 1 }]);
     expect(hits.find((h) => h.kind === "log")).toBeUndefined();
   });
+
+  it("covers one logger shape per language, receiver-gated in each", () => {
+    const cases: [string, string, string][] = [
+      ["x.java", "logger", "info"],
+      ["x.java", "LOGGER", "warn"],
+      ["x.kt", "log", "error"],
+      ["x.cs", "_logger", "LogInformation"],
+      ["x.cs", "Console", "WriteLine"],
+      ["x.go", "log", "Printf"],
+      ["x.py", "logging", "warning"],
+      ["x.rb", "logger", "info"],
+      ["x.php", "logger", "error"],
+    ];
+    for (const [file, receiver, callee] of cases) {
+      const l = langForFile(file)!;
+      expect(
+        findSinks(l, [{ callee, receiver, line: 1 }], LOG_SINKS).map((h) => h.kind),
+        `${file} ${receiver}.${callee}`,
+      ).toEqual(["log"]);
+      expect(findSinks(l, [{ callee, line: 1 }], LOG_SINKS), `${file} bare ${callee}`).toEqual([]);
+    }
+  });
 });
 
 // ── CWE-532: sensitive-logging line-content pass ───────────────────────────────

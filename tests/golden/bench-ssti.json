@@ -1,6 +1,53 @@
 {
   "findings": [
     {
+      "id": "957cda865480",
+      "category": "taint",
+      "cwe": "CWE-1336",
+      "title": "Server-side template injection (SSTI): untrusted input reaches evaluate()",
+      "severity": "high",
+      "confidence": "low",
+      "source": {
+        "file": "vuln.java",
+        "line": 9,
+        "kind": "http"
+      },
+      "sink": {
+        "file": "vuln.java",
+        "line": 12,
+        "kind": "ssti",
+        "symbol": "doGet"
+      },
+      "path": [
+        {
+          "file": "vuln.java",
+          "line": 9,
+          "symbol": "doGet",
+          "why": "untrusted input (http): .getParameter("
+        },
+        {
+          "file": "vuln.java",
+          "line": 12,
+          "symbol": "doGet",
+          "why": "ssti sink: evaluate()"
+        }
+      ],
+      "sourceScope": "symbol",
+      "dataflow": "linked",
+      "flow": {
+        "tainted": [
+          "tpl"
+        ]
+      },
+      "message": "Intra-file candidate: http input at vuln.java:9 may reach the ssti sink evaluate() at vuln.java:12 through 1 hop(s). Tainted data compiled/evaluated as a JVM template (Velocity/FreeMarker/Thymeleaf). Render data as context VALUES on a fixed template, never build the template source from input; on Thymeleaf avoid `__${...}__` preprocessing with user data. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.",
+      "tool": "ultrasec",
+      "references": [
+        "https://cwe.mitre.org/data/definitions/1336.html"
+      ],
+      "status": "open",
+      "risk": 48
+    },
+    {
       "id": "feb256823d13",
       "category": "taint",
       "cwe": "CWE-1336",
@@ -50,17 +97,105 @@
   ],
   "graph": {
     "files": [
+      "safe.java",
       "safe.js",
+      "vuln.java",
       "vuln.js"
     ],
     "edges": [],
     "symbolDefs": {
+      "Safe": [
+        "safe.java"
+      ],
+      "doGet": [
+        "safe.java",
+        "vuln.java"
+      ],
       "view": [
         "safe.js",
         "vuln.js"
+      ],
+      "Vuln": [
+        "vuln.java"
       ]
     },
     "callersBySymbol": {
+      "StringWriter": [
+        {
+          "file": "safe.java",
+          "line": 15,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 11,
+          "symbol": "doGet"
+        }
+      ],
+      "VelocityContext": [
+        {
+          "file": "safe.java",
+          "line": 12,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 10,
+          "symbol": "doGet"
+        }
+      ],
+      "evaluate": [
+        {
+          "file": "vuln.java",
+          "line": 12,
+          "symbol": "doGet"
+        }
+      ],
+      "getParameter": [
+        {
+          "file": "safe.java",
+          "line": 10,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 9,
+          "symbol": "doGet"
+        }
+      ],
+      "getTemplate": [
+        {
+          "file": "safe.java",
+          "line": 14,
+          "symbol": "doGet"
+        }
+      ],
+      "length": [
+        {
+          "file": "safe.java",
+          "line": 17,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 13,
+          "symbol": "doGet"
+        }
+      ],
+      "merge": [
+        {
+          "file": "safe.java",
+          "line": 16,
+          "symbol": "doGet"
+        }
+      ],
+      "put": [
+        {
+          "file": "safe.java",
+          "line": 13,
+          "symbol": "doGet"
+        }
+      ],
       "render": [
         {
           "file": "safe.js",
@@ -83,6 +218,30 @@
         {
           "file": "vuln.js",
           "line": 1
+        }
+      ],
+      "setContentLength": [
+        {
+          "file": "safe.java",
+          "line": 17,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 13,
+          "symbol": "doGet"
+        }
+      ],
+      "toString": [
+        {
+          "file": "safe.java",
+          "line": 17,
+          "symbol": "doGet"
+        },
+        {
+          "file": "vuln.java",
+          "line": 13,
+          "symbol": "doGet"
         }
       ]
     }

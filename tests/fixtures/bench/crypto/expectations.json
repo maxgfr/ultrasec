@@ -1,15 +1,9 @@
 {
   "cwe": "CWE-327",
   "cases": [
-    {
-      "name": "vuln",
-      "file": "vuln.js",
-      "vulnerable": true
-    },
-    {
-      "name": "safe",
-      "file": "safe.js",
-      "vulnerable": false
-    }
+    { "name": "vuln", "file": "vuln.js", "vulnerable": true },
+    { "name": "safe", "file": "safe.js", "vulnerable": false },
+    { "name": "vuln-go", "file": "vuln.go", "vulnerable": true },
+    { "name": "safe-go", "file": "safe.go", "vulnerable": false }
   ]
 }

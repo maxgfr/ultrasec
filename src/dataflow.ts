@@ -226,6 +226,10 @@ export interface SanitizerHit {
 /** How many lines above the sink to inspect: sanitization is usually written
  *  immediately before the dangerous call, not on the same line as it. */
 const LOOKBEHIND = 3;
+/** And how many BELOW it: a prepared statement binds its parameters after the
+ *  prepare — `stmt = conn.prepareStatement(sql); stmt.setString(1, name);` —
+ *  so the evidence that the query is parameterized sits under the sink line. */
+const LOOKAHEAD = 3;
 
 /**
  * Collect sanitizer hints along every hop, not just the sink line.
@@ -259,9 +263,10 @@ export function sanitizersAlongPath(path: PathStep[], sinkKind: string, lineAt: 
   };
 
   for (const step of path) inspect(step.file, step.line);
-  // The lines just above the sink, which no path step points at.
+  // The lines just above and just below the sink, which no path step points at.
   if (sink) {
     for (let l = sink.line - LOOKBEHIND; l < sink.line; l++) inspect(sink.file, l);
+    for (let l = sink.line + 1; l <= sink.line + LOOKAHEAD; l++) inspect(sink.file, l);
   }
 
   return out.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.note.localeCompare(b.note));
@@ -298,17 +303,63 @@ const IDENT = /[A-Za-z_$][A-Za-z0-9_$]*/g;
  * (`==`, `===`, `!=`, `<=`, `>=`, `=>`). Returns -1 when the expression is used
  * inline rather than bound.
  */
+/**
+ * Which characters of `line` sit inside a string literal. `sql += " WHERE id
+ * = " + id` has an `=` in the literal, and scanning for the binding operator
+ * from the right used to stop there, binding `id` to itself and leaving `sql`
+ * untracked. Returns `undefined` when the line has no quotes at all, which is
+ * the common case and costs nothing.
+ */
+function quotedMask(line: string): boolean[] | undefined {
+  let quote: string | null = null;
+  let any = false;
+  const mask: boolean[] = new Array(line.length).fill(false);
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i]!;
+    if (quote) {
+      mask[i] = true;
+      if (ch === "\\") {
+        i++;
+        if (i < line.length) mask[i] = true;
+        continue;
+      }
+      if (ch === quote) quote = null;
+    } else if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      mask[i] = true;
+      any = true;
+    }
+  }
+  return any ? mask : undefined;
+}
+
 function bindingOperatorBefore(line: string, atIndex: number): number {
+  const quoted = quotedMask(line);
   for (let i = Math.min(atIndex, line.length) - 1; i >= 0; i--) {
-    if (line[i] !== "=") continue;
+    if (line[i] !== "=" || quoted?.[i]) continue;
     const prev = line[i - 1] ?? "";
     const next = line[i + 1] ?? "";
     if (next === "=" || next === ">") continue; // ==, ===, =>
-    if (prev === "=" || prev === "!" || prev === "<" || prev === ">" || prev === "+" || prev === "-" || prev === "*" || prev === "/") continue;
+    // `+=` and PHP's `.=` APPEND to the left-hand name, so they bind it just as
+    // `=` does — `sql += " WHERE id=" + id` keeps `sql` tainted. The operator
+    // index handed back is the one before `=`, so the left-hand slice excludes
+    // it. The arithmetic compounds (`-=`, `*=`, `/=`) stay excluded: a number
+    // cannot carry a payload.
+    if (prev === "+" || prev === ".") return i - 1;
+    if (prev === "=" || prev === "!" || prev === "<" || prev === ">" || prev === "-" || prev === "*" || prev === "/") continue;
     return i;
   }
   return -1;
 }
+
+/**
+ * A mutating call on a receiver that carries what is appended into it:
+ * `sb.append(param)`, `list.add(x)`, `map.put(k, v)`, `parts.push(v)`,
+ * `writer.write(s)`. The receiver is then as tainted as the argument — and it is
+ * what reaches the sink, as `sb.toString()` or `String.join(parts)`.
+ */
+const MUTATING_CALL =
+  /^\s*(?:this\s*\.\s*)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\.\s*(?:append|appendLine|add|addAll|put|putAll|push|unshift|write|writeln|print|format|concat|insert|set|extend|update|join)\s*\(/;
 
 /**
  * Names bound by the left-hand side of an assignment.
@@ -406,9 +457,10 @@ export function traceDefUseDetail(
   for (let l = sourceLine + 1; l < entryLine; l++) {
     const text = lines[l - 1] ?? "";
     if (!tracked.some((n) => mentions(text, n))) continue;
+    const mut = MUTATING_CALL.exec(text);
+    if (mut && !tainted.has(mut[1]!)) tainted.add(mut[1]!);
     const assign = bindingOperatorBefore(text, text.length);
-    if (assign < 0) continue;
-    for (const n of boundNames(text.slice(0, assign))) tainted.add(n);
+    if (assign >= 0) for (const n of boundNames(text.slice(0, assign))) tainted.add(n);
     if (tainted.size !== tracked.length) tracked = [...tainted];
   }
 
