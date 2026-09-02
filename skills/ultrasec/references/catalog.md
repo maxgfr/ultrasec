@@ -9,7 +9,7 @@ you a glance; a missed flow is a missed bug.
 
 | kind | CWE | severity | example callees |
 |------|-----|----------|-----------------|
-| sql | CWE-89 | high | `query`, `execute`, `raw`, `executemany` · JDBC/JPA: `prepareStatement`, `prepareCall`, `executeUpdate`, `addBatch`, `createQuery` · Go `db.Query|QueryRow|Exec|*Context` (receiver-gated) · PHP `mysqli_query`, `pg_query`, `mysqli_prepare` · Rails `Model.where|order|pluck|find_by_sql` (receiver-gated) |
+| sql | CWE-89 | high | `query`, `execute`, `raw`, `executemany` · JDBC/JPA: `prepareStatement`, `prepareCall`, `executeUpdate`, `addBatch`, `createQuery` · Spring JdbcTemplate: `batchUpdate`, `queryForObject|List|Map|RowSet|Int|Long` · Go `db.Query|QueryRow|Exec|*Context` (receiver-gated) · PHP `mysqli_query`, `pg_query`, `mysqli_prepare` · Rails `Model.where|order|pluck|find_by_sql` (receiver-gated) |
 | nosql | CWE-943 | high | `db.find`, `collection.findOne`, `mapReduce`, `aggregate` (receiver-gated) |
 | command | CWE-78 | critical | `execSync`, `spawnSync`, `popen`, `Popen`, `shell_exec`, `passthru`, `proc_open`, `ProcessBuilder`, `Runtime.getRuntime` · plus `exec`/`spawn`/`run` **corroborated** (see below) |
 | code | CWE-94 | high | `eval`, `Function`, `runInThisContext`, `compile` · PHP `create_function`, `assert($x)` (line shape) · Ruby `instance_eval|class_eval|module_eval|*_exec` · plus the **line shape** `.apply(eval)` / `.map(exec)`, where the interpreter is a *reference*, not a call |

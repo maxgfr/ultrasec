@@ -148,6 +148,17 @@ export const SINKS: SinkRule[] = [
       "nativeSQL",
       "createQuery",
       "createNativeQuery",
+      // Spring's JdbcTemplate: every remaining OWASP Benchmark CWE-89 miss (76
+      // of 272) was one of these — the SQL string is the first argument.
+      // `update` is deliberately absent: too generic a verb to claim.
+      "batchUpdate",
+      "queryForObject",
+      "queryForList",
+      "queryForMap",
+      "queryForRowSet",
+      "queryForInt",
+      "queryForLong",
+      "queryForStream",
       // PHP's procedural drivers: bare names nothing else uses.
       "mysqli_query",
       "mysqli_real_query",
