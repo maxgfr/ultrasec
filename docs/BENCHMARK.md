@@ -5,7 +5,7 @@ Scores against **third-party labelled corpora** — not the fixtures in this rep
 rules, so a perfect score there proves the rules did not change, not that they are good.
 These are the numbers that can be checked by someone who does not trust us.
 
-Engine `1.21.0` · extraction tier `AST (tree-sitter)` · generated 2026-08-06
+Engine `1.42.0` · extraction tier `AST (tree-sitter)` · generated 2026-09-02
 
 Detection follows the SATE convention: a case counts as detected when a finding **of its
 CWE** has a path intersecting the case file.
@@ -24,17 +24,17 @@ trade this project has deliberately not made.
 
 | CWE | TP | FN | FP | TN | TPR | FPR | FP w/ sanitizer noted | F1 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
-| CWE-22 | 118 | 15 | 102 | 33 |  88.7% |  75.6% | 0/102 | 0.67 |
-| CWE-327 | 101 | 29 | 99 | 17 |  77.7% |  85.3% | 0/99 | 0.61 |
-| CWE-328 | 98 | 31 | 86 | 21 |  76.0% |  80.4% | 0/86 | 0.63 |
-| CWE-330 | 177 | 41 | 142 | 133 |  81.2% |  51.6% | 0/142 | 0.66 |
-| CWE-501 | 72 | 11 | 33 | 10 |  86.7% |  76.7% | 0/33 | 0.77 |
+| CWE-22 | 133 | 0 | 135 | 0 | 100.0% | 100.0% | 0/135 | 0.66 |
+| CWE-327 | 130 | 0 | 116 | 0 | 100.0% | 100.0% | 0/116 | 0.69 |
+| CWE-328 | 129 | 0 | 107 | 0 | 100.0% | 100.0% | 0/107 | 0.71 |
+| CWE-330 | 218 | 0 | 173 | 102 | 100.0% |  62.9% | 0/173 | 0.72 |
+| CWE-501 | 83 | 0 | 43 | 0 | 100.0% | 100.0% | 0/43 | 0.79 |
 | CWE-614 | 36 | 0 | 31 | 0 | 100.0% | 100.0% | 0/31 | 0.70 |
-| CWE-643 | 7 | 8 | 7 | 13 |  46.7% |  35.0% | 0/7 | 0.48 |
-| CWE-78 | 115 | 11 | 89 | 36 |  91.3% |  71.2% | 0/89 | 0.70 |
-| CWE-79 | 195 | 51 | 135 | 74 |  79.3% |  64.6% | 2/135 | 0.68 |
-| CWE-89 | 183 | 89 | 129 | 103 |  67.3% |  55.6% | 0/129 | 0.63 |
-| CWE-90 | 11 | 16 | 11 | 21 |  40.7% |  34.4% | 0/11 | 0.45 |
+| CWE-643 | 15 | 0 | 20 | 0 | 100.0% | 100.0% | 0/20 | 0.60 |
+| CWE-78 | 126 | 0 | 125 | 0 | 100.0% | 100.0% | 0/125 | 0.67 |
+| CWE-79 | 217 | 29 | 192 | 17 |  88.2% |  91.9% | 35/192 | 0.66 |
+| CWE-89 | 272 | 0 | 232 | 0 | 100.0% | 100.0% | 53/232 | 0.70 |
+| CWE-90 | 27 | 0 | 32 | 0 | 100.0% | 100.0% | 0/32 | 0.63 |
 
 ## Reading these honestly
 
