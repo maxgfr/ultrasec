@@ -20999,6 +20999,7 @@ function fileRenamedTo(repo, file) {
 // src/noise.ts
 var VENDORED_DIR = /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules|\.pnpm|bower_components|site-packages|\.venv|venv|__pycache__|\.tox|\.ipynb_checkpoints|dist|build|out|target|coverage|\.next|\.nuxt|\.svelte-kit|\.turbo|\.gradle)\//i;
 var MINIFIED = /\.min\.(js|mjs|cjs|css)$/i;
+var TEST_DEMOTABLE = /* @__PURE__ */ new Set(["taint", "sast", "crypto", "authz", "config"]);
 function locationsOf(f) {
   const out2 = [];
   if (f.source?.file) out2.push(f.source.file);
@@ -21039,10 +21040,14 @@ var RULES17 = [
     confidence: "low",
     why: () => `de-prioritized: every cited location is a test path, so the flow does not exist in the shipped artifact. Confirm the harness is not itself the product (fixtures served in production, a test route mounted by the app) before dismissing.`,
     // Deliberately scoped to the enumerated classes. A hardcoded credential in a
-    // test file is a classic real leak — CI tokens live there — so `secret` and
-    // `config` findings are NOT demoted for sitting in a test.
+    // test file is a classic real leak — CI tokens live there — so `secret`
+    // findings are NOT demoted for sitting in a test (`committed-password-hash`
+    // must stay loud). `crypto`, `authz` and `config` claims, on the other hand,
+    // describe a flow the test harness performs — a `jwt-alg-none` assertion
+    // string, a `verify: false` in a fixture client, a weak hash in a helper —
+    // and on the self-audit three of the six "critical"s were exactly that.
     matches: (f) => {
-      if (f.category !== "taint" && f.category !== "sast") return false;
+      if (!TEST_DEMOTABLE.has(f.category)) return false;
       const locs = locationsOf(f);
       return locs.length > 0 && locs.every((l) => isTestPath(l));
     }
@@ -23190,11 +23195,27 @@ var CACHE_VERSION = 2;
 function cachePath(run2) {
   return join39(run2, "cache", "scan-cache.json");
 }
+function isCacheEntry(key, v) {
+  if (!v || typeof v !== "object") return false;
+  const e = v;
+  if (typeof e.hash !== "string" || e.hash === "") return false;
+  if (!e.record || typeof e.record !== "object") return false;
+  const r = e.record;
+  if (typeof r.rel !== "string" || typeof r.hash !== "string" || typeof r.lang !== "string" || typeof r.ext !== "string") return false;
+  if (typeof r.size !== "number" || typeof r.lines !== "number") return false;
+  if (!Array.isArray(r.symbols) || !Array.isArray(r.refs) || !Array.isArray(r.headings)) return false;
+  if (r.hash !== e.hash) return false;
+  if (r.rel !== key) return false;
+  return true;
+}
 function loadScanCache(run2) {
   try {
     const data = JSON.parse(readFileSync18(cachePath(run2), "utf8"));
-    if (!data || data.cacheVersion !== CACHE_VERSION || data.extractorVersion !== EXTRACTOR_VERSION || typeof data.entries !== "object") return /* @__PURE__ */ new Map();
-    return new Map(Object.entries(data.entries));
+    if (!data || data.cacheVersion !== CACHE_VERSION || data.extractorVersion !== EXTRACTOR_VERSION) return /* @__PURE__ */ new Map();
+    if (!data.entries || typeof data.entries !== "object" || Array.isArray(data.entries)) return /* @__PURE__ */ new Map();
+    const out2 = /* @__PURE__ */ new Map();
+    for (const [k, v] of Object.entries(data.entries)) if (isCacheEntry(k, v)) out2.set(k, v);
+    return out2;
   } catch {
     return /* @__PURE__ */ new Map();
   }
@@ -30987,7 +31008,16 @@ function renderReport(d, narrative) {
 var MISSING = "\u2014";
 function esc2(s) {
   if (s === void 0 || s === null) return MISSING;
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function safeHref(ref) {
+  try {
+    const u = new URL(ref);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return void 0;
+    return ref;
+  } catch {
+    return void 0;
+  }
 }
 function sevClass(s) {
   return s ? s[0].toLowerCase() : "x";
@@ -31029,7 +31059,11 @@ function scenarioHtml(f) {
   return `<div class="scenario"><div class="s-label">Attack scenario</div><p>${esc2(f.exploitPath)}</p></div>`;
 }
 function refsHtml(f) {
-  const refs = (f.references ?? []).slice(0, 5).map((r) => `<a href="${esc2(r)}" rel="noreferrer noopener">${esc2(String(r).replace(/^https?:\/\//, ""))}</a>`).join(" \xB7 ");
+  const refs = (f.references ?? []).slice(0, 5).map((r) => {
+    const label = esc2(String(r).replace(/^https?:\/\//, ""));
+    const href = safeHref(String(r));
+    return href ? `<a href="${esc2(href)}" rel="noreferrer noopener">${label}</a>` : `<span class="ref-text">${label}</span>`;
+  }).join(" \xB7 ");
   return refs ? `<p class="refs">${refs}</p>` : "";
 }
 function metaHtml(f) {
@@ -32118,12 +32152,19 @@ function isPrivateHost(ip) {
   if (lc.startsWith("::ffff:")) return isPrivateHost(lc.slice(7));
   return lc.startsWith("fc") || lc.startsWith("fd") || lc.startsWith("fe80");
 }
-async function resolveIp(hostname) {
+var defaultResolver = async (hostname) => {
   try {
-    return (await lookup(hostname)).address;
+    const r = await lookup(hostname);
+    return { address: r.address, family: r.family === 6 ? 6 : 4 };
   } catch {
     return null;
   }
+};
+function pinnedLookup(pin) {
+  return ((_host, options, cb) => {
+    if (typeof options === "object" && options?.all) cb(null, [{ address: pin.address, family: pin.family }]);
+    else cb(null, pin.address, pin.family);
+  });
 }
 function doRequest(u, opts) {
   return new Promise((resolveP, reject) => {
@@ -32138,7 +32179,10 @@ function doRequest(u, opts) {
       // Observe & REPORT certificate problems rather than aborting on them —
       // this is a diagnostic probe, not a client that must stay safe.
       rejectUnauthorized: false,
-      servername: u.hostname
+      // `hostname`/`servername` stay the real name (Host header, SNI); only the
+      // socket's destination is pinned.
+      servername: u.hostname,
+      ...opts.pinned ? { lookup: pinnedLookup(opts.pinned) } : {}
     };
     const onRes = (res) => {
       const chunks = [];
@@ -32183,7 +32227,7 @@ async function fetchWithin(ctx, u, opts) {
   }
   ctx.made++;
   try {
-    return await doRequest(u, { ...opts, timeout: ctx.timeout });
+    return await doRequest(u, { ...opts, timeout: ctx.timeout, pinned: ctx.pinned });
   } catch {
     return null;
   }
@@ -32433,7 +32477,8 @@ function renderProbeMd(r) {
   return `${L.join("\n")}
 `;
 }
-async function runProbe(args2) {
+async function runProbe(args2, deps = {}) {
+  const resolveIp = deps.resolveIp ?? defaultResolver;
   const raw = args2._[1];
   if (!raw) {
     eprintln("usage: ultrasec probe <url> --i-own-this [--deep] [--graphql] [--allow-private] [--timeout ms] [--out dir]");
@@ -32455,7 +32500,8 @@ async function runProbe(args2) {
     return 2;
   }
   const allowPrivate = flagBool(args2, "allow-private");
-  const resolvedIp = await resolveIp(url.hostname);
+  const pinned = await resolveIp(url.hostname);
+  const resolvedIp = pinned?.address ?? null;
   if (resolvedIp && isPrivateHost(resolvedIp) && !allowPrivate) {
     eprintln(
       `ultrasec probe: ${url.hostname} resolves to a private/loopback/metadata address (${resolvedIp}). Pass --allow-private for a local target you own.`
@@ -32465,8 +32511,8 @@ async function runProbe(args2) {
   const deep = flagBool(args2, "deep");
   const graphql = flagBool(args2, "graphql");
   const timeout = numFlag(args2, "timeout") ?? 1e4;
-  const out2 = resolve35(flagStr(args2, "out") ?? ".ultrasec");
-  const ctx = { cap: deep ? 24 : 12, made: 0, timeout, findings: [], truncated: false };
+  const out2 = resolve34(flagStr(args2, "out") ?? ".ultrasec");
+  const ctx = { cap: deep ? 24 : 12, made: 0, timeout, findings: [], truncated: false, pinned };
   const main2 = await fetchWithin(ctx, url, { method: "GET" });
   if (!main2) {
     eprintln(`ultrasec probe: could not reach ${url.toString()} (connection failed or timed out).`);
@@ -33190,7 +33236,7 @@ var LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 function isOriginAllowed(origin, allowed = []) {
   if (origin === void 0) return true;
   const o = origin.trim();
-  if (o === "" || o === "null") return true;
+  if (o === "") return true;
   if (LOOPBACK_ORIGIN.test(o)) return true;
   return allowed.some((a) => a === "*" || a.toLowerCase() === o.toLowerCase());
 }

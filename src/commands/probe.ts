@@ -83,15 +83,44 @@ function isPrivateHost(ip: string): boolean {
   return lc.startsWith("fc") || lc.startsWith("fd") || lc.startsWith("fe80"); // ULA + link-local
 }
 
-async function resolveIp(hostname: string): Promise<string | null> {
+/** One resolved address, with the family the socket needs to connect to it. */
+export interface PinnedAddress {
+  address: string;
+  family: 4 | 6;
+}
+
+/** Injectable resolver (tests pin a host that does not exist in DNS). */
+export type Resolver = (hostname: string) => Promise<PinnedAddress | null>;
+
+const defaultResolver: Resolver = async (hostname) => {
   try {
-    return (await lookup(hostname)).address;
+    const r = await lookup(hostname);
+    return { address: r.address, family: r.family === 6 ? 6 : 4 };
   } catch {
     return null;
   }
+};
+
+/**
+ * A `lookup` for `http.request` that answers with the address the private-range
+ * check already approved, whatever the resolver would say now. Without it the
+ * hostname is resolved TWICE — once for the check, once by the socket — and a
+ * DNS record with a short TTL can pass the check on a public address and then
+ * hand the socket 169.254.169.254 (rebinding). Node's `net.connect` calls the
+ * hook with `{ all: true }` when family auto-selection is on and expects an
+ * array; both shapes are answered.
+ */
+function pinnedLookup(pin: PinnedAddress): NonNullable<RequestOptions["lookup"]> {
+  return ((_host: string, options: { all?: boolean } | number | undefined, cb: (...a: unknown[]) => void) => {
+    if (typeof options === "object" && options?.all) cb(null, [{ address: pin.address, family: pin.family }]);
+    else cb(null, pin.address, pin.family);
+  }) as unknown as NonNullable<RequestOptions["lookup"]>;
 }
 
-function doRequest(u: URL, opts: { method?: string; headers?: Record<string, string>; body?: string; timeout: number }): Promise<Resp> {
+function doRequest(
+  u: URL,
+  opts: { method?: string; headers?: Record<string, string>; body?: string; timeout: number; pinned?: PinnedAddress | null },
+): Promise<Resp> {
   return new Promise((resolveP, reject) => {
     const isHttps = u.protocol === "https:";
     // Typed as https options (a superset of http's); passing this variable to
@@ -106,7 +135,10 @@ function doRequest(u: URL, opts: { method?: string; headers?: Record<string, str
       // Observe & REPORT certificate problems rather than aborting on them —
       // this is a diagnostic probe, not a client that must stay safe.
       rejectUnauthorized: false,
+      // `hostname`/`servername` stay the real name (Host header, SNI); only the
+      // socket's destination is pinned.
       servername: u.hostname,
+      ...(opts.pinned ? { lookup: pinnedLookup(opts.pinned) } : {}),
     };
     const onRes = (res: IncomingMessage) => {
       const chunks: Buffer[] = [];
@@ -149,6 +181,8 @@ interface Ctx {
   timeout: number;
   findings: ProbeFinding[];
   truncated: boolean;
+  /** The address the private-range check approved; every request connects to it. */
+  pinned: PinnedAddress | null;
 }
 
 function add(ctx: Ctx, area: string, title: string, severity: Severity, grounding: string, message: string, cwe?: string): void {
@@ -162,7 +196,7 @@ async function fetchWithin(ctx: Ctx, u: URL, opts: { method?: string; headers?: 
   }
   ctx.made++;
   try {
-    return await doRequest(u, { ...opts, timeout: ctx.timeout });
+    return await doRequest(u, { ...opts, timeout: ctx.timeout, pinned: ctx.pinned });
   } catch {
     return null;
   }
@@ -430,7 +464,8 @@ function renderProbeMd(r: ProbeReport): string {
   return `${L.join("\n")}\n`;
 }
 
-export async function runProbe(args: ParsedArgs): Promise<number> {
+export async function runProbe(args: ParsedArgs, deps: { resolveIp?: Resolver } = {}): Promise<number> {
+  const resolveIp = deps.resolveIp ?? defaultResolver;
   const raw = args._[1];
   if (!raw) {
     eprintln("usage: ultrasec probe <url> --i-own-this [--deep] [--graphql] [--allow-private] [--timeout ms] [--out dir]");
@@ -455,7 +490,8 @@ export async function runProbe(args: ParsedArgs): Promise<number> {
   }
 
   const allowPrivate = flagBool(args, "allow-private");
-  const resolvedIp = await resolveIp(url.hostname);
+  const pinned = await resolveIp(url.hostname);
+  const resolvedIp = pinned?.address ?? null;
   if (resolvedIp && isPrivateHost(resolvedIp) && !allowPrivate) {
     eprintln(
       `ultrasec probe: ${url.hostname} resolves to a private/loopback/metadata address (${resolvedIp}). Pass --allow-private for a local target you own.`,
@@ -467,7 +503,9 @@ export async function runProbe(args: ParsedArgs): Promise<number> {
   const graphql = flagBool(args, "graphql");
   const timeout = numFlag(args, "timeout") ?? 10_000;
   const out = resolve(flagStr(args, "out") ?? ".ultrasec");
-  const ctx: Ctx = { cap: deep ? 24 : 12, made: 0, timeout, findings: [], truncated: false };
+  // The address checked above is the address every request connects to — the
+  // probe does not follow redirects, so there is no second hostname to re-check.
+  const ctx: Ctx = { cap: deep ? 24 : 12, made: 0, timeout, findings: [], truncated: false, pinned };
 
   const main = await fetchWithin(ctx, url, { method: "GET" });
   if (!main) {

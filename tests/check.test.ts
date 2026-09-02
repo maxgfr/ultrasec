@@ -303,7 +303,17 @@ describe("check — lineCount streaming (IMPORTANT 3)", () => {
   });
 });
 
-describe("history-scanned citations are graded against their own commit", () => {
+function gitAvailable(): boolean {
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const HAS_GIT = gitAvailable();
+
+describe.skipIf(!HAS_GIT)("history-scanned citations are graded against their own commit", () => {
   // gitleaks `detect` reads every commit, so a secret in a file deleted since
   // cites a path that does not exist at HEAD. The gate used to call that
   // "hallucinated or stale" and FAIL — 20 of them on the first real audit, not

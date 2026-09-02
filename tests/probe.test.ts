@@ -110,6 +110,35 @@ describe("probe — posture checks over the wire", () => {
   });
 });
 
+describe("probe — DNS pinning (no second resolution between the check and the socket)", () => {
+  it("connects to the address the private-range check approved, not to what DNS says at connect time", async () => {
+    // `.invalid` is reserved (RFC 2606) and never resolves. If the socket did
+    // its own lookup the request would fail; the pinned address from the check
+    // is the only way to reach the fixture server.
+    const port = new URL(base).port;
+    const target = `http://does-not-resolve.invalid:${port}`;
+    const out = mkdtempSync(join(tmpdir(), "ultrasec-probe-pin-"));
+    const resolveIp = vi.fn(async () => ({ address: "127.0.0.1", family: 4 as const }));
+    const restore = silence();
+    const code = await runProbe(parseArgs(["probe", target, "--i-own-this", "--allow-private", "--out", out]), { resolveIp });
+    restore();
+    expect(code).toBe(0);
+    expect(resolveIp).toHaveBeenCalledTimes(1); // one lookup per run — the check's
+    const report = JSON.parse(readFileSync(join(out, "PROBE.json"), "utf8")) as { resolvedIp: string; observed: { status: number }; requestsMade: number };
+    expect(report.resolvedIp).toBe("127.0.0.1");
+    expect(report.observed.status).toBe(200);
+    expect(report.requestsMade).toBeGreaterThan(1); // every follow-up request was pinned too
+  });
+
+  it("still refuses a pinned private address without --allow-private", async () => {
+    const resolveIp = async () => ({ address: "169.254.169.254", family: 4 as const });
+    const restore = silence();
+    const code = await runProbe(parseArgs(["probe", "http://metadata.example.test", "--i-own-this"]), { resolveIp });
+    restore();
+    expect(code).toBe(2);
+  });
+});
+
 describe("probe — does not contaminate the check gate", () => {
   const REPO = join(import.meta.dirname, "fixtures", "vuln-express");
 

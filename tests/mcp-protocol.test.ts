@@ -126,10 +126,20 @@ describe("isOriginAllowed", () => {
     }
   });
 
-  it("allows an absent or opaque origin (non-browser clients send none)", () => {
+  it("allows an absent or empty origin (non-browser clients send none)", () => {
     expect(isOriginAllowed(undefined)).toBe(true);
-    expect(isOriginAllowed("null")).toBe(true);
     expect(isOriginAllowed("")).toBe(true);
+  });
+
+  it("rejects the literal `null` origin — a sandboxed iframe or file:// page is attacker-arrangeable", () => {
+    expect(isOriginAllowed("null")).toBe(false);
+    expect(isOriginAllowed(" null ")).toBe(false);
+  });
+
+  it("lets an operator opt in to `null` by listing it explicitly", () => {
+    expect(isOriginAllowed("null", ["null"])).toBe(true);
+    expect(isOriginAllowed("null", ["*"])).toBe(true);
+    expect(isOriginAllowed("null", ["https://app.example.com"])).toBe(false);
   });
 
   it("rejects a remote origin — the DNS-rebinding case", () => {

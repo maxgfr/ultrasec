@@ -39,7 +39,23 @@ const MISSING = "—";
 
 function esc(s: string | undefined | null): string {
   if (s === undefined || s === null) return MISSING;
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
+/**
+ * A reference is a URL a scanner or an adjudicator wrote into the dossier, and
+ * the report is opened in a browser. Only `http:`/`https:` may become a link —
+ * `javascript:` and `data:` would execute or render attacker-chosen content
+ * from inside a trusted-looking report. Anything else is shown as text.
+ */
+function safeHref(ref: string): string | undefined {
+  try {
+    const u = new URL(ref);
+    if (u.protocol !== "http:" && u.protocol !== "https:") return undefined;
+    return ref; // the original text, not `u.href` — no silent normalization of what the dossier says
+  } catch {
+    return undefined;
+  }
 }
 
 /** Shorthand severity class: `c`/`h`/`m`/`l`/`i`, or `x` for a malformed one. */
@@ -105,7 +121,11 @@ function scenarioHtml(f: Finding): string {
 function refsHtml(f: Finding): string {
   const refs = (f.references ?? [])
     .slice(0, 5)
-    .map((r) => `<a href="${esc(r)}" rel="noreferrer noopener">${esc(String(r).replace(/^https?:\/\//, ""))}</a>`)
+    .map((r) => {
+      const label = esc(String(r).replace(/^https?:\/\//, ""));
+      const href = safeHref(String(r));
+      return href ? `<a href="${esc(href)}" rel="noreferrer noopener">${label}</a>` : `<span class="ref-text">${label}</span>`;
+    })
     .join(" · ");
   return refs ? `<p class="refs">${refs}</p>` : "";
 }

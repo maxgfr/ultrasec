@@ -189,7 +189,7 @@ Verdict (supported): req.query.name is concatenated into a shell string at repor
 
 Revalidation (still-valid): report.js:5 is unchanged at HEAD — still execSync on a concatenated string.</p>
         <div class="scenario"><div class="s-label">Attack scenario</div><p>GET /report?name=x;sleep%205 · unauthenticated → the response takes 5s (baseline ~40ms), proving shell execution as the app user</p></div>
-        <div class="ai-fix"><strong>Suggested fix (AI):</strong> Replace execSync with execFile and an argv array: execFile(&quot;generate-report&quot;, [&quot;--for&quot;, name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can't be read as an option. · owner @backend<pre class="ai-patch"><code>- return execSync(&quot;generate-report --for &quot; + name).toString();
+        <div class="ai-fix"><strong>Suggested fix (AI):</strong> Replace execSync with execFile and an argv array: execFile(&quot;generate-report&quot;, [&quot;--for&quot;, name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can&#39;t be read as an option. · owner @backend<pre class="ai-patch"><code>- return execSync(&quot;generate-report --for &quot; + name).toString();
 + return execFileSync(&quot;generate-report&quot;, [&quot;--for&quot;, &quot;--&quot;, name]).toString();</code></pre></div>
         
         <p class="refs"><a href="https://cwe.mitre.org/data/definitions/78.html" rel="noreferrer noopener">cwe.mitre.org/data/definitions/78.html</a></p>
@@ -200,7 +200,7 @@ Revalidation (still-valid): report.js:5 is unchanged at HEAD — still execSync 
         <div class="meta"><code>54b733703450</code> · CWE-89 · taint · confirmed · supported · confidence high</div>
         <div class="chips"><span class="chip risk">risk 48</span></div>
         <div class="flow"><div class="node source"><div class="loc">src/server.js:10</div><div class="why">untrusted input (http): req.query</div></div><div class="arrow">→</div><div class="node hop"><div class="loc">src/server.js:11</div><div class="why">calls getUser()</div></div><div class="arrow">→</div><div class="node sink"><div class="loc">src/db.js:6</div><div class="sym">getUser()</div><div class="why">sql sink: query()</div></div></div>
-        <p class="msg">Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
+        <p class="msg">Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn&#39;t a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
 Verdict (supported): req.query.id is concatenated into SQL at db.js:5 and reaches sqlite.query() with no parameter array. The parameterized sibling getUserSafe (db.js:11) is NOT on this path.
 

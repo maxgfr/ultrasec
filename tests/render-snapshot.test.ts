@@ -95,3 +95,30 @@ describe("render — byte-identical with NO narrative (Phase 3 guard)", () => {
     expect(renderHtml(dossier, undefined)).toBe(renderHtml(dossier));
   });
 });
+
+describe("renderHtml — reference links are scheme-allowlisted", () => {
+  const withRefs = (references: string[]): Dossier => ({
+    ...dossier,
+    findings: [{ ...findings[0]!, references }],
+  });
+
+  it("links http(s) references verbatim", () => {
+    const html = renderHtml(withRefs(["https://cwe.mitre.org/data/definitions/89.html", "http://example.test/advisory?id=1&x=2"]));
+    expect(html).toContain(`<a href="https://cwe.mitre.org/data/definitions/89.html" rel="noreferrer noopener">`);
+    expect(html).toContain(`<a href="http://example.test/advisory?id=1&amp;x=2" rel="noreferrer noopener">`);
+  });
+
+  it("never turns a javascript:, data: or malformed reference into a link", () => {
+    const html = renderHtml(withRefs(["javascript:alert(1)", "data:text/html,<script>alert(1)</script>", "not a url", "vbscript:x"]));
+    expect(html).not.toMatch(/href="(javascript|data|vbscript):/i);
+    expect(html).not.toContain(`href="not a url"`);
+    expect(html).toContain(`<span class="ref-text">javascript:alert(1)</span>`);
+    expect(html).toContain("&lt;script&gt;");
+  });
+
+  it("escapes single quotes so an attribute quoted with ' cannot be broken out of", () => {
+    const html = renderHtml(withRefs(["https://example.test/a'onmouseover='alert(1)"]));
+    expect(html).not.toContain("'onmouseover=");
+    expect(html).toContain("&#39;onmouseover=&#39;");
+  });
+});

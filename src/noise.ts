@@ -66,6 +66,9 @@ const VENDORED_DIR =
   /(^|\/)(\.yarn\/(releases|plugins)|vendor|vendored|third_party|third-party|node_modules|\.pnpm|bower_components|site-packages|\.venv|venv|__pycache__|\.tox|\.ipynb_checkpoints|dist|build|out|target|coverage|\.next|\.nuxt|\.svelte-kit|\.turbo|\.gradle)\//i;
 const MINIFIED = /\.min\.(js|mjs|cjs|css)$/i;
 
+/** Classes `test-only-path` may demote. `secret` is deliberately absent (see the rule). */
+const TEST_DEMOTABLE: ReadonlySet<Finding["category"]> = new Set(["taint", "sast", "crypto", "authz", "config"]);
+
 interface NoiseRule {
   id: NoiseClass;
   /** Severity floor. Never raises a finding — `worstOf` keeps the lower of the two. */
@@ -119,10 +122,14 @@ const RULES: NoiseRule[] = [
     why: () =>
       `de-prioritized: every cited location is a test path, so the flow does not exist in the shipped artifact. Confirm the harness is not itself the product (fixtures served in production, a test route mounted by the app) before dismissing.`,
     // Deliberately scoped to the enumerated classes. A hardcoded credential in a
-    // test file is a classic real leak — CI tokens live there — so `secret` and
-    // `config` findings are NOT demoted for sitting in a test.
+    // test file is a classic real leak — CI tokens live there — so `secret`
+    // findings are NOT demoted for sitting in a test (`committed-password-hash`
+    // must stay loud). `crypto`, `authz` and `config` claims, on the other hand,
+    // describe a flow the test harness performs — a `jwt-alg-none` assertion
+    // string, a `verify: false` in a fixture client, a weak hash in a helper —
+    // and on the self-audit three of the six "critical"s were exactly that.
     matches: (f) => {
-      if (f.category !== "taint" && f.category !== "sast") return false;
+      if (!TEST_DEMOTABLE.has(f.category)) return false;
       const locs = locationsOf(f);
       return locs.length > 0 && locs.every((l) => isTestPath(l));
     },

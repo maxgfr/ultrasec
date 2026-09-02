@@ -31,12 +31,44 @@ function cachePath(run: string): string {
   return join(run, "cache", "scan-cache.json");
 }
 
-/** Load the scan cache (empty map on absence, corruption, or a version/extractor mismatch). */
+/**
+ * Shape check for one cache entry. The cache file lives under the run dir, which
+ * is writable by anything that can write the workspace, and `--resume` replays
+ * its records straight into the scan without re-reading the source file. A
+ * record with the wrong shape (a missing `symbols`, a `lines` that is a string,
+ * a `rel` that does not match its key) would surface as a crash — or worse, as a
+ * silently wrong link-graph — deep inside the auditors. So every entry is
+ * validated against `FileRecord`'s load-bearing fields and a bad one is simply
+ * treated as a miss (that file is re-extracted); the rest of the cache still
+ * counts.
+ */
+export function isCacheEntry(key: string, v: unknown): v is CacheEntry {
+  if (!v || typeof v !== "object") return false;
+  const e = v as { hash?: unknown; record?: unknown };
+  if (typeof e.hash !== "string" || e.hash === "") return false;
+  if (!e.record || typeof e.record !== "object") return false;
+  const r = e.record as Record<string, unknown>;
+  if (typeof r.rel !== "string" || typeof r.hash !== "string" || typeof r.lang !== "string" || typeof r.ext !== "string") return false;
+  if (typeof r.size !== "number" || typeof r.lines !== "number") return false;
+  if (!Array.isArray(r.symbols) || !Array.isArray(r.refs) || !Array.isArray(r.headings)) return false;
+  if (r.hash !== e.hash) return false;
+  if (r.rel !== key) return false;
+  return true;
+}
+
+/**
+ * Load the scan cache — an empty map on absence, corruption, or a
+ * version/extractor mismatch; a partial map when only some entries are
+ * malformed (those are dropped, the others kept).
+ */
 export function loadScanCache(run: string): Map<string, CacheEntry> {
   try {
     const data = JSON.parse(readFileSync(cachePath(run), "utf8")) as CacheFile;
-    if (!data || data.cacheVersion !== CACHE_VERSION || data.extractorVersion !== EXTRACTOR_VERSION || typeof data.entries !== "object") return new Map();
-    return new Map(Object.entries(data.entries));
+    if (!data || data.cacheVersion !== CACHE_VERSION || data.extractorVersion !== EXTRACTOR_VERSION) return new Map();
+    if (!data.entries || typeof data.entries !== "object" || Array.isArray(data.entries)) return new Map();
+    const out = new Map<string, CacheEntry>();
+    for (const [k, v] of Object.entries(data.entries)) if (isCacheEntry(k, v)) out.set(k, v);
+    return out;
   } catch {
     return new Map();
   }

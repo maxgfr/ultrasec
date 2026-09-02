@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanRepo, scanRepoCached } from "../src/scan.js";
-import { loadScanCache, saveScanCache, CACHE_VERSION, type CacheEntry } from "../src/cache.js";
+import { loadScanCache, saveScanCache, isCacheEntry, CACHE_VERSION, type CacheEntry } from "../src/cache.js";
 import { EXTRACTOR_VERSION } from "../src/vendor/codeindex-engine.mjs";
 
 describe("scan cache (--resume)", () => {
@@ -77,6 +77,49 @@ describe("scan cache (--resume)", () => {
     expect(data.extractorVersion).toBe(EXTRACTOR_VERSION); // it was embedded
     data.extractorVersion = EXTRACTOR_VERSION + 1; // simulate a future engine re-pin
     writeFileSync(path, JSON.stringify(data));
+    expect(loadScanCache(run).size).toBe(0);
+    rmSync(run, { recursive: true, force: true });
+  });
+
+  it("drops a malformed entry but keeps the well-formed ones (a tampered cache is a miss, not a crash)", () => {
+    const run = mkdtempSync(join(tmpdir(), "ultrasec-run-"));
+    const cache = new Map<string, CacheEntry>();
+    scanRepoCached(repo, {}, cache);
+    const good = cache.get("src/b.js")!;
+    const path = join(run, "cache", "scan-cache.json");
+    mkdirSync(join(run, "cache"), { recursive: true });
+    writeFileSync(
+      path,
+      JSON.stringify({
+        cacheVersion: CACHE_VERSION,
+        extractorVersion: EXTRACTOR_VERSION,
+        entries: {
+          "src/b.js": good,
+          // wrong shape: `symbols` is not an array, `lines` is a string
+          "src/a.js": { hash: "deadbeef", record: { ...good.record, rel: "src/a.js", hash: "deadbeef", symbols: "nope", lines: "3" } },
+          // key/record mismatch: a record replayed under another path
+          "src/c.js": { hash: good.hash, record: good.record },
+        },
+      }),
+    );
+    const loaded = loadScanCache(run);
+    expect([...loaded.keys()]).toEqual(["src/b.js"]);
+    expect(loaded.get("src/b.js")!.record).toEqual(good.record);
+    rmSync(run, { recursive: true, force: true });
+  });
+
+  it("rejects an entry whose record hash disagrees with the entry hash, or whose entries is not an object", () => {
+    expect(
+      isCacheEntry("x.js", { hash: "a", record: { rel: "x.js", hash: "b", lang: "js", ext: ".js", size: 1, lines: 1, symbols: [], refs: [], headings: [] } }),
+    ).toBe(false);
+    expect(
+      isCacheEntry("x.js", { hash: "a", record: { rel: "x.js", hash: "a", lang: "js", ext: ".js", size: 1, lines: 1, symbols: [], refs: [], headings: [] } }),
+    ).toBe(true);
+    expect(isCacheEntry("x.js", null)).toBe(false);
+    expect(isCacheEntry("x.js", "str")).toBe(false);
+    const run = mkdtempSync(join(tmpdir(), "ultrasec-run-"));
+    mkdirSync(join(run, "cache"), { recursive: true });
+    writeFileSync(join(run, "cache", "scan-cache.json"), JSON.stringify({ cacheVersion: CACHE_VERSION, extractorVersion: EXTRACTOR_VERSION, entries: [1, 2] }));
     expect(loadScanCache(run).size).toBe(0);
     rmSync(run, { recursive: true, force: true });
   });

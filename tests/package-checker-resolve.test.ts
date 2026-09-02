@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { connect, createServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -80,7 +80,17 @@ function stopFixtureServer(fx: { proc: ChildProcess; root: string } | undefined)
   rmSync(fx.root, { recursive: true, force: true });
 }
 
-describe("resolveScriptSource — runtime latest-with-fallback", () => {
+function pythonAvailable(): boolean {
+  try {
+    execFileSync("python3", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+const HAS_PYTHON = pythonAvailable();
+
+describe.skipIf(!HAS_PYTHON)("resolveScriptSource — runtime latest-with-fallback", () => {
   let dir: string;
   let fx: { proc: ChildProcess; base: string; root: string } | undefined;
 

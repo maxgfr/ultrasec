@@ -55,6 +55,19 @@ describe("test-only-path", () => {
     expect(classifyNoise(f, FIXTURE)).toBeUndefined();
   });
 
+  it("demotes a crypto/authz/config claim whose only location is a test file", () => {
+    for (const category of ["crypto", "authz", "config"] as const) {
+      const f = finding({ category, sink: { file: "tests/x.test.ts", line: 3 } });
+      expect(classifyNoise(f, FIXTURE), category).toBe("test-only-path");
+      expect(classifyNoise(f, FIXTURE, { includeTests: true }), category).toBeUndefined();
+    }
+  });
+
+  it("does NOT demote a crypto claim on a production file", () => {
+    const f = finding({ category: "crypto", sink: { file: "src/auth.ts", line: 3 } });
+    expect(classifyNoise(f, FIXTURE)).toBeUndefined();
+  });
+
   it("--include-tests keeps them at full severity", () => {
     const f = pathThrough("src/__tests__/a.test.ts");
     expect(classifyNoise(f, FIXTURE, { includeTests: true })).toBeUndefined();
