@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.45.1](https://github.com/maxgfr/ultrasec/compare/v1.45.0...v1.45.1) (2026-09-03)
+
+
+### Bug Fixes
+
+* harden MCP output and package checker runtime ([adce4e6](https://github.com/maxgfr/ultrasec/commit/adce4e68384a1e87a64c041b1a7410269eae73b9))
+* **scanner:** prove safe crypto and rng identities ([d8b2758](https://github.com/maxgfr/ultrasec/commit/d8b275893885ed98585f999d18130c09f77ce9e2))
+
 # [1.45.0](https://github.com/maxgfr/ultrasec/compare/v1.44.0...v1.45.0) (2026-09-03)
 
 
