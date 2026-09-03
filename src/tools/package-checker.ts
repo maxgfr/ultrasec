@@ -5,7 +5,7 @@ import { join } from "node:path";
 import type { Finding } from "../types.js";
 import type { ToolAdapter } from "./run.js";
 import { makeToolFinding, normalizeSeverity } from "./normalize.js";
-import { detect } from "./registry.js";
+import { detect, resolveCompatibleBash } from "./registry.js";
 import { cacheDir } from "./scoring.js";
 import { PACKAGE_CHECKER_SH, PACKAGE_CHECKER_SHA256, PACKAGE_CHECKER_TAG } from "../vendor/package-checker-script.js";
 
@@ -250,7 +250,8 @@ export const packageChecker: ToolAdapter = {
       ? "repo-local data/*.purl would shadow the advisory feeds (feed-poisoning risk) — remove them or scan with trivy/osv-scanner"
       : null,
   command(): string[] | null {
-    if (!detect("bash").installed || !detect("awk").installed || !detect("curl").installed) return null;
+    const bash = resolveCompatibleBash();
+    if (!bash || !detect("awk").installed || !detect("curl").installed) return null;
     // Guard script resolution/materialization end to end: cache dir failures
     // (EACCES, ENOSPC, etc.) must not crash the scan. If nothing can be
     // written, skip gracefully — resolveScriptSource() itself already falls
@@ -258,7 +259,7 @@ export const packageChecker: ToolAdapter = {
     try {
       const { cmd, note } = resolveScriptSource();
       if (truthyEnv(process.env.ULTRASEC_PACKAGE_CHECKER_DEBUG)) process.stderr.write(`package-checker: ${note}\n`);
-      return cmd;
+      return [bash, ...cmd.slice(1)];
     } catch {
       return null;
     }

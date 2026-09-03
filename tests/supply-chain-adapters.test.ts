@@ -7,7 +7,7 @@ import { grype } from "../src/tools/grype.js";
 import { pipAudit } from "../src/tools/pip-audit.js";
 import { trivy } from "../src/tools/trivy.js";
 import { correlate } from "../src/tools/correlate.js";
-import { detect } from "../src/tools/registry.js";
+import { detect, resolveCompatibleBash } from "../src/tools/registry.js";
 import { npmAudit, pnpmAudit, yarnAudit, parseNpmV6Advisories, parseNpmV7 } from "../src/tools/pm-audit.js";
 import { packageChecker, mapExport, scriptPath } from "../src/tools/package-checker.js";
 
@@ -556,10 +556,11 @@ describe("package-checker adapter — mapExport (the export-JSON -> Finding[] ma
     const prev = process.env.ULTRASEC_CACHE_DIR;
     process.env.ULTRASEC_CACHE_DIR = dir;
     try {
-      const haveAll = detect("bash").installed && detect("awk").installed && detect("curl").installed;
+      const bash = resolveCompatibleBash();
+      const haveAll = bash !== undefined && detect("awk").installed && detect("curl").installed;
       const cmd = packageChecker.command!();
       if (haveAll) {
-        expect(cmd).toEqual(["bash", scriptPath()]);
+        expect(cmd).toEqual([bash, scriptPath()]);
       } else {
         expect(cmd).toBeNull();
       }

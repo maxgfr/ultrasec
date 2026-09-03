@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { realpathSync } from "node:fs";
+import { delimiter, join } from "node:path";
 import type { Category } from "../types.js";
 import { byStr } from "../util.js";
 import { PACKAGE_CHECKER_TAG } from "../vendor/package-checker-script.js";
@@ -178,17 +179,17 @@ export const TOOLS: ToolSpec[] = [
     name: "package-checker",
     category: "dep",
     description:
-      "multi-ecosystem GHSA/OSV lockfile scanner — runs upstream's latest release, vendored sha256-pinned copy as offline/failure fallback (nothing to install)",
+      "multi-ecosystem GHSA/OSV lockfile scanner — runs upstream's latest release, vendored sha256-pinned copy as offline/failure fallback (requires Bash >=4)",
     languages: ["*"],
-    install: { url: "https://github.com/maxgfr/package-checker.sh" }, // latest by default, vendored + pinned fallback — ships with ultrasec
+    install: { brew: "brew install bash", url: "https://github.com/maxgfr/package-checker.sh" }, // script ships with ultrasec; Bash >=4 is required
     runHint: "bash <resolved package-checker.sh> <repo> --default-source-ghsa-osv --export-json <file>",
     // Not a PATH binary — it's resolved (latest, or the vendored fallback) and
     // materialized to the cache dir at runtime (src/tools/package-checker.ts,
     // resolveScriptSource()). "Installed" means the interpreter trio it needs
-    // (bash/awk/curl) is present, not any specific script version — the
+    // (Bash >=4/awk/curl) is present, not any specific script version — the
     // version actually run is decided per-run, not at registry-display time.
     detect: () => {
-      const ok = detect("bash").installed && detect("awk").installed && detect("curl").installed;
+      const ok = resolveCompatibleBash() !== undefined && detect("awk").installed && detect("curl").installed;
       return { installed: ok, version: ok ? PACKAGE_CHECKER_TAG : undefined };
     },
   },
@@ -287,6 +288,29 @@ function whichPath(name: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Find a Bash runtime new enough for the vendored package-checker, which uses
+ * associative arrays (`declare -A`, introduced in Bash 4). Search every PATH
+ * entry instead of stopping at `which bash`: macOS resolves `/bin/bash` 3.2
+ * before a compatible Homebrew Bash that appears later on PATH. */
+export function resolveCompatibleBash(): string | undefined {
+  const names = process.platform === "win32" ? ["bash.exe", "bash"] : ["bash"];
+  for (const dir of (process.env.PATH ?? "").split(delimiter).filter(Boolean)) {
+    for (const name of names) {
+      const candidate = join(dir, name);
+      try {
+        execFileSync(candidate, ["-c", "(( BASH_VERSINFO[0] >= 4 ))"], {
+          stdio: "ignore",
+          timeout: 5000,
+        });
+        return candidate;
+      } catch {
+        // Missing, non-executable, or Bash < 4: keep looking later on PATH.
+      }
+    }
+  }
+  return undefined;
 }
 
 // One `--version` spawn per binary per process. `detect` is called from the
