@@ -2,6 +2,26 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.44.0](https://github.com/maxgfr/ultrasec/compare/v1.43.0...v1.44.0) (2026-09-03)
+
+
+### Bug Fixes
+
+* **hardening:** close four self-audit gaps and widen test-path demotion ([81c9688](https://github.com/maxgfr/ultrasec/commit/81c96883db3a41deba50b90af04a8ab9de620b24))
+
+
+### Features
+
+* **catalog:** Spring JdbcTemplate query methods are SQL sinks ([4139d70](https://github.com/maxgfr/ultrasec/commit/4139d7082c45c08d3aade33b7014714b4f0d12da))
+* **catalog:** widen sink/source/sanitizer recall across JVM, Go, .NET, PHP and Ruby ([fecf52e](https://github.com/maxgfr/ultrasec/commit/fecf52eb201d494c2f3c08bb1eb70f6f385a163e))
+* **config:** unpinned-action and token-permission vectors, app-hardening shapes ([5c7b3e6](https://github.com/maxgfr/ultrasec/commit/5c7b3e61eeb238dcd56f0f5dd72c17299c349ad9))
+
+
+### Performance Improvements
+
+* **scan:** one walk, shared file facts, indexed catalog — same output ([50dea2a](https://github.com/maxgfr/ultrasec/commit/50dea2a8e2bc15e2b3340b1f50a5ef6fcf191818))
+* **tools:** run scanners in a pool and replay pure-function results under --resume ([a944974](https://github.com/maxgfr/ultrasec/commit/a944974f4a0a298a203d5805c4a28ac2a63ac88c))
+
 # [1.43.0](https://github.com/maxgfr/ultrasec/compare/v1.42.0...v1.43.0) (2026-09-02)
 
 
