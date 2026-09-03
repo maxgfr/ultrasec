@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.45.0](https://github.com/maxgfr/ultrasec/compare/v1.44.0...v1.45.0) (2026-09-03)
+
+
+### Features
+
+* **engine:** re-pin vendored engines ([9f68872](https://github.com/maxgfr/ultrasec/commit/9f68872f3cb50e7c57068dcdb68b3a44db69c961))
+
 # [1.44.0](https://github.com/maxgfr/ultrasec/compare/v1.43.0...v1.44.0) (2026-09-03)
 
 
