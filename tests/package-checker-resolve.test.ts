@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { resolveScriptSource, scriptPath, packageChecker } from "../src/tools/package-checker.js";
+import { resolveCompatibleBash } from "../src/tools/registry.js";
 import { PACKAGE_CHECKER_TAG } from "../src/vendor/package-checker-script.js";
 
 // resolveScriptSource() (src/tools/package-checker.ts) picks between the
@@ -194,7 +195,7 @@ describe.skipIf(!HAS_PYTHON)("resolveScriptSource — runtime latest-with-fallba
     const stderr = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     try {
       const cmd = packageChecker.command!();
-      expect(cmd).toEqual(["bash", scriptPath()]);
+      expect(cmd).toEqual([resolveCompatibleBash(), scriptPath()]);
       expect(stderr).toHaveBeenCalledWith(expect.stringContaining(`package-checker: ${PACKAGE_CHECKER_TAG} (vendored, pinned)`));
     } finally {
       stderr.mockRestore();
@@ -223,7 +224,7 @@ describe.skipIf(!HAS_PYTHON)("resolveScriptSource — runtime latest-with-fallba
     process.env.ULTRASEC_PACKAGE_CHECKER_RAW = fx.base;
     const cmd = packageChecker.command!();
     expect(cmd).not.toBeNull();
-    expect(cmd![0]).toBe("bash");
+    expect(cmd![0]).toBe(resolveCompatibleBash());
     expect(cmd![1]).toMatch(/script-v99\.0\.0-[0-9a-f]{12}\.sh$/);
   });
 });

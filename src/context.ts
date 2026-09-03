@@ -298,7 +298,7 @@ function sinkKindsAt(fileScan: RepoScan["files"][number], spec: LangSpec, lines:
   const cached = sinkIndexCache.get(fileScan);
   if (cached) return cached;
   const index = new Map<number, Set<string>>();
-  const hits = [...findSinks(spec, fileScan.calls ?? [], undefined, fileScan.imports), ...findTextSinks(spec, lines.join("\n"))];
+  const hits = [...findSinks(spec, fileScan.calls ?? [], undefined, fileScan.imports, undefined, lines), ...findTextSinks(spec, lines.join("\n"))];
   for (const h of hits) {
     let set = index.get(h.line);
     if (!set) index.set(h.line, (set = new Set()));

@@ -70,7 +70,7 @@ export function createFileFacts(scan: RepoScan): FileFacts {
     if (!hits) {
       const file = byRel.get(rel);
       const lang = langForFile(rel);
-      hits = file && lang ? findSinks(lang, file.calls, extraSinks, file.imports, localDefs(rel)) : EMPTY_HITS;
+      hits = file && lang ? findSinks(lang, file.calls, extraSinks, file.imports, localDefs(rel), lines(rel)) : EMPTY_HITS;
       bucket.set(rel, hits);
     }
     return hits;

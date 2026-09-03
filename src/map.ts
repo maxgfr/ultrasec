@@ -204,7 +204,8 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
     da.files++;
     const fs: FileSurface = { file: f.rel, region: dir, sources: 0, sinks: 0, score: 0 };
 
-    const sources = findSources(lang, readText(join(scan.repo, f.rel)), f.rel);
+    const text = readText(join(scan.repo, f.rel));
+    const sources = findSources(lang, text, f.rel);
     for (const s of sources) {
       totalSources++;
       la.sources++;
@@ -217,7 +218,7 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
 
-    for (const sink of findSinks(lang, f.calls, undefined, f.imports, localDefNames(f.symbols))) {
+    for (const sink of findSinks(lang, f.calls, undefined, f.imports, localDefNames(f.symbols), text.split(/\r?\n/))) {
       totalSinks++;
       la.sinks++;
       da.sinks++;

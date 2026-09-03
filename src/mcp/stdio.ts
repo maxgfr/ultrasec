@@ -48,8 +48,20 @@ export async function runStdioServer(opts: StdioOptions = {}): Promise<void> {
   }
 
   const server = createServer(opts);
+  let pendingWrite = Promise.resolve();
+  const queueWrite = (frame: string) => {
+    pendingWrite = pendingWrite.then(
+      () =>
+        new Promise<void>((resolve, reject) => {
+          emit(frame, (error) => {
+            if (error) reject(error);
+            else resolve();
+          });
+        }),
+    );
+  };
   const send = (msg: JsonRpcMessage) => {
-    emit(JSON.stringify(msg) + "\n");
+    queueWrite(JSON.stringify(msg) + "\n");
   };
 
   const inFlight = new Set<Promise<void>>();
@@ -86,7 +98,7 @@ export async function runStdioServer(opts: StdioOptions = {}): Promise<void> {
           (async () => {
             const out: JsonRpcMessage[] = [];
             await Promise.all(parsed.map((m) => server.handle(m as JsonRpcMessage, (r) => void out.push(r))));
-            if (out.length) emit(JSON.stringify(out) + "\n");
+            if (out.length) queueWrite(JSON.stringify(out) + "\n");
           })().catch(reportInternal(send)),
         );
         continue;
@@ -106,6 +118,7 @@ export async function runStdioServer(opts: StdioOptions = {}): Promise<void> {
     // process.exit() here would drop these frames, because stdout on a pipe is
     // asynchronous and exit() does not flush it.
     await Promise.all(inFlight);
+    await pendingWrite;
   } finally {
     rl.close();
     restore?.();

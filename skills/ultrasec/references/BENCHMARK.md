@@ -5,7 +5,7 @@ Scores against **third-party labelled corpora** — not the fixtures in this rep
 rules, so a perfect score there proves the rules did not change, not that they are good.
 These are the numbers that can be checked by someone who does not trust us.
 
-Engine `1.42.0` · extraction tier `AST (tree-sitter)` · generated 2026-09-02
+Engine `1.44.0` · extraction tier `AST (tree-sitter)` · generated 2026-09-03
 
 Detection follows the SATE convention: a case counts as detected when a finding **of its
 CWE** has a path intersecting the case file.
@@ -25,9 +25,9 @@ trade this project has deliberately not made.
 | CWE | TP | FN | FP | TN | TPR | FPR | FP w/ sanitizer noted | F1 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|
 | CWE-22 | 133 | 0 | 135 | 0 | 100.0% | 100.0% | 0/135 | 0.66 |
-| CWE-327 | 130 | 0 | 116 | 0 | 100.0% | 100.0% | 0/116 | 0.69 |
+| CWE-327 | 130 | 0 | 50 | 66 | 100.0% |  43.1% | 0/50 | 0.84 |
 | CWE-328 | 129 | 0 | 107 | 0 | 100.0% | 100.0% | 0/107 | 0.71 |
-| CWE-330 | 218 | 0 | 173 | 102 | 100.0% |  62.9% | 0/173 | 0.72 |
+| CWE-330 | 218 | 0 | 24 | 251 | 100.0% |   8.7% | 0/24 | 0.95 |
 | CWE-501 | 83 | 0 | 43 | 0 | 100.0% | 100.0% | 0/43 | 0.79 |
 | CWE-614 | 36 | 0 | 31 | 0 | 100.0% | 100.0% | 0/31 | 0.70 |
 | CWE-643 | 15 | 0 | 20 | 0 | 100.0% | 100.0% | 0/20 | 0.60 |
