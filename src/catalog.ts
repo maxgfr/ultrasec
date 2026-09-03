@@ -17,6 +17,83 @@ export function cweUrl(cwe: string): string {
 }
 
 // ── Sinks ─────────────────────────────────────────────────────────────────
+/**
+ * What a call has to show, structurally, for a rule not to apply to it.
+ *
+ * Both shapes read one specific part of the matched call, and both stand on the
+ * same proof: the call's receiver chain names a type whose IDENTITY this file can
+ * establish. A spelling never establishes it — see `TrustedType`.
+ */
+export type SinkRefutation =
+  /**
+   * The verdict is selected by ONE argument, at a position the API fixes
+   * (`Cipher.getInstance(transformation, provider)` reads it at 0). Three things
+   * have to hold together: the chain names one of `types` and its identity is
+   * proven, the argument is a single string literal standing on its own, and its
+   * whole value is that type's `safe` set — bare `"AES"` is a fine KEY algorithm
+   * and, as a transformation, ECB. `evil.Cipher.getInstance("AES/GCM/NoPadding")`
+   * and a file-local `class Cipher` fail the first test and refute nothing.
+   */
+  | { by: "argument"; index: number; types: readonly TrustedType[] }
+  /**
+   * The verdict is a claim about where the value CAME FROM, so the proof has to
+   * be the call's own receiver/construction chain: the chain, in full, is a
+   * construction of a trusted type or a static factory called on one. Everything
+   * else keeps the candidate — `(weak ? new Random() : new SecureRandom())`,
+   * `factory(SecureRandom)`, `getGenerator("SecureRandom")`, `config.SecureRandom`
+   * and `((SecureRandom) rng)` name the API and prove nothing about it.
+   */
+  | { by: "receiver"; types: readonly TrustedType[] };
+
+/**
+ * One type a refutation trusts, spelled the way its API is actually reachable.
+ *
+ * Everything here exists to answer "is this THAT type?", and a matching name
+ * never answers it. A simple name belongs to whoever is in scope, and so does a
+ * package root: `java` and `javax` are ordinary identifiers, not keywords, so a
+ * variable of that name obscures the package in every EXPRESSION it appears in
+ * (JLS 6.4.2/6.5.2) and `java.security.SecureRandom.getInstance(…)` becomes a
+ * field walk on somebody's object. `new java.security.SecureRandom()` is the one
+ * shape a variable cannot reach: `new` puts the qualified name in TYPE context,
+ * where the resolution never considers variables at all.
+ *
+ * So identity is proven by exactly two shapes, and `identityProven` is where that
+ * is decided:
+ *
+ *  - **Qualified** by the type's own `namespace`, exactly and entirely. In type
+ *    context that is proof on its own; in expression context the root has to be
+ *    a name the file only ever writes as a qualifier.
+ *  - **Unqualified in TYPE context** (`new SecureRandom()`), bound by the one
+ *    exact single-type import and not declared as a type by the file itself.
+ *
+ * An unqualified name in EXPRESSION context (`Cipher.getInstance(…)`,
+ * `SecureRandom.getInstance(…)`) is deliberately not on that list. Any local,
+ * parameter or field of that name obscures it, and a file this reader can only
+ * see one line of at a time cannot rule one out. Those stay candidates.
+ */
+export interface TrustedType {
+  /** Simple name, compared end to end: `SecureRandomWrapper` is not `SecureRandom`. */
+  name: string;
+  /** The ONE package path the type lives at, head first. A chain qualified with
+   *  anything else names a different type that shares the simple name. */
+  namespace: readonly string[];
+  /** Static factories that return an instance when called ON the type:
+   *  `SecureRandom.getInstance(…)`. `getInstance` is a JDK-wide name, so the
+   *  owner is what makes it evidence — `KeyStore.getInstance` is not. Read by
+   *  `receiver` refutations only. */
+  factories?: readonly string[];
+  /** The one import specifier that binds the SIMPLE name to this type, for the
+   *  `new SecureRandom()` spelling. A package wildcard is deliberately not it: a
+   *  type the file declares outranks a wildcard, and the import list alone cannot
+   *  see that. Absent ⇒ the unqualified spelling is never provable. */
+  simpleImport?: string;
+  /** Which literal makes `Type.getInstance(literal, …)` not a finding. Read by
+   *  `argument` refutations only, and only once identity is proven. */
+  safe?: RegExp;
+  /** Languages this spelling exists in. */
+  languages: string[];
+}
+
 export interface SinkRule {
   kind: string;
   cwe: string;
@@ -71,9 +148,65 @@ export interface SinkRule {
    * to skip the source question for a class that still needs it.
    */
   sourceless?: boolean;
+  /**
+   * Positive evidence, inside the matched call itself, that this call is not what
+   * the rule claims — the mirror of `receivers`/`requireModule`, applied to the
+   * call's arguments and receiver chain instead of to its callee.
+   *
+   * A rule whose verdict is selected by a STRING (`Cipher.getInstance("…")`,
+   * `x.nextInt()`) is matched on callee and receiver alone, so the literal that
+   * decides whether the primitive is weak — the only thing that distinguishes the
+   * finding from the recommended API — was never read. The catalog notes said so
+   * out loud ("AES/GCM here is not a finding") while the engine emitted exactly
+   * that, with a title the matched line refutes.
+   *
+   * The evidence has to be STRUCTURAL: tied to the thing that makes the call safe
+   * — the algorithm in the argument position the API reads it from, the generator
+   * the draw was taken from — never to a word that merely appears somewhere in the
+   * call's text. A safe transformation named in a provider argument, one branch of
+   * a selection resolved at run time, `label("SecureRandom")` handed to a logger:
+   * none of those say anything about this call, and all of them stay candidates.
+   *
+   * Strictly one-directional, and that is the whole safety argument. Anything the
+   * reader cannot pin down — a variable, a value assembled at run time, a call it
+   * cannot attribute — refutes nothing. Consulted only when the caller passes the
+   * file's lines; without them every rule behaves exactly as it did before this
+   * field existed.
+   */
+  refutedBy?: SinkRefutation;
   title: string;
   note: string;
 }
+
+/**
+ * An AEAD transformation, matched end to end. `Cipher.getInstance` is the only
+ * one of these factories that takes a full `algorithm/mode/padding`, and the mode
+ * is the whole question: `AES/GCM/NoPadding` authenticates, `AES/ECB/…` and a
+ * bare `AES` (which IS ECB on the JVM) do not.
+ */
+const JVM_AEAD_TRANSFORMATION = /^(?:AES|ARIA|Camellia)(?:_(?:128|192|256))?\/(?:GCM|CCM)(?:\/[A-Za-z0-9]+)?$|^ChaCha20-Poly1305$/i;
+
+/**
+ * A strong algorithm NAME, matched end to end. Key and signature factories take a
+ * name and no mode, so there is no ECB default to worry about and `AES` alone is
+ * exactly right.
+ */
+const JVM_STRONG_ALGORITHM = /^(?:AES|ChaCha20|RSA|EC|ECDSA|Ed25519|X25519|DiffieHellman|PBKDF2WithHmacSHA(?:224|256|384|512)|HmacSHA(?:224|256|384|512))$/i;
+
+const JVM = ["java", "kotlin", "scala"];
+
+/**
+ * The JDK/JCE primitive factories, each at the one package it actually lives at.
+ * The `safe` set hangs off the TYPE and not off the receiver's spelling, which is
+ * the point: a literal only speaks for a call once the chain has proven whose
+ * `getInstance` it is.
+ */
+const JVM_PRIMITIVE_FACTORIES: readonly TrustedType[] = [
+  { name: "Cipher", namespace: ["javax", "crypto"], simpleImport: "javax.crypto.Cipher", safe: JVM_AEAD_TRANSFORMATION, languages: JVM },
+  { name: "KeyGenerator", namespace: ["javax", "crypto"], simpleImport: "javax.crypto.KeyGenerator", safe: JVM_STRONG_ALGORITHM, languages: JVM },
+  { name: "SecretKeyFactory", namespace: ["javax", "crypto"], simpleImport: "javax.crypto.SecretKeyFactory", safe: JVM_STRONG_ALGORITHM, languages: JVM },
+  { name: "KeyPairGenerator", namespace: ["java", "security"], simpleImport: "java.security.KeyPairGenerator", safe: JVM_STRONG_ALGORITHM, languages: JVM },
+];
 
 export const SINKS: SinkRule[] = [
   {
@@ -778,6 +911,13 @@ export const SINKS: SinkRule[] = [
     // Cipher/key factories → CWE-327 (broken or risky ALGORITHM).
     receivers: ["Cipher", "KeyGenerator", "SecretKeyFactory", "KeyPairGenerator", "Signature"],
     requireReceiver: true,
+    // …unless argument 0 — where every one of these factories takes its algorithm
+    // — IS spelled out as a literal the note already calls safe. A key factory
+    // takes an algorithm NAME, not a transformation, so a bare "AES" there carries
+    // no ECB default and is not the same claim as a bare `Cipher.getInstance("AES")`,
+    // which stays a finding because on the JVM that IS ECB. `Signature` has no safe
+    // set: nothing in its arguments refutes it.
+    refutedBy: { by: "argument", index: 0, types: JVM_PRIMITIVE_FACTORIES },
     title: "Weak or attacker-selected cryptographic primitive",
     note: "A JVM crypto primitive chosen by string. Read the algorithm argument: DES/RC4/3DES, or ECB mode, are weak — and an algorithm name built from input is worse. AES/GCM here is not a finding.",
   },
@@ -1001,6 +1141,35 @@ export const SINKS: SinkRule[] = [
     severity: "low",
     languages: ["*"],
     callees: ["Random", "nextInt", "nextFloat", "nextDouble", "nextLong", "mt_rand", "randint", "randrange", "shuffle"],
+    // The title is a claim about WHICH generator this draw came from, so only the
+    // construction the draw hangs off can settle it — and only when that
+    // construction is the JDK's and not something else wearing its name.
+    // `new java.security.SecureRandom().nextInt()` says so, and so does the
+    // unqualified `new SecureRandom()` in a file that imports exactly that class
+    // and declares no type of its own by that name. `evil.SecureRandom()`,
+    // `fake.SecureRandom.getInstance()`, a local `static Random SecureRandom()`,
+    // a file-local `class SecureRandom extends Random`, a file that binds `java`
+    // as a variable — each matches the name and none is the CSPRNG, so each stays
+    // a candidate. A CSPRNG named anywhere else in the chain (a ternary branch, a
+    // factory argument, a string, a field) says nothing either.
+    //
+    // Java only. Python's `secrets`/`random.SystemRandom` read the same on the
+    // page and are not decidable from it: a parameter, a lambda parameter, a
+    // tuple unpack, a `with … as`, a walrus or a `global` in another function all
+    // rebind the module, and enumerating those forms line by line is guesswork
+    // with a missed bug on the wrong side of it. Nothing Python refutes.
+    refutedBy: {
+      by: "receiver",
+      types: [
+        {
+          name: "SecureRandom",
+          namespace: ["java", "security"],
+          factories: ["getInstance", "getInstanceStrong"],
+          simpleImport: "java.security.SecureRandom",
+          languages: JVM,
+        },
+      ],
+    },
     title: "Predictable value from a non-cryptographic RNG",
     note: "Only a finding when the value becomes a token, key, session id, password-reset link or nonce — for a shuffle or a jitter it is nothing. Read what it is used for, then require a CSPRNG (SecureRandom / crypto.randomBytes / secrets).",
   },
@@ -1504,6 +1673,555 @@ export interface SinkHit {
   downgraded?: string;
 }
 
+// ── The call a refutation has to belong to ──────────────────────────────
+//
+// `refutedBy` reads two specific parts of the matched call — an argument at a
+// fixed position, or the chain the call hangs off — and three things sit between
+// those and the source text.
+//
+// A call is not reliably one line: every Java formatter wraps a long one, so
+// `Cipher.getInstance(\n  "AES/GCM/NoPadding", provider)` puts the literal on the
+// line BELOW the callee. A line is not reliably one call:
+// `Cipher.getInstance("DES"); Cipher.getInstance("AES/GCM/NoPadding");` is two,
+// and reading the whole line would let the safe one clear the weak one — the
+// exact inversion of what the rule is for. And a call is not its text: a strong
+// transformation named in a PROVIDER argument, one branch of `pick("DES",
+// "AES/GCM/NoPadding")`, `label("SecureRandom")` handed to a logger — all three
+// contain the safe words and none of them is safe.
+//
+// So the text is cut three times. The WINDOW is the statement: the line, extended
+// forward only while the parentheses it opened are still unbalanced, which is
+// exactly the call's own arguments and cannot reach the next statement. Inside
+// that window one OCCURRENCE is picked out — its receiver chain, its callee, its
+// own balanced argument list. And from that occurrence only two things are ever
+// handed to a rule, both of them PARSED and neither of them text: its chain as a
+// sequence of dotted names (`ChainShape`), and its top-level arguments reduced to
+// the value of each one that is a single string literal standing alone. A nested
+// call, a concatenation and a variable all reduce to "unreadable", so nothing
+// inside them can speak for the call that contains them; a ternary, a cast and an
+// index make the chain opaque, for the same reason and with the same effect.
+//
+// A `Call` carries no column, so WHICH occurrence of the callee on the line the
+// record means is not always knowable. When it is not — two occurrences the
+// receiver cannot separate, a callee whose text is not on its own line — there is
+// no attribution and no refutation: the candidate stays. That asymmetry is
+// deliberate. A kept candidate costs one adjudication; a dropped one is a missed
+// bug, and this gate exists only to remove findings, so every uncertainty inside
+// it has to fall the other way.
+
+/** Languages where `#` starts a comment. PHP has both `#` and `//`; its `#[Attr]`
+ *  is an attribute, not a comment. */
+const HASH_COMMENT_LANGS: ReadonlySet<string> = new Set(["python", "ruby", "php", "shell", "elixir"]);
+
+/**
+ * Drop comments, keep string literals, and report the net parenthesis depth the
+ * line leaves open. Both halves matter: the evidence `refutedBy` looks for lives
+ * INSIDE a literal, and a `// TODO: move to AES/GCM` must not be able to refute
+ * the finding it is asking someone to fix.
+ */
+function scanStatementLine(text: string, hash: boolean): { clean: string; net: number } {
+  let clean = "";
+  let net = 0;
+  let quote: string | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      clean += ch;
+      if (ch === "\\") {
+        i++;
+        if (i < text.length) clean += text[i];
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      clean += ch;
+      continue;
+    }
+    // `//` is a comment everywhere it is not floor division; in Python cutting at
+    // `a // b` only shortens the window, which can lose a refutation and never
+    // invent one — the safe direction.
+    if (ch === "/" && text[i + 1] === "/") break;
+    if (ch === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      if (end < 0) break;
+      i = end + 1;
+      continue;
+    }
+    if (hash && ch === "#" && text[i + 1] !== "[") break;
+    if (ch === "(") net++;
+    else if (ch === ")") net--;
+    clean += ch;
+  }
+  return { clean, net };
+}
+
+/** How far a wrapped argument list may run past its callee. */
+const MAX_CONTINUATION_LINES = 3;
+
+/** The statement a call sits in, with the two things reading it needs: which
+ *  characters are inside a string literal, and which parentheses pair up. */
+interface Statement {
+  /** Comment-free text, continuation lines joined by a space. */
+  text: string;
+  /** 1 where `text[i]` is part of a string literal (its quotes included). */
+  quoted: Uint8Array;
+  /** For every `(` and `)` that pairs up inside the window, the index of its
+   *  partner; -1 everywhere else, including a bracket the window never closes. */
+  partner: Int32Array;
+}
+
+const EMPTY_STATEMENT: Statement = { text: "", quoted: new Uint8Array(0), partner: new Int32Array(0) };
+
+/**
+ * Index the window once: literals, and paren pairs that skip literals.
+ *
+ * Both are needed to cut a segment honestly. `foo(")")` balances only if the
+ * scan knows that `)` is text, and the algorithm name `refutedBy` looks for is
+ * itself inside a literal, so the literals cannot simply be dropped the way the
+ * comments were.
+ */
+function analyzeStatement(text: string): Statement {
+  const quoted = new Uint8Array(text.length);
+  const partner = new Int32Array(text.length).fill(-1);
+  const open: number[] = [];
+  let quote: string | null = null;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (quote) {
+      quoted[i] = 1;
+      if (ch === "\\") {
+        i++;
+        if (i < text.length) quoted[i] = 1;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      quoted[i] = 1;
+      continue;
+    }
+    if (ch === "(") open.push(i);
+    else if (ch === ")") {
+      const start = open.pop();
+      if (start !== undefined) {
+        partner[start] = i;
+        partner[i] = start;
+      }
+    }
+  }
+  return { text, quoted, partner };
+}
+
+/** The statement starting at `line` (1-based), or an empty one when the file has
+ *  no such line. */
+function statementAt(lines: readonly string[], line: number, langId: string): Statement {
+  const first = lines[line - 1];
+  if (first === undefined) return EMPTY_STATEMENT;
+  const hash = HASH_COMMENT_LANGS.has(langId);
+  const head = scanStatementLine(first, hash);
+  let clean = head.clean;
+  let depth = head.net;
+  for (let i = 1; depth > 0 && i <= MAX_CONTINUATION_LINES; i++) {
+    const next = lines[line - 1 + i];
+    if (next === undefined) break;
+    const cont = scanStatementLine(next, hash);
+    clean += ` ${cont.clean}`;
+    depth += cont.net;
+  }
+  return analyzeStatement(clean);
+}
+
+/** Characters that can appear inside a callee or receiver name. `$` is one in
+ *  Java, JS and PHP; dropping a PHP sigil only ever shortens a prefix. */
+const NAME_CHAR = /[A-Za-z0-9_$]/;
+
+/** One occurrence of the callee, used as a call, inside a statement. */
+interface Occurrence extends CallSite {
+  /** The plain identifier this call hangs off (`Cipher` in
+   *  `javax.crypto.Cipher.getInstance(…)`), or undefined when it hangs off a
+   *  call (`…getInstance("SHA1PRNG").nextInt()`) or off nothing at all. That is
+   *  what the extractor puts in `Call.receiver`, so the two compare directly. */
+  receiver?: string;
+}
+
+/** The two parts of a matched call a refutation is allowed to read. Everything
+ *  else about the call — the callee, the rest of the statement — is not
+ *  evidence about it. */
+interface CallSite {
+  /** The receiver/construction chain the call hangs off, up to but not including
+   *  the callee, read as structure rather than as text. */
+  chain: ChainShape;
+  /** One entry per top-level argument: the argument's value when the WHOLE
+   *  argument is a single string literal, undefined otherwise (a variable, a
+   *  concatenation, a nested call). Undefined for the list itself when it does
+   *  not close inside the window, i.e. when the arguments were cut off. */
+  literals?: (string | undefined)[];
+}
+
+/** Index of the first non-blank character at or before `i - 1` — the end of the
+ *  token preceding `i`. */
+function trimBack(text: string, i: number): number {
+  let p = i;
+  while (p > 0 && (text[p - 1] === " " || text[p - 1] === "\t")) p--;
+  return p;
+}
+
+/** Index of the first non-blank character at or after `i`. */
+function trimForward(text: string, i: number): number {
+  let p = i;
+  while (p < text.length && (text[p] === " " || text[p] === "\t")) p++;
+  return p;
+}
+
+/** One link of a receiver chain: a name, and whether that name was applied to an
+ *  argument list. `SecureRandom.getInstance("SHA1PRNG")` is two links — a plain
+ *  `SecureRandom`, then a called `getInstance`. */
+interface ChainLink {
+  name: string;
+  called: boolean;
+}
+
+/**
+ * The chain a call hangs off, read as structure: the dotted names between the
+ * start of the expression and the callee, head first.
+ *
+ * A chain is only ever evidence about provenance when the reader can say what
+ * built the value, so anything it cannot resolve to a name — a parenthesized
+ * expression, a cast, an index, an operator, a literal — sets `opaque`, and an
+ * opaque chain proves nothing no matter what names survived beside it.
+ */
+interface ChainShape {
+  /** The links, from the head of the expression to the one the callee hangs off. */
+  links: ChainLink[];
+  /** Some part of the chain is not a name or a call on a name. */
+  opaque: boolean;
+  /** The whole chain is a `new` expression. On the JVM that is the difference
+   *  between constructing a type and invoking a method that shares its name —
+   *  `new SecureRandom()` and `SecureRandom()` are different declarations, and
+   *  only the first is a type at all. */
+  newed: boolean;
+}
+
+/**
+ * Walk back from the callee over its receiver chain: `a.b().c.callee` → back to
+ * `a`. The dotted qualifier matters because the rule spells the receiver the way
+ * the JDK does (`KeyGenerator.getInstance`) while the source spells it
+ * `javax.crypto.KeyGenerator.getInstance`; the chained call matters because
+ * `SecureRandom.getInstance("SHA1PRNG").nextInt()` is where the proof that a
+ * draw is cryptographic actually sits.
+ *
+ * Anything that is not a chain link — `=`, `;`, `,`, `(`, `[`, a bare space —
+ * stops the walk, so a chain cannot grow into the statement beside it.
+ *
+ * `new` is not a link — it qualifies the whole chain — so the walk stops at it
+ * and records it on the shape. `new SecureRandom()` and `SecureRandom()` come
+ * back as the same one called link, distinguished by `newed`; on the JVM that is
+ * exactly the difference between a constructor and a method of the same name.
+ */
+function readChain(st: Statement, calleeAt: number): { receiver?: string; chain: ChainShape } {
+  const { text } = st;
+  let p = calleeAt;
+  let receiver: string | undefined;
+  let steps = 0;
+  const links: ChainLink[] = [];
+  let opaque = false;
+  for (;;) {
+    let q = trimBack(text, p);
+    if (q === 0 || text[q - 1] !== "." || st.quoted[q - 1]) break;
+    q--; // past the dot
+    if (q > 0 && text[q - 1] === "?") q--; // `a?.b()`
+    q = trimBack(text, q);
+    if (q > 0 && text[q - 1] === ")" && st.partner[q - 1]! >= 0) {
+      // A call in the chain: swallow its whole `(…)` group AND the callee that
+      // opened it (`…SecureRandom.getInstance("SHA1PRNG").nextInt()`), then keep
+      // walking from there. Its own receiver is picked up by the next turn.
+      const inner = st.partner[q - 1]!;
+      let name = inner;
+      while (name > 0 && NAME_CHAR.test(text[name - 1]!) && !st.quoted[name - 1]) name--;
+      // No name in front of the group: it is a parenthesized EXPRESSION, not a
+      // call — a ternary, a cast, a grouped construction. Whatever is inside it
+      // was selected by code this reader is not evaluating.
+      if (name === inner) opaque = true;
+      else links.unshift({ name: text.slice(name, inner), called: true });
+      p = name < inner ? name : inner;
+      steps++;
+      continue;
+    }
+    let s = q;
+    while (s > 0 && NAME_CHAR.test(text[s - 1]!) && !st.quoted[s - 1]) s--;
+    if (s === q) {
+      // A dot whose left side is not a name: an index (`pool[0].`), a literal,
+      // an operator. The links already collected hang off something unreadable.
+      opaque = true;
+      break;
+    }
+    if (steps === 0) receiver = text.slice(s, q);
+    links.unshift({ name: text.slice(s, q), called: false });
+    p = s;
+    steps++;
+  }
+  return { receiver, chain: { links, opaque, newed: links.length > 0 && keywordBefore(st, p) === "new" } };
+}
+
+/** The bare word immediately preceding `at`, or `""` when what precedes is not a
+ *  word (an operator, a bracket, the start of the statement, a literal). */
+function keywordBefore(st: Statement, at: number): string {
+  const { text } = st;
+  const end = trimBack(text, at);
+  let start = end;
+  while (start > 0 && NAME_CHAR.test(text[start - 1]!) && !st.quoted[start - 1]) start--;
+  return text.slice(start, end);
+}
+
+/**
+ * What the FILE says about the names a chain uses. An identity claim is settled
+ * by scope: which names the file imported, and which ones it could be using for
+ * something else entirely.
+ */
+interface RefutationContext {
+  langId: string;
+  /** Is `spec` one of the file's import specifiers? False whenever the imports
+   *  were never extracted — "could not see them" is not "there are none", and an
+   *  unprovable identity keeps the candidate either way. */
+  imported(spec: string): boolean;
+  /** Does the FILE declare a TYPE by this name? Such a declaration outranks a
+   *  single-type import of the same simple name. */
+  declaresType(name: string): boolean;
+  /** Is this name written, somewhere in the file, as anything other than the
+   *  qualifier of a dotted name? See `usedOnlyAsQualifier`. */
+  usedOnlyAsQualifier(name: string): boolean;
+}
+
+/** `name` as a regex literal. Chain links and catalog names are identifiers, so
+ *  `$` (legal in Java/JS/PHP) is the only metacharacter that can reach here. */
+const asLiteral = (name: string) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Does the file declare a TYPE by this name?
+ *
+ * The one binding that outranks a single-type import of the same simple name: a
+ * `class SecureRandom extends Random`, nested or not, makes every unqualified
+ * `new SecureRandom()` below it that class. The extractor reports only top-level
+ * types, so this reads the declaration keywords out of the source instead —
+ * anchored to the declaration syntax and to this one name, and only ever able to
+ * KEEP a candidate the import would otherwise have refuted.
+ */
+function declaresTypeNamed(lines: readonly string[], name: string): boolean {
+  const decl = new RegExp(`(?:^|[^\\w$.])(?:class|interface|enum|record|trait|object|struct)\\s+${asLiteral(name)}(?![\\w$])`);
+  return lines.some((l) => decl.test(l));
+}
+
+/**
+ * Is this name only ever a QUALIFIER in this file — always immediately followed
+ * by the dot of a dotted name?
+ *
+ * This is the check that keeps a package root honest. `java` and `javax` are
+ * ordinary identifiers: a local, a parameter or a field of that name obscures the
+ * package in every expression it is in scope for, and then
+ * `java.security.SecureRandom.getInstance(…)` is a walk over somebody's object
+ * graph that happens to spell the JDK. Such a binding has to WRITE the bare name
+ * at its declaration (`Fakes java = …`, `catch (E javax)`, `f(Object java)`),
+ * while a package root used as a package is written `java.` every single time.
+ * So "the bare name never appears undotted" is a sound over-approximation of "no
+ * binding shadows it": it cannot miss a binding the file makes, and the cases it
+ * gets wrong — the name inside a comment or a string — only KEEP a candidate.
+ *
+ * Ordinary import and package declarations are skipped: they end in an undotted
+ * name and bind no variable. `import static` is read instead of skipped — it binds
+ * a field or a method into the file's scope under exactly that simple name, which
+ * is a rebinding this check exists to catch.
+ *
+ * It answers "no" for essentially every simple TYPE name, because declaring a
+ * variable of that type (`Cipher c = …`) writes it undotted. That is intended:
+ * an unqualified type name in expression position genuinely is unprovable here.
+ */
+const IMPORT_LINE = /^\s*(?:import|package|from)\b/;
+/** A JVM static import, and the simple name it binds (`*` for the on-demand form). */
+const STATIC_IMPORT = /^\s*import\s+static\s+[\w$.]*?([\w$]+|\*)\s*;/;
+function usedOnlyAsQualifierIn(lines: readonly string[], name: string): boolean {
+  const use = new RegExp(`(?:^|[^\\w$.])${asLiteral(name)}(?![\\w$])\\s*(.?)`, "g");
+  for (const line of lines) {
+    // A static import binds its LAST segment — a field or a method — into the
+    // file's scope, and the on-demand form binds names this reader cannot list.
+    // The bare-name scan below would miss it: there the name is dotted.
+    const stat = STATIC_IMPORT.exec(line);
+    if (stat) {
+      if (stat[1] === "*" || stat[1] === name) return false;
+      continue;
+    }
+    if (IMPORT_LINE.test(line)) continue;
+    use.lastIndex = 0;
+    for (let m = use.exec(line); m; m = use.exec(line)) if (m[1] !== ".") return false;
+  }
+  return true;
+}
+
+/**
+ * Is the type at `links[typeAt]` the one `t` describes, and not something else
+ * wearing its simple name? `typeContext` is true where the language resolves the
+ * name as a TYPE — after `new` — and variables therefore cannot obscure it.
+ *
+ * Qualified, the qualifier has to BE the type's namespace, exactly and entirely:
+ * `evil.SecureRandom` and `fake.SecureRandom.getInstance` are somebody's own
+ * class, and a prefix of the real path (`security.SecureRandom`) is not the path.
+ * Unqualified, the only proof is the one import that binds that simple name.
+ * Either way the ROOT of what was written has to still mean what it spells: no
+ * type of that name declared in this file, and — outside type context — no use of
+ * that name anywhere in the file that could be a binding.
+ */
+function identityProven(t: TrustedType, links: readonly ChainLink[], typeAt: number, ctx: RefutationContext, typeContext: boolean): boolean {
+  if (!appliesTo(t.languages, ctx.langId)) return false;
+  if (links[typeAt]?.name !== t.name) return false;
+  for (let i = 0; i < typeAt; i++) if (links[i]!.called) return false;
+  if (typeAt === 0) {
+    if (t.simpleImport === undefined || !ctx.imported(t.simpleImport)) return false;
+  } else {
+    if (typeAt !== t.namespace.length) return false;
+    for (let i = 0; i < typeAt; i++) if (links[i]!.name !== t.namespace[i]) return false;
+  }
+  const head = links[0]!.name;
+  if (ctx.declaresType(head)) return false;
+  return typeContext || ctx.usedOnlyAsQualifier(head);
+}
+
+/**
+ * Does this chain PROVE the value came out of the API the rule names?
+ *
+ * The whole chain — never a fragment of it — has to be a construction of a
+ * trusted type or a static factory called ON one, with every link before the type
+ * a plain qualifier: a call there produced a value this reader knows nothing about
+ * (`getFactory().getInstance("SHA1PRNG")` names the right factory on the wrong
+ * owner). Then `identityProven` has to say the name is that type's.
+ */
+function chainProves(types: readonly TrustedType[], chain: ChainShape, ctx: RefutationContext): boolean {
+  const { links, opaque, newed } = chain;
+  if (opaque || links.length === 0) return false;
+  const last = links[links.length - 1]!;
+  // `new Q.T(…)`: the construction IS the type, and `new` reads it in type
+  // context, where no variable can obscure the name.
+  if (newed) return last.called && types.some((t) => identityProven(t, links, links.length - 1, ctx, true));
+  // `Q.T.factory(…)`: an expression, so every name in it has to survive scope.
+  if (!last.called || links.length < 2) return false;
+  return types.some((t) => t.factories?.includes(last.name) && identityProven(t, links, links.length - 2, ctx, false));
+}
+
+/**
+ * Which trusted type this call's RECEIVER is, for an `argument` refutation, or
+ * undefined when the chain does not prove one.
+ *
+ * The chain has to be the type's name and nothing more — `javax.crypto.Cipher`
+ * before a `.getInstance(…)`, every link a plain qualifier. It is an expression,
+ * so the same scope test applies: `evil.Cipher` is the wrong namespace and a
+ * file-local `class Cipher` outranks the import.
+ */
+function receiverType(types: readonly TrustedType[], chain: ChainShape, ctx: RefutationContext): TrustedType | undefined {
+  const { links, opaque, newed } = chain;
+  if (opaque || newed || links.length === 0 || links[links.length - 1]!.called) return undefined;
+  return types.find((t) => identityProven(t, links, links.length - 1, ctx, false));
+}
+
+/**
+ * The top-level arguments between `open` and `close`, each reduced to its string
+ * value when the whole argument is one literal and to undefined when it is
+ * anything else.
+ *
+ * Splitting is depth-aware over brackets and blind inside literals, so a comma in
+ * `pick("a,b", c)` does not split and a nested `f(x, y)` stays one argument. A
+ * split this reader gets wrong — Java generics carry commas too — can only make
+ * an argument look non-literal, which keeps the candidate.
+ */
+function argumentLiterals(st: Statement, open: number, close: number): (string | undefined)[] {
+  const { text, quoted } = st;
+  const args: (string | undefined)[] = [];
+  /** An argument is a literal exactly when every character in it, quotes
+   *  included, is inside one — `"a" + b` and `f("a")` both have characters that
+   *  are not, and adjacent literals need an unquoted separator between them. */
+  const literalOf = (from: number, to: number): string | undefined => {
+    const a = trimForward(text, from);
+    const b = trimBack(text, to);
+    if (b - a < 2 || !quoted[a]) return undefined;
+    for (let i = a; i < b; i++) if (!quoted[i]) return undefined;
+    return text.slice(a + 1, b - 1);
+  };
+  let depth = 0;
+  let from = open + 1;
+  for (let i = from; i < close; i++) {
+    if (quoted[i]) continue;
+    const ch = text[i]!;
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (ch === "," && depth === 0) {
+      args.push(literalOf(from, i));
+      from = i + 1;
+    }
+  }
+  if (trimForward(text, from) < close) args.push(literalOf(from, close));
+  return args;
+}
+
+/** More occurrences than this on one line and the answer is "ambiguous" anyway. */
+const MAX_OCCURRENCES = 8;
+
+/**
+ * The one call in `st` that `callee`/`receiver` identify, or undefined when no
+ * single call can be picked out.
+ *
+ * Undefined is the answer whenever attribution is in doubt, and the caller reads
+ * it as "do not refute": no occurrence at all (the extractor matched a call this
+ * reader cannot find in the text), several that the receiver cannot separate, or
+ * a receiver that contradicts the only occurrence — a `Cipher` record against a
+ * lone `MessageDigest.getInstance` is not that record's call.
+ */
+function callSiteFor(st: Statement, callee: string, receiver?: string): CallSite | undefined {
+  const { text } = st;
+  if (!callee || !text) return undefined;
+  const found: Occurrence[] = [];
+  for (let i = text.indexOf(callee); i >= 0; i = text.indexOf(callee, i + 1)) {
+    if (st.quoted[i]) continue;
+    const before = text[i - 1];
+    if (before !== undefined && (NAME_CHAR.test(before) || before === "?")) continue;
+    const end = i + callee.length;
+    const after = text[end];
+    if (after !== undefined && NAME_CHAR.test(after)) continue;
+    const paren = trimForward(text, end);
+    if (text[paren] !== "(" || st.quoted[paren]) continue; // a mention, not a call
+    const { receiver: own, chain } = readChain(st, i);
+    const close = st.partner[paren]!;
+    // An argument list that never closes inside the window is a call whose
+    // arguments were cut off: the chain still speaks for it, the arguments
+    // cannot.
+    found.push({ chain, literals: close >= 0 ? argumentLiterals(st, paren, close) : undefined, receiver: own });
+    if (found.length > MAX_OCCURRENCES) return undefined;
+  }
+  if (found.length === 0) return undefined;
+  let only = found[0]!;
+  if (found.length > 1) {
+    // With no column on the record, the receiver is the only discriminator left,
+    // and it has to single one out. A tie is an unattributable refutation.
+    if (!receiver) return undefined;
+    const named = found.filter((o) => o.receiver === receiver);
+    if (named.length !== 1) return undefined;
+    only = named[0]!;
+  } else if (receiver !== undefined && only.receiver !== undefined && only.receiver !== receiver) return undefined;
+  return only;
+}
+
+/** Does this call show, structurally, that the rule does not apply to it? */
+function refutes(rule: SinkRefutation, site: CallSite, ctx: RefutationContext): boolean {
+  if (rule.by === "receiver") return chainProves(rule.types, site.chain, ctx);
+  // The literal speaks for the call only once the chain has proven WHOSE
+  // `getInstance` this is: a strong transformation handed to `evil.Cipher`, or to
+  // a `Cipher` the file declares itself, says nothing about what that call does.
+  const type = receiverType(rule.types, site.chain, ctx);
+  const literal = site.literals?.[rule.index];
+  return type?.safe !== undefined && literal !== undefined && type.safe.test(literal.trim());
+}
+
 /** Severity an `ambiguous` rule falls back to when nothing corroborated it. A
  *  candidate worth a second look, not a headline. */
 const UNRESOLVED_SEVERITY: Severity = "medium";
@@ -1571,6 +2289,9 @@ const sanitizerByLang = new WeakMap<readonly SanitizerRule[], Map<string, Saniti
  * declared 68 lines above its call site is not `subprocess.run`. Consulted by
  * `ambiguous` rules only (see the gate below for why). Omitted ⇒ no
  * local-definition gate, byte-identical to before this param existed.
+ * @param lines The file's lines, for `refutedBy`. Only rules that declare one
+ * read them, and only for the statement they matched. Omitted ⇒ no refutation
+ * gate, byte-identical to before this param existed.
  */
 export function findSinks(
   lang: LangSpec,
@@ -1578,10 +2299,40 @@ export function findSinks(
   extraSinks?: SinkRule[],
   imports?: readonly { spec: string }[],
   localDefs?: ReadonlySet<string>,
+  lines?: readonly string[],
 ): SinkHit[] {
   const byCallee = sinkIndex(extraSinks && extraSinks.length ? mergedSinks(extraSinks) : SINKS);
   const out: SinkHit[] = [];
   const specs = (imports ?? []).map((i) => i.spec.toLowerCase());
+  // One parsed statement per line that needs one — several rules can consult the
+  // same call, and a file has few crypto/RNG calls but many lines.
+  const source = lines ?? [];
+  const statements = new Map<number, Statement>();
+  const statement = (line: number): Statement => {
+    let st = statements.get(line);
+    if (st === undefined) statements.set(line, (st = statementAt(source, line, lang.id)));
+    return st;
+  };
+  // What the file says about the names a refutation reads. Exact specs, not the
+  // lowercased `specs` above: `requireModule` asks whether a technology is
+  // present, this asks whether one specific declaration is, and only the exact
+  // spelling answers that. `imports` undefined ⇒ nothing is proven, which keeps
+  // every candidate. Both name questions scan the file, so both memoize.
+  const importSpecs = imports && new Set(imports.map((i) => i.spec));
+  const memo = <T>(f: (name: string) => T) => {
+    const seen = new Map<string, T>();
+    return (name: string): T => {
+      let v = seen.get(name);
+      if (v === undefined) seen.set(name, (v = f(name)));
+      return v;
+    };
+  };
+  const refutationCtx: RefutationContext = {
+    langId: lang.id,
+    imported: (spec) => importSpecs?.has(spec) === true,
+    declaresType: memo((name) => localDefs?.has(name) === true || declaresTypeNamed(source, name)),
+    usedOnlyAsQualifier: memo((name) => usedOnlyAsQualifierIn(source, name)),
+  };
   for (const c of calls) {
     // Only the rules naming this callee, in catalog order — the linear scan of
     // ~150 rules per call was the taint pass's second-hottest loop. Order is
@@ -1598,6 +2349,11 @@ export function findSinks(
     // function `find`. Ambiguous rules already require corroboration; this is
     // one more piece of it, and the only place the trade is worth making.
     const shadowed = !c.receiver && localDefs?.has(c.callee) === true;
+    // This call, read out of its statement — resolved once per call, on the first
+    // rule that asks for it, and undefined when no single call on the line can be
+    // attributed to this record.
+    let site: CallSite | undefined;
+    let siteRead = false;
     for (const rule of rules) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       // Verb-shaped callees (get/post/…) are only a sink as a MEMBER call
@@ -1607,6 +2363,16 @@ export function findSinks(
       // it (cuts false positives like `arr.call(...)` matching the command rule).
       // Rules with no `receivers` (e.g. sql) match any receiver.
       if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) continue;
+      // The evidence gate: this call's own arguments or receiver chain say it is
+      // not what the rule claims. Needs the file's lines; without them the rule
+      // fires exactly as before, and so does a call that cannot be attributed.
+      if (rule.refutedBy && lines) {
+        if (!siteRead) {
+          site = callSiteFor(statement(c.line), c.callee, c.receiver);
+          siteRead = true;
+        }
+        if (site !== undefined && refutes(rule.refutedBy, site, refutationCtx)) continue;
+      }
       // Technology gate. Only enforced when imports were actually extracted:
       // an empty list means we couldn't see them, not that there are none.
       // `specs` is lowercased, so the needle must be too — otherwise a rule

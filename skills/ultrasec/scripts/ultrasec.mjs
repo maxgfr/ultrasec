@@ -19604,6 +19604,15 @@ function cweUrl(cwe) {
   const n = cwe.replace(/\D/g, "");
   return `https://cwe.mitre.org/data/definitions/${n}.html`;
 }
+var JVM_AEAD_TRANSFORMATION = /^(?:AES|ARIA|Camellia)(?:_(?:128|192|256))?\/(?:GCM|CCM)(?:\/[A-Za-z0-9]+)?$|^ChaCha20-Poly1305$/i;
+var JVM_STRONG_ALGORITHM = /^(?:AES|ChaCha20|RSA|EC|ECDSA|Ed25519|X25519|DiffieHellman|PBKDF2WithHmacSHA(?:224|256|384|512)|HmacSHA(?:224|256|384|512))$/i;
+var JVM = ["java", "kotlin", "scala"];
+var JVM_PRIMITIVE_FACTORIES = [
+  { name: "Cipher", namespace: ["javax", "crypto"], simpleImport: "javax.crypto.Cipher", safe: JVM_AEAD_TRANSFORMATION, languages: JVM },
+  { name: "KeyGenerator", namespace: ["javax", "crypto"], simpleImport: "javax.crypto.KeyGenerator", safe: JVM_STRONG_ALGORITHM, languages: JVM },
+  { name: "SecretKeyFactory", namespace: ["javax", "crypto"], simpleImport: "javax.crypto.SecretKeyFactory", safe: JVM_STRONG_ALGORITHM, languages: JVM },
+  { name: "KeyPairGenerator", namespace: ["java", "security"], simpleImport: "java.security.KeyPairGenerator", safe: JVM_STRONG_ALGORITHM, languages: JVM }
+];
 var SINKS = [
   {
     // BEFORE `sql`, which also claims `execute`: `httpClient.execute(request)`
@@ -20307,6 +20316,13 @@ var SINKS = [
     // Cipher/key factories → CWE-327 (broken or risky ALGORITHM).
     receivers: ["Cipher", "KeyGenerator", "SecretKeyFactory", "KeyPairGenerator", "Signature"],
     requireReceiver: true,
+    // …unless argument 0 — where every one of these factories takes its algorithm
+    // — IS spelled out as a literal the note already calls safe. A key factory
+    // takes an algorithm NAME, not a transformation, so a bare "AES" there carries
+    // no ECB default and is not the same claim as a bare `Cipher.getInstance("AES")`,
+    // which stays a finding because on the JVM that IS ECB. `Signature` has no safe
+    // set: nothing in its arguments refutes it.
+    refutedBy: { by: "argument", index: 0, types: JVM_PRIMITIVE_FACTORIES },
     title: "Weak or attacker-selected cryptographic primitive",
     note: "A JVM crypto primitive chosen by string. Read the algorithm argument: DES/RC4/3DES, or ECB mode, are weak \u2014 and an algorithm name built from input is worse. AES/GCM here is not a finding."
   },
@@ -20530,6 +20546,35 @@ var SINKS = [
     severity: "low",
     languages: ["*"],
     callees: ["Random", "nextInt", "nextFloat", "nextDouble", "nextLong", "mt_rand", "randint", "randrange", "shuffle"],
+    // The title is a claim about WHICH generator this draw came from, so only the
+    // construction the draw hangs off can settle it — and only when that
+    // construction is the JDK's and not something else wearing its name.
+    // `new java.security.SecureRandom().nextInt()` says so, and so does the
+    // unqualified `new SecureRandom()` in a file that imports exactly that class
+    // and declares no type of its own by that name. `evil.SecureRandom()`,
+    // `fake.SecureRandom.getInstance()`, a local `static Random SecureRandom()`,
+    // a file-local `class SecureRandom extends Random`, a file that binds `java`
+    // as a variable — each matches the name and none is the CSPRNG, so each stays
+    // a candidate. A CSPRNG named anywhere else in the chain (a ternary branch, a
+    // factory argument, a string, a field) says nothing either.
+    //
+    // Java only. Python's `secrets`/`random.SystemRandom` read the same on the
+    // page and are not decidable from it: a parameter, a lambda parameter, a
+    // tuple unpack, a `with … as`, a walrus or a `global` in another function all
+    // rebind the module, and enumerating those forms line by line is guesswork
+    // with a missed bug on the wrong side of it. Nothing Python refutes.
+    refutedBy: {
+      by: "receiver",
+      types: [
+        {
+          name: "SecureRandom",
+          namespace: ["java", "security"],
+          factories: ["getInstance", "getInstanceStrong"],
+          simpleImport: "java.security.SecureRandom",
+          languages: JVM
+        }
+      ]
+    },
     title: "Predictable value from a non-cryptographic RNG",
     note: "Only a finding when the value becomes a token, key, session id, password-reset link or nonce \u2014 for a shuffle or a jitter it is nothing. Read what it is used for, then require a CSPRNG (SecureRandom / crypto.randomBytes / secrets)."
   },
@@ -20929,6 +20974,255 @@ var LOG_SINKS = [
   // which the extractor does not record as calls, so a rule here could never
   // fire. Log-shaped macros need a line rule, not a call rule.
 ];
+var HASH_COMMENT_LANGS = /* @__PURE__ */ new Set(["python", "ruby", "php", "shell", "elixir"]);
+function scanStatementLine(text, hash) {
+  let clean = "";
+  let net = 0;
+  let quote = null;
+  for (let i2 = 0; i2 < text.length; i2++) {
+    const ch = text[i2];
+    if (quote) {
+      clean += ch;
+      if (ch === "\\") {
+        i2++;
+        if (i2 < text.length) clean += text[i2];
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      clean += ch;
+      continue;
+    }
+    if (ch === "/" && text[i2 + 1] === "/") break;
+    if (ch === "/" && text[i2 + 1] === "*") {
+      const end = text.indexOf("*/", i2 + 2);
+      if (end < 0) break;
+      i2 = end + 1;
+      continue;
+    }
+    if (hash && ch === "#" && text[i2 + 1] !== "[") break;
+    if (ch === "(") net++;
+    else if (ch === ")") net--;
+    clean += ch;
+  }
+  return { clean, net };
+}
+var MAX_CONTINUATION_LINES = 3;
+var EMPTY_STATEMENT = { text: "", quoted: new Uint8Array(0), partner: new Int32Array(0) };
+function analyzeStatement(text) {
+  const quoted = new Uint8Array(text.length);
+  const partner = new Int32Array(text.length).fill(-1);
+  const open = [];
+  let quote = null;
+  for (let i2 = 0; i2 < text.length; i2++) {
+    const ch = text[i2];
+    if (quote) {
+      quoted[i2] = 1;
+      if (ch === "\\") {
+        i2++;
+        if (i2 < text.length) quoted[i2] = 1;
+        continue;
+      }
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") {
+      quote = ch;
+      quoted[i2] = 1;
+      continue;
+    }
+    if (ch === "(") open.push(i2);
+    else if (ch === ")") {
+      const start2 = open.pop();
+      if (start2 !== void 0) {
+        partner[start2] = i2;
+        partner[i2] = start2;
+      }
+    }
+  }
+  return { text, quoted, partner };
+}
+function statementAt(lines5, line, langId) {
+  const first = lines5[line - 1];
+  if (first === void 0) return EMPTY_STATEMENT;
+  const hash = HASH_COMMENT_LANGS.has(langId);
+  const head = scanStatementLine(first, hash);
+  let clean = head.clean;
+  let depth = head.net;
+  for (let i2 = 1; depth > 0 && i2 <= MAX_CONTINUATION_LINES; i2++) {
+    const next = lines5[line - 1 + i2];
+    if (next === void 0) break;
+    const cont = scanStatementLine(next, hash);
+    clean += ` ${cont.clean}`;
+    depth += cont.net;
+  }
+  return analyzeStatement(clean);
+}
+var NAME_CHAR = /[A-Za-z0-9_$]/;
+function trimBack(text, i2) {
+  let p = i2;
+  while (p > 0 && (text[p - 1] === " " || text[p - 1] === "	")) p--;
+  return p;
+}
+function trimForward(text, i2) {
+  let p = i2;
+  while (p < text.length && (text[p] === " " || text[p] === "	")) p++;
+  return p;
+}
+function readChain(st, calleeAt) {
+  const { text } = st;
+  let p = calleeAt;
+  let receiver;
+  let steps = 0;
+  const links = [];
+  let opaque = false;
+  for (; ; ) {
+    let q = trimBack(text, p);
+    if (q === 0 || text[q - 1] !== "." || st.quoted[q - 1]) break;
+    q--;
+    if (q > 0 && text[q - 1] === "?") q--;
+    q = trimBack(text, q);
+    if (q > 0 && text[q - 1] === ")" && st.partner[q - 1] >= 0) {
+      const inner = st.partner[q - 1];
+      let name2 = inner;
+      while (name2 > 0 && NAME_CHAR.test(text[name2 - 1]) && !st.quoted[name2 - 1]) name2--;
+      if (name2 === inner) opaque = true;
+      else links.unshift({ name: text.slice(name2, inner), called: true });
+      p = name2 < inner ? name2 : inner;
+      steps++;
+      continue;
+    }
+    let s = q;
+    while (s > 0 && NAME_CHAR.test(text[s - 1]) && !st.quoted[s - 1]) s--;
+    if (s === q) {
+      opaque = true;
+      break;
+    }
+    if (steps === 0) receiver = text.slice(s, q);
+    links.unshift({ name: text.slice(s, q), called: false });
+    p = s;
+    steps++;
+  }
+  return { receiver, chain: { links, opaque, newed: links.length > 0 && keywordBefore(st, p) === "new" } };
+}
+function keywordBefore(st, at) {
+  const { text } = st;
+  const end = trimBack(text, at);
+  let start2 = end;
+  while (start2 > 0 && NAME_CHAR.test(text[start2 - 1]) && !st.quoted[start2 - 1]) start2--;
+  return text.slice(start2, end);
+}
+var asLiteral = (name2) => name2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function declaresTypeNamed(lines5, name2) {
+  const decl = new RegExp(`(?:^|[^\\w$.])(?:class|interface|enum|record|trait|object|struct)\\s+${asLiteral(name2)}(?![\\w$])`);
+  return lines5.some((l) => decl.test(l));
+}
+var IMPORT_LINE = /^\s*(?:import|package|from)\b/;
+var STATIC_IMPORT = /^\s*import\s+static\s+[\w$.]*?([\w$]+|\*)\s*;/;
+function usedOnlyAsQualifierIn(lines5, name2) {
+  const use = new RegExp(`(?:^|[^\\w$.])${asLiteral(name2)}(?![\\w$])\\s*(.?)`, "g");
+  for (const line of lines5) {
+    const stat = STATIC_IMPORT.exec(line);
+    if (stat) {
+      if (stat[1] === "*" || stat[1] === name2) return false;
+      continue;
+    }
+    if (IMPORT_LINE.test(line)) continue;
+    use.lastIndex = 0;
+    for (let m = use.exec(line); m; m = use.exec(line)) if (m[1] !== ".") return false;
+  }
+  return true;
+}
+function identityProven(t, links, typeAt, ctx, typeContext) {
+  if (!appliesTo(t.languages, ctx.langId)) return false;
+  if (links[typeAt]?.name !== t.name) return false;
+  for (let i2 = 0; i2 < typeAt; i2++) if (links[i2].called) return false;
+  if (typeAt === 0) {
+    if (t.simpleImport === void 0 || !ctx.imported(t.simpleImport)) return false;
+  } else {
+    if (typeAt !== t.namespace.length) return false;
+    for (let i2 = 0; i2 < typeAt; i2++) if (links[i2].name !== t.namespace[i2]) return false;
+  }
+  const head = links[0].name;
+  if (ctx.declaresType(head)) return false;
+  return typeContext || ctx.usedOnlyAsQualifier(head);
+}
+function chainProves(types, chain, ctx) {
+  const { links, opaque, newed } = chain;
+  if (opaque || links.length === 0) return false;
+  const last = links[links.length - 1];
+  if (newed) return last.called && types.some((t) => identityProven(t, links, links.length - 1, ctx, true));
+  if (!last.called || links.length < 2) return false;
+  return types.some((t) => t.factories?.includes(last.name) && identityProven(t, links, links.length - 2, ctx, false));
+}
+function receiverType(types, chain, ctx) {
+  const { links, opaque, newed } = chain;
+  if (opaque || newed || links.length === 0 || links[links.length - 1].called) return void 0;
+  return types.find((t) => identityProven(t, links, links.length - 1, ctx, false));
+}
+function argumentLiterals(st, open, close) {
+  const { text, quoted } = st;
+  const args2 = [];
+  const literalOf = (from2, to) => {
+    const a = trimForward(text, from2);
+    const b = trimBack(text, to);
+    if (b - a < 2 || !quoted[a]) return void 0;
+    for (let i2 = a; i2 < b; i2++) if (!quoted[i2]) return void 0;
+    return text.slice(a + 1, b - 1);
+  };
+  let depth = 0;
+  let from = open + 1;
+  for (let i2 = from; i2 < close; i2++) {
+    if (quoted[i2]) continue;
+    const ch = text[i2];
+    if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth--;
+    else if (ch === "," && depth === 0) {
+      args2.push(literalOf(from, i2));
+      from = i2 + 1;
+    }
+  }
+  if (trimForward(text, from) < close) args2.push(literalOf(from, close));
+  return args2;
+}
+var MAX_OCCURRENCES = 8;
+function callSiteFor(st, callee, receiver) {
+  const { text } = st;
+  if (!callee || !text) return void 0;
+  const found = [];
+  for (let i2 = text.indexOf(callee); i2 >= 0; i2 = text.indexOf(callee, i2 + 1)) {
+    if (st.quoted[i2]) continue;
+    const before = text[i2 - 1];
+    if (before !== void 0 && (NAME_CHAR.test(before) || before === "?")) continue;
+    const end = i2 + callee.length;
+    const after = text[end];
+    if (after !== void 0 && NAME_CHAR.test(after)) continue;
+    const paren = trimForward(text, end);
+    if (text[paren] !== "(" || st.quoted[paren]) continue;
+    const { receiver: own2, chain } = readChain(st, i2);
+    const close = st.partner[paren];
+    found.push({ chain, literals: close >= 0 ? argumentLiterals(st, paren, close) : void 0, receiver: own2 });
+    if (found.length > MAX_OCCURRENCES) return void 0;
+  }
+  if (found.length === 0) return void 0;
+  let only = found[0];
+  if (found.length > 1) {
+    if (!receiver) return void 0;
+    const named = found.filter((o) => o.receiver === receiver);
+    if (named.length !== 1) return void 0;
+    only = named[0];
+  } else if (receiver !== void 0 && only.receiver !== void 0 && only.receiver !== receiver) return void 0;
+  return only;
+}
+function refutes(rule, site, ctx) {
+  if (rule.by === "receiver") return chainProves(rule.types, site.chain, ctx);
+  const type = receiverType(rule.types, site.chain, ctx);
+  const literal = site.literals?.[rule.index];
+  return type?.safe !== void 0 && literal !== void 0 && type.safe.test(literal.trim());
+}
 var UNRESOLVED_SEVERITY = "medium";
 var UNRESOLVED_RECEIVER = "unresolved-receiver";
 var sinkIndexes = /* @__PURE__ */ new WeakMap();
@@ -20963,18 +21257,49 @@ function byLanguage(store, rules, langId) {
 var textSinkByLang = /* @__PURE__ */ new WeakMap();
 var sourceByLang = /* @__PURE__ */ new WeakMap();
 var sanitizerByLang = /* @__PURE__ */ new WeakMap();
-function findSinks(lang, calls, extraSinks, imports, localDefs) {
+function findSinks(lang, calls, extraSinks, imports, localDefs, lines5) {
   const byCallee = sinkIndex(extraSinks && extraSinks.length ? mergedSinks(extraSinks) : SINKS);
   const out2 = [];
   const specs = (imports ?? []).map((i2) => i2.spec.toLowerCase());
+  const source = lines5 ?? [];
+  const statements = /* @__PURE__ */ new Map();
+  const statement = (line) => {
+    let st = statements.get(line);
+    if (st === void 0) statements.set(line, st = statementAt(source, line, lang.id));
+    return st;
+  };
+  const importSpecs = imports && new Set(imports.map((i2) => i2.spec));
+  const memo = (f) => {
+    const seen = /* @__PURE__ */ new Map();
+    return (name2) => {
+      let v = seen.get(name2);
+      if (v === void 0) seen.set(name2, v = f(name2));
+      return v;
+    };
+  };
+  const refutationCtx = {
+    langId: lang.id,
+    imported: (spec) => importSpecs?.has(spec) === true,
+    declaresType: memo((name2) => localDefs?.has(name2) === true || declaresTypeNamed(source, name2)),
+    usedOnlyAsQualifier: memo((name2) => usedOnlyAsQualifierIn(source, name2))
+  };
   for (const c2 of calls) {
     const rules = byCallee.get(c2.callee);
     if (!rules) continue;
     const shadowed = !c2.receiver && localDefs?.has(c2.callee) === true;
+    let site;
+    let siteRead = false;
     for (const rule of rules) {
       if (!appliesTo(rule.languages, lang.id)) continue;
       if (rule.requireReceiver && !c2.receiver) continue;
       if (rule.receivers && c2.receiver && !rule.receivers.includes(c2.receiver)) continue;
+      if (rule.refutedBy && lines5) {
+        if (!siteRead) {
+          site = callSiteFor(statement(c2.line), c2.callee, c2.receiver);
+          siteRead = true;
+        }
+        if (site !== void 0 && refutes(rule.refutedBy, site, refutationCtx)) continue;
+      }
       const moduleSeen = !!rule.requireModule && rule.requireModule.some((m) => specs.some((s) => s.includes(m.toLowerCase())));
       if (rule.requireModule && specs.length && !moduleSeen) continue;
       let downgraded;
@@ -22302,7 +22627,8 @@ function buildAttackSurface(scan2, coveredScopes = []) {
     la.files++;
     da.files++;
     const fs2 = { file: f.rel, region: dir, sources: 0, sinks: 0, score: 0 };
-    const sources = findSources(lang, readText2(join32(scan2.repo, f.rel)), f.rel);
+    const text = readText2(join32(scan2.repo, f.rel));
+    const sources = findSources(lang, text, f.rel);
     for (const s of sources) {
       totalSources++;
       la.sources++;
@@ -22314,7 +22640,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
       const arr = entryByKind.get(s.kind) ?? entryByKind.set(s.kind, []).get(s.kind);
       arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
     }
-    for (const sink of findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols))) {
+    for (const sink of findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols), text.split(/\r?\n/))) {
       totalSinks++;
       la.sinks++;
       da.sinks++;
@@ -22494,7 +22820,7 @@ function createFileFacts(scan2) {
     if (!hits) {
       const file = byRel.get(rel2);
       const lang = langForFile(rel2);
-      hits = file && lang ? findSinks(lang, file.calls, extraSinks, file.imports, localDefs(rel2)) : EMPTY_HITS;
+      hits = file && lang ? findSinks(lang, file.calls, extraSinks, file.imports, localDefs(rel2), lines5(rel2)) : EMPTY_HITS;
       bucket.set(rel2, hits);
     }
     return hits;
@@ -25833,7 +26159,7 @@ function sinkKindsAt(fileScan, spec, lines5) {
   const cached = sinkIndexCache.get(fileScan);
   if (cached) return cached;
   const index = /* @__PURE__ */ new Map();
-  const hits = [...findSinks(spec, fileScan.calls ?? [], void 0, fileScan.imports), ...findTextSinks(spec, lines5.join("\n"))];
+  const hits = [...findSinks(spec, fileScan.calls ?? [], void 0, fileScan.imports, void 0, lines5), ...findTextSinks(spec, lines5.join("\n"))];
   for (const h of hits) {
     let set = index.get(h.line);
     if (!set) index.set(h.line, set = /* @__PURE__ */ new Set());
@@ -29317,7 +29643,7 @@ function buildAssumptionWorklist(scan2) {
     if (!lang) continue;
     const text = readText2(join56(scan2.repo, f.rel));
     const sources = findSources(lang, text).length;
-    const sinks = findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols)).length;
+    const sinks = findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols), text.split(/\r?\n/)).length;
     if (!sources && !sinks) continue;
     const why = sources && sinks ? "reads untrusted input AND performs a dangerous operation" : sources ? "reads untrusted input" : "performs a dangerous operation";
     const named = f.symbols.filter((s) => s.name).slice(0, 12);
