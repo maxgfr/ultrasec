@@ -235,6 +235,9 @@ COMMANDS
              'scan'. Flags: --json · --write (ROUTE.md) · --out <dir>.
 
 GLOBAL
+  --require-tools <a,b>  scan: require these scanners to execute successfully.
+                        Selects them if --tools is absent, including scoped scans.
+                        Skipped/failed/missing outcome exits 1; artifacts are kept.
   --help, -h     Show this help.
   --version, -v  Print the version.
   --json         Machine-readable output (every command above except render/dossier).
@@ -250,7 +253,7 @@ GLOBAL
 
 EXIT CODES
   0  ok        1  a gate failed (check) / nothing usable ingested (import)
-                  / rows refused under --strict
+                  / rows refused under --strict / required scanner incomplete
   2  usage or runtime error (bad flag value, unreadable run, unresolvable git ref)
 
 Each command's flags are listed above; \`--help\`/\`-h\` (anywhere) prints this help.

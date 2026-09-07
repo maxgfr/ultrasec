@@ -759,7 +759,7 @@ export function renderHtml(d: Dossier, narrative?: Narrative): string {
   </header>
   <div class="cols${rail ? "" : " norail"}">
   ${rail}
-  <main>${bannerHtml(unread)}
+  <main>${d.manifest.scannerPolicy && !d.manifest.scannerPolicy.complete ? `<section class="banner"><h2>Required scanners incomplete</h2><p>${esc(d.manifest.scannerPolicy.incomplete.join(", "))} did not complete this pass. No findings does not mean secure. Re-run the required scanners.</p></section>` : ""}${bannerHtml(unread)}
     <section id="summary">
       <h2>Summary</h2>
       ${surfacesHtml(undecided)}

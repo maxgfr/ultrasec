@@ -8,7 +8,11 @@
 # optional override: pass `--build-arg TRIVY_VERSION=0.71.1` (etc.) to pin a
 # specific tool to a specific release when reproducibility matters more than
 # freshness. Arch is detected from the base image so it builds on amd64 and
-# arm64.
+# arm64. gosec also needs a Go toolchain to load packages and the standard
+# library. GO_VERSION follows the latest Go 1 release unless explicitly pinned.
+ARG GO_VERSION=1
+FROM golang:${GO_VERSION}-bookworm AS go-toolchain
+
 FROM node:22-bookworm-slim
 
 # Empty (default) ⇒ install each tool's latest release. Set a version to pin.
@@ -87,6 +91,10 @@ RUN set -eux; \
     "checkov${CHECKOV_VERSION:+==$CHECKOV_VERSION}" "pip-audit${PIP_AUDIT_VERSION:+==$PIP_AUDIT_VERSION}"; \
   trivy --version; gitleaks version; osv-scanner --version; semgrep --version; gosec --version; hadolint --version; bandit --version; checkov --version; \
   grype version; syft version; pip-audit --version
+
+COPY --from=go-toolchain /usr/local/go /usr/local/go
+ENV PATH="/usr/local/go/bin:${PATH}"
+RUN go version
 
 # Not baked in (deliberately — they're per-run/network-fetched state, not
 # pinned binaries, and would bloat the image): the grype vulnerability DB and

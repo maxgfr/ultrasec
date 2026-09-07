@@ -141,6 +141,8 @@ export interface ToolRunResult {
   ok: boolean;
   findings: Finding[];
   note: string;
+  /** Optional execution stays tolerant, but required scanners need every workspace. */
+  workspaceCoverage?: { total: number; completed: number };
 }
 
 /** Per-tool outcome, persisted so a report distinguishes "ran, 0 findings" from
@@ -150,15 +152,17 @@ export interface ToolStatus {
   status: "ran" | "empty" | "skipped" | "failed";
   findings?: number;
   note?: string;
+  workspaceCoverage?: { total: number; completed: number };
 }
 
 /** Collapse the rich run results into a persisted per-tool status. */
 export function toolStatus(results: ToolRunResult[]): ToolStatus[] {
   return results.map((r) => {
-    if (!r.ran) return { name: r.name, status: "skipped", ...(r.note ? { note: r.note } : {}) };
-    if (!r.ok) return { name: r.name, status: "failed", ...(r.note ? { note: r.note } : {}) };
+    const coverage = r.workspaceCoverage ? { workspaceCoverage: r.workspaceCoverage } : {};
+    if (!r.ran) return { name: r.name, status: "skipped", ...(r.note ? { note: r.note } : {}), ...coverage };
+    if (!r.ok) return { name: r.name, status: "failed", ...(r.note ? { note: r.note } : {}), ...coverage };
     const status = r.findings.length ? "ran" : "empty";
-    return { name: r.name, status, findings: r.findings.length, ...(r.note ? { note: r.note } : {}) };
+    return { name: r.name, status, findings: r.findings.length, ...(r.note ? { note: r.note } : {}), ...coverage };
   });
 }
 
@@ -372,7 +376,14 @@ async function runEachWorkspace(adapter: ToolAdapter, repo: string, cmd: string[
     `${findings.length} finding(s) across ${covered.length} workspace(s): ${covered.join(", ") || "none"}`,
     ...failures.map((f) => `failed ${f}`),
   ].join(" · ");
-  return { name: adapter.name, ran: covered.length > 0, ok: covered.length > 0, findings, note };
+  return {
+    name: adapter.name,
+    ran: covered.length > 0,
+    ok: covered.length > 0,
+    findings,
+    note,
+    workspaceCoverage: { total: dirs.length, completed: covered.length },
+  };
 }
 
 /** Run one adapter via its official Docker image. Never throws. Never cached:

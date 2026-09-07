@@ -193,6 +193,10 @@ export function renderDossierMd(d: Dossier): string {
   L.push(`- languages: ${m.languages.join(", ") || "—"}`);
   L.push(`- external tools run: ${m.toolsRun.join(", ") || "none (graph + taint only)"}`);
   if (m.toolStatus?.length) for (const line of toolStatusLines(m.toolStatus)) L.push(`  - ${line}`);
+  if (m.scannerPolicy)
+    L.push(
+      `- required scanners (this pass): ${m.scannerPolicy.complete ? "complete" : `INCOMPLETE — ${m.scannerPolicy.incomplete.join(", ")}`} — execution only, not a clean-security verdict`,
+    );
   if (m.sbom) L.push(`- SBOM: \`${m.sbom}\` (CycloneDX)`);
   L.push(`- findings: **${m.counts.findings}** — ${SEVERITIES.map((s) => `${severityBadge(s)} ${c[s]}`).join("  ")}`);
   L.push("");

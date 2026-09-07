@@ -1,6 +1,7 @@
 ---
 name: ultrasec
-description: "Audit a codebase for exploitable security issues by tracing untrusted data across files and adjudicating scanner findings. Use for vulnerability, taint, dependency, secrets, auth, business-logic, or supply-chain audits."
+description: "Audit a codebase for exploitable security issues with cross-file tracing, scanner adjudication, and grounded findings."
+disable-model-invocation: true
 license: MIT
 metadata:
   version: 1.45.1
@@ -41,12 +42,14 @@ flows are real and exploitable, find the subtle bugs the tools miss, and verify.
 
 ## Running the engine
 
+Require scanners with `scan --require-tools a,b`; incomplete execution fails.
+See [completion policy](references/commands.md). Execution success does not establish security.
+
 One committed, dependency-free bundle — no `npm install`, no API keys.
 
-> **Use an absolute path.** An installed skill lives away from the user's project (e.g.
-> `~/.agents/skills/ultrasec/`), so a cwd-relative `scripts/ultrasec.mjs` will NOT resolve.
-> Resolve `<skill-dir>/scripts/ultrasec.mjs` once and reuse it — and give **subagents the
-> absolute path**, since they don't share your cwd. Below, `ultrasec` means exactly that path.
+> **Use an absolute path.** Resolve `<skill-dir>/scripts/ultrasec.mjs` once and give
+> **subagents the absolute path** too: installed skills live outside the project,
+> and subagents may have another cwd. Below, `ultrasec` means that path.
 
 ```bash
 ULTRASEC="<skill-dir>/scripts/ultrasec.mjs"     # then: node "$ULTRASEC" <command>

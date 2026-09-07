@@ -18587,10 +18587,11 @@ function withSources(f) {
 // src/tools/run.ts
 function toolStatus(results) {
   return results.map((r) => {
-    if (!r.ran) return { name: r.name, status: "skipped", ...r.note ? { note: r.note } : {} };
-    if (!r.ok) return { name: r.name, status: "failed", ...r.note ? { note: r.note } : {} };
+    const coverage = r.workspaceCoverage ? { workspaceCoverage: r.workspaceCoverage } : {};
+    if (!r.ran) return { name: r.name, status: "skipped", ...r.note ? { note: r.note } : {}, ...coverage };
+    if (!r.ok) return { name: r.name, status: "failed", ...r.note ? { note: r.note } : {}, ...coverage };
     const status = r.findings.length ? "ran" : "empty";
-    return { name: r.name, status, findings: r.findings.length, ...r.note ? { note: r.note } : {} };
+    return { name: r.name, status, findings: r.findings.length, ...r.note ? { note: r.note } : {}, ...coverage };
   });
 }
 var TIMEOUT_MS = 3e5;
@@ -18708,7 +18709,14 @@ async function runEachWorkspace(adapter, repo, cmd, argv, dirs, ctx) {
     `${findings.length} finding(s) across ${covered.length} workspace(s): ${covered.join(", ") || "none"}`,
     ...failures.map((f) => `failed ${f}`)
   ].join(" \xB7 ");
-  return { name: adapter.name, ran: covered.length > 0, ok: covered.length > 0, findings, note };
+  return {
+    name: adapter.name,
+    ran: covered.length > 0,
+    ok: covered.length > 0,
+    findings,
+    note,
+    workspaceCoverage: { total: dirs.length, completed: covered.length }
+  };
 }
 async function runDocker(adapter, repo, ctx) {
   if (blockedOffline(adapter, ctx)) {
@@ -22451,6 +22459,10 @@ function renderDossierMd(d) {
   L.push(`- languages: ${m.languages.join(", ") || "\u2014"}`);
   L.push(`- external tools run: ${m.toolsRun.join(", ") || "none (graph + taint only)"}`);
   if (m.toolStatus?.length) for (const line of toolStatusLines(m.toolStatus)) L.push(`  - ${line}`);
+  if (m.scannerPolicy)
+    L.push(
+      `- required scanners (this pass): ${m.scannerPolicy.complete ? "complete" : `INCOMPLETE \u2014 ${m.scannerPolicy.incomplete.join(", ")}`} \u2014 execution only, not a clean-security verdict`
+    );
   if (m.sbom) L.push(`- SBOM: \`${m.sbom}\` (CycloneDX)`);
   L.push(`- findings: **${m.counts.findings}** \u2014 ${SEVERITIES2.map((s) => `${severityBadge(s)} ${c2[s]}`).join("  ")}`);
   L.push("");
@@ -25164,9 +25176,12 @@ var gosec = {
   // unexplained failure on every non-Go project. Ask the question `cppcheck`
   // already asks instead, and skip cleanly.
   applicable: (repo) => walk2(repo).some((f) => /\.go$/i.test(f.rel)) ? null : "no Go sources",
-  argv: () => ["-fmt", "json", "-quiet", "-no-fail", "./..."],
+  argv: () => ["-fmt", "json", "-no-fail", "./..."],
   parse(raw) {
-    const data = JSON.parse(raw || "{}");
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.Issues)) throw new Error("gosec did not return a valid Issues report");
+    const errors = Object.values(data["Golang errors"] ?? {}).flat();
+    if (errors.length) throw new Error(`gosec could not analyze all packages: ${errors.map((e) => e.error ?? "package load error").join("; ")}`);
     const out2 = [];
     for (const i2 of data.Issues ?? []) {
       const line = parseInt(String(i2.line).split("-")[0] ?? "", 10);
@@ -26543,6 +26558,15 @@ async function runScan(args2) {
     eprintln(`ultrasec: --repo '${repo}' is not a directory. Aborting \u2014 an unscannable path must not report a clean audit.`);
     return 2;
   }
+  const rawRequired = args2.flags["require-tools"];
+  const requiredValues = rawRequired === void 0 ? [] : Array.isArray(rawRequired) ? rawRequired : [rawRequired];
+  const required = [...new Set(requiredValues.flatMap((v) => typeof v === "string" ? v.split(",").map((s) => s.trim()) : [""]))].sort();
+  const toolsFlag = flagStr(args2, "tools");
+  const selected = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
+  if (required.some((name2) => !ADAPTERS.some((a) => a.name === name2)) || required.length > 0 && (flagBool(args2, "no-tools") || toolsFlag === "none" || selected?.some((name2) => !ADAPTERS.some((a) => a.name === name2)) || required.some((name2) => selected && !selected.includes(name2)))) {
+    eprintln("ultrasec: --require-tools needs known scanner names and cannot conflict with --tools/--no-tools. Use `ultrasec tools` to list names.");
+    return 2;
+  }
   const scope = listFlag(args2, "scope");
   const include = listFlag(args2, "include");
   const exclude = listFlag(args2, "exclude");
@@ -26581,7 +26605,7 @@ async function runScan(args2) {
     } else {
       diffNote = `--diff ${diffRef}: ${changed.length} changed file(s) \u2014 run a full scan first to include reverse-dependents`;
     }
-    if (targets.length === 0) {
+    if (targets.length === 0 && required.length === 0) {
       println(`ultrasec scan: no changed files since ${diffRef} \u2014 nothing to do.`);
       return 0;
     }
@@ -26640,10 +26664,9 @@ async function runScan(args2) {
   const cloudFindings = auditCloud(repo, prune, tree);
   const credentialFindings = auditSecrets(repo, prune, tree);
   const scopedScan = !!(effectiveScope && effectiveScope.length || include?.length || exclude?.length || diffRef);
-  const toolsFlag = flagStr(args2, "tools");
-  const toolsAutoSkipped = scopedScan && toolsFlag === void 0 && !flagBool(args2, "no-tools");
+  const toolsAutoSkipped = scopedScan && toolsFlag === void 0 && !flagBool(args2, "no-tools") && required.length === 0;
   const skipTools = flagBool(args2, "no-tools") || toolsFlag === "none" || toolsAutoSkipped;
-  const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
+  const which = selected ?? (toolsFlag === void 0 && required.length ? required : void 0);
   const useDocker = flagBool(args2, "docker");
   const offline = flagBool(args2, "offline");
   timer.mark("sbom");
@@ -26708,6 +26731,13 @@ async function runScan(args2) {
   const truncation = truncatedCount > 0 || scan2.truncated ? { candidates: truncatedCount, total: totalCandidates, ...scan2.truncated ? { files: true } : {} } : void 0;
   const recordedScopes = [...scope ?? [], ...diffRef ? [`diff:${diffRef}`] : []].sort(byStr2);
   const perToolStatus = tool.results.length ? toolStatus(tool.results) : void 0;
+  const incomplete = required.filter(
+    (name2) => !perToolStatus?.some(
+      (s) => s.name === name2 && (s.status === "ran" || s.status === "empty") && (!s.workspaceCoverage || s.workspaceCoverage.completed === s.workspaceCoverage.total)
+    )
+  );
+  const scannerPolicy = required.length ? { required, complete: incomplete.length === 0, incomplete } : void 0;
+  const exitCode = incomplete.length ? 1 : 0;
   const manifest = {
     version: VERSION,
     schemaVersion: SCHEMA_VERSION2,
@@ -26716,6 +26746,7 @@ async function runScan(args2) {
     languages,
     toolsRun: tool.toolsRun,
     ...perToolStatus ? { toolStatus: perToolStatus } : {},
+    ...scannerPolicy ? { scannerPolicy } : {},
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     extraction: extractionTier(),
     // Which opt-in passes ran, so a later stage can distinguish "the flag was
@@ -26772,6 +26803,7 @@ async function runScan(args2) {
           files: scan2.files.length,
           toolsRun: fm.toolsRun,
           toolStatus: fm.toolStatus,
+          scannerPolicy: fm.scannerPolicy,
           kev,
           risk: riskNote,
           truncation,
@@ -26790,9 +26822,13 @@ async function runScan(args2) {
         2
       )
     );
-    return 0;
+    return exitCode;
   }
   println(`ultrasec scan \u2192 ${out2}${mergedNote}`);
+  if (scannerPolicy)
+    println(
+      `  required scanners: ${scannerPolicy.complete ? "complete" : `INCOMPLETE \u2014 ${incomplete.join(", ")}`} (this pass only; not a clean-security verdict)`
+    );
   println(`  files scanned: ${scan2.files.length}  \xB7  languages: ${languages.join(", ") || "\u2014"}`);
   if (scan2.notebooks?.found) {
     const nb = scan2.notebooks;
@@ -26834,7 +26870,7 @@ async function runScan(args2) {
   } else {
     println(`  next: read ${out2}/DOSSIER.md, then \`ultrasec dossier <id> --run ${out2}\` to adjudicate.`);
   }
-  return 0;
+  return exitCode;
 }
 
 // src/commands/context.ts
@@ -29616,6 +29652,10 @@ function check(dossier, opts = {}) {
   const unargued = findings.filter((f) => f.status === "dismissed" && (f.severity === "critical" || f.severity === "high") && !f.brocard).map((f) => f.id).sort(byStr2);
   const messages = [];
   let ok = true;
+  if (dossier.manifest.scannerPolicy && !dossier.manifest.scannerPolicy.complete) {
+    ok = false;
+    messages.push(`Required scanners incomplete: ${dossier.manifest.scannerPolicy.incomplete.join(", ")} \u2014 re-run scan with the required tools available.`);
+  }
   if (dangling.length) {
     ok = false;
     messages.push(`${dangling.length} dangling citation(s) \u2014 a cited [file:line] does not resolve (hallucinated or stale).`);
@@ -30030,7 +30070,7 @@ function runInvestigate(args2) {
           2
         )
       );
-      return strict && parsed.dropped.length > 0 ? 1 : 0;
+      return strict && (parsed.dropped.length > 0 || res.rejected.length > 0) ? 1 : 0;
     }
     println(`ultrasec investigate --apply \u2192 updated ${run2}/findings.json`);
     println(
@@ -30038,6 +30078,8 @@ function runInvestigate(args2) {
     );
     for (const line of formatNormalized(parsed.normalized ?? [])) println(line);
     for (const r of res.rejected) println(`  \u2717 rejected "${r.discovery.title}": ${r.reason}`);
+    if (strict && res.rejected.length > 0)
+      println(`  --strict: ${res.rejected.length} discovery(ies) refused by the citation gate \u2014 failing so the loss isn't absorbed silently.`);
     const code = surfaceDropped(parsed.dropped, strict, println);
     const submitted = parsed.rows.length + parsed.dropped.length;
     if (parsed.dropped.length > 0 && parsed.dropped.length * 2 >= submitted)
@@ -30045,7 +30087,7 @@ function runInvestigate(args2) {
         `  \u26A0 ${parsed.dropped.length} of ${submitted} discoveries were refused \u2014 those findings do NOT exist in the dossier and no later stage will report them missing. Fix the rows above and re-apply.`
       );
     if (res.ingested) println(`  next: \`ultrasec dossier <id> --run ${run2}\` then \`verify\` \u2014 adjudicate them like any candidate.`);
-    return code;
+    return code || (strict && res.rejected.length > 0 ? 1 : 0);
   }
   const scanOpts = {
     scope: listFlag(args2, "scope"),
@@ -32215,12 +32257,19 @@ function tierSections(findings, rem, mermaid) {
   return L;
 }
 function incompleteBanner(d) {
+  const policy = d.manifest.scannerPolicy;
+  const scanner = policy && !policy.complete ? [
+    `> ## Required scanners incomplete`,
+    `> ${policy.incomplete.join(", ")} did not complete this pass. No findings does not mean secure. Re-run the required scanners.`,
+    ""
+  ] : [];
   const unread = unadjudicatedCode(d.findings);
-  if (!unread.length) return [];
+  if (!unread.length) return scanner;
   const crit = unread.filter((f) => f.severity === "critical").length;
   const high = unread.length - crit;
   const tally = [crit ? `${crit} CRITICAL` : "", high ? `${high} HIGH` : ""].filter(Boolean).join(" and ");
   return [
+    ...scanner,
     `> ## \u26A0\uFE0F Incomplete audit \u2014 ${unread.length} source-code candidate(s) were never read`,
     `>`,
     `> ${tally} candidate(s) in this repository's own code still have no verdict. Nobody opened the files and`,
@@ -32831,7 +32880,7 @@ function renderHtml(d, narrative) {
   </header>
   <div class="cols${rail ? "" : " norail"}">
   ${rail}
-  <main>${bannerHtml(unread)}
+  <main>${d.manifest.scannerPolicy && !d.manifest.scannerPolicy.complete ? `<section class="banner"><h2>Required scanners incomplete</h2><p>${esc2(d.manifest.scannerPolicy.incomplete.join(", "))} did not complete this pass. No findings does not mean secure. Re-run the required scanners.</p></section>` : ""}${bannerHtml(unread)}
     <section id="summary">
       <h2>Summary</h2>
       ${surfacesHtml(undecided)}
@@ -32908,6 +32957,10 @@ function runRender(args2) {
   for (const [name2] of outputs) println(`  ${join64(run2, name2)}`);
   if (narrativeNote) println(narrativeNote);
   const unread = unadjudicatedCode(dossier.findings);
+  if (dossier.manifest.scannerPolicy && !dossier.manifest.scannerPolicy.complete) {
+    println(`  Required scanners incomplete: ${dossier.manifest.scannerPolicy.incomplete.join(", ")} \u2014 report marked incomplete.`);
+    return flagBool(args2, "draft") ? 0 : 1;
+  }
   if (!unread.length) return 0;
   const draft = flagBool(args2, "draft");
   const crit = unread.filter((f) => f.severity === "critical").length;
@@ -35672,6 +35725,9 @@ COMMANDS
              'scan'. Flags: --json \xB7 --write (ROUTE.md) \xB7 --out <dir>.
 
 GLOBAL
+  --require-tools <a,b>  scan: require these scanners to execute successfully.
+                        Selects them if --tools is absent, including scoped scans.
+                        Skipped/failed/missing outcome exits 1; artifacts are kept.
   --help, -h     Show this help.
   --version, -v  Print the version.
   --json         Machine-readable output (every command above except render/dossier).
@@ -35687,7 +35743,7 @@ GLOBAL
 
 EXIT CODES
   0  ok        1  a gate failed (check) / nothing usable ingested (import)
-                  / rows refused under --strict
+                  / rows refused under --strict / required scanner incomplete
   2  usage or runtime error (bad flag value, unreadable run, unresolvable git ref)
 
 Each command's flags are listed above; \`--help\`/\`-h\` (anywhere) prints this help.

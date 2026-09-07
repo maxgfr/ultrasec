@@ -7,7 +7,8 @@ import { walk } from "../walk.js";
 // `math/rand` where crypto/rand is required, `tls.Config{InsecureSkipVerify:true}`,
 // `exec.Command` with a tainted arg, SQL string concat, unhandled errors, file
 // perms. Scans `./...` from the repo root (cwd is the repo natively, /work in
-// docker). `-no-fail` keeps the exit code 0; parse errors land in GolangErrors.
+// docker). `-no-fail` keeps findings from failing the process. Do not use
+// `-quiet`: it can suppress the entire report when packages cannot load.
 // NB gosec emits line/column/cwe.id as STRINGS.
 export const gosec: ToolAdapter = {
   name: "gosec",
@@ -19,9 +20,12 @@ export const gosec: ToolAdapter = {
   // unexplained failure on every non-Go project. Ask the question `cppcheck`
   // already asks instead, and skip cleanly.
   applicable: (repo) => (walk(repo).some((f) => /\.go$/i.test(f.rel)) ? null : "no Go sources"),
-  argv: () => ["-fmt", "json", "-quiet", "-no-fail", "./..."],
+  argv: () => ["-fmt", "json", "-no-fail", "./..."],
   parse(raw): Finding[] {
-    const data = JSON.parse(raw || "{}") as any;
+    const data = JSON.parse(raw) as any;
+    if (!data || !Array.isArray(data.Issues)) throw new Error("gosec did not return a valid Issues report");
+    const errors = Object.values(data["Golang errors"] ?? {}).flat() as { error?: string }[];
+    if (errors.length) throw new Error(`gosec could not analyze all packages: ${errors.map((e) => e.error ?? "package load error").join("; ")}`);
     const out: Finding[] = [];
     for (const i of data.Issues ?? []) {
       const line = parseInt(String(i.line).split("-")[0] ?? "", 10);

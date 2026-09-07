@@ -218,6 +218,10 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
 
   const messages: string[] = [];
   let ok = true;
+  if (dossier.manifest.scannerPolicy && !dossier.manifest.scannerPolicy.complete) {
+    ok = false;
+    messages.push(`Required scanners incomplete: ${dossier.manifest.scannerPolicy.incomplete.join(", ")} — re-run scan with the required tools available.`);
+  }
 
   if (dangling.length) {
     ok = false;

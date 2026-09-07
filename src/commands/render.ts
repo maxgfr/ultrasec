@@ -69,6 +69,10 @@ export function runRender(args: ParsedArgs): number {
   if (narrativeNote) println(narrativeNote);
 
   const unread = unadjudicatedCode(dossier.findings);
+  if (dossier.manifest.scannerPolicy && !dossier.manifest.scannerPolicy.complete) {
+    println(`  Required scanners incomplete: ${dossier.manifest.scannerPolicy.incomplete.join(", ")} — report marked incomplete.`);
+    return flagBool(args, "draft") ? 0 : 1;
+  }
   if (!unread.length) return 0;
 
   const draft = flagBool(args, "draft");

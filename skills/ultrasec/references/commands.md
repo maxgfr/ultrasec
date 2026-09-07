@@ -56,6 +56,20 @@ Writes `CONTEXT.scaffold.json` + `CONTEXT.todo.md`. See
 ## Scan
 
 ### `scan --repo <dir>`
+
+`--require-tools <a,b>` requires each named scanner to execute successfully.
+Absent `--tools`, selects these names even for a scoped/diff pass. With explicit
+`--tools`, every required scanner must be included. Unknown names, empty values
+and contradictory `--no-tools`/`--tools none` exit 2 before scanning. A skipped,
+failed or missing outcome exits 1 with artifacts retained and `scannerPolicy`
+in the manifest/JSON. `check` and `render` also fail on that incomplete policy;
+rendered reports keep a banner, including under the explicit `--draft` override.
+Zero findings from a successful scanner satisfies execution only, not security.
+The policy describes the current pass, not historical results carried by merge.
+Workspace-aware scanners must complete every selected workspace; partial results
+retain `toolStatus.workspaceCoverage` counts but fail the required policy.
+`--resume` permits an eligible unchanged cache entry as reused execution evidence,
+marked `cached (--resume)` in its status note. Omit it for fresh tool execution.
 The mechanical pass: walk → link-graph → cross-file taint candidates → external scanners →
 cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 

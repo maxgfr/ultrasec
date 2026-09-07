@@ -1,5 +1,30 @@
 # ultrasec
 
+## Required scanners in CI
+
+`node scripts/ultrasec.mjs scan --repo . --out .ultrasec --require-tools gitleaks,bandit`
+selects those scanners (also in scoped scans). A missing, skipped, offline-incompatible,
+or failed required scanner exits **1**, while retaining the dossier and JSON
+`scannerPolicy` with the incomplete names. A successful scanner with zero findings
+satisfies this execution policy; this is **not** proof that the repository is secure.
+If `--tools` is also supplied it must include every required name; contradictory
+flags or unknown required names exit **2**. No policy means the existing tolerant
+behavior. With `--merge`, the policy describes the current pass, not prior runs.
+
+For a workspace-aware scanner, every selected workspace must finish successfully;
+partial results remain in the dossier with structured `workspaceCoverage` counts
+but do not satisfy a required scanner. Without the policy, partial runs remain
+tolerated. With `--resume`, an eligible unchanged cached result may satisfy the
+policy as reused execution evidence (marked `cached (--resume)` in `toolStatus`),
+not a fresh process execution. Omit `--resume` to require a fresh invocation.
+
+## Manual skill invocation
+
+Invoke `$ultrasec` explicitly in Codex or `/ultrasec` in Claude Code.
+The shipped skill disables automatic activation in both hosts; CLI commands
+remain unchanged. Other hosts may not honor these settings. Existing installed
+copies need to be updated to receive this invocation policy.
+
 > Cross-file security audit for whole repos — trace untrusted data across
 > functions and files, orchestrate best-in-class OSS scanners, and adversarially
 > verify every finding into a cited, tiered report.
@@ -45,8 +70,8 @@ npx skills add maxgfr/ultrasec
 ```
 
 This drops `SKILL.md` + the `references/` + the committed `scripts/ultrasec.mjs`
-bundle into your agent's skills directory. Your agent then triggers it on
-"audit this repo for security", "find vulnerabilities", etc.
+bundle into your agent's skills directory. Invoke `$ultrasec` in Codex or
+`/ultrasec` in Claude Code, followed by the repository and audit scope.
 
 **Standalone** (just the CLI — no agent needed):
 
@@ -461,6 +486,11 @@ installs its latest release by default (each has an optional `--build-arg
 <TOOL>_VERSION=x.y.z` to pin it instead — see `docker/Dockerfile`); image
 freshness is therefore the freshness of the last build:
 
+The toolbox includes the Go toolchain required by gosec to load Go packages
+and the standard library. It follows the latest Go 1 release by default;
+`--build-arg GO_VERSION=1.26.0` pins the toolchain when needed. Package-loading
+errors are reported as failed scans, including when gosec exits successfully.
+
 ```bash
 docker compose build
 docker compose build --no-cache   # refresh: re-resolve every tool's latest release
@@ -560,4 +590,3 @@ a release that does not exist. Write `issue 24` or `n°24`, or keep the referenc
 ## License
 
 MIT
-

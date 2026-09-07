@@ -583,7 +583,15 @@ export interface Manifest {
   toolsRun: string[];
   /** Per-tool outcome — distinguishes "ran, 0 findings" from "skipped (no target)"
    *  from "failed". Additive/optional; older dossiers and `--tools none` omit it. */
-  toolStatus?: { name: string; status: "ran" | "empty" | "skipped" | "failed"; findings?: number; note?: string }[];
+  toolStatus?: {
+    name: string;
+    status: "ran" | "empty" | "skipped" | "failed";
+    findings?: number;
+    note?: string;
+    workspaceCoverage?: { total: number; completed: number };
+  }[];
+  /** Required scanner execution for THIS pass only, not a vulnerability or whole-repo coverage verdict. */
+  scannerPolicy?: { required: string[]; complete: boolean; incomplete: string[] };
   counts: { findings: number; bySeverity: Record<Severity, number> };
   /** Jupyter notebooks: how many the walk found, how many were extracted, and
    *  what could not be aligned. Present only when the tree HAS notebooks — a

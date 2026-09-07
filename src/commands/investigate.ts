@@ -53,7 +53,7 @@ export function runInvestigate(args: ParsedArgs): number {
           2,
         ),
       );
-      return strict && parsed.dropped.length > 0 ? 1 : 0;
+      return strict && (parsed.dropped.length > 0 || res.rejected.length > 0) ? 1 : 0;
     }
     println(`ultrasec investigate --apply → updated ${run}/findings.json`);
     println(
@@ -61,6 +61,12 @@ export function runInvestigate(args: ParsedArgs): number {
     );
     for (const line of formatNormalized(parsed.normalized ?? [])) println(line);
     for (const r of res.rejected) println(`  ✗ rejected "${r.discovery.title}": ${r.reason}`);
+    // A citation the repo doesn't have is a refused row exactly like a malformed
+    // one — the discovery is gone either way — so `--strict` has to count both.
+    // Counting only `dropped` let a schema-valid discovery citing an invented
+    // [file:line] exit 0, which is the one case the citation gate exists for.
+    if (strict && res.rejected.length > 0)
+      println(`  --strict: ${res.rejected.length} discovery(ies) refused by the citation gate — failing so the loss isn't absorbed silently.`);
     const code = surfaceDropped(parsed.dropped, strict, println);
     // A refused discovery is unrecoverable in a way a refused verdict is not: a
     // verdict left un-applied leaves the finding `open`, and `check --semantic`
@@ -74,7 +80,7 @@ export function runInvestigate(args: ParsedArgs): number {
         `  ⚠ ${parsed.dropped.length} of ${submitted} discoveries were refused — those findings do NOT exist in the dossier and no later stage will report them missing. Fix the rows above and re-apply.`,
       );
     if (res.ingested) println(`  next: \`ultrasec dossier <id> --run ${run}\` then \`verify\` — adjudicate them like any candidate.`);
-    return code;
+    return code || (strict && res.rejected.length > 0 ? 1 : 0);
   }
 
   // Emit mode

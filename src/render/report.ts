@@ -344,12 +344,22 @@ function tierSections(findings: readonly Finding[], rem: Map<string, Remediation
  * flow is not — deciding it means opening the file.
  */
 function incompleteBanner(d: Dossier): string[] {
+  const policy = d.manifest.scannerPolicy;
+  const scanner =
+    policy && !policy.complete
+      ? [
+          `> ## Required scanners incomplete`,
+          `> ${policy.incomplete.join(", ")} did not complete this pass. No findings does not mean secure. Re-run the required scanners.`,
+          "",
+        ]
+      : [];
   const unread = unadjudicatedCode(d.findings);
-  if (!unread.length) return [];
+  if (!unread.length) return scanner;
   const crit = unread.filter((f) => f.severity === "critical").length;
   const high = unread.length - crit;
   const tally = [crit ? `${crit} CRITICAL` : "", high ? `${high} HIGH` : ""].filter(Boolean).join(" and ");
   return [
+    ...scanner,
     `> ## \u26a0\ufe0f Incomplete audit \u2014 ${unread.length} source-code candidate(s) were never read`,
     `>`,
     `> ${tally} candidate(s) in this repository's own code still have no verdict. Nobody opened the files and`,

@@ -70,6 +70,25 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     return 2;
   }
 
+  // A required tool is an execution obligation, including in scoped scans.
+  // Validate the complete policy before doing work; typos must not select zero tools.
+  const rawRequired = args.flags["require-tools"];
+  const requiredValues = rawRequired === undefined ? [] : Array.isArray(rawRequired) ? rawRequired : [rawRequired];
+  const required = [...new Set(requiredValues.flatMap((v) => (typeof v === "string" ? v.split(",").map((s) => s.trim()) : [""])))].sort();
+  const toolsFlag = flagStr(args, "tools");
+  const selected = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : undefined;
+  if (
+    required.some((name) => !ADAPTERS.some((a) => a.name === name)) ||
+    (required.length > 0 &&
+      (flagBool(args, "no-tools") ||
+        toolsFlag === "none" ||
+        selected?.some((name) => !ADAPTERS.some((a) => a.name === name)) ||
+        required.some((name) => selected && !selected.includes(name))))
+  ) {
+    eprintln("ultrasec: --require-tools needs known scanner names and cannot conflict with --tools/--no-tools. Use `ultrasec tools` to list names.");
+    return 2;
+  }
+
   // Scope knobs (large-repo focus): prune the walk so a huge tree is never fully read.
   const scope = listFlag(args, "scope");
   const include = listFlag(args, "include");
@@ -130,7 +149,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     } else {
       diffNote = `--diff ${diffRef}: ${changed.length} changed file(s) — run a full scan first to include reverse-dependents`;
     }
-    if (targets.length === 0) {
+    if (targets.length === 0 && required.length === 0) {
       println(`ultrasec scan: no changed files since ${diffRef} — nothing to do.`);
       return 0;
     }
@@ -285,10 +304,9 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // auto. A SCOPED/diff pass skips them by default (don't re-run Trivy on a drill-down);
   // pass `--tools auto` to force them.
   const scopedScan = !!((effectiveScope && effectiveScope.length) || include?.length || exclude?.length || diffRef);
-  const toolsFlag = flagStr(args, "tools");
-  const toolsAutoSkipped = scopedScan && toolsFlag === undefined && !flagBool(args, "no-tools");
+  const toolsAutoSkipped = scopedScan && toolsFlag === undefined && !flagBool(args, "no-tools") && required.length === 0;
   const skipTools = flagBool(args, "no-tools") || toolsFlag === "none" || toolsAutoSkipped;
-  const which = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : undefined;
+  const which = selected ?? (toolsFlag === undefined && required.length ? required : undefined);
   const useDocker = flagBool(args, "docker");
   const offline = flagBool(args, "offline");
   // Produce the CycloneDX SBOM (when `syft` is installed) before running the
@@ -402,6 +420,17 @@ export async function runScan(args: ParsedArgs): Promise<number> {
       : undefined;
   const recordedScopes = [...(scope ?? []), ...(diffRef ? [`diff:${diffRef}`] : [])].sort(byStr);
   const perToolStatus = tool.results.length ? toolStatus(tool.results) : undefined;
+  const incomplete = required.filter(
+    (name) =>
+      !perToolStatus?.some(
+        (s) =>
+          s.name === name &&
+          (s.status === "ran" || s.status === "empty") &&
+          (!s.workspaceCoverage || s.workspaceCoverage.completed === s.workspaceCoverage.total),
+      ),
+  );
+  const scannerPolicy = required.length ? { required, complete: incomplete.length === 0, incomplete } : undefined;
+  const exitCode = incomplete.length ? 1 : 0;
   const manifest: Manifest = {
     version: VERSION,
     schemaVersion: SCHEMA_VERSION,
@@ -410,6 +439,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     languages,
     toolsRun: tool.toolsRun,
     ...(perToolStatus ? { toolStatus: perToolStatus } : {}),
+    ...(scannerPolicy ? { scannerPolicy } : {}),
     counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
     extraction: extractionTier(),
     // Which opt-in passes ran, so a later stage can distinguish "the flag was
@@ -483,6 +513,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
           files: scan.files.length,
           toolsRun: fm.toolsRun,
           toolStatus: fm.toolStatus,
+          scannerPolicy: fm.scannerPolicy,
           kev,
           risk: riskNote,
           truncation,
@@ -501,10 +532,14 @@ export async function runScan(args: ParsedArgs): Promise<number> {
         2,
       ),
     );
-    return 0;
+    return exitCode;
   }
 
   println(`ultrasec scan → ${out}${mergedNote}`);
+  if (scannerPolicy)
+    println(
+      `  required scanners: ${scannerPolicy.complete ? "complete" : `INCOMPLETE — ${incomplete.join(", ")}`} (this pass only; not a clean-security verdict)`,
+    );
   println(`  files scanned: ${scan.files.length}  ·  languages: ${languages.join(", ") || "—"}`);
   if (scan.notebooks?.found) {
     const nb = scan.notebooks;
@@ -551,5 +586,5 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   } else {
     println(`  next: read ${out}/DOSSIER.md, then \`ultrasec dossier <id> --run ${out}\` to adjudicate.`);
   }
-  return 0;
+  return exitCode;
 }
