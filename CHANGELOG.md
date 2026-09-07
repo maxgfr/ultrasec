@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.47.0](https://github.com/maxgfr/ultrasec/compare/v1.46.0...v1.47.0) (2026-09-07)
+
+
+### Features
+
+* harden verification, add workflows and require explicit skill invocation ([d85c740](https://github.com/maxgfr/ultrasec/commit/d85c7402e2f994b2f998040e66c37450d40832e4))
+
 # [1.46.0](https://github.com/maxgfr/ultrasec/compare/v1.45.1...v1.46.0) (2026-09-07)
 
 
