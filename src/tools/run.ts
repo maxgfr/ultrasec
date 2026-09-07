@@ -4,6 +4,7 @@ import { relative } from "node:path";
 import type { Category, Finding, PathStep, CodeLoc } from "../types.js";
 import { detect } from "./registry.js";
 import { correlate } from "./correlate.js";
+import { PartialToolReportError } from "./partial-report.js";
 
 // Adapter contract: each scanner provides how to invoke it and how to parse its
 // JSON into normalized Findings. The runner detects presence, runs the installed
@@ -83,8 +84,9 @@ export interface ToolAdapter {
   category: Category;
   /** Args after the binary; `target` is the repo path (native) or /work (docker). */
   argv(target: string, ctx?: RunContext): string[];
-  /** Normalize raw stdout (JSON) into findings. Must not throw on empty input.
-   *  `ctx.workspace` names the sub-directory being audited, when there is one. */
+  /** Normalize raw stdout (JSON) into findings; reject invalid reports. Throw
+   * PartialToolReportError to retain valid findings from an incomplete pass.
+   * `ctx.workspace` names the sub-directory being audited, when there is one. */
   parse(raw: string, repo: string, ctx?: RunContext): Finding[];
   /**
    * Some tools (hadolint) scan explicit files, not a directory. When present,
@@ -365,11 +367,11 @@ async function runEachWorkspace(adapter: ToolAdapter, repo: string, cmd: string[
     // so the path it records — and therefore the finding id — is repo-relative
     // from the start.
     const one = finish(adapter, repo, stdout, failed, err, false, { ...ctx, workspace: rel });
+    findings.push(...one.findings);
     if (!one.ok) {
       failures.push(`${rel || "."}: ${one.note}`);
       continue;
     }
-    findings.push(...one.findings);
     covered.push(rel || ".");
   }
   const note = [
@@ -414,16 +416,25 @@ function finish(
 ): ToolRunResult {
   if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
   try {
+    let parsed: Finding[];
+    let incomplete: string | undefined;
+    try {
+      parsed = adapter.parse(stdout, repo, ctx);
+    } catch (e) {
+      if (!(e instanceof PartialToolReportError)) throw e;
+      parsed = e.findings;
+      incomplete = e.message;
+    }
     // Normalize paths to repo-relative: strip /work (docker) or the repo dir (native).
     const base = docker ? MOUNT : repo;
-    const relativized = relativizeFindings(adapter.parse(stdout, repo, ctx), base);
+    const relativized = relativizeFindings(parsed, base);
     // …then apply the SAME prune the walk applied, so `--gitignore` means one
     // thing across the whole run. The count is reported, not swallowed: the
     // status note has to describe what shipped, or a filtered run reads as a
     // quiet one.
     const { findings, dropped } = ctx?.pruned ? prunePaths(relativized, ctx.pruned) : { findings: relativized, dropped: 0 };
     const note = `${findings.length} finding(s)${docker ? " (docker)" : ""}${dropped ? ` · ${dropped} pruned (ignored paths)` : ""}`;
-    return { name: adapter.name, ran: true, ok: true, findings, note };
+    return { name: adapter.name, ran: true, ok: incomplete === undefined, findings, note: incomplete ? `${note} · incomplete: ${incomplete}` : note };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${(e as Error).message}` };
   }

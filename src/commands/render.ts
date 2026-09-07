@@ -69,11 +69,12 @@ export function runRender(args: ParsedArgs): number {
   if (narrativeNote) println(narrativeNote);
 
   const unread = unadjudicatedCode(dossier.findings);
-  if (dossier.manifest.scannerPolicy && !dossier.manifest.scannerPolicy.complete) {
-    println(`  Required scanners incomplete: ${dossier.manifest.scannerPolicy.incomplete.join(", ")} — report marked incomplete.`);
-    return flagBool(args, "draft") ? 0 : 1;
+  const scannerPolicy = dossier.manifest.scannerPolicy;
+  const scannerIncomplete = scannerPolicy && !scannerPolicy.complete;
+  if (scannerPolicy && scannerIncomplete) {
+    println(`  Required scanners incomplete: ${scannerPolicy.incomplete.join(", ")} — report marked incomplete.`);
   }
-  if (!unread.length) return 0;
+  if (!unread.length) return scannerIncomplete && !flagBool(args, "draft") ? 1 : 0;
 
   const draft = flagBool(args, "draft");
   const crit = unread.filter((f) => f.severity === "critical").length;

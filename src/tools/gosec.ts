@@ -2,6 +2,7 @@ import type { Finding } from "../types.js";
 import type { ToolAdapter } from "./run.js";
 import { makeToolFinding, normalizeSeverity } from "./normalize.js";
 import { walk } from "../walk.js";
+import { PartialToolReportError } from "./partial-report.js";
 
 // gosec → Go security checker, stdlib-aware in ways generic SAST is not:
 // `math/rand` where crypto/rand is required, `tls.Config{InsecureSkipVerify:true}`,
@@ -25,7 +26,6 @@ export const gosec: ToolAdapter = {
     const data = JSON.parse(raw) as any;
     if (!data || !Array.isArray(data.Issues)) throw new Error("gosec did not return a valid Issues report");
     const errors = Object.values(data["Golang errors"] ?? {}).flat() as { error?: string }[];
-    if (errors.length) throw new Error(`gosec could not analyze all packages: ${errors.map((e) => e.error ?? "package load error").join("; ")}`);
     const out: Finding[] = [];
     for (const i of data.Issues ?? []) {
       const line = parseInt(String(i.line).split("-")[0] ?? "", 10);
@@ -46,6 +46,8 @@ export const gosec: ToolAdapter = {
         }),
       );
     }
+    if (errors.length)
+      throw new PartialToolReportError(`gosec could not analyze all packages: ${errors.map((e) => e.error ?? "package load error").join("; ")}`, out);
     return out;
   },
 };

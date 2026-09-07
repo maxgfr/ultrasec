@@ -7,6 +7,7 @@ import { renderHtml } from "../src/render/html.js";
 import { renderReport, renderSummary } from "../src/render/report.js";
 import type { Dossier } from "../src/store.js";
 import type { Finding, Status } from "../src/types.js";
+import { captureOutput } from "../src/util.js";
 
 function finding(over: Partial<Finding> = {}): Finding {
   return {
@@ -62,6 +63,17 @@ function seed(findings: Finding[]): void {
 }
 
 describe("render gate", () => {
+  it.each([false, true])("announces both missing scanner coverage and unread candidates (draft=%s)", async (draft) => {
+    seed([finding()]);
+    const manifest = JSON.parse(readFileSync(join(run, "manifest.json"), "utf8"));
+    manifest.scannerPolicy = { required: ["gitleaks"], complete: false, incomplete: ["gitleaks"] };
+    writeFileSync(join(run, "manifest.json"), JSON.stringify(manifest));
+    const output = await captureOutput(() => runRender({ _: ["render"], flags: { run, draft, "no-journal": true } }));
+    expect(output.result).toBe(draft ? 0 : 1);
+    expect(output.stdout).toContain("Required scanners incomplete");
+    expect(output.stdout).toContain("1 source-code candidate(s) at HIGH+ were never read");
+  });
+
   it("exits 1 when a HIGH source-code candidate was never read", () => {
     seed([finding()]);
     expect(runRender({ _: ["render"], flags: { run, "no-journal": true } })).toBe(1);

@@ -18721,6 +18721,16 @@ function withSources(f) {
   return f.sources && f.sources.length ? f : { ...f, sources: [f.tool] };
 }
 
+// src/tools/partial-report.ts
+var PartialToolReportError = class extends Error {
+  constructor(message, findings) {
+    super(message);
+    this.findings = findings;
+    this.name = "PartialToolReportError";
+  }
+  findings;
+};
+
 // src/tools/run.ts
 function toolStatus(results) {
   return results.map((r) => {
@@ -18835,11 +18845,11 @@ async function runEachWorkspace(adapter, repo, cmd, argv, dirs, ctx) {
     const rel2 = relative(repo, dir);
     const { stdout, failed: failed2, err: err2 } = await execAsync(cmd[0], [...cmd.slice(1), ...argv], dir, adapter.stderr);
     const one = finish(adapter, repo, stdout, failed2, err2, false, { ...ctx, workspace: rel2 });
+    findings.push(...one.findings);
     if (!one.ok) {
       failures.push(`${rel2 || "."}: ${one.note}`);
       continue;
     }
-    findings.push(...one.findings);
     covered.push(rel2 || ".");
   }
   const note = [
@@ -18872,11 +18882,20 @@ async function runDocker(adapter, repo, ctx) {
 function finish(adapter, repo, stdout, failed2, err2, docker2, ctx) {
   if (failed2) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err2 ?? "no output"}` };
   try {
+    let parsed;
+    let incomplete;
+    try {
+      parsed = adapter.parse(stdout, repo, ctx);
+    } catch (e) {
+      if (!(e instanceof PartialToolReportError)) throw e;
+      parsed = e.findings;
+      incomplete = e.message;
+    }
     const base = docker2 ? MOUNT : repo;
-    const relativized = relativizeFindings(adapter.parse(stdout, repo, ctx), base);
+    const relativized = relativizeFindings(parsed, base);
     const { findings, dropped } = ctx?.pruned ? prunePaths(relativized, ctx.pruned) : { findings: relativized, dropped: 0 };
     const note = `${findings.length} finding(s)${docker2 ? " (docker)" : ""}${dropped ? ` \xB7 ${dropped} pruned (ignored paths)` : ""}`;
-    return { name: adapter.name, ran: true, ok: true, findings, note };
+    return { name: adapter.name, ran: true, ok: incomplete === void 0, findings, note: incomplete ? `${note} \xB7 incomplete: ${incomplete}` : note };
   } catch (e) {
     return { name: adapter.name, ran: true, ok: false, findings: [], note: `parse failed: ${e.message}` };
   }
@@ -25318,7 +25337,6 @@ var gosec = {
     const data = JSON.parse(raw);
     if (!data || !Array.isArray(data.Issues)) throw new Error("gosec did not return a valid Issues report");
     const errors = Object.values(data["Golang errors"] ?? {}).flat();
-    if (errors.length) throw new Error(`gosec could not analyze all packages: ${errors.map((e) => e.error ?? "package load error").join("; ")}`);
     const out2 = [];
     for (const i2 of data.Issues ?? []) {
       const line2 = parseInt(String(i2.line).split("-")[0] ?? "", 10);
@@ -25339,6 +25357,8 @@ var gosec = {
         })
       );
     }
+    if (errors.length)
+      throw new PartialToolReportError(`gosec could not analyze all packages: ${errors.map((e) => e.error ?? "package load error").join("; ")}`, out2);
     return out2;
   }
 };
@@ -33094,11 +33114,12 @@ function runRender(args2) {
   for (const [name2] of outputs) println(`  ${join64(run2, name2)}`);
   if (narrativeNote) println(narrativeNote);
   const unread = unadjudicatedCode(dossier.findings);
-  if (dossier.manifest.scannerPolicy && !dossier.manifest.scannerPolicy.complete) {
-    println(`  Required scanners incomplete: ${dossier.manifest.scannerPolicy.incomplete.join(", ")} \u2014 report marked incomplete.`);
-    return flagBool(args2, "draft") ? 0 : 1;
+  const scannerPolicy = dossier.manifest.scannerPolicy;
+  const scannerIncomplete = scannerPolicy && !scannerPolicy.complete;
+  if (scannerPolicy && scannerIncomplete) {
+    println(`  Required scanners incomplete: ${scannerPolicy.incomplete.join(", ")} \u2014 report marked incomplete.`);
   }
-  if (!unread.length) return 0;
+  if (!unread.length) return scannerIncomplete && !flagBool(args2, "draft") ? 1 : 0;
   const draft = flagBool(args2, "draft");
   const crit = unread.filter((f) => f.severity === "critical").length;
   println(`  \u26A0\uFE0F  ${unread.length} source-code candidate(s) at HIGH+ were never read (${crit} critical) \u2014 the report says so in a banner.`);

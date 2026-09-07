@@ -18,6 +18,12 @@ tolerated. With `--resume`, an eligible unchanged cached result may satisfy the
 policy as reused execution evidence (marked `cached (--resume)` in `toolStatus`),
 not a fresh process execution. Omit `--resume` to require a fresh invocation.
 
+If gosec reports both issues and package-loading errors, the valid issues are
+retained, normalized and filtered, while the scanner stays `failed` and is not
+cached. `render` announces both missing required-scanner coverage and unread
+HIGH/CRITICAL code candidates when both apply; `--draft` acknowledges them
+without suppressing either warning.
+
 ## Manual skill invocation
 
 Invoke `$ultrasec` explicitly in Codex or `/ultrasec` in Claude Code.
