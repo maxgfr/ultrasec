@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.47.1](https://github.com/maxgfr/ultrasec/compare/v1.47.0...v1.47.1) (2026-09-07)
+
+
+### Bug Fixes
+
+* retain partial scanner evidence and report all incomplete gates ([327c9e0](https://github.com/maxgfr/ultrasec/commit/327c9e0a7081ba6d365965044ac16c47b20c61a8))
+
 # [1.47.0](https://github.com/maxgfr/ultrasec/compare/v1.46.0...v1.47.0) (2026-09-07)
 
 
