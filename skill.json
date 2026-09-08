@@ -1,0 +1,66 @@
+{
+  "name": "ultrasec",
+  "vendorDir": "src/vendor",
+  "engines": {
+    "codeindex": {
+      "repo": "maxgfr/codeindex",
+      "minRef": "v2.30.0",
+      "meta": "engine.meta.json",
+      "files": [
+        {
+          "remote": "scripts/engine.mjs",
+          "local": "codeindex-engine.mjs"
+        },
+        {
+          "remote": "scripts/engine.d.mts",
+          "local": "codeindex-engine.d.mts"
+        }
+      ],
+      "forks": {
+        "src/git.ts:headCommit": "Security provenance uses null on unavailable HEAD; preserves audit schema.",
+        "src/graph.ts:EdgeKind": "Security graph edge vocabulary.",
+        "src/graph.ts:Edge": "Security graph schema with audit evidence.",
+        "src/graph.ts:Graph": "Security graph schema and symbol lookup.",
+        "src/graph.ts:buildGraph": "Builds security-specific edges from the shared scan rather than an indexing module graph.",
+        "src/logs/hygiene.ts:enclosingSymbol": "Conservative nearest preceding symbol label for logging candidates.",
+        "src/neighbors.ts:NeighborLink": "Security evidence neighbor schema.",
+        "src/neighbors.ts:NeighborResult": "Security evidence neighbor response.",
+        "src/resolve.ts:resolveImport": "Adapts shared import resolution to the existing optional target return value.",
+        "src/scan.ts:RepoScan": "Security scan schema adapted from CodeIndex.",
+        "src/scan.ts:ScanOptions": "Security scope and inventory options translated to CodeIndex.",
+        "src/scan.ts:scanRepo": "Delegates engineScanRepo then adapts its result for audit passes.",
+        "src/types.ts:SCHEMA_VERSION": "Version of the security dossier schema.",
+        "src/util.ts:shortHash": "Persisted finding IDs use SHA-256 with 12 characters; CodeIndex uses SHA-1 with 8.",
+        "src/walk.ts:WalkedFile": "Security inventory exposes bytes and mtime for cache invalidation.",
+        "src/walk.ts:WalkOptions": "Security file budgets, scoping and opt-in gitignore policy.",
+        "src/walk.ts:WalkResult": "Security inventory reports truncated and totalSeen.",
+        "src/walk.ts:walk": "Result adapter over shared traversal with security scope policy.",
+        "src/walk.ts:readText": "Raw UTF-8 audit evidence reader; preserves NUL-containing evidence and returns empty on failure."
+      },
+      "usageFloor": 21
+    }
+  },
+  "repin": {
+    "artifacts": [
+      "src/vendor",
+      "scripts",
+      "skills",
+      "package.json",
+      "pnpm-lock.yaml",
+      "skill.json",
+      ".github/workflows/engine-repin.yml",
+      "tests/golden",
+      "assets/example-audit"
+    ],
+    "workflows": [
+      "ci.yml",
+      "release.yml"
+    ],
+    "recall": {
+      "paths": [
+        "tests/golden",
+        "assets/example-audit"
+      ]
+    }
+  }
+}

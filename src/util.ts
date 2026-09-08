@@ -189,9 +189,8 @@ export function shortHash(input: string, len = 12): string {
 }
 
 /** Deterministic string compare (locale-independent), for stable ordering. */
-export function byStr(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
-}
+export { byStr };
+import { byStr } from "./vendor/codeindex-engine.mjs";
 
 // ── Finding message stage notes ──────────────────────────────────────────────
 // `verify --apply` and `revalidate --apply` each append a trailing block to a

@@ -1,7 +1,12 @@
-import { readFileSync, readdirSync, lstatSync, statSync, realpathSync, type Dirent } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { readFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { byStr } from "./util.js";
-import { isIgnored as engineIsIgnored, parseGitignore as engineParseGitignore, type IgnoreRule as EngineIgnoreRule } from "./vendor/codeindex-engine.mjs";
+import {
+  walk as engineWalk,
+  isIgnored as engineIsIgnored,
+  parseGitignore as engineParseGitignore,
+  type IgnoreRule as EngineIgnoreRule,
+} from "./vendor/codeindex-engine.mjs";
 
 // Directories never worth scanning for a security audit (vendored code, build
 // output, VCS internals). Kept conservative + deterministic.
@@ -197,9 +202,8 @@ function underIgnoredDir(rel: string): boolean {
  * that produces repo-relative paths of its own — above all the external
  * scanners, which get the raw repo bind-mounted and have never seen `--gitignore`.
  *
- * Built from the VENDORED ENGINE's `parseGitignore`/`isIgnored`, not from the
- * local pair in this file, and deliberately so: the engine honours nested
- * `.gitignore` files while the local `walkWithMeta` reads only the root's. A
+ * Built from the shared `walk`, `parseGitignore` and `isIgnored` primitives: the engine honours nested
+ * `.gitignore` files as does `walkWithMeta`. A
  * filter that disagreed with the walker about what is ignored would replace one
  * inconsistency with a subtler one.
  *
@@ -225,27 +229,21 @@ export function buildPruneMatcher(root: string, opts: PruneOptions): ((rel: stri
   const vendored = !opts.includeVendored;
   const rules: EngineIgnoreRule[] = [];
   if (opts.gitignore) {
-    const visit = (dir: string, baseRel: string, depth: number): void => {
-      if (depth > GITIGNORE_MAX_DEPTH) return;
-      let entries: Dirent[];
+    const files = engineWalk(root, {
+      ignoreDirs: [...DEFAULT_IGNORE_DIRS],
+      gitignore: false,
+      includeOversize: true,
+      includeMinified: true,
+      filter: ({ rel, directory }) => (directory ? rel.split("/").length <= GITIGNORE_MAX_DEPTH : rel.split("/").at(-1) === ".gitignore"),
+    }).files.sort((a, b) => a.rel.split("/").length - b.rel.split("/").length || byStr(a.rel, b.rel));
+    for (const file of files) {
+      const baseRel = file.rel.includes("/") ? file.rel.slice(0, file.rel.lastIndexOf("/")) : "";
       try {
-        entries = readdirSync(dir, { withFileTypes: true });
+        rules.push(...engineParseGitignore(readFileSync(file.abs, "utf8"), baseRel));
       } catch {
-        return; // unreadable directory: not a reason to fail the audit
+        /* unreadable .gitignore — the rest still applies */
       }
-      if (entries.some((e) => e.isFile() && e.name === ".gitignore")) {
-        try {
-          rules.push(...engineParseGitignore(readFileSync(join(dir, ".gitignore"), "utf8"), baseRel));
-        } catch {
-          /* unreadable .gitignore — the rest still applies */
-        }
-      }
-      for (const e of entries) {
-        if (!e.isDirectory() || DEFAULT_IGNORE_DIRS.has(e.name)) continue;
-        visit(join(dir, e.name), baseRel ? `${baseRel}/${e.name}` : e.name, depth + 1);
-      }
-    };
-    visit(root, "", 0);
+    }
   }
   if (!excludeRes && !rules.length && !vendored) return undefined;
   return (rel: string): boolean => {
@@ -359,40 +357,6 @@ function fileInScope(rel: string, scopes: ScopeEntry[]): boolean {
   return false;
 }
 
-/** One `.gitignore` rule, in source order. `negated` marks a `!`-re-include. */
-export interface GitignoreRule {
-  glob: string;
-  negated: boolean;
-}
-
-/** Best-effort parse of a repo-root `.gitignore` into an ORDERED rule list (git's
- *  last-match-wins). Common patterns only: comments, anchored (`/x`) vs any-depth,
- *  directory-only (trailing `/`), `!`-negations, and a leading `\` escape for a
- *  literal `#`/`!`. Order is preserved so a later exclude can re-override an earlier
- *  `!`-negation, matching `git check-ignore`. */
-export function parseGitignore(content: string): GitignoreRule[] {
-  const rules: GitignoreRule[] = [];
-  for (const raw of content.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const negated = line.startsWith("!");
-    let body = negated ? line.slice(1) : line;
-    if (body.startsWith("\\")) body = body.slice(1); // unescape a literal leading '#'/'!'
-    const rooted = body.startsWith("/");
-    let pat = rooted ? body.slice(1) : body;
-    const dirOnly = pat.endsWith("/");
-    if (dirOnly) pat = pat.replace(/\/+$/, "");
-    if (!pat) continue;
-    const anchored = rooted || pat.includes("/");
-    const g = anchored ? pat : "**/" + pat;
-    // Match the path + (for a dir) its contents. Only a NON-dir-only pattern also
-    // matches a bare file of that name (`build/` must not exclude a file `build`).
-    rules.push({ glob: g + "/", negated });
-    if (!dirOnly) rules.push({ glob: g, negated });
-  }
-  return rules;
-}
-
 /** Recursively list files under `root`, skipping ignored dirs. Deterministic. */
 export function walk(root: string, opts: WalkOptions = {}): WalkedFile[] {
   return walkWithMeta(root, opts).files;
@@ -418,116 +382,44 @@ const MANIFEST_MAX_DEPTH = 3;
  * mistaken for a workspace.
  */
 export function findManifestDirs(root: string, names: readonly string[], maxDepth = MANIFEST_MAX_DEPTH): string[] {
-  const found: { dir: string; depth: number }[] = [];
-  const visit = (dir: string, depth: number): void => {
-    let entries: Dirent[];
-    try {
-      entries = readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return; // unreadable directory: not a reason to fail the audit
-    }
-    if (entries.some((e) => e.isFile() && names.includes(e.name))) found.push({ dir, depth });
-    if (depth >= maxDepth) return;
-    for (const e of entries) {
-      if (!e.isDirectory() || e.name.startsWith(".") || DEFAULT_IGNORE_DIRS.has(e.name)) continue;
-      visit(join(dir, e.name), depth + 1);
-    }
-  };
-  visit(root, 0);
-  return found.sort((a, b) => a.depth - b.depth || byStr(a.dir, b.dir)).map((f) => f.dir);
+  const files = engineWalk(root, {
+    ignoreDirs: [...DEFAULT_IGNORE_DIRS],
+    gitignore: false,
+    includeBinary: true,
+    includeLockfiles: true,
+    includeOversize: true,
+    includeMinified: true,
+    filter: ({ rel, directory }) => {
+      const parts = rel.split("/");
+      return directory ? parts.length <= maxDepth && !parts.at(-1)!.startsWith(".") : names.includes(parts.at(-1)!);
+    },
+  }).files;
+  const found = new Map<string, number>();
+  for (const file of files) found.set(dirname(file.abs), file.rel.split("/").length - 1);
+  return [...found].sort(([a, da], [b, db]) => da - db || byStr(a, b)).map(([dir]) => dir);
 }
 
 /** As `walk`, but also reports whether `maxFiles` truncated the result. */
 export function walkWithMeta(root: string, opts: WalkOptions = {}): WalkResult {
-  const ignore = opts.ignoreDirs ?? DEFAULT_IGNORE_DIRS;
-  const maxBytes = opts.maxBytes ?? MAX_FILE_BYTES;
-  const maxFiles = opts.maxFiles ?? Infinity;
-  const scopes = opts.scope && opts.scope.length ? toScopeEntries(opts.scope) : undefined;
-  const includeRes = opts.include && opts.include.length ? opts.include.map(globToRe) : undefined;
-
-  // User --exclude: a flat exclude set (no negation). gitignore: an ORDERED rule
-  // list evaluated last-match-wins so a later exclude can override an earlier `!`.
-  const userExcludeRes = opts.exclude && opts.exclude.length ? opts.exclude.map(globToRe) : undefined;
-  const giRules: { re: RegExp; negated: boolean }[] = [];
-  if (opts.gitignore) {
-    try {
-      for (const r of parseGitignore(readFileSync(join(root, ".gitignore"), "utf8"))) giRules.push({ re: globToRe(r.glob), negated: r.negated });
-    } catch {
-      /* no .gitignore — fine */
-    }
-  }
-  const isExcluded = (rel: string): boolean => {
-    if (userExcludeRes && userExcludeRes.some((re) => re.test(rel))) return true;
-    let ex = false;
-    for (const r of giRules) if (r.re.test(rel)) ex = !r.negated; // last match wins
-    return ex;
-  };
-
-  // Resolve `root` once for symlink-containment checks (reject targets that escape).
-  let rootReal: string;
-  try {
-    rootReal = realpathSync(root);
-  } catch {
-    rootReal = resolve(root);
-  }
-
-  const out: WalkedFile[] = [];
-  let truncated = false;
-
-  const visit = (dir: string): void => {
-    if (truncated) return;
-    let entries: string[];
-    try {
-      entries = readdirSync(dir);
-    } catch {
-      return;
-    }
-    for (const name of entries.sort(byStr)) {
-      if (truncated) return;
-      const abs = join(dir, name);
-      let st: ReturnType<typeof lstatSync>;
-      try {
-        st = lstatSync(abs); // classify WITHOUT following — see symlink handling below
-      } catch {
-        continue;
-      }
-      if (st.isSymbolicLink()) {
-        // git tracks symlinked FILES, so scan a symlink that resolves to a regular
-        // file INSIDE the repo; but never recurse a symlinked DIRECTORY (it could
-        // point at an ancestor → loop) and never follow one that escapes the repo.
-        try {
-          const real = realpathSync(abs);
-          if (real !== rootReal && !real.startsWith(rootReal + sep)) continue; // escapes repo
-          const target = statSync(abs); // follow
-          if (target.isDirectory()) continue; // avoid symlink-dir loops
-          st = target; // a real file inside the repo → treat it as a file
-        } catch {
-          continue; // dangling/broken symlink
-        }
-      }
-      const rel = relative(root, abs).split(sep).join("/");
-      if (st.isDirectory()) {
-        if (ignore.has(name)) continue;
-        if (scopes && !dirInScope(rel, scopes)) continue;
-        if (isExcluded(rel)) continue;
-        visit(abs);
-      } else if (st.isFile()) {
-        if (st.size > maxBytes) continue;
-        if (scopes && !fileInScope(rel, scopes)) continue;
-        if (includeRes && !includeRes.some((re) => re.test(rel))) continue;
-        if (isExcluded(rel)) continue;
-        if (out.length >= maxFiles) {
-          truncated = true;
-          return;
-        }
-        out.push({ rel, abs, bytes: st.size, mtimeMs: st.mtimeMs });
-      }
-    }
-  };
-
-  visit(root);
-  const files = out.sort((a, b) => byStr(a.rel, b.rel));
-  return { files, truncated, totalSeen: files.length };
+  const scopes = opts.scope?.length ? toScopeEntries(opts.scope) : undefined;
+  const include = opts.include?.length ? opts.include.map(globToRe) : undefined;
+  const exclude = opts.exclude?.length ? opts.exclude.map(globToRe) : undefined;
+  const result = engineWalk(root, {
+    ignoreDirs: [...(opts.ignoreDirs ?? DEFAULT_IGNORE_DIRS)],
+    maxFileBytes: opts.maxBytes ?? MAX_FILE_BYTES,
+    maxFiles: opts.maxFiles,
+    gitignore: opts.gitignore === true,
+    includeBinary: true,
+    includeLockfiles: true,
+    includeMinified: true,
+    filter: ({ rel, directory }) => {
+      if (exclude?.some((re) => re.test(rel))) return false;
+      if (directory) return !scopes || dirInScope(rel, scopes);
+      return (!scopes || fileInScope(rel, scopes)) && (!include || include.some((re) => re.test(rel)));
+    },
+  });
+  const files = result.files.map(({ rel, abs, size, mtimeMs }) => ({ rel, abs, bytes: size, mtimeMs })).sort((a, b) => byStr(a.rel, b.rel));
+  return { files, truncated: result.capped, totalSeen: files.length };
 }
 
 export function readText(abs: string): string {

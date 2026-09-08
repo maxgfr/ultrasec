@@ -2,7 +2,7 @@ import { describe, it, expect, afterAll } from "vitest";
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { walk, walkWithMeta, globToRe, parseGitignore } from "../src/walk.js";
+import { walk, walkWithMeta, globToRe } from "../src/walk.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
 
@@ -116,15 +116,6 @@ describe("gitignore", () => {
   const tmp = mkdtempSync(join(tmpdir(), "ultrasec-walk-"));
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
-  it("parses ordered rules: dir-only stays dir-only, negations carry a flag", () => {
-    const rules = parseGitignore("# comment\nsecret.txt\nbuildlogs/\n!keep.js\n");
-    const globs = rules.map((r) => r.glob);
-    expect(globs).toContain("**/secret.txt"); // file → bare form
-    expect(globs).toContain("**/buildlogs/"); // dir-only → dir form
-    expect(globs).not.toContain("**/buildlogs"); // …but NOT the bare-file form
-    expect(rules.some((r) => r.glob.includes("keep.js") && r.negated)).toBe(true); // negation captured, not dropped
-  });
-
   it("honours last-match-wins: a later exclude re-overrides an earlier negation", () => {
     const t = mkdtempSync(join(tmpdir(), "ultrasec-order-"));
     writeFileSync(join(t, "keep.log"), "x");
@@ -133,9 +124,18 @@ describe("gitignore", () => {
     rmSync(t, { recursive: true, force: true });
   });
 
-  it("unescapes a leading backslash (\\#literal ignores a file named #literal)", () => {
-    const rules = parseGitignore("\\#literal\n");
-    expect(rules.some((r) => r.glob === "**/#literal")).toBe(true);
+  it("honours an escaped leading hash through the shared walker", () => {
+    const t = mkdtempSync(join(tmpdir(), "ultrasec-escaped-"));
+    try {
+      writeFileSync(join(t, "#literal"), "secret");
+      writeFileSync(join(t, "keep.js"), "ok");
+      writeFileSync(join(t, ".gitignore"), "\\#literal\n");
+      const files = walk(t, { gitignore: true }).map((f) => f.rel);
+      expect(files).not.toContain("#literal");
+      expect(files).toContain("keep.js");
+    } finally {
+      rmSync(t, { recursive: true, force: true });
+    }
   });
 
   it("a malformed gitignore rule does not abort the rules after it", () => {
