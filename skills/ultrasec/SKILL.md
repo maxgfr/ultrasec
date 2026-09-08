@@ -9,7 +9,7 @@ metadata:
 
 # ultrasec — cross-file security audit, grounded not guessed
 
-Use the bundled CodeIndex-backed commands to locate relevant files, symbols and relationships, then inspect the cited source before drawing conclusions. Report caps, skipped files, unavailable extractors and blocked sources as coverage limits. An empty or partial result does not establish that nothing exists.
+For engine evidence and coverage limits, read [engine-evidence](references/engine-evidence.md).
 
 `ultrasec` finds vulnerabilities by **reasoning over how untrusted data moves between functions
 and files**, the way a human auditor does — then proves or disproves each candidate against the
