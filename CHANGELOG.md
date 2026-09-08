@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.47.2](https://github.com/maxgfr/ultrasec/compare/v1.47.1...v1.47.2) (2026-09-08)
+
+
+### Bug Fixes
+
+* **engine:** unify pins, repins and shared engine adapters ([866627a](https://github.com/maxgfr/ultrasec/commit/866627a81135af6d391d225487002e6b6efda143))
+* **engine:** unify pins, repins and shared engine adapters ([2dc3004](https://github.com/maxgfr/ultrasec/commit/2dc30044aaf3513418d281f66a5150e7c7acf24f))
+* **engine:** unify pins, repins and shared engine adapters ([090158e](https://github.com/maxgfr/ultrasec/commit/090158ec4eb9bd1c47fdd5df52ffdc88145733e3))
+
 ## [1.47.1](https://github.com/maxgfr/ultrasec/compare/v1.47.0...v1.47.1) (2026-09-07)
 
 
