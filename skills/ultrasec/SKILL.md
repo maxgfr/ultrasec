@@ -12,8 +12,7 @@ metadata:
 For engine evidence and coverage limits, read [engine-evidence](references/engine-evidence.md).
 
 `ultrasec` finds vulnerabilities by **reasoning over how untrusted data moves between functions
-and files**, the way a human auditor does — then proves or disproves each candidate against the
-real code. Like its `ultra*` siblings it is a **division of labour**: the deterministic,
+and files**, then verifies each candidate against the code. the deterministic,
 zero-dependency engine does the *mechanical* work — the link-graph, the candidate source→sink
 paths, the scanner runs, the evidence packets; **you** do the *security reasoning* — decide which
 flows are real and exploitable, find the subtle bugs the tools miss, and verify.
