@@ -151,7 +151,17 @@ export function loadDossier(outDir: string): Dossier {
   if (!existsSync(join(outDir, "findings.json"))) {
     throw new Error(`no audit dossier at ${outDir} (run \`ultrasec scan --out ${outDir}\` first)`);
   }
-  return { manifest: read("manifest.json"), findings: read("findings.json"), graph: read("graph.json") };
+  const findings: unknown = read("findings.json");
+  if (!Array.isArray(findings)) throw new Error("findings.json must contain a JSON array");
+  const ids = new Set<string>();
+  for (const [index, finding] of findings.entries()) {
+    if (!finding || typeof finding !== "object" || typeof finding.id !== "string" || !finding.id.trim()) {
+      throw new Error(`findings.json row ${index + 1} requires a non-empty string id`);
+    }
+    if (ids.has(finding.id)) throw new Error(`findings.json contains duplicate finding id: ${finding.id}`);
+    ids.add(finding.id);
+  }
+  return { manifest: read("manifest.json"), findings, graph: read("graph.json") };
 }
 
 function severityBadge(s: Severity): string {

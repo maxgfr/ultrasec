@@ -22918,7 +22918,17 @@ function loadDossier(outDir) {
   if (!existsSync14(join31(outDir, "findings.json"))) {
     throw new Error(`no audit dossier at ${outDir} (run \`ultrasec scan --out ${outDir}\` first)`);
   }
-  return { manifest: read("manifest.json"), findings: read("findings.json"), graph: read("graph.json") };
+  const findings = read("findings.json");
+  if (!Array.isArray(findings)) throw new Error("findings.json must contain a JSON array");
+  const ids = /* @__PURE__ */ new Set();
+  for (const [index, finding] of findings.entries()) {
+    if (!finding || typeof finding !== "object" || typeof finding.id !== "string" || !finding.id.trim()) {
+      throw new Error(`findings.json row ${index + 1} requires a non-empty string id`);
+    }
+    if (ids.has(finding.id)) throw new Error(`findings.json contains duplicate finding id: ${finding.id}`);
+    ids.add(finding.id);
+  }
+  return { manifest: read("manifest.json"), findings, graph: read("graph.json") };
 }
 function severityBadge(s) {
   return { critical: "\u{1F7E5} CRIT", high: "\u{1F7E7} HIGH", medium: "\u{1F7E8} MED", low: "\u{1F7E9} LOW", info: "\u2B1C INFO" }[s];
