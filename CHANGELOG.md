@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.48.1](https://github.com/maxgfr/ultrasec/compare/v1.48.0...v1.48.1) (2026-09-09)
+
+
+### Bug Fixes
+
+* reject malformed and duplicate persisted finding identities ([77aae93](https://github.com/maxgfr/ultrasec/commit/77aae93cb5e4660419706d17bf55baef5229b1bb))
+
 # [1.48.0](https://github.com/maxgfr/ultrasec/compare/v1.47.3...v1.48.0) (2026-09-09)
 
 
