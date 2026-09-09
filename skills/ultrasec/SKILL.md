@@ -1,10 +1,11 @@
 ---
 name: ultrasec
-description: "Audit a codebase for exploitable security issues with cross-file tracing, scanner adjudication, and grounded findings."
+description: Audit a codebase for exploitable security issues with cross-file tracing, scanner adjudication, and grounded findings.
 disable-model-invocation: true
 license: MIT
 metadata:
   version: 1.48.2
+  opencode/autoinvoke: 'false'
 ---
 
 # ultrasec — cross-file security audit, grounded not guessed
