@@ -4,7 +4,7 @@ description: "Audit a codebase for exploitable security issues with cross-file t
 disable-model-invocation: true
 license: MIT
 metadata:
-  version: 1.48.1
+  version: 1.48.2
 ---
 
 # ultrasec — cross-file security audit, grounded not guessed
