@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.48.3](https://github.com/maxgfr/ultrasec/compare/v1.48.2...v1.48.3) (2026-09-09)
+
+
+### Bug Fixes
+
+* **skills:** preserve manual invocation across agent hosts ([9ca4867](https://github.com/maxgfr/ultrasec/commit/9ca48676550c244e41597a2e4afc80f26040a1df))
+
 ## [1.48.2](https://github.com/maxgfr/ultrasec/compare/v1.48.1...v1.48.2) (2026-09-09)
 
 
