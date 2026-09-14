@@ -4,7 +4,7 @@ description: Audit a codebase for exploitable security issues with cross-file tr
 disable-model-invocation: true
 license: MIT
 metadata:
-  version: 1.48.5
+  version: 1.48.6
   opencode/autoinvoke: 'false'
 ---
 
