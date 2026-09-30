@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.49.1](https://github.com/maxgfr/ultrasec/compare/v1.49.0...v1.49.1) (2026-09-30)
+
+
+### Bug Fixes
+
+* adapt to the codeindex v2.31 resolve context and file-symlink walk ([f761c8e](https://github.com/maxgfr/ultrasec/commit/f761c8ec31b9e9ac89f77178a85e67e869196bff))
+
 # [1.49.0](https://github.com/maxgfr/ultrasec/compare/v1.48.7...v1.49.0) (2026-09-30)
 
 
