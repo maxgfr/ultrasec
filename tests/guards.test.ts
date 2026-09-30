@@ -397,3 +397,36 @@ def view(request):
     expect(row(rows, "view")?.state).toBe("guarded");
   });
 });
+
+// A Server Action reads no `req` — its arguments ARE the request body — so the
+// only way it reaches the matrix is as an entry point by convention. Before, it
+// never did: `guards` on a real Next.js app listed none of ~20 action files, and
+// the audit's critical authorization bug lived in one of them.
+describe("guard matrix — Next.js Server Actions", () => {
+  const rows = matrixOf({
+    "src/app/(default)/rattachement/actions.ts": `"use server";
+
+import { getServerSession } from "next-auth";
+
+export async function addSirens(sirens: string[]) {
+  await db.insert(sirens);
+}
+
+export async function listSirens() {
+  const session = await getServerSession(authConfig);
+  if (!session) throw new Error("unauthorized");
+  return db.list(session.user.id);
+}
+`,
+  });
+
+  it("asks the authorization question of every exported action", () => {
+    expect(row(rows, "addSirens")?.state).toBe("unguarded");
+    expect(row(rows, "addSirens")?.kinds).toEqual(["http"]);
+  });
+
+  it("recognises NextAuth's session check as a guard", () => {
+    expect(row(rows, "listSirens")?.state).toBe("guarded");
+    expect(row(rows, "listSirens")?.guards.map((g) => g.hint)).toContain("getServerSession");
+  });
+});

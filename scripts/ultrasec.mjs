@@ -22135,8 +22135,40 @@ var ROUTE_FILES = [
   }
 ];
 var routeMatchers = ROUTE_FILES.map((r) => ({ rule: r, res: r.files.flatMap(expandBraces).map(globToRe) }));
+var JS_MODULE = /\.(?:[cm]?[jt]sx?)$/;
+var DIRECTIVE = /^(["'])([^"'\\]*)\1\s*;?$/;
+var SERVER_ACTION_DECL = /^\s*export\s+(?:default\s+)?(?:async\s+)?function\b|^\s*export\s+(?:const|let|var)\s+\w+\s*(?::[^=]+)?=|^\s*export\s+default\s+async\b/;
+function hasUseServerDirective(content) {
+  let inBlock = false;
+  for (const raw of content.split(/\r?\n/, 200)) {
+    let line2 = raw.trim();
+    if (inBlock) {
+      const close = line2.indexOf("*/");
+      if (close < 0) continue;
+      inBlock = false;
+      line2 = line2.slice(close + 2).trim();
+    }
+    while (line2.startsWith("/*")) {
+      const close = line2.indexOf("*/", 2);
+      if (close < 0) {
+        inBlock = true;
+        line2 = "";
+        break;
+      }
+      line2 = line2.slice(close + 2).trim();
+    }
+    if (!line2 || line2.startsWith("//") || line2.startsWith("#!")) continue;
+    const d = DIRECTIVE.exec(line2);
+    if (!d) return false;
+    if (d[2] === "use server") return true;
+  }
+  return false;
+}
 function findRouteEntryPoints(rel2, content) {
   const matched = routeMatchers.filter((m) => m.res.some((re) => re.test(rel2)));
+  if (JS_MODULE.test(rel2) && hasUseServerDirective(content)) {
+    matched.unshift({ rule: { kind: "http", files: [], decl: SERVER_ACTION_DECL, title: "Next.js Server Action" } });
+  }
   if (!matched.length) return [];
   const out2 = [];
   const lines5 = content.split(/\r?\n/);
@@ -26524,7 +26556,7 @@ import { existsSync as existsSync23, readFileSync as readFileSync23 } from "fs";
 import { join as join45, resolve as resolve10 } from "path";
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
-var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
+var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|getServerSession|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
 var THROTTLE_MARKER = /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
 var JS_FRAMEWORKS = {
   express: "express",

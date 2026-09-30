@@ -38,8 +38,13 @@ const MAX_SCAFFOLD_ENTRIES = 80;
 // character on its left, and an annotation is preceded by indentation or nothing.
 // `@Secured("ROLE_ADMIN")` — the whole guard, with no call-site twin in the body —
 // was invisible to both the brief and the matrix.
+//
+// `getServerSession` is NextAuth's server-side session read — the canonical
+// first line of a guarded Route Handler or Server Action, and the only thing
+// that tells one from an open one. NextAuth v5's `auth()` is the same check under
+// a name too generic to match on.
 export const AUTH_MARKER =
-  /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
+  /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|getServerSession|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
 
 // Rate-limiting / throttling markers, the same shape of vocabulary for the other
 // absence the matrix can enumerate.

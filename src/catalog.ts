@@ -2745,15 +2745,85 @@ export const ROUTE_FILES: RouteRule[] = [
 
 const routeMatchers = ROUTE_FILES.map((r) => ({ rule: r, res: r.files.flatMap(expandBraces).map(globToRe) }));
 
+// ── Routes by directive ─────────────────────────────────────────────────────
+// The one convention the path cannot carry. A Next.js module whose FIRST
+// statement is `"use server"` makes every export a Server Action: the framework
+// mints an action id for it and any client can POST arguments to it, from any
+// file, at any path (`app/(default)/rattachement/actions.ts`,
+// `app/_globalActions/company.ts`). Nothing inside reads `req` — the arguments
+// ARE the request body — so the line-content rules never fire either. Measured
+// on a real Next.js app: ~20 action files, none in `map`, `context` or `guards`,
+// and the audit's critical authorization bug (`addSirens`/`removeSirens`, any
+// caller could attach any company) was in two of them.
+//
+// Only the module-level directive counts, and only in the directive prologue:
+// blank lines, comments and other directives may precede it, anything else
+// ends the prologue — after an `import`, `"use server"` is an inert expression
+// statement. A function-level `"use server"` inside a server component is also
+// an action, but finding it means knowing which function the string opens,
+// which a line scan cannot; it is left to the line-content rules and the reader.
+
+/** Files a Next.js directive can mark. */
+const JS_MODULE = /\.(?:[cm]?[jt]sx?)$/;
+
+/** One directive statement: a lone string literal, optional semicolon. */
+const DIRECTIVE = /^(["'])([^"'\\]*)\1\s*;?$/;
+
 /**
- * Entry points a file has by CONVENTION — because of where it sits, not what it
- * says. Emitted in the same `SourceHit` shape as `findSources`, so every
- * consumer (attack surface, context scaffold, taint seeding) gets them for free.
+ * Which declarations of a `"use server"` module are actions. Next.js refuses to
+ * build such a module unless every value export is an async function, so every
+ * `export const x =` is one — including the wrapped shape
+ * (`export const x = actionClient.action(async (...) => …)`) a narrower
+ * `= async (` pattern would miss. Type-only exports are erased and excluded.
+ */
+const SERVER_ACTION_DECL =
+  /^\s*export\s+(?:default\s+)?(?:async\s+)?function\b|^\s*export\s+(?:const|let|var)\s+\w+\s*(?::[^=]+)?=|^\s*export\s+default\s+async\b/;
+
+/** True when the module's directive prologue contains `"use server"`. */
+function hasUseServerDirective(content: string): boolean {
+  let inBlock = false;
+  for (const raw of content.split(/\r?\n/, 200)) {
+    let line = raw.trim();
+    if (inBlock) {
+      const close = line.indexOf("*/");
+      if (close < 0) continue;
+      inBlock = false;
+      line = line.slice(close + 2).trim();
+    }
+    // Strip leading block comments that open (and maybe close) on this line.
+    while (line.startsWith("/*")) {
+      const close = line.indexOf("*/", 2);
+      if (close < 0) {
+        inBlock = true;
+        line = "";
+        break;
+      }
+      line = line.slice(close + 2).trim();
+    }
+    if (!line || line.startsWith("//") || line.startsWith("#!")) continue;
+    const d = DIRECTIVE.exec(line);
+    if (!d) return false; // first real statement: the prologue is over
+    if (d[2] === "use server") return true;
+  }
+  return false;
+}
+
+/**
+ * Entry points a file has by CONVENTION — because of where it sits (or, for a
+ * Server Action module, the directive it opens with), not what its body reads.
+ * Emitted in the same `SourceHit` shape as `findSources`, so every consumer
+ * (attack surface, context scaffold, taint seeding, guard matrix) gets them for
+ * free.
  *
  * `rel` must be a repo-relative POSIX path.
  */
 export function findRouteEntryPoints(rel: string, content: string): SourceHit[] {
-  const matched = routeMatchers.filter((m) => m.res.some((re) => re.test(rel)));
+  const matched: { rule: RouteRule }[] = routeMatchers.filter((m) => m.res.some((re) => re.test(rel)));
+  if (JS_MODULE.test(rel) && hasUseServerDirective(content)) {
+    // First, so on a line a path convention also matches (a `"use server"`
+    // module under `controllers/`) the more specific title is the one kept.
+    matched.unshift({ rule: { kind: "http", files: [], decl: SERVER_ACTION_DECL, title: "Next.js Server Action" } });
+  }
   if (!matched.length) return [];
   const out: SourceHit[] = [];
   const lines = content.split(/\r?\n/);
