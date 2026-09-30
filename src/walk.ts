@@ -412,6 +412,8 @@ export function walkWithMeta(root: string, opts: WalkOptions = {}): WalkResult {
     includeBinary: true,
     includeLockfiles: true,
     includeMinified: true,
+    // A symlinked file is audited under its own path, like git tracks it.
+    includeFileSymlinks: true,
     filter: ({ rel, directory }) => {
       if (exclude?.some((re) => re.test(rel))) return false;
       if (directory) return !scopes || dirInScope(rel, scopes);

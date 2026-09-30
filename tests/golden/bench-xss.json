@@ -296,19 +296,22 @@
       "Must": [
         {
           "file": "safe.go",
-          "line": 8
+          "line": 8,
+          "symbol": "page"
         }
       ],
       "New": [
         {
           "file": "safe.go",
-          "line": 8
+          "line": 8,
+          "symbol": "page"
         }
       ],
       "Parse": [
         {
           "file": "safe.go",
-          "line": 8
+          "line": 8,
+          "symbol": "page"
         }
       ],
       "Query": [
