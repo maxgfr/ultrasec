@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.50.0](https://github.com/maxgfr/ultrasec/compare/v1.49.1...v1.50.0) (2026-09-30)
+
+
+### Bug Fixes
+
+* **catalog:** Python fetch() is a database call, not an SSRF sink ([ea12310](https://github.com/maxgfr/ultrasec/commit/ea12310d5ce892fbbd01c5e9f75a8a884525836e))
+* **catalog:** treat Next.js "use server" modules as entry points ([cf5f0ef](https://github.com/maxgfr/ultrasec/commit/cf5f0eff6ae30675534fac7f2d966b7d09e7d06e))
+* **guards:** search a handler's decorator block, not just its body ([6d3b82d](https://github.com/maxgfr/ultrasec/commit/6d3b82d90558aaa7ee6052de7d7e66e86845bbaf))
+
+
+### Features
+
+* **guards:** declare the project's own guard helpers as markers ([7acd4a2](https://github.com/maxgfr/ultrasec/commit/7acd4a23d45d35472020a4d856fc7d30978d360b))
+
 ## [1.49.1](https://github.com/maxgfr/ultrasec/compare/v1.49.0...v1.49.1) (2026-09-30)
 
 

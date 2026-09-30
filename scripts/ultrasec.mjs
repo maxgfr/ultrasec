@@ -27097,7 +27097,7 @@ ${HELP}`);
 init_text();
 
 // src/types.ts
-var VERSION = "1.49.1";
+var VERSION = "1.50.0";
 var SCHEMA_VERSION2 = 9;
 var SEVERITIES2 = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
