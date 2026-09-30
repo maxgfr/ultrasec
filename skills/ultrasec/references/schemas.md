@@ -205,6 +205,8 @@ reach. One row per handler, not per request read.
 
 `scope` says how far the guard search reached, weakest last: `symbol` (the extractor gave an end
 line), `approx` (bounded by the next symbol — the common case), `file` (nothing to bound against).
+Every scope starts at the handler's decorator/annotation block, so `@login_required` above a `def`
+or `@UseGuards(...)` above a method is searched, and `approx` stops before the next handler's.
 
 You write:
 

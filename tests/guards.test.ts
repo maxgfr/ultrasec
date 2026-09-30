@@ -267,3 +267,133 @@ describe("guards --lens throttle", () => {
     expect(thr[0]!.lens).toBe("throttle");
   });
 });
+
+// ── Decorators are part of the handler they sit on ──────────────────────────
+//
+// Observed on a real Sanic app (egapro, `packages/api/egapro/views.py`): every
+// handler decorated `@tokens.require` / `@ensure_owner` was scoped from its
+// `def` line down, so the guard in the canonical Python position — ABOVE the
+// `def` — was never searched. Measured on both extraction tiers: a Python
+// function's symbol line is its `def` (decorators excluded), a TypeScript
+// method's is its name (decorators excluded); only Java's AST tier folds
+// annotations into the symbol. Worse, the approximate scope (no `endLine`, the
+// regex tier's normal case) ran to the line before the NEXT `def` — which is the
+// next handler's decorator block, credited to the handler above it.
+describe("guard matrix — decorators and annotations", () => {
+  it("credits a Python view with the decorator above its def", () => {
+    const rows = matrixOf({
+      "app/views.py": `from django.http import HttpResponse
+
+@login_required
+def private(request):
+    return HttpResponse(request.GET["a"])
+
+def public(request):
+    return HttpResponse(request.GET["b"])
+`,
+    });
+    expect(row(rows, "private")?.state).toBe("guarded");
+    expect(row(rows, "private")?.guards.map((g) => g.line)).toEqual([3]);
+    expect(row(rows, "public")?.state).toBe("unguarded");
+  });
+
+  it("does not credit a handler with the NEXT handler's decorator", () => {
+    // The worse half: an open handler followed by a guarded one read as guarded,
+    // because the approximate scope ran up to the next `def`.
+    const rows = matrixOf({
+      "app/views.py": `def open_view(request):
+    return request.GET["a"]
+
+@app.route("/closed",
+           methods=["POST"])
+@login_required
+def closed_view(request):
+    return request.GET["b"]
+`,
+    });
+    expect(row(rows, "open_view")?.state).toBe("unguarded");
+    expect(row(rows, "open_view")?.scope).toBe("approx");
+    // A decorator whose arguments span lines is still one block with the def.
+    expect(row(rows, "closed_view")?.state).toBe("guarded");
+  });
+
+  it("does not reach past a closed function body into an earlier decorator", () => {
+    // `@login_required` belongs to `a`; nothing but the body of `a` separates it
+    // from `b`, and a naive "keep walking up to the next @" would hand it to `b`.
+    const rows = matrixOf({
+      "app/views.py": `@login_required
+def a(request):
+    return request.GET["x"]
+def b(request):
+    return request.GET["y"]
+`,
+    });
+    expect(row(rows, "a")?.state).toBe("guarded");
+    expect(row(rows, "b")?.state).toBe("unguarded");
+  });
+
+  it("credits a Spring method with the annotation above it", () => {
+    const rows = matrixOf({
+      "src/main/java/UserController.java": `@RestController
+public class UserController {
+  @Secured("ROLE_ADMIN")
+  @GetMapping("/admin")
+  public String admin(@RequestParam String q) {
+    return q;
+  }
+
+  @GetMapping("/open")
+  public String open(@RequestParam String q) {
+    return q;
+  }
+}
+`,
+    });
+    expect(row(rows, "admin")?.state).toBe("guarded");
+    // The annotation itself is the marker — `@Secured` has no call-site twin.
+    expect(row(rows, "admin")?.guards.map((g) => g.hint)).toContain("@Secured");
+    expect(row(rows, "open")?.state).toBe("unguarded");
+  });
+
+  it("holds on the AST tier's shape too, where the extent is exact", () => {
+    // What the AST tier records for this file, as measured: the method starts at
+    // its NAME, below its decorators, with an exact `endLine`. The regex tier
+    // extracts no TypeScript methods at all, so the shape is pinned here rather
+    // than depending on which grammars this machine has cached.
+    const dir = repoWith({
+      "src/users.controller.ts": `export class UsersController {
+  @UseGuards(AuthGuard)
+  @Get()
+  find(@Query() q: string) {
+    return q;
+  }
+
+  @Post()
+  open(@Body() b: unknown) {
+    return b;
+  }
+}
+`,
+      "app/views.py": `@login_required
+def view(request):
+    return request.GET["a"]
+`,
+    });
+    const scan = scanRepo(dir);
+    const ts = scan.files.find((f) => f.rel === "src/users.controller.ts")!;
+    ts.symbols = [
+      { name: "UsersController", kind: "class", line: 1, endLine: 12, exported: true },
+      { name: "find", kind: "method", line: 4, endLine: 6, exported: true },
+      { name: "open", kind: "method", line: 9, endLine: 11, exported: true },
+    ];
+    const py = scan.files.find((f) => f.rel === "app/views.py")!;
+    py.symbols = [{ name: "view", kind: "function", line: 2, endLine: 3, exported: true }];
+
+    const rows = buildGuardMatrix(scan);
+    expect(row(rows, "find")?.state).toBe("guarded");
+    expect(row(rows, "find")?.guards.map((g) => g.hint)).toContain("@UseGuards");
+    expect(row(rows, "find")?.scope).toBe("symbol");
+    expect(row(rows, "open")?.state).toBe("unguarded");
+    expect(row(rows, "view")?.state).toBe("guarded");
+  });
+});

@@ -26524,7 +26524,7 @@ import { existsSync as existsSync23, readFileSync as readFileSync23 } from "fs";
 import { join as join45, resolve as resolve10 } from "path";
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
-var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
+var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
 var THROTTLE_MARKER = /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
 var JS_FRAMEWORKS = {
   express: "express",
@@ -31116,7 +31116,8 @@ function parseGuardVerdicts(raw, lens = "auth") {
     })
   });
 }
-function guardScope(symbols, line2, lineCount2) {
+function guardScope(symbols, line2, lines5) {
+  const lineCount2 = lines5.length;
   let best;
   for (const s of symbols) {
     if (s.line > line2) continue;
@@ -31124,10 +31125,45 @@ function guardScope(symbols, line2, lineCount2) {
     if (!best || s.line > best.line || s.line === best.line && (s.endLine ?? Infinity) <= (best.endLine ?? Infinity)) best = s;
   }
   if (!best) return { from: 1, to: lineCount2, scope: "file" };
-  if (best.endLine !== void 0) return { from: best.line, to: best.endLine, scope: "symbol" };
+  const from = decoratorBlockStart(lines5, best.line);
+  if (best.endLine !== void 0) return { from, to: best.endLine, scope: "symbol" };
   let next = Infinity;
   for (const s of symbols) if (s.line > best.line && s.line < next) next = s.line;
-  return next === Infinity ? { from: best.line, to: lineCount2, scope: "file" } : { from: best.line, to: next - 1, scope: "approx" };
+  if (next === Infinity) return { from, to: lineCount2, scope: "file" };
+  return { from, to: Math.max(best.line, decoratorBlockStart(lines5, next) - 1), scope: "approx" };
+}
+var DECORATOR_LINE = /^@[A-Za-z_][\w.]*\s*(?:\(.*)?$/;
+var MAX_DECORATOR_SPAN = 12;
+function decoratorBlockStart(lines5, symLine) {
+  let start2 = symLine;
+  for (let j = start2 - 1; j >= 1 && start2 - j <= MAX_DECORATOR_SPAN; j--) {
+    const text = lines5[j - 1].trim();
+    if (!text) break;
+    if (!DECORATOR_LINE.test(text) || !closesJustAbove(lines5, j, start2)) continue;
+    start2 = j;
+  }
+  return start2;
+}
+function closesJustAbove(lines5, first, end) {
+  let depth = 0;
+  for (let k = first; k < end; k++) {
+    depth += bracketDelta(lines5[k - 1]);
+    if (depth < 0) return false;
+    if (k < end - 1 ? depth === 0 : depth !== 0) return false;
+  }
+  return true;
+}
+function bracketDelta(line2) {
+  let d = 0;
+  for (let i2 = 0; i2 < line2.length; i2++) {
+    const c2 = line2[i2];
+    if (c2 === '"' || c2 === "'" || c2 === "`") {
+      for (i2++; i2 < line2.length && line2[i2] !== c2; i2++) if (line2[i2] === "\\") i2++;
+    } else if (c2 === "#" || c2 === "/" && line2[i2 + 1] === "/") break;
+    else if (c2 === "(" || c2 === "[" || c2 === "{") d++;
+    else if (c2 === ")" || c2 === "]" || c2 === "}") d--;
+  }
+  return d;
 }
 function buildGuardMatrix(scan2, lens = "auth") {
   const spec = LENSES2[lens];
@@ -31158,7 +31194,7 @@ function buildGuardMatrix(scan2, lens = "auth") {
       }
     }
     for (const [, h] of byHandler) {
-      const { from, to, scope } = guardScope(file.symbols, h.line, lines5.length);
+      const { from, to, scope } = guardScope(file.symbols, h.line, lines5);
       const guards = markers.filter((m) => m.line >= from && m.line <= to);
       rows.push({
         // The auth lens keeps its historical id, so a GUARDS.json written before
