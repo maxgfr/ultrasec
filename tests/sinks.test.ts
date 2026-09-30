@@ -291,3 +291,32 @@ describe("a URL/HTML attribute assigned a CONSTANT is not a sink", () => {
     expect(isConstantAssignment(' "plain";')).toBe(true);
   });
 });
+
+describe("findSinks — Python fetch() is a database call, not an HTTP request", () => {
+  const py = langForFile("db.py")!;
+  const js = langForFile("a.ts")!;
+  const ssrf = (hits: ReturnType<typeof findSinks>) => hits.filter((h) => h.kind === "ssrf");
+
+  // Observed on a real Sanic/asyncpg API: every `conn.fetch(query, *args)` was
+  // reported as CWE-918 at HIGH — 34 orphan candidates, none of them a request.
+  it("does not report asyncpg/DB-API fetch() calls as SSRF", () => {
+    for (const receiver of ["conn", "pool", "connection", "table", undefined]) {
+      const hits = findSinks(py, [{ callee: "fetch", receiver, line: 1 }], undefined, [{ spec: "asyncpg" }]);
+      expect(ssrf(hits), `receiver ${receiver}`).toEqual([]);
+    }
+  });
+
+  it("still reports Tornado's HTTP client fetch() as SSRF", () => {
+    const hits = findSinks(py, [{ callee: "fetch", receiver: "client", line: 1 }], undefined, [{ spec: "tornado.httpclient" }]);
+    expect(ssrf(hits)).toHaveLength(1);
+  });
+
+  it("keeps the candidate when imports could not be seen (regex tier)", () => {
+    expect(ssrf(findSinks(py, [{ callee: "fetch", receiver: "client", line: 1 }], undefined, []))).toHaveLength(1);
+  });
+
+  it("still reports Python urlopen() and JavaScript fetch() as SSRF", () => {
+    expect(ssrf(findSinks(py, [{ callee: "urlopen", line: 1 }], undefined, [{ spec: "urllib.request" }]))).toHaveLength(1);
+    expect(ssrf(findSinks(js, [{ callee: "fetch", line: 1 }], undefined, []))).toHaveLength(1);
+  });
+});

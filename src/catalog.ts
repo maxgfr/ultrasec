@@ -99,6 +99,11 @@ export interface SinkRule {
   cwe: string;
   severity: Severity;
   languages: string[];
+  /** Languages a `*` rule does NOT apply to — for a callee whose meaning flips in
+   *  one ecosystem (Python's `fetch` is a database cursor/driver call, not an HTTP
+   *  request). Kept as an exception list so a newly supported language still gets
+   *  the generic rule. */
+  exceptLanguages?: string[];
   callees: string[];
   /** If set, a call with a *different* known receiver is skipped (reduces FP). */
   receivers?: string[];
@@ -755,9 +760,36 @@ export const SINKS: SinkRule[] = [
     cwe: "CWE-918",
     severity: "high",
     languages: ["*"],
-    callees: ["fetch", "request", "urlopen", "urlretrieve", "got", "axios", "openConnection"],
+    callees: ["request", "urlopen", "urlretrieve", "got", "axios", "openConnection"],
     title: "Server-side request forgery (SSRF)",
     note: "Tainted data used as a request URL/host. Verify the destination is allow-listed (no internal/metadata endpoints).",
+  },
+  {
+    // `fetch` is the web platform's HTTP call everywhere but Python, where it is
+    // the database API: asyncpg's `conn.fetch(query, *args)`, DB-API cursors,
+    // SQLAlchemy results. On a real Sanic/asyncpg service every one of the 34
+    // `fetch()` candidates this rule raised was a query, at HIGH, as CWE-918.
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["*"],
+    exceptLanguages: ["python"],
+    callees: ["fetch"],
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a request URL/host. Verify the destination is allow-listed (no internal/metadata endpoints).",
+  },
+  {
+    // Python's one HTTP `fetch`: Tornado's `AsyncHTTPClient().fetch(url)`. Gated
+    // on the import — like every `requireModule` rule it still fires when the
+    // imports could not be extracted, so the regex tier loses nothing.
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["python"],
+    callees: ["fetch"],
+    requireModule: ["tornado"],
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a Tornado HTTP client URL. Verify the destination is allow-listed (no internal/metadata endpoints).",
   },
   {
     // Member-call form: `axios.get(u)`, `http.get(u)`, `requests.get(u)`,
@@ -2355,7 +2387,7 @@ export function findSinks(
     let site: CallSite | undefined;
     let siteRead = false;
     for (const rule of rules) {
-      if (!appliesTo(rule.languages, lang.id)) continue;
+      if (!appliesTo(rule.languages, lang.id) || rule.exceptLanguages?.includes(lang.id)) continue;
       // Verb-shaped callees (get/post/…) are only a sink as a MEMBER call
       // (`axios.get`) — a bare `get(x)` is a generic getter, so skip it.
       if (rule.requireReceiver && !c.receiver) continue;
