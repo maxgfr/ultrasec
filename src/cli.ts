@@ -139,7 +139,11 @@ COMMANDS
              finding per handler. Rows with none are a worklist; a marker in
              scope is a CANDIDATE, never proof. --apply turns an 'unguarded' /
              'unthrottled' verdict into a cited finding (GUARDS.md / THROTTLE.md).
-             Flags: --run · --repo · --lens auth|throttle · --apply · --strict.
+             The project's own helpers (assertServerSession, tokens.require…)
+             are declared once in CONTEXT.md — 'Auth markers: a, b.c' /
+             'Throttle markers: …' — or ad hoc with --marker.
+             Flags: --run · --repo · --lens auth|throttle · --marker <name>[,…] ·
+             --apply · --strict.
   variants   Hunt other instances of a CONFIRMED bug's root cause: emit one seed
              per confirmed finding with its mechanical neighbours (same sink
              callee / file / CWE), you state the root cause and generalize a

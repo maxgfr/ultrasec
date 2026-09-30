@@ -31224,8 +31224,30 @@ function bracketDelta(line2) {
   }
   return d;
 }
-function buildGuardMatrix(scan2, lens = "auth") {
+var MARKERS_LINE = {
+  auth: /^\s*(?:[-*]\s*)?(?:\*\*)?auth(?:orization)? markers?(?:\*\*)?\s*:\s*(.+)$/gim,
+  throttle: /^\s*(?:[-*]\s*)?(?:\*\*)?(?:throttle|rate[- ]limit) markers?(?:\*\*)?\s*:\s*(.+)$/gim
+};
+function contextMarkers(doc, lens) {
+  if (!doc) return [];
+  const out2 = [];
+  for (const m of doc.matchAll(MARKERS_LINE[lens])) {
+    for (const name2 of m[1].split(",")) {
+      const clean = name2.trim().replace(/^`+|`+$/g, "").replace(/^@/, "").trim();
+      if (/^[\w$][\w$.]*$/.test(clean) && !out2.includes(clean)) out2.push(clean);
+    }
+  }
+  return out2;
+}
+function withProjectMarkers(base, names) {
+  const valid = names.filter((n) => /^[\w$][\w$.]*$/.test(n));
+  if (!valid.length) return base;
+  const escaped = valid.map((n) => n.replace(/[.$]/g, "\\$&"));
+  return new RegExp(`(?:${base.source})|(?<![\\w$.])(?:${escaped.join("|")})(?![\\w$])`, base.flags);
+}
+function buildGuardMatrix(scan2, lens = "auth", extraMarkers = []) {
   const spec = LENSES2[lens];
+  const marker = withProjectMarkers(spec.marker, extraMarkers);
   const rows = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
@@ -31236,7 +31258,7 @@ function buildGuardMatrix(scan2, lens = "auth") {
     const lines5 = text.split(/\r?\n/);
     const markers = [];
     for (let i2 = 0; i2 < lines5.length; i2++) {
-      const m = spec.marker.exec(lines5[i2]);
+      const m = marker.exec(lines5[i2]);
       if (m) markers.push({ line: i2 + 1, hint: m[0] });
     }
     const byHandler = /* @__PURE__ */ new Map();
@@ -31443,6 +31465,11 @@ function guardDiscovery(row, note, lens = "auth") {
 }
 
 // src/commands/guards.ts
+function markerFlags(args2) {
+  const v = args2.flags.marker;
+  const values = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string");
+  return values.flatMap((x) => x.split(",")).map((x) => x.trim()).filter(Boolean);
+}
 var isLens = (s) => GUARD_LENSES.includes(s);
 function runGuards(args2) {
   const run2 = resolve25(flagStr(args2, "run") ?? ".ultrasec");
@@ -31464,6 +31491,7 @@ function runGuards(args2) {
     return 2;
   }
   const repo = resolve25(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const markers = [.../* @__PURE__ */ new Set([...contextMarkers(loadContextDoc(run2), lens), ...markerFlags(args2)])];
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed;
@@ -31473,7 +31501,7 @@ function runGuards(args2) {
       eprintln(`ultrasec guards --apply: ${e.message}`);
       return 2;
     }
-    const byId = new Map(buildGuardMatrix(scanRepo2(repo), lens).map((r) => [r.id, r]));
+    const byId = new Map(buildGuardMatrix(scanRepo2(repo), lens, markers).map((r) => [r.id, r]));
     const unknown = [];
     const discoveries = [];
     let confirmedPresent = 0;
@@ -31503,7 +31531,7 @@ function runGuards(args2) {
     if (strict && (unknown.length || res.rejected.length)) return 1;
     return code;
   }
-  const rows = buildGuardMatrix(scanRepo2(repo), lens);
+  const rows = buildGuardMatrix(scanRepo2(repo), lens, markers);
   const todoPath = emitWorklist(run2, stageFiles(spec.stem), rows, renderGuardsMd(rows, loadContextDoc(run2), lens));
   const t = guardTotals(rows);
   writeDossier(run2, { ...dossier, manifest: { ...dossier.manifest, passes: { ...dossier.manifest.passes, [spec.pass]: true } } });
@@ -31511,6 +31539,7 @@ function runGuards(args2) {
   println(
     `  ${t.handlers} handler(s) reading request data \xB7 ${t.unguarded} with no visible ${label}${t.fileScoped ? ` \xB7 ${t.fileScoped} file-scoped (weaker evidence)` : ""}`
   );
+  if (markers.length) println(`  project markers: ${markers.join(", ")}`);
   if (t.noMarkerAnywhere && lens === "throttle") {
     println(`  \u26A0\uFE0F  NO throttling marker anywhere in the tree \u2014 that is one architectural fact, not ${t.handlers} findings.`);
     println(`      Decide once in CONTEXT.md: nothing bounds request volume, or the limit lives outside the repo (ingress/CDN/gateway)?`);
@@ -36227,7 +36256,11 @@ COMMANDS
              finding per handler. Rows with none are a worklist; a marker in
              scope is a CANDIDATE, never proof. --apply turns an 'unguarded' /
              'unthrottled' verdict into a cited finding (GUARDS.md / THROTTLE.md).
-             Flags: --run \xB7 --repo \xB7 --lens auth|throttle \xB7 --apply \xB7 --strict.
+             The project's own helpers (assertServerSession, tokens.require\u2026)
+             are declared once in CONTEXT.md \u2014 'Auth markers: a, b.c' /
+             'Throttle markers: \u2026' \u2014 or ad hoc with --marker.
+             Flags: --run \xB7 --repo \xB7 --lens auth|throttle \xB7 --marker <name>[,\u2026] \xB7
+             --apply \xB7 --strict.
   variants   Hunt other instances of a CONFIRMED bug's root cause: emit one seed
              per confirmed finding with its mechanical neighbours (same sink
              callee / file / CWE), you state the root cause and generalize a

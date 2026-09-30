@@ -307,6 +307,49 @@ function bracketDelta(line: string): number {
   return d;
 }
 
+// ── Project markers ────────────────────────────────────────────────────────
+//
+// The vocabulary knows the common spellings (`requireAuth`, `login_required`,
+// `getServerSession`…). Most real applications wrap them in a helper of their
+// own, and a helper nobody told the engine about is an `unguarded` row on every
+// handler that calls it: on a real Next.js app, 26 Server Actions all calling
+// `assertServerSession({ owner, staff })`, each a question already answered.
+//
+// Declaring the helper once — `--marker`, or an `Auth markers:` line in
+// CONTEXT.md so every later run and every subagent inherits it — turns those
+// rows into candidates like any other marker: evidence to read, never a proof.
+
+const MARKERS_LINE: Record<GuardLens, RegExp> = {
+  auth: /^\s*(?:[-*]\s*)?(?:\*\*)?auth(?:orization)? markers?(?:\*\*)?\s*:\s*(.+)$/gim,
+  throttle: /^\s*(?:[-*]\s*)?(?:\*\*)?(?:throttle|rate[- ]limit) markers?(?:\*\*)?\s*:\s*(.+)$/gim,
+};
+
+/** The marker names a CONTEXT.md declares for a lens (`Auth markers: a, b.c`). */
+export function contextMarkers(doc: string | undefined, lens: GuardLens): string[] {
+  if (!doc) return [];
+  const out: string[] = [];
+  for (const m of doc.matchAll(MARKERS_LINE[lens])) {
+    for (const name of m[1]!.split(",")) {
+      const clean = name
+        .trim()
+        .replace(/^`+|`+$/g, "")
+        .replace(/^@/, "")
+        .trim();
+      if (/^[\w$][\w$.]*$/.test(clean) && !out.includes(clean)) out.push(clean);
+    }
+  }
+  return out;
+}
+
+/** The lens vocabulary plus the project's own names, matched as WHOLE (possibly
+ *  dotted) names: `tokens.require` must not match `tokens.required_for_later`. */
+function withProjectMarkers(base: RegExp, names: readonly string[]): RegExp {
+  const valid = names.filter((n) => /^[\w$][\w$.]*$/.test(n));
+  if (!valid.length) return base;
+  const escaped = valid.map((n) => n.replace(/[.$]/g, "\\$&"));
+  return new RegExp(`(?:${base.source})|(?<![\\w$.])(?:${escaped.join("|")})(?![\\w$])`, base.flags);
+}
+
 /**
  * Build the entry-point × marker matrix for one lens.
  *
@@ -317,8 +360,9 @@ function bracketDelta(line: string): number {
  * `lens` defaults to `auth`, so every existing caller gets exactly the matrix it
  * got before lenses existed.
  */
-export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth"): GuardRow[] {
+export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth", extraMarkers: readonly string[] = []): GuardRow[] {
   const spec = LENSES[lens];
+  const marker = withProjectMarkers(spec.marker, extraMarkers);
   const rows: GuardRow[] = [];
 
   for (const file of scan.files) {
@@ -332,7 +376,7 @@ export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth"): Guar
     // Every marker in the file, once — the per-handler scopes index into it.
     const markers: GuardSighting[] = [];
     for (let i = 0; i < lines.length; i++) {
-      const m = spec.marker.exec(lines[i]!);
+      const m = marker.exec(lines[i]!);
       if (m) markers.push({ line: i + 1, hint: m[0] });
     }
 

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanRepo } from "../src/scan.js";
-import { buildGuardMatrix, guardDiscovery, guardTotals, renderGuardsMd, type GuardRow } from "../src/guards.js";
+import { buildGuardMatrix, contextMarkers, guardDiscovery, guardTotals, renderGuardsMd, type GuardRow } from "../src/guards.js";
 
 // The entry-point × guard matrix — the vulnerability that is an ABSENCE.
 //
@@ -428,5 +428,66 @@ export async function listSirens() {
   it("recognises NextAuth's session check as a guard", () => {
     expect(row(rows, "listSirens")?.state).toBe("guarded");
     expect(row(rows, "listSirens")?.guards.map((g) => g.hint)).toContain("getServerSession");
+  });
+});
+
+describe("guard matrix — project-specific markers", () => {
+  // Observed on a real Next.js app: every Server Action called the project's own
+  // `assertServerSession({ owner, staff })` helper, which no generic vocabulary
+  // knows — 26 guarded actions came out `unguarded`, one false question each.
+  const files = {
+    "src/app/actions.ts": `"use server";
+
+export async function getDeclaration(siren: string) {
+  await assertServerSession({ owner: { check: siren }, staff: true });
+  return load(siren);
+}
+
+export async function saveNote(note: string) {
+  return store(note);
+}
+`,
+  };
+
+  it("counts a marker the project declares as a guard", () => {
+    const rows = buildGuardMatrix(scanRepo(repoWith(files)), "auth", ["assertServerSession"]);
+    expect(row(rows, "getDeclaration")?.state).toBe("guarded");
+    expect(row(rows, "getDeclaration")?.guards.map((g) => g.hint)).toEqual(["assertServerSession"]);
+    expect(row(rows, "saveNote")?.state).toBe("unguarded");
+  });
+
+  it("is unguarded without the declaration (the default vocabulary does not know it)", () => {
+    expect(row(matrixOf(files), "getDeclaration")?.state).toBe("unguarded");
+  });
+
+  it("matches a dotted decorator name, whole names only", () => {
+    const py = {
+      "api/views.py": `@app.route("/a")
+@tokens.require
+def a(request):
+    return request.json
+
+@app.route("/b")
+def b(request):
+    tokens.required_for_later = request.json
+    return request.json
+`,
+    };
+    const rows = buildGuardMatrix(scanRepo(repoWith(py)), "auth", ["tokens.require"]);
+    expect(row(rows, "a")?.state).toBe("guarded");
+    expect(row(rows, "b")?.state).toBe("unguarded");
+  });
+});
+
+describe("contextMarkers", () => {
+  it("reads the markers declared in CONTEXT.md, per lens", () => {
+    const doc = `# ctx
+
+- Auth markers: \`assertServerSession\`, tokens.require , ensure_owner
+Throttle markers: rateLimitByIp
+`;
+    expect(contextMarkers(doc, "auth")).toEqual(["assertServerSession", "tokens.require", "ensure_owner"]);
+    expect(contextMarkers(doc, "throttle")).toEqual(["rateLimitByIp"]);
+    expect(contextMarkers(undefined, "auth")).toEqual([]);
   });
 });

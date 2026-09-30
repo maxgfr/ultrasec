@@ -197,7 +197,8 @@ each: [references/schemas.md](references/schemas.md).
    the object is touched. `--apply` turns `unguarded` into a cited finding. Run it again with
    `--lens throttle` for the other absence — handlers nothing rate-limits, auth routes flagged
    apart. Under either lens, **no marker anywhere is one architectural fact, not N findings**:
-   answer it once in `CONTEXT.md`. [references/hunting-heuristics.md](references/hunting-heuristics.md).
+   answer it once in `CONTEXT.md` — as is a project guard helper: `Auth markers: assertServerSession`.
+   [references/hunting-heuristics.md](references/hunting-heuristics.md).
 
 7. **Hunt what the engine can't enumerate.** `investigate --run <run>` groups the attack surface
    by region; find broken access control/IDOR, business logic, auth/session/JWT, crypto, races,
