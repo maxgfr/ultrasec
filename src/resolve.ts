@@ -82,6 +82,7 @@ function ctxFromFileSet(fileSet: Set<string>): ResolveContext {
     javaRoots: [],
     pyRoots: [""],
     workspacePackages: [],
+    packageScopes: [],
     cIncludeRoots: [],
     rubyLibRoots: [],
     phpPsr4: [],
