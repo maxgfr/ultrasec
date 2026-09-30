@@ -178,7 +178,7 @@ export interface GuardRow {
    *
    * - `symbol` — the handler's own extent, from the extractor's end line.
    * - `approx` — from the handler's first line to the line before the next
-   *   symbol starts. The extractor often omits `endLine` even on the AST tier
+   *   symbol starts (both ends taken at the decorator block: see `guardScope`). The extractor often omits `endLine` even on the AST tier
    *   (measured: all 49 handlers of one real Next.js monorepo), and the whole
    *   file is a much worse answer than the gap to the next function.
    * - `file` — the file has no other symbol to bound against. For a one-handler
@@ -202,8 +202,24 @@ export interface GuardRow {
  * on a multi-handler file can credit one route with another's guard. Bounding
  * by the next symbol's first line instead is the ordinary approximation of a
  * function's extent, and it is right far more often than the file is.
+ *
+ * Both ends are then moved to the handler's DECORATOR block, because that is
+ * where a large share of guards are written and the extractor does not count it
+ * as part of the symbol. Measured on both tiers: a Python function starts at its
+ * `def`, a TypeScript method at its name — `@login_required`, `@UseGuards(...)`
+ * sit above that line. Only Java's AST tier folds annotations into the symbol
+ * (there the upward walk finds nothing and is a no-op). So:
+ *
+ * - `from` walks up over the handler's own decorator block — without it a
+ *   decorated Python view was reported `unguarded` with its guard one line
+ *   above the scope (every `@tokens.require` handler of a real Sanic app);
+ * - an approximate `to` stops before the NEXT symbol's decorator block — without
+ *   it an open handler followed by a guarded one was credited with the guarded
+ *   one's decorator and read as `guarded`, the one error this matrix must not
+ *   make.
  */
-function guardScope(symbols: Sym[], line: number, lineCount: number): { from: number; to: number; scope: GuardRow["scope"] } {
+function guardScope(symbols: Sym[], line: number, lines: readonly string[]): { from: number; to: number; scope: GuardRow["scope"] } {
+  const lineCount = lines.length;
   let best: Sym | undefined;
   for (const s of symbols) {
     if (s.line > line) continue;
@@ -211,11 +227,127 @@ function guardScope(symbols: Sym[], line: number, lineCount: number): { from: nu
     if (!best || s.line > best.line || (s.line === best.line && (s.endLine ?? Infinity) <= (best.endLine ?? Infinity))) best = s;
   }
   if (!best) return { from: 1, to: lineCount, scope: "file" };
-  if (best.endLine !== undefined) return { from: best.line, to: best.endLine, scope: "symbol" };
+  const from = decoratorBlockStart(lines, best.line);
+  if (best.endLine !== undefined) return { from, to: best.endLine, scope: "symbol" };
 
   let next = Infinity;
   for (const s of symbols) if (s.line > best.line && s.line < next) next = s.line;
-  return next === Infinity ? { from: best.line, to: lineCount, scope: "file" } : { from: best.line, to: next - 1, scope: "approx" };
+  if (next === Infinity) return { from, to: lineCount, scope: "file" };
+  // Never above the handler's own first line: a scope that ends before it starts
+  // would silently search nothing and report `unguarded` for the wrong reason.
+  return { from, to: Math.max(best.line, decoratorBlockStart(lines, next) - 1), scope: "approx" };
+}
+
+/** A line that opens a decorator or annotation: `@name`, `@a.b`, optionally
+ *  followed by an argument list that may stay open onto the next lines. The
+ *  tail is anchored so Ruby's `@user = …` (an instance-variable assignment, not
+ *  an annotation) does not qualify. */
+const DECORATOR_LINE = /^@[A-Za-z_][\w.]*\s*(?:\(.*)?$/;
+
+/** How far a single decorator's arguments may run onto following lines before
+ *  the walk stops believing it is looking at one. Generous for a
+ *  `@app.route("/x",\n methods=[...])` or a multi-line `@RequestMapping(...)`,
+ *  small enough that a runaway match cannot swallow a neighbouring function. */
+const MAX_DECORATOR_SPAN = 12;
+
+/**
+ * The first line of the decorator block directly above `symLine` (1-based), or
+ * `symLine` itself when there is none.
+ *
+ * Deliberately conservative, because every line it wrongly admits is a line
+ * whose marker is credited to this handler:
+ *
+ * - The block must be CONTIGUOUS with the symbol: a blank line ends it.
+ * - Each decorator is one `DECORATOR_LINE` plus, when its brackets stay open,
+ *   the continuation lines that close them — and only those. A decorator is
+ *   accepted when its brackets balance exactly on the line just above what has
+ *   been accepted so far, and not before. That rule is what stops the walk from
+ *   crossing a closed function body: in `@login_required / def a(): / body /
+ *   def b():` the `@login_required` line is already balanced on its own line, so
+ *   it cannot be the start of anything that runs down to `def b`.
+ * - Comment lines between decorators are not skipped. Rare, and a missed guard
+ *   costs one read; a wrongly credited one hides a finding.
+ */
+function decoratorBlockStart(lines: readonly string[], symLine: number): number {
+  let start = symLine;
+  for (let j = start - 1; j >= 1 && start - j <= MAX_DECORATOR_SPAN; j--) {
+    const text = lines[j - 1]!.trim();
+    if (!text) break;
+    if (!DECORATOR_LINE.test(text) || !closesJustAbove(lines, j, start)) continue;
+    start = j;
+  }
+  return start;
+}
+
+/** Lines `first..end-1` form one decorator: bracket depth stays open after every
+ *  line but the last, and is exactly zero after the last. */
+function closesJustAbove(lines: readonly string[], first: number, end: number): boolean {
+  let depth = 0;
+  for (let k = first; k < end; k++) {
+    depth += bracketDelta(lines[k - 1]!);
+    if (depth < 0) return false;
+    if (k < end - 1 ? depth === 0 : depth !== 0) return false;
+  }
+  return true;
+}
+
+/** Net `([{` minus `)]}` on one line, skipping quoted strings and stopping at a
+ *  `#` or `//` comment — enough to read a decorator's argument list, which is
+ *  all it is ever asked to read. */
+function bracketDelta(line: string): number {
+  let d = 0;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (c === '"' || c === "'" || c === "`") {
+      for (i++; i < line.length && line[i] !== c; i++) if (line[i] === "\\") i++;
+    } else if (c === "#" || (c === "/" && line[i + 1] === "/")) break;
+    else if (c === "(" || c === "[" || c === "{") d++;
+    else if (c === ")" || c === "]" || c === "}") d--;
+  }
+  return d;
+}
+
+// ── Project markers ────────────────────────────────────────────────────────
+//
+// The vocabulary knows the common spellings (`requireAuth`, `login_required`,
+// `getServerSession`…). Most real applications wrap them in a helper of their
+// own, and a helper nobody told the engine about is an `unguarded` row on every
+// handler that calls it: on a real Next.js app, 26 Server Actions all calling
+// `assertServerSession({ owner, staff })`, each a question already answered.
+//
+// Declaring the helper once — `--marker`, or an `Auth markers:` line in
+// CONTEXT.md so every later run and every subagent inherits it — turns those
+// rows into candidates like any other marker: evidence to read, never a proof.
+
+const MARKERS_LINE: Record<GuardLens, RegExp> = {
+  auth: /^\s*(?:[-*]\s*)?(?:\*\*)?auth(?:orization)? markers?(?:\*\*)?\s*:\s*(.+)$/gim,
+  throttle: /^\s*(?:[-*]\s*)?(?:\*\*)?(?:throttle|rate[- ]limit) markers?(?:\*\*)?\s*:\s*(.+)$/gim,
+};
+
+/** The marker names a CONTEXT.md declares for a lens (`Auth markers: a, b.c`). */
+export function contextMarkers(doc: string | undefined, lens: GuardLens): string[] {
+  if (!doc) return [];
+  const out: string[] = [];
+  for (const m of doc.matchAll(MARKERS_LINE[lens])) {
+    for (const name of m[1]!.split(",")) {
+      const clean = name
+        .trim()
+        .replace(/^`+|`+$/g, "")
+        .replace(/^@/, "")
+        .trim();
+      if (/^[\w$][\w$.]*$/.test(clean) && !out.includes(clean)) out.push(clean);
+    }
+  }
+  return out;
+}
+
+/** The lens vocabulary plus the project's own names, matched as WHOLE (possibly
+ *  dotted) names: `tokens.require` must not match `tokens.required_for_later`. */
+function withProjectMarkers(base: RegExp, names: readonly string[]): RegExp {
+  const valid = names.filter((n) => /^[\w$][\w$.]*$/.test(n));
+  if (!valid.length) return base;
+  const escaped = valid.map((n) => n.replace(/[.$]/g, "\\$&"));
+  return new RegExp(`(?:${base.source})|(?<![\\w$.])(?:${escaped.join("|")})(?![\\w$])`, base.flags);
 }
 
 /**
@@ -228,8 +360,9 @@ function guardScope(symbols: Sym[], line: number, lineCount: number): { from: nu
  * `lens` defaults to `auth`, so every existing caller gets exactly the matrix it
  * got before lenses existed.
  */
-export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth"): GuardRow[] {
+export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth", extraMarkers: readonly string[] = []): GuardRow[] {
   const spec = LENSES[lens];
+  const marker = withProjectMarkers(spec.marker, extraMarkers);
   const rows: GuardRow[] = [];
 
   for (const file of scan.files) {
@@ -243,7 +376,7 @@ export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth"): Guar
     // Every marker in the file, once — the per-handler scopes index into it.
     const markers: GuardSighting[] = [];
     for (let i = 0; i < lines.length; i++) {
-      const m = spec.marker.exec(lines[i]!);
+      const m = marker.exec(lines[i]!);
       if (m) markers.push({ line: i + 1, hint: m[0] });
     }
 
@@ -264,7 +397,7 @@ export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth"): Guar
     }
 
     for (const [, h] of byHandler) {
-      const { from, to, scope } = guardScope(file.symbols, h.line, lines.length);
+      const { from, to, scope } = guardScope(file.symbols, h.line, lines);
       const guards = markers.filter((m) => m.line >= from && m.line <= to);
       rows.push({
         // The auth lens keeps its historical id, so a GUARDS.json written before

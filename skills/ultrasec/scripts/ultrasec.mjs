@@ -29655,9 +29655,36 @@ var SINKS = [
     cwe: "CWE-918",
     severity: "high",
     languages: ["*"],
-    callees: ["fetch", "request", "urlopen", "urlretrieve", "got", "axios", "openConnection"],
+    callees: ["request", "urlopen", "urlretrieve", "got", "axios", "openConnection"],
     title: "Server-side request forgery (SSRF)",
     note: "Tainted data used as a request URL/host. Verify the destination is allow-listed (no internal/metadata endpoints)."
+  },
+  {
+    // `fetch` is the web platform's HTTP call everywhere but Python, where it is
+    // the database API: asyncpg's `conn.fetch(query, *args)`, DB-API cursors,
+    // SQLAlchemy results. On a real Sanic/asyncpg service every one of the 34
+    // `fetch()` candidates this rule raised was a query, at HIGH, as CWE-918.
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["*"],
+    exceptLanguages: ["python"],
+    callees: ["fetch"],
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a request URL/host. Verify the destination is allow-listed (no internal/metadata endpoints)."
+  },
+  {
+    // Python's one HTTP `fetch`: Tornado's `AsyncHTTPClient().fetch(url)`. Gated
+    // on the import — like every `requireModule` rule it still fires when the
+    // imports could not be extracted, so the regex tier loses nothing.
+    kind: "ssrf",
+    cwe: "CWE-918",
+    severity: "high",
+    languages: ["python"],
+    callees: ["fetch"],
+    requireModule: ["tornado"],
+    title: "Server-side request forgery (SSRF)",
+    note: "Tainted data used as a Tornado HTTP client URL. Verify the destination is allow-listed (no internal/metadata endpoints)."
   },
   {
     // Member-call form: `axios.get(u)`, `http.get(u)`, `requests.get(u)`,
@@ -30785,7 +30812,7 @@ function findSinks(lang, calls, extraSinks, imports, localDefs, lines5) {
     let site;
     let siteRead = false;
     for (const rule2 of rules) {
-      if (!appliesTo(rule2.languages, lang.id)) continue;
+      if (!appliesTo(rule2.languages, lang.id) || rule2.exceptLanguages?.includes(lang.id)) continue;
       if (rule2.requireReceiver && !c2.receiver) continue;
       if (rule2.receivers && c2.receiver && !rule2.receivers.includes(c2.receiver)) continue;
       if (rule2.refutedBy && lines5) {
@@ -31096,8 +31123,40 @@ var ROUTE_FILES = [
   }
 ];
 var routeMatchers = ROUTE_FILES.map((r) => ({ rule: r, res: r.files.flatMap(expandBraces).map(globToRe) }));
+var JS_MODULE = /\.(?:[cm]?[jt]sx?)$/;
+var DIRECTIVE2 = /^(["'])([^"'\\]*)\1\s*;?$/;
+var SERVER_ACTION_DECL = /^\s*export\s+(?:default\s+)?(?:async\s+)?function\b|^\s*export\s+(?:const|let|var)\s+\w+\s*(?::[^=]+)?=|^\s*export\s+default\s+async\b/;
+function hasUseServerDirective(content) {
+  let inBlock = false;
+  for (const raw of content.split(/\r?\n/, 200)) {
+    let line2 = raw.trim();
+    if (inBlock) {
+      const close = line2.indexOf("*/");
+      if (close < 0) continue;
+      inBlock = false;
+      line2 = line2.slice(close + 2).trim();
+    }
+    while (line2.startsWith("/*")) {
+      const close = line2.indexOf("*/", 2);
+      if (close < 0) {
+        inBlock = true;
+        line2 = "";
+        break;
+      }
+      line2 = line2.slice(close + 2).trim();
+    }
+    if (!line2 || line2.startsWith("//") || line2.startsWith("#!")) continue;
+    const d = DIRECTIVE2.exec(line2);
+    if (!d) return false;
+    if (d[2] === "use server") return true;
+  }
+  return false;
+}
 function findRouteEntryPoints(rel2, content) {
   const matched = routeMatchers.filter((m) => m.res.some((re) => re.test(rel2)));
+  if (JS_MODULE.test(rel2) && hasUseServerDirective(content)) {
+    matched.unshift({ rule: { kind: "http", files: [], decl: SERVER_ACTION_DECL, title: "Next.js Server Action" } });
+  }
   if (!matched.length) return [];
   const out2 = [];
   const lines5 = content.split(/\r?\n/);
@@ -35485,7 +35544,7 @@ import { existsSync as existsSync23, readFileSync as readFileSync27 } from "fs";
 import { join as join50, resolve as resolve16 } from "path";
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
-var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|@UseGuards|@PreAuthorize|@Secured|@RolesAllowed|login_required|permission_required|before_action|authenticate_user!|current_user)\b/;
+var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|getServerSession|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
 var THROTTLE_MARKER = /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
 var JS_FRAMEWORKS = {
   express: "express",
@@ -40077,7 +40136,8 @@ function parseGuardVerdicts(raw, lens = "auth") {
     })
   });
 }
-function guardScope(symbols, line2, lineCount2) {
+function guardScope(symbols, line2, lines5) {
+  const lineCount2 = lines5.length;
   let best;
   for (const s of symbols) {
     if (s.line > line2) continue;
@@ -40085,13 +40145,70 @@ function guardScope(symbols, line2, lineCount2) {
     if (!best || s.line > best.line || s.line === best.line && (s.endLine ?? Infinity) <= (best.endLine ?? Infinity)) best = s;
   }
   if (!best) return { from: 1, to: lineCount2, scope: "file" };
-  if (best.endLine !== void 0) return { from: best.line, to: best.endLine, scope: "symbol" };
+  const from = decoratorBlockStart(lines5, best.line);
+  if (best.endLine !== void 0) return { from, to: best.endLine, scope: "symbol" };
   let next = Infinity;
   for (const s of symbols) if (s.line > best.line && s.line < next) next = s.line;
-  return next === Infinity ? { from: best.line, to: lineCount2, scope: "file" } : { from: best.line, to: next - 1, scope: "approx" };
+  if (next === Infinity) return { from, to: lineCount2, scope: "file" };
+  return { from, to: Math.max(best.line, decoratorBlockStart(lines5, next) - 1), scope: "approx" };
 }
-function buildGuardMatrix(scan2, lens = "auth") {
+var DECORATOR_LINE = /^@[A-Za-z_][\w.]*\s*(?:\(.*)?$/;
+var MAX_DECORATOR_SPAN = 12;
+function decoratorBlockStart(lines5, symLine) {
+  let start2 = symLine;
+  for (let j = start2 - 1; j >= 1 && start2 - j <= MAX_DECORATOR_SPAN; j--) {
+    const text = lines5[j - 1].trim();
+    if (!text) break;
+    if (!DECORATOR_LINE.test(text) || !closesJustAbove(lines5, j, start2)) continue;
+    start2 = j;
+  }
+  return start2;
+}
+function closesJustAbove(lines5, first, end) {
+  let depth = 0;
+  for (let k = first; k < end; k++) {
+    depth += bracketDelta(lines5[k - 1]);
+    if (depth < 0) return false;
+    if (k < end - 1 ? depth === 0 : depth !== 0) return false;
+  }
+  return true;
+}
+function bracketDelta(line2) {
+  let d = 0;
+  for (let i2 = 0; i2 < line2.length; i2++) {
+    const c2 = line2[i2];
+    if (c2 === '"' || c2 === "'" || c2 === "`") {
+      for (i2++; i2 < line2.length && line2[i2] !== c2; i2++) if (line2[i2] === "\\") i2++;
+    } else if (c2 === "#" || c2 === "/" && line2[i2 + 1] === "/") break;
+    else if (c2 === "(" || c2 === "[" || c2 === "{") d++;
+    else if (c2 === ")" || c2 === "]" || c2 === "}") d--;
+  }
+  return d;
+}
+var MARKERS_LINE = {
+  auth: /^\s*(?:[-*]\s*)?(?:\*\*)?auth(?:orization)? markers?(?:\*\*)?\s*:\s*(.+)$/gim,
+  throttle: /^\s*(?:[-*]\s*)?(?:\*\*)?(?:throttle|rate[- ]limit) markers?(?:\*\*)?\s*:\s*(.+)$/gim
+};
+function contextMarkers(doc, lens) {
+  if (!doc) return [];
+  const out2 = [];
+  for (const m of doc.matchAll(MARKERS_LINE[lens])) {
+    for (const name2 of m[1].split(",")) {
+      const clean = name2.trim().replace(/^`+|`+$/g, "").replace(/^@/, "").trim();
+      if (/^[\w$][\w$.]*$/.test(clean) && !out2.includes(clean)) out2.push(clean);
+    }
+  }
+  return out2;
+}
+function withProjectMarkers(base, names) {
+  const valid = names.filter((n) => /^[\w$][\w$.]*$/.test(n));
+  if (!valid.length) return base;
+  const escaped = valid.map((n) => n.replace(/[.$]/g, "\\$&"));
+  return new RegExp(`(?:${base.source})|(?<![\\w$.])(?:${escaped.join("|")})(?![\\w$])`, base.flags);
+}
+function buildGuardMatrix(scan2, lens = "auth", extraMarkers = []) {
   const spec = LENSES2[lens];
+  const marker = withProjectMarkers(spec.marker, extraMarkers);
   const rows = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
@@ -40102,7 +40219,7 @@ function buildGuardMatrix(scan2, lens = "auth") {
     const lines5 = text.split(/\r?\n/);
     const markers = [];
     for (let i2 = 0; i2 < lines5.length; i2++) {
-      const m = spec.marker.exec(lines5[i2]);
+      const m = marker.exec(lines5[i2]);
       if (m) markers.push({ line: i2 + 1, hint: m[0] });
     }
     const byHandler = /* @__PURE__ */ new Map();
@@ -40119,7 +40236,7 @@ function buildGuardMatrix(scan2, lens = "auth") {
       }
     }
     for (const [, h] of byHandler) {
-      const { from, to, scope } = guardScope(file.symbols, h.line, lines5.length);
+      const { from, to, scope } = guardScope(file.symbols, h.line, lines5);
       const guards = markers.filter((m) => m.line >= from && m.line <= to);
       rows.push({
         // The auth lens keeps its historical id, so a GUARDS.json written before
@@ -40309,6 +40426,11 @@ function guardDiscovery(row, note, lens = "auth") {
 }
 
 // src/commands/guards.ts
+function markerFlags(args2) {
+  const v = args2.flags.marker;
+  const values = (Array.isArray(v) ? v : [v]).filter((x) => typeof x === "string");
+  return values.flatMap((x) => x.split(",")).map((x) => x.trim()).filter(Boolean);
+}
 var isLens = (s) => GUARD_LENSES.includes(s);
 function runGuards(args2) {
   const run2 = resolve31(flagStr(args2, "run") ?? ".ultrasec");
@@ -40330,6 +40452,7 @@ function runGuards(args2) {
     return 2;
   }
   const repo = resolve31(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const markers = [.../* @__PURE__ */ new Set([...contextMarkers(loadContextDoc(run2), lens), ...markerFlags(args2)])];
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -40339,7 +40462,7 @@ function runGuards(args2) {
       eprintln(`ultrasec guards --apply: ${e.message}`);
       return 2;
     }
-    const byId = new Map(buildGuardMatrix(scanRepo2(repo), lens).map((r) => [r.id, r]));
+    const byId = new Map(buildGuardMatrix(scanRepo2(repo), lens, markers).map((r) => [r.id, r]));
     const unknown = [];
     const discoveries = [];
     let confirmedPresent = 0;
@@ -40369,7 +40492,7 @@ function runGuards(args2) {
     if (strict && (unknown.length || res.rejected.length)) return 1;
     return code;
   }
-  const rows = buildGuardMatrix(scanRepo2(repo), lens);
+  const rows = buildGuardMatrix(scanRepo2(repo), lens, markers);
   const todoPath = emitWorklist(run2, stageFiles(spec.stem), rows, renderGuardsMd(rows, loadContextDoc(run2), lens));
   const t = guardTotals(rows);
   writeDossier(run2, { ...dossier, manifest: { ...dossier.manifest, passes: { ...dossier.manifest.passes, [spec.pass]: true } } });
@@ -40377,6 +40500,7 @@ function runGuards(args2) {
   println(
     `  ${t.handlers} handler(s) reading request data \xB7 ${t.unguarded} with no visible ${label}${t.fileScoped ? ` \xB7 ${t.fileScoped} file-scoped (weaker evidence)` : ""}`
   );
+  if (markers.length) println(`  project markers: ${markers.join(", ")}`);
   if (t.noMarkerAnywhere && lens === "throttle") {
     println(`  \u26A0\uFE0F  NO throttling marker anywhere in the tree \u2014 that is one architectural fact, not ${t.handlers} findings.`);
     println(`      Decide once in CONTEXT.md: nothing bounds request volume, or the limit lives outside the repo (ingress/CDN/gateway)?`);
@@ -45093,7 +45217,11 @@ COMMANDS
              finding per handler. Rows with none are a worklist; a marker in
              scope is a CANDIDATE, never proof. --apply turns an 'unguarded' /
              'unthrottled' verdict into a cited finding (GUARDS.md / THROTTLE.md).
-             Flags: --run \xB7 --repo \xB7 --lens auth|throttle \xB7 --apply \xB7 --strict.
+             The project's own helpers (assertServerSession, tokens.require\u2026)
+             are declared once in CONTEXT.md \u2014 'Auth markers: a, b.c' /
+             'Throttle markers: \u2026' \u2014 or ad hoc with --marker.
+             Flags: --run \xB7 --repo \xB7 --lens auth|throttle \xB7 --marker <name>[,\u2026] \xB7
+             --apply \xB7 --strict.
   variants   Hunt other instances of a CONFIRMED bug's root cause: emit one seed
              per confirmed finding with its mechanical neighbours (same sink
              callee / file / CWE), you state the root cause and generalize a

@@ -139,7 +139,9 @@ GraphQL resolvers (`(parent, args)`), Spring mappings (`@GetMapping`…), Django
 (`@api_view`, `APIView`), Vapor/Swift. **By convention** (the path, not the content): Next/Nuxt/SvelteKit
 route files, serverless handlers, `*Controller` files, Django `views.py`, PHP web roots — and the
 route tables themselves, Laravel `routes/web.php|api.php` (`Route::get(...)`) and Rails
-`config/routes.rb` (`get "/x", to: ...`).
+`config/routes.rb` (`get "/x", to: ...`). **By directive** (the one convention a path cannot carry):
+every export of a Next.js module whose first statement is `"use server"` is a POST-callable Server
+Action, wherever the file sits.
 
 **Client-side (DOM)** — `location.hash|search|href`, `document.URL|referrer|cookie`, `window.name`,
 `URLSearchParams`, `localStorage/sessionStorage.getItem`, `history.state`, and `event.data` from a

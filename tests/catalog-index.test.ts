@@ -39,7 +39,7 @@ function findSinksRef(
   for (const c of calls) {
     const shadowed = !c.receiver && localDefs?.has(c.callee) === true;
     for (const rule of rules) {
-      if (!appliesTo(rule.languages, lang.id)) continue;
+      if (!appliesTo(rule.languages, lang.id) || rule.exceptLanguages?.includes(lang.id)) continue;
       if (!rule.callees.includes(c.callee)) continue;
       if (rule.requireReceiver && !c.receiver) continue;
       if (rule.receivers && c.receiver && !rule.receivers.includes(c.receiver)) continue;

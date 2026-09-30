@@ -4,6 +4,7 @@ import { loadDossier, writeDossier } from "../store.js";
 import { scanRepo } from "../scan.js";
 import {
   buildGuardMatrix,
+  contextMarkers,
   guardDiscovery,
   guardTotals,
   parseGuardVerdicts,
@@ -27,6 +28,16 @@ import { surfaceDropped, type ParseResult } from "../apply-parse.js";
 // has nobody put an authorization check in front of, and which has nobody put a
 // rate limit in front of? See `src/guards.ts` for why this exists and what a row
 // does and does not claim.
+
+/** Every `--marker` value, repeated or comma-separated. */
+function markerFlags(args: ParsedArgs): string[] {
+  const v = args.flags.marker;
+  const values = (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === "string");
+  return values
+    .flatMap((x) => x.split(","))
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
 
 const isLens = (s: string): s is GuardLens => (GUARD_LENSES as readonly string[]).includes(s);
 
@@ -56,6 +67,9 @@ export function runGuards(args: ParsedArgs): number {
     return 2;
   }
   const repo = resolve(flagStr(args, "repo") ?? dossier.manifest.repo);
+  // The project's own guard helpers: declared once in CONTEXT.md (`Auth markers:`
+  // / `Throttle markers:`) so every run inherits them, or ad hoc with --marker.
+  const markers = [...new Set([...contextMarkers(loadContextDoc(run), lens), ...markerFlags(args)])];
 
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
@@ -70,7 +84,7 @@ export function runGuards(args: ParsedArgs): number {
     // Re-derive the matrix rather than trusting the worklist on disk: a verdict
     // must name a handler that exists in the CODE, so a stale or hand-edited
     // GUARDS.json cannot introduce a finding whose citation nobody checked.
-    const byId = new Map(buildGuardMatrix(scanRepo(repo), lens).map((r) => [r.id, r]));
+    const byId = new Map(buildGuardMatrix(scanRepo(repo), lens, markers).map((r) => [r.id, r]));
     const unknown: string[] = [];
     const discoveries = [];
     let confirmedPresent = 0;
@@ -103,7 +117,7 @@ export function runGuards(args: ParsedArgs): number {
     return code;
   }
 
-  const rows: GuardRow[] = buildGuardMatrix(scanRepo(repo), lens);
+  const rows: GuardRow[] = buildGuardMatrix(scanRepo(repo), lens, markers);
   const todoPath = emitWorklist(run, stageFiles(spec.stem), rows, renderGuardsMd(rows, loadContextDoc(run), lens));
   const t = guardTotals(rows);
 
@@ -117,6 +131,7 @@ export function runGuards(args: ParsedArgs): number {
   println(
     `  ${t.handlers} handler(s) reading request data · ${t.unguarded} with no visible ${label}${t.fileScoped ? ` · ${t.fileScoped} file-scoped (weaker evidence)` : ""}`,
   );
+  if (markers.length) println(`  project markers: ${markers.join(", ")}`);
   if (t.noMarkerAnywhere && lens === "throttle") {
     println(`  ⚠️  NO throttling marker anywhere in the tree — that is one architectural fact, not ${t.handlers} findings.`);
     println(`      Decide once in CONTEXT.md: nothing bounds request volume, or the limit lives outside the repo (ingress/CDN/gateway)?`);

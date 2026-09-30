@@ -142,6 +142,67 @@ describe("findRouteEntryPoints", () => {
   });
 });
 
+// A Next.js module whose first statement is `"use server"` turns every exported
+// async function into a POST-callable endpoint, WHEREVER the file sits. Keyed on
+// the path alone, the convention table never saw one: on the egapro audit, none
+// of ~20 server-action files reached `map`, `context` or `guards` — and the
+// critical authorization bug (`addSirens`/`removeSirens`) was in exactly those.
+describe("findRouteEntryPoints — Next.js Server Actions (keyed on content)", () => {
+  const ACTIONS = `// Server actions for the rattachement flow.
+/* eslint-disable
+   no-restricted-imports */
+
+"use server";
+
+import { db } from "@/db";
+
+export type Sirens = string[];
+
+export async function addSirens(sirens: Sirens) {
+  await db.insert(sirens);
+}
+
+export const removeSirens = async (sirens: Sirens) => {
+  await db.remove(sirens);
+};
+
+async function helper() {}
+
+export default async function reset() {
+  await helper();
+}
+`;
+
+  it("reports every exported function of a 'use server' module, whatever its path", () => {
+    const hits = findRouteEntryPoints("src/app/(default)/rattachement/actions.ts", ACTIONS);
+    // addSirens, removeSirens, the default export — not the type, not the helper.
+    expect(hits.map((h) => h.line)).toEqual([11, 15, 21]);
+    expect(hits.every((h) => h.kind === "http")).toBe(true);
+    expect(hits[0]!.title).toBe("Next.js Server Action");
+    // The path is irrelevant: the same module under a directory no convention
+    // names is still an endpoint.
+    expect(findRouteEntryPoints("src/app/_globalActions/company.ts", ACTIONS)).toHaveLength(3);
+  });
+
+  it("accepts single quotes and no semicolon", () => {
+    const hits = findRouteEntryPoints("lib/a.ts", "'use server'\nexport async function go(id: string) {}\n");
+    expect(hits.map((h) => h.line)).toEqual([2]);
+  });
+
+  it("is not fooled by 'use client', a late directive, or the string elsewhere", () => {
+    const body = "export async function go(id: string) {}\n";
+    expect(findRouteEntryPoints("lib/a.ts", `"use client";\n${body}`)).toEqual([]);
+    // After an import, it is an ordinary expression statement, not a directive.
+    expect(findRouteEntryPoints("lib/a.ts", `import x from "x";\n"use server";\n${body}`)).toEqual([]);
+    expect(findRouteEntryPoints("lib/a.ts", `const s = "use server";\n${body}`)).toEqual([]);
+    expect(findRouteEntryPoints("lib/a.ts", `// "use server"\n${body}`)).toEqual([]);
+  });
+
+  it("only reads JavaScript/TypeScript modules", () => {
+    expect(findRouteEntryPoints("docs/a.md", `"use server"\nexport async function go() {}\n`)).toEqual([]);
+  });
+});
+
 describe("expandBraces", () => {
   it("expands alternation into plain globs", () => {
     expect(expandBraces("**/x.{js,ts}").sort()).toEqual(["**/x.js", "**/x.ts"]);

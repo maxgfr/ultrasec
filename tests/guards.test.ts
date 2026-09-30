@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { scanRepo } from "../src/scan.js";
-import { buildGuardMatrix, guardDiscovery, guardTotals, renderGuardsMd, type GuardRow } from "../src/guards.js";
+import { buildGuardMatrix, contextMarkers, guardDiscovery, guardTotals, renderGuardsMd, type GuardRow } from "../src/guards.js";
 
 // The entry-point × guard matrix — the vulnerability that is an ABSENCE.
 //
@@ -265,5 +265,229 @@ describe("guards --lens throttle", () => {
     // GUARDS.json written before lenses existed still names the same rows.
     expect(auth[0]!.lens).toBeUndefined();
     expect(thr[0]!.lens).toBe("throttle");
+  });
+});
+
+// ── Decorators are part of the handler they sit on ──────────────────────────
+//
+// Observed on a real Sanic app (egapro, `packages/api/egapro/views.py`): every
+// handler decorated `@tokens.require` / `@ensure_owner` was scoped from its
+// `def` line down, so the guard in the canonical Python position — ABOVE the
+// `def` — was never searched. Measured on both extraction tiers: a Python
+// function's symbol line is its `def` (decorators excluded), a TypeScript
+// method's is its name (decorators excluded); only Java's AST tier folds
+// annotations into the symbol. Worse, the approximate scope (no `endLine`, the
+// regex tier's normal case) ran to the line before the NEXT `def` — which is the
+// next handler's decorator block, credited to the handler above it.
+describe("guard matrix — decorators and annotations", () => {
+  it("credits a Python view with the decorator above its def", () => {
+    const rows = matrixOf({
+      "app/views.py": `from django.http import HttpResponse
+
+@login_required
+def private(request):
+    return HttpResponse(request.GET["a"])
+
+def public(request):
+    return HttpResponse(request.GET["b"])
+`,
+    });
+    expect(row(rows, "private")?.state).toBe("guarded");
+    expect(row(rows, "private")?.guards.map((g) => g.line)).toEqual([3]);
+    expect(row(rows, "public")?.state).toBe("unguarded");
+  });
+
+  it("does not credit a handler with the NEXT handler's decorator", () => {
+    // The worse half: an open handler followed by a guarded one read as guarded,
+    // because the approximate scope ran up to the next `def`.
+    const rows = matrixOf({
+      "app/views.py": `def open_view(request):
+    return request.GET["a"]
+
+@app.route("/closed",
+           methods=["POST"])
+@login_required
+def closed_view(request):
+    return request.GET["b"]
+`,
+    });
+    expect(row(rows, "open_view")?.state).toBe("unguarded");
+    expect(row(rows, "open_view")?.scope).toBe("approx");
+    // A decorator whose arguments span lines is still one block with the def.
+    expect(row(rows, "closed_view")?.state).toBe("guarded");
+  });
+
+  it("does not reach past a closed function body into an earlier decorator", () => {
+    // `@login_required` belongs to `a`; nothing but the body of `a` separates it
+    // from `b`, and a naive "keep walking up to the next @" would hand it to `b`.
+    const rows = matrixOf({
+      "app/views.py": `@login_required
+def a(request):
+    return request.GET["x"]
+def b(request):
+    return request.GET["y"]
+`,
+    });
+    expect(row(rows, "a")?.state).toBe("guarded");
+    expect(row(rows, "b")?.state).toBe("unguarded");
+  });
+
+  it("credits a Spring method with the annotation above it", () => {
+    const rows = matrixOf({
+      "src/main/java/UserController.java": `@RestController
+public class UserController {
+  @Secured("ROLE_ADMIN")
+  @GetMapping("/admin")
+  public String admin(@RequestParam String q) {
+    return q;
+  }
+
+  @GetMapping("/open")
+  public String open(@RequestParam String q) {
+    return q;
+  }
+}
+`,
+    });
+    expect(row(rows, "admin")?.state).toBe("guarded");
+    // The annotation itself is the marker — `@Secured` has no call-site twin.
+    expect(row(rows, "admin")?.guards.map((g) => g.hint)).toContain("@Secured");
+    expect(row(rows, "open")?.state).toBe("unguarded");
+  });
+
+  it("holds on the AST tier's shape too, where the extent is exact", () => {
+    // What the AST tier records for this file, as measured: the method starts at
+    // its NAME, below its decorators, with an exact `endLine`. The regex tier
+    // extracts no TypeScript methods at all, so the shape is pinned here rather
+    // than depending on which grammars this machine has cached.
+    const dir = repoWith({
+      "src/users.controller.ts": `export class UsersController {
+  @UseGuards(AuthGuard)
+  @Get()
+  find(@Query() q: string) {
+    return q;
+  }
+
+  @Post()
+  open(@Body() b: unknown) {
+    return b;
+  }
+}
+`,
+      "app/views.py": `@login_required
+def view(request):
+    return request.GET["a"]
+`,
+    });
+    const scan = scanRepo(dir);
+    const ts = scan.files.find((f) => f.rel === "src/users.controller.ts")!;
+    ts.symbols = [
+      { name: "UsersController", kind: "class", line: 1, endLine: 12, exported: true },
+      { name: "find", kind: "method", line: 4, endLine: 6, exported: true },
+      { name: "open", kind: "method", line: 9, endLine: 11, exported: true },
+    ];
+    const py = scan.files.find((f) => f.rel === "app/views.py")!;
+    py.symbols = [{ name: "view", kind: "function", line: 2, endLine: 3, exported: true }];
+
+    const rows = buildGuardMatrix(scan);
+    expect(row(rows, "find")?.state).toBe("guarded");
+    expect(row(rows, "find")?.guards.map((g) => g.hint)).toContain("@UseGuards");
+    expect(row(rows, "find")?.scope).toBe("symbol");
+    expect(row(rows, "open")?.state).toBe("unguarded");
+    expect(row(rows, "view")?.state).toBe("guarded");
+  });
+});
+
+// A Server Action reads no `req` — its arguments ARE the request body — so the
+// only way it reaches the matrix is as an entry point by convention. Before, it
+// never did: `guards` on a real Next.js app listed none of ~20 action files, and
+// the audit's critical authorization bug lived in one of them.
+describe("guard matrix — Next.js Server Actions", () => {
+  const rows = matrixOf({
+    "src/app/(default)/rattachement/actions.ts": `"use server";
+
+import { getServerSession } from "next-auth";
+
+export async function addSirens(sirens: string[]) {
+  await db.insert(sirens);
+}
+
+export async function listSirens() {
+  const session = await getServerSession(authConfig);
+  if (!session) throw new Error("unauthorized");
+  return db.list(session.user.id);
+}
+`,
+  });
+
+  it("asks the authorization question of every exported action", () => {
+    expect(row(rows, "addSirens")?.state).toBe("unguarded");
+    expect(row(rows, "addSirens")?.kinds).toEqual(["http"]);
+  });
+
+  it("recognises NextAuth's session check as a guard", () => {
+    expect(row(rows, "listSirens")?.state).toBe("guarded");
+    expect(row(rows, "listSirens")?.guards.map((g) => g.hint)).toContain("getServerSession");
+  });
+});
+
+describe("guard matrix — project-specific markers", () => {
+  // Observed on a real Next.js app: every Server Action called the project's own
+  // `assertServerSession({ owner, staff })` helper, which no generic vocabulary
+  // knows — 26 guarded actions came out `unguarded`, one false question each.
+  const files = {
+    "src/app/actions.ts": `"use server";
+
+export async function getDeclaration(siren: string) {
+  await assertServerSession({ owner: { check: siren }, staff: true });
+  return load(siren);
+}
+
+export async function saveNote(note: string) {
+  return store(note);
+}
+`,
+  };
+
+  it("counts a marker the project declares as a guard", () => {
+    const rows = buildGuardMatrix(scanRepo(repoWith(files)), "auth", ["assertServerSession"]);
+    expect(row(rows, "getDeclaration")?.state).toBe("guarded");
+    expect(row(rows, "getDeclaration")?.guards.map((g) => g.hint)).toEqual(["assertServerSession"]);
+    expect(row(rows, "saveNote")?.state).toBe("unguarded");
+  });
+
+  it("is unguarded without the declaration (the default vocabulary does not know it)", () => {
+    expect(row(matrixOf(files), "getDeclaration")?.state).toBe("unguarded");
+  });
+
+  it("matches a dotted decorator name, whole names only", () => {
+    const py = {
+      "api/views.py": `@app.route("/a")
+@tokens.require
+def a(request):
+    return request.json
+
+@app.route("/b")
+def b(request):
+    tokens.required_for_later = request.json
+    return request.json
+`,
+    };
+    const rows = buildGuardMatrix(scanRepo(repoWith(py)), "auth", ["tokens.require"]);
+    expect(row(rows, "a")?.state).toBe("guarded");
+    expect(row(rows, "b")?.state).toBe("unguarded");
+  });
+});
+
+describe("contextMarkers", () => {
+  it("reads the markers declared in CONTEXT.md, per lens", () => {
+    const doc = `# ctx
+
+- Auth markers: \`assertServerSession\`, tokens.require , ensure_owner
+Throttle markers: rateLimitByIp
+`;
+    expect(contextMarkers(doc, "auth")).toEqual(["assertServerSession", "tokens.require", "ensure_owner"]);
+    expect(contextMarkers(doc, "throttle")).toEqual(["rateLimitByIp"]);
+    expect(contextMarkers(undefined, "auth")).toEqual([]);
   });
 });

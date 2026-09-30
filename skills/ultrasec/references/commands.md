@@ -263,6 +263,7 @@ The verdict→status table and every JSON shape live in [schemas.md](schemas.md)
 |---|---|---|---|
 | `triage --run <d>` | `TRIAGE.todo.json` + `.md` | `noise\|keep` | `noise` clears only low/med/info; on high/critical it is **ignored** |
 | `guards --run <d>` | `GUARDS.todo.json` + `.md` | `guarded\|unguarded\|intentionally-public` | `unguarded` becomes a cited `authz` finding (CWE-306); the matrix is re-derived from the code, so a stale row is refused |
+| `guards --marker <name>[,…]` | same | same | adds the project's own guard helpers to the lens vocabulary (whole, possibly dotted names); `Auth markers:` / `Throttle markers:` lines in `CONTEXT.md` do the same for every run |
 | `guards --lens throttle --run <d>` | `THROTTLE.todo.json` + `.md` | `throttled\|unthrottled\|not-abusable` | `unthrottled` becomes a cited `other` finding — **CWE-307 + CWE-204** on an auth-shaped handler, CWE-770 otherwise |
 | `verify --run <d>` | `VERIFY.todo.json` + `.md` | `supported\|partial\|unsupported\|refuted` | `partial` → needs-human at any severity; `unsupported` → needs-human on high/critical |
 | `investigate --run <d>` | `INVESTIGATE.todo.json` + `.md` | `Discovery[]` | citations checked **before** ingest; a bad one is rejected, not folded |
