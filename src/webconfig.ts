@@ -161,6 +161,42 @@ export const WEBCONFIG_SHAPES: Record<string, WebConfigShape> = {
     cwe: "CWE-770",
     note: "`express.json()` / `express.urlencoded()` / `bodyParser.*()` with no `limit`. The default (100 kB) is small, so this is a hardening note rather than a hole — but a raised default elsewhere, or a `text()`/`raw()` parser, makes an unbounded body a memory-exhaustion vector. State the limit explicitly.",
   },
+  // ── Application-code shapes with no source→sink flow ──────────────────────
+  "csv-formula": {
+    id: "csv-formula",
+    title: "CSV built by hand without formula neutralization",
+    severity: "medium",
+    cwe: "CWE-1236",
+    note: 'The CSV is assembled with `.join(";")` / `.join(",")`, and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet, such a cell is a FORMULA — `=HYPERLINK(…)` exfiltrates the sheet, DDE-style payloads run commands on older clients. Quoting is not enough. Prefix those cells with `\'` (OWASP CSV injection), including values that come from the database (second-order).',
+  },
+  "env-coerce-boolean": {
+    id: "env-coerce-boolean",
+    title: "`z.coerce.boolean()` on an environment variable",
+    severity: "medium",
+    cwe: "CWE-704",
+    note: '`z.coerce.boolean()` is `Boolean(value)`: every non-empty string is true, including `"false"` and `"0"`. An operator writing `FLAG=false` turns the flag ON — for a test seam, a mock or a security toggle, that is the opposite of what the deployment says. Parse the string explicitly (`z.enum(["true","false"]).transform(v => v === "true")`, or `z.stringbool()` in zod 4).',
+  },
+  "xff-first-hop": {
+    id: "xff-first-hop",
+    title: "Client IP taken from the first X-Forwarded-For entry",
+    severity: "medium",
+    cwe: "CWE-348",
+    note: 'Proxies APPEND to X-Forwarded-For, so the first entry is whatever the client sent. Taking `split(",")[0]` lets any caller choose its own IP — for rate limits, allow-lists and audit logs alike — and an unbounded value can overflow the column it is stored in. Take the entry your own proxy wrote (count hops from the right), or the platform\'s trusted header.',
+  },
+  "unbounded-export": {
+    id: "unbounded-export",
+    title: "Public export/listing route queries without a row limit",
+    severity: "medium",
+    cwe: "CWE-770",
+    note: "A route under a public/export path runs a `select … from` (or `findMany`) with no `limit`/`take`. Every call materializes the whole table in memory and on the wire, and the cost grows with the data rather than with the request — a cheap amplification lever even behind a rate limit. Page it, cap it, or stream it with a hard ceiling.",
+  },
+  "next-headers-missing": {
+    id: "next-headers-missing",
+    title: "Next.js app sets no security headers",
+    severity: "low",
+    cwe: "CWE-693",
+    note: "This `next.config` defines no `headers()`, and nothing in the app sets a Content-Security-Policy (no middleware, no helper). Next.js sends no CSP, HSTS, X-Frame-Options, X-Content-Type-Options or Referrer-Policy by default. Add them in `headers()` or middleware — unless a reverse proxy or CDN in front sets them, which is the thing to check (`ultrasec probe` sees what is actually served).",
+  },
 };
 
 /** The line that constructs the app, per framework, for the absence shapes. */
@@ -317,6 +353,74 @@ function scanCookies(rel: string, content: string, out: Finding[]): void {
   }
 }
 
+// ── Application-code shapes ─────────────────────────────────────────────────
+/** True when the line is a comment, not code. */
+const COMMENT_LINE = /^\s*(?:\/\/|\*|\/\*)/;
+
+// CSV formula injection (CWE-1236) — the hand-built half. The catalog rule
+// knows CSV LIBRARIES (writerow, csv-stringify); a CSV assembled with
+// `.join(";")` was invisible, on a public export whose cells came from the
+// database.
+const MENTIONS_CSV = /text\/csv|\.csv\b|\bcsv\b/i;
+const CELL_JOIN = /\.join\(\s*(["'`])(?:;|,|\\t)\1\s*\)/;
+const NEUTRALIZES_FORMULA =
+  /\[[^\]\n]*=[^\]\n]*\+[^\]\n]*\]|\[[^\]\n]*\+[^\]\n]*=[^\]\n]*\]|["']=["']\s*,\s*["']\+["']|formula|neutrali[sz]|csv-?injection|escapeCsv|sanitizeCsv/i;
+
+function scanCsvFormula(rel: string, ls: Line[], content: string, out: Finding[]): void {
+  if (!MENTIONS_CSV.test(content)) return;
+  // Code only: a comment saying "cells are not neutralized" is not a neutralizer.
+  const code = ls
+    .filter((l) => !COMMENT_LINE.test(l.text))
+    .map((l) => l.text.replace(/\s\/\/.*$/, ""))
+    .join("\n");
+  if (NEUTRALIZES_FORMULA.test(code)) return;
+  // The data rows are joined after the header: cite the last cell join.
+  const joins = ls.filter((l) => CELL_JOIN.test(l.text) && !COMMENT_LINE.test(l.text));
+  const at = joins[joins.length - 1];
+  if (at) out.push(hit(rel, at.n, WEBCONFIG_SHAPES["csv-formula"]!, at.text));
+}
+
+// `z.coerce.boolean()` on an env var (CWE-704). An env schema key is
+// UPPER_SNAKE; any other key still counts in a file that reads the environment.
+const COERCE_BOOLEAN = /\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
+const ENV_KEY = /^\s*["']?[A-Z][A-Z0-9_]*["']?\s*:/;
+const READS_ENV = /\bprocess\.env\b|\bimport\.meta\.env\b|\bcreateEnv\s*\(|\bDeno\.env\b|\bBun\.env\b/;
+
+// First X-Forwarded-For hop (CWE-348): the split and the header within a few lines.
+const FIRST_HOP = /\.split\(\s*(["'])\s*,\s*\1\s*\)\s*(?:\[\s*0\s*\]|\.shift\(\s*\)|\.at\(\s*0\s*\))/;
+const XFF = /x-forwarded-for|HTTP_X_FORWARDED_FOR|X_FORWARDED_FOR/i;
+const XFF_LOOKBACK = 5;
+
+// Unbounded query in a public/export route (CWE-770).
+const ROUTE_FILE = /(?:^|\/)app\/(?:.*\/)?route\.[cm]?[jt]s$|(?:^|\/)pages\/api\/.+\.[cm]?[jt]sx?$/;
+const EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|xlsx|feed|dump)(?:[/._-]|$)/i;
+const SELECT_START = /\.\s*select(?:Distinct)?\s*\(|\.\s*findMany\s*\(/g;
+const MAX_STATEMENT = 2000;
+
+function scanUnboundedExport(rel: string, content: string, out: Finding[]): void {
+  if (!ROUTE_FILE.test(rel) || !EXPORT_PATH.test(rel)) return;
+  for (const m of content.matchAll(SELECT_START)) {
+    const start = m.index ?? 0;
+    // The statement: up to the first `;` or blank line after the call.
+    const rest = content.slice(start, start + MAX_STATEMENT);
+    const end = rest.search(/;|\n\s*\n/);
+    const stmt = end === -1 ? rest : rest.slice(0, end);
+    const prisma = /findMany/.test(m[0]);
+    if (!prisma && !/\.\s*from\s*\(/.test(stmt)) continue;
+    if (prisma ? /\btake\s*:/.test(stmt) : /\.\s*(?:limit|paginate|\$paginate)\s*\(/.test(stmt)) continue;
+    out.push(hit(rel, lineOf(content, start), WEBCONFIG_SHAPES["unbounded-export"]!, stmt.split("\n")[0]!));
+  }
+}
+
+// Next.js with no security headers (CWE-693): an absence, grounded on the
+// config object — where `headers()` would go.
+const NEXT_CONFIG = /(?:^|\/)next\.config\.(?:js|mjs|cjs|ts|mts)$/;
+const NEXT_HEADERS = /\bheaders\s*(?:\(|:)/;
+const SETS_CSP = /Content-Security-Policy|\bhelmet\s*\(|next-secure-headers|@nosecone|\bnosecone\b|next-safe/i;
+const CONFIG_OBJECT = /(?:const|let|var)\s+\w*[cC]onfig\w*\s*(?::[^=]+)?=\s*\{|module\.exports\s*=|export\s+default\b/;
+
+const dirOfRel = (rel: string): string => (rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/") + 1) : "");
+
 /**
  * Audit a repo for API / web misconfiguration. Returns candidates — a wildcard
  * CORS on an internal service is a different risk from the same on a public API,
@@ -325,6 +429,10 @@ function scanCookies(rel: string, content: string, out: Finding[]): void {
 export function auditWebConfig(repo: string, prune?: (rel: string) => boolean, tree?: RepoTree): Finding[] {
   const out: Finding[] = [];
   const read = tree?.read ?? readText;
+  // Next.js configs without `headers()`, and the directories where something
+  // sets a CSP — decided after the walk, since the setter can be any file.
+  const nextConfigs: { rel: string; ls: Line[] }[] = [];
+  const cspDirs: string[] = [];
   for (const wf of tree?.files ?? walk(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
@@ -370,6 +478,39 @@ export function auditWebConfig(repo: string, prune?: (rel: string) => boolean, t
 
     scanCors(rel, content, out);
     scanCookies(rel, content, out);
+
+    if (JS.has(ext)) {
+      scanCsvFormula(rel, ls, content, out);
+      scanUnboundedExport(rel, content, out);
+      const readsEnv = READS_ENV.test(content);
+      for (let i = 0; i < ls.length; i++) {
+        const l = ls[i]!;
+        if (COMMENT_LINE.test(l.text)) continue;
+        const code = l.text.split("//")[0]!;
+        if (COERCE_BOOLEAN.test(code) && (ENV_KEY.test(code) || readsEnv)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["env-coerce-boolean"]!, l.text));
+      }
+      if (SETS_CSP.test(content) && !NEXT_CONFIG.test(rel)) cspDirs.push(dirOfRel(rel));
+      if (NEXT_CONFIG.test(rel)) {
+        if (SETS_CSP.test(content)) cspDirs.push(dirOfRel(rel));
+        if (!NEXT_HEADERS.test(content)) nextConfigs.push({ rel, ls });
+      }
+    }
+    if (CODE.has(ext)) {
+      for (let i = 0; i < ls.length; i++) {
+        const l = ls[i]!;
+        if (COMMENT_LINE.test(l.text) || !FIRST_HOP.test(l.text)) continue;
+        const window = ls.slice(Math.max(0, i - XFF_LOOKBACK), i + 1);
+        if (window.some((w) => XFF.test(w.text))) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["xff-first-hop"]!, l.text));
+      }
+    }
+  }
+  for (const cfg of nextConfigs) {
+    // A CSP set anywhere in the app's own tree (middleware, a helper, the
+    // config itself) answers the question; a sibling app's does not.
+    const root = dirOfRel(cfg.rel);
+    if (cspDirs.some((d) => d.startsWith(root))) continue;
+    const at = cfg.ls.find((l) => CONFIG_OBJECT.test(l.text)) ?? cfg.ls[0];
+    if (at) out.push(hit(cfg.rel, at.n, WEBCONFIG_SHAPES["next-headers-missing"]!, at.text));
   }
   return out;
 }

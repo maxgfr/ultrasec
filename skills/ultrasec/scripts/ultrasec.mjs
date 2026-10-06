@@ -33473,6 +33473,42 @@ var WEBCONFIG_SHAPES = {
     severity: "low",
     cwe: "CWE-770",
     note: "`express.json()` / `express.urlencoded()` / `bodyParser.*()` with no `limit`. The default (100 kB) is small, so this is a hardening note rather than a hole \u2014 but a raised default elsewhere, or a `text()`/`raw()` parser, makes an unbounded body a memory-exhaustion vector. State the limit explicitly."
+  },
+  // ── Application-code shapes with no source→sink flow ──────────────────────
+  "csv-formula": {
+    id: "csv-formula",
+    title: "CSV built by hand without formula neutralization",
+    severity: "medium",
+    cwe: "CWE-1236",
+    note: 'The CSV is assembled with `.join(";")` / `.join(",")`, and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet, such a cell is a FORMULA \u2014 `=HYPERLINK(\u2026)` exfiltrates the sheet, DDE-style payloads run commands on older clients. Quoting is not enough. Prefix those cells with `\'` (OWASP CSV injection), including values that come from the database (second-order).'
+  },
+  "env-coerce-boolean": {
+    id: "env-coerce-boolean",
+    title: "`z.coerce.boolean()` on an environment variable",
+    severity: "medium",
+    cwe: "CWE-704",
+    note: '`z.coerce.boolean()` is `Boolean(value)`: every non-empty string is true, including `"false"` and `"0"`. An operator writing `FLAG=false` turns the flag ON \u2014 for a test seam, a mock or a security toggle, that is the opposite of what the deployment says. Parse the string explicitly (`z.enum(["true","false"]).transform(v => v === "true")`, or `z.stringbool()` in zod 4).'
+  },
+  "xff-first-hop": {
+    id: "xff-first-hop",
+    title: "Client IP taken from the first X-Forwarded-For entry",
+    severity: "medium",
+    cwe: "CWE-348",
+    note: 'Proxies APPEND to X-Forwarded-For, so the first entry is whatever the client sent. Taking `split(",")[0]` lets any caller choose its own IP \u2014 for rate limits, allow-lists and audit logs alike \u2014 and an unbounded value can overflow the column it is stored in. Take the entry your own proxy wrote (count hops from the right), or the platform\'s trusted header.'
+  },
+  "unbounded-export": {
+    id: "unbounded-export",
+    title: "Public export/listing route queries without a row limit",
+    severity: "medium",
+    cwe: "CWE-770",
+    note: "A route under a public/export path runs a `select \u2026 from` (or `findMany`) with no `limit`/`take`. Every call materializes the whole table in memory and on the wire, and the cost grows with the data rather than with the request \u2014 a cheap amplification lever even behind a rate limit. Page it, cap it, or stream it with a hard ceiling."
+  },
+  "next-headers-missing": {
+    id: "next-headers-missing",
+    title: "Next.js app sets no security headers",
+    severity: "low",
+    cwe: "CWE-693",
+    note: "This `next.config` defines no `headers()`, and nothing in the app sets a Content-Security-Policy (no middleware, no helper). Next.js sends no CSP, HSTS, X-Frame-Options, X-Content-Type-Options or Referrer-Policy by default. Add them in `headers()` or middleware \u2014 unless a reverse proxy or CDN in front sets them, which is the thing to check (`ultrasec probe` sees what is actually served)."
   }
 };
 var APP_CTOR = /\b(?:express|fastify|Fastify)\s*\(\s*\)|\bnew\s+(?:Hono|Koa|Elysia)\s*\(|\bFastAPI\s*\(/;
@@ -33589,9 +33625,51 @@ function scanCookies(rel2, content, out2) {
     else if (sameSite[1]?.toLowerCase() === "none" && !hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-samesite-none-insecure"], m[0]));
   }
 }
+var COMMENT_LINE = /^\s*(?:\/\/|\*|\/\*)/;
+var MENTIONS_CSV = /text\/csv|\.csv\b|\bcsv\b/i;
+var CELL_JOIN = /\.join\(\s*(["'`])(?:;|,|\\t)\1\s*\)/;
+var NEUTRALIZES_FORMULA = /\[[^\]\n]*=[^\]\n]*\+[^\]\n]*\]|\[[^\]\n]*\+[^\]\n]*=[^\]\n]*\]|["']=["']\s*,\s*["']\+["']|formula|neutrali[sz]|csv-?injection|escapeCsv|sanitizeCsv/i;
+function scanCsvFormula(rel2, ls, content, out2) {
+  if (!MENTIONS_CSV.test(content)) return;
+  const code = ls.filter((l) => !COMMENT_LINE.test(l.text)).map((l) => l.text.replace(/\s\/\/.*$/, "")).join("\n");
+  if (NEUTRALIZES_FORMULA.test(code)) return;
+  const joins = ls.filter((l) => CELL_JOIN.test(l.text) && !COMMENT_LINE.test(l.text));
+  const at = joins[joins.length - 1];
+  if (at) out2.push(hit2(rel2, at.n, WEBCONFIG_SHAPES["csv-formula"], at.text));
+}
+var COERCE_BOOLEAN = /\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
+var ENV_KEY = /^\s*["']?[A-Z][A-Z0-9_]*["']?\s*:/;
+var READS_ENV = /\bprocess\.env\b|\bimport\.meta\.env\b|\bcreateEnv\s*\(|\bDeno\.env\b|\bBun\.env\b/;
+var FIRST_HOP = /\.split\(\s*(["'])\s*,\s*\1\s*\)\s*(?:\[\s*0\s*\]|\.shift\(\s*\)|\.at\(\s*0\s*\))/;
+var XFF = /x-forwarded-for|HTTP_X_FORWARDED_FOR|X_FORWARDED_FOR/i;
+var XFF_LOOKBACK = 5;
+var ROUTE_FILE = /(?:^|\/)app\/(?:.*\/)?route\.[cm]?[jt]s$|(?:^|\/)pages\/api\/.+\.[cm]?[jt]sx?$/;
+var EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|xlsx|feed|dump)(?:[/._-]|$)/i;
+var SELECT_START = /\.\s*select(?:Distinct)?\s*\(|\.\s*findMany\s*\(/g;
+var MAX_STATEMENT = 2e3;
+function scanUnboundedExport(rel2, content, out2) {
+  if (!ROUTE_FILE.test(rel2) || !EXPORT_PATH.test(rel2)) return;
+  for (const m of content.matchAll(SELECT_START)) {
+    const start2 = m.index ?? 0;
+    const rest = content.slice(start2, start2 + MAX_STATEMENT);
+    const end = rest.search(/;|\n\s*\n/);
+    const stmt = end === -1 ? rest : rest.slice(0, end);
+    const prisma = /findMany/.test(m[0]);
+    if (!prisma && !/\.\s*from\s*\(/.test(stmt)) continue;
+    if (prisma ? /\btake\s*:/.test(stmt) : /\.\s*(?:limit|paginate|\$paginate)\s*\(/.test(stmt)) continue;
+    out2.push(hit2(rel2, lineOf(content, start2), WEBCONFIG_SHAPES["unbounded-export"], stmt.split("\n")[0]));
+  }
+}
+var NEXT_CONFIG = /(?:^|\/)next\.config\.(?:js|mjs|cjs|ts|mts)$/;
+var NEXT_HEADERS = /\bheaders\s*(?:\(|:)/;
+var SETS_CSP = /Content-Security-Policy|\bhelmet\s*\(|next-secure-headers|@nosecone|\bnosecone\b|next-safe/i;
+var CONFIG_OBJECT = /(?:const|let|var)\s+\w*[cC]onfig\w*\s*(?::[^=]+)?=\s*\{|module\.exports\s*=|export\s+default\b/;
+var dirOfRel = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/") + 1) : "";
 function auditWebConfig(repo, prune, tree) {
   const out2 = [];
   const read = tree?.read ?? readText2;
+  const nextConfigs = [];
+  const cspDirs = [];
   for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf3(wf.rel);
@@ -33623,6 +33701,36 @@ function auditWebConfig(repo, prune, tree) {
     }
     scanCors(rel2, content, out2);
     scanCookies(rel2, content, out2);
+    if (JS.has(ext)) {
+      scanCsvFormula(rel2, ls, content, out2);
+      scanUnboundedExport(rel2, content, out2);
+      const readsEnv = READS_ENV.test(content);
+      for (let i2 = 0; i2 < ls.length; i2++) {
+        const l = ls[i2];
+        if (COMMENT_LINE.test(l.text)) continue;
+        const code = l.text.split("//")[0];
+        if (COERCE_BOOLEAN.test(code) && (ENV_KEY.test(code) || readsEnv)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["env-coerce-boolean"], l.text));
+      }
+      if (SETS_CSP.test(content) && !NEXT_CONFIG.test(rel2)) cspDirs.push(dirOfRel(rel2));
+      if (NEXT_CONFIG.test(rel2)) {
+        if (SETS_CSP.test(content)) cspDirs.push(dirOfRel(rel2));
+        if (!NEXT_HEADERS.test(content)) nextConfigs.push({ rel: rel2, ls });
+      }
+    }
+    if (CODE.has(ext)) {
+      for (let i2 = 0; i2 < ls.length; i2++) {
+        const l = ls[i2];
+        if (COMMENT_LINE.test(l.text) || !FIRST_HOP.test(l.text)) continue;
+        const window2 = ls.slice(Math.max(0, i2 - XFF_LOOKBACK), i2 + 1);
+        if (window2.some((w) => XFF.test(w.text))) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["xff-first-hop"], l.text));
+      }
+    }
+  }
+  for (const cfg of nextConfigs) {
+    const root = dirOfRel(cfg.rel);
+    if (cspDirs.some((d) => d.startsWith(root))) continue;
+    const at = cfg.ls.find((l) => CONFIG_OBJECT.test(l.text)) ?? cfg.ls[0];
+    if (at) out2.push(hit2(cfg.rel, at.n, WEBCONFIG_SHAPES["next-headers-missing"], at.text));
   }
   return out2;
 }
