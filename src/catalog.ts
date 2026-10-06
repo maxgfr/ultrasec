@@ -179,8 +179,72 @@ export interface SinkRule {
    * field existed.
    */
   refutedBy?: SinkRefutation;
+  /**
+   * JavaScript/TypeScript only: shapes of the call's FIRST argument that prove
+   * the call is not this sink.
+   *
+   * - `callback`: the first argument is a function. tRPC registers a procedure
+   *   with `.query(async ({ ctx, input }) => …)`; no SQL driver takes a callback
+   *   where the statement goes. On a real tRPC app 31 of 53 "SQL injection"
+   *   candidates were procedure declarations.
+   * - `tags`: the first argument is a tagged template whose tag binds every
+   *   interpolation as a parameter (Drizzle's `sql\`…\``, postgres.js, slonik)
+   *   — only when the file imports one of `modules`. A `sql.raw(x)` inside it is
+   *   its own call and its own sink. Imports not extracted ⇒ no refutation.
+   *
+   * Read from the file's lines starting at the call's line (a chained call is
+   * recorded on the line its chain starts); a call that cannot be found there
+   * refutes nothing.
+   */
+  jsFirstArgument?: { callback?: boolean; tags?: readonly { tag: string; modules: readonly string[] }[] };
   title: string;
   note: string;
+}
+
+/** How far below the recorded line a chained call's `callee(` may sit. */
+const JS_CALL_LOOKAHEAD = 30;
+
+/**
+ * The text right after `callee(` (or `callee<…>(`), starting at `line` — the
+ * first such call in a window of lines. Undefined when there is none.
+ */
+function jsFirstArgumentHead(lines: readonly string[], line: number, callee: string): string | undefined {
+  const text = lines.slice(line - 1, line - 1 + JS_CALL_LOOKAHEAD).join("\n");
+  const re = new RegExp(`(?<![\\w$])${callee.replace(/[$]/g, "\\$")}\\s*`, "g");
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    let i = m.index + m[0].length;
+    if (text[i] === "<") {
+      // A generic argument list: `execute<{ total: number }>(` — balanced, and an
+      // arrow's `=>` is not a closing bracket.
+      let depth = 0;
+      for (; i < text.length; i++) {
+        const c = text[i];
+        if (c === "<") depth++;
+        else if (c === ">" && text[i - 1] !== "=") depth--;
+        if (depth === 0) break;
+      }
+      i = i + 1;
+      while (i < text.length && /\s/.test(text[i]!)) i++;
+    }
+    if (text[i] === "(") return text.slice(i + 1, i + 400).trimStart();
+  }
+  return undefined;
+}
+
+const JS_CALLBACK = /^(?:async\s+)?function\b|^(?:async\s*)?\((?:[^()]|\([^()]*\))*\)\s*(?::[^=]{0,200}?)?=>|^(?:async\s+)?[A-Za-z_$][\w$]*\s*=>/;
+
+/** True when this call's first argument proves it is not `rule`'s sink (see `jsFirstArgument`). */
+function jsArgumentRefutes(rule: SinkRule, lines: readonly string[], c: Call, specs: readonly string[]): boolean {
+  const shape = rule.jsFirstArgument;
+  if (!shape) return false;
+  const head = jsFirstArgumentHead(lines, c.line, c.callee);
+  if (head === undefined) return false;
+  if (shape.callback && JS_CALLBACK.test(head)) return true;
+  for (const t of shape.tags ?? []) {
+    if (!new RegExp(`^${t.tag}\\s*(?:<[^>\`]*>)?\\s*\``).test(head)) continue;
+    if (specs.some((s) => t.modules.some((m) => s === m || s.startsWith(`${m}/`)))) return true;
+  }
+  return false;
 }
 
 /**
@@ -307,6 +371,15 @@ export const SINKS: SinkRule[] = [
       "pg_send_query",
       "sqlite_query",
     ],
+    jsFirstArgument: {
+      callback: true,
+      tags: [
+        {
+          tag: "sql",
+          modules: ["drizzle-orm", "postgres", "slonik", "@vercel/postgres", "@neondatabase/serverless", "kysely", "sql-template-tag", "sql-template-strings"],
+        },
+      ],
+    },
     title: "SQL injection",
     note: "Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query.",
   },
@@ -2398,6 +2471,7 @@ export function findSinks(
       // The evidence gate: this call's own arguments or receiver chain say it is
       // not what the rule claims. Needs the file's lines; without them the rule
       // fires exactly as before, and so does a call that cannot be attributed.
+      if (rule.jsFirstArgument && lines && lang.id === "javascript" && jsArgumentRefutes(rule, lines, c, specs)) continue;
       if (rule.refutedBy && lines) {
         if (!siteRead) {
           site = callSiteFor(statement(c.line), c.callee, c.receiver);

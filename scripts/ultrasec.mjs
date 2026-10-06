@@ -29150,6 +29150,40 @@ function cweUrl(cwe) {
   const n = cwe.replace(/\D/g, "");
   return `https://cwe.mitre.org/data/definitions/${n}.html`;
 }
+var JS_CALL_LOOKAHEAD = 30;
+function jsFirstArgumentHead(lines5, line2, callee) {
+  const text = lines5.slice(line2 - 1, line2 - 1 + JS_CALL_LOOKAHEAD).join("\n");
+  const re = new RegExp(`(?<![\\w$])${callee.replace(/[$]/g, "\\$")}\\s*`, "g");
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    let i2 = m.index + m[0].length;
+    if (text[i2] === "<") {
+      let depth = 0;
+      for (; i2 < text.length; i2++) {
+        const c2 = text[i2];
+        if (c2 === "<") depth++;
+        else if (c2 === ">" && text[i2 - 1] !== "=") depth--;
+        if (depth === 0) break;
+      }
+      i2 = i2 + 1;
+      while (i2 < text.length && /\s/.test(text[i2])) i2++;
+    }
+    if (text[i2] === "(") return text.slice(i2 + 1, i2 + 400).trimStart();
+  }
+  return void 0;
+}
+var JS_CALLBACK = /^(?:async\s+)?function\b|^(?:async\s*)?\((?:[^()]|\([^()]*\))*\)\s*(?::[^=]{0,200}?)?=>|^(?:async\s+)?[A-Za-z_$][\w$]*\s*=>/;
+function jsArgumentRefutes(rule2, lines5, c2, specs) {
+  const shape = rule2.jsFirstArgument;
+  if (!shape) return false;
+  const head = jsFirstArgumentHead(lines5, c2.line, c2.callee);
+  if (head === void 0) return false;
+  if (shape.callback && JS_CALLBACK.test(head)) return true;
+  for (const t of shape.tags ?? []) {
+    if (!new RegExp(`^${t.tag}\\s*(?:<[^>\`]*>)?\\s*\``).test(head)) continue;
+    if (specs.some((s) => t.modules.some((m) => s === m || s.startsWith(`${m}/`)))) return true;
+  }
+  return false;
+}
 var JVM_AEAD_TRANSFORMATION = /^(?:AES|ARIA|Camellia)(?:_(?:128|192|256))?\/(?:GCM|CCM)(?:\/[A-Za-z0-9]+)?$|^ChaCha20-Poly1305$/i;
 var JVM_STRONG_ALGORITHM = /^(?:AES|ChaCha20|RSA|EC|ECDSA|Ed25519|X25519|DiffieHellman|PBKDF2WithHmacSHA(?:224|256|384|512)|HmacSHA(?:224|256|384|512))$/i;
 var JVM = ["java", "kotlin", "scala"];
@@ -29253,6 +29287,15 @@ var SINKS = [
       "pg_send_query",
       "sqlite_query"
     ],
+    jsFirstArgument: {
+      callback: true,
+      tags: [
+        {
+          tag: "sql",
+          modules: ["drizzle-orm", "postgres", "slonik", "@vercel/postgres", "@neondatabase/serverless", "kysely", "sql-template-tag", "sql-template-strings"]
+        }
+      ]
+    },
     title: "SQL injection",
     note: "Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query."
   },
@@ -30866,6 +30909,7 @@ function findSinks(lang, calls, extraSinks, imports, localDefs, lines5) {
       if (!appliesTo(rule2.languages, lang.id) || rule2.exceptLanguages?.includes(lang.id)) continue;
       if (rule2.requireReceiver && !c2.receiver) continue;
       if (rule2.receivers && c2.receiver && !rule2.receivers.includes(c2.receiver)) continue;
+      if (rule2.jsFirstArgument && lines5 && lang.id === "javascript" && jsArgumentRefutes(rule2, lines5, c2, specs)) continue;
       if (rule2.refutedBy && lines5) {
         if (!siteRead) {
           site = callSiteFor(statement(c2.line), c2.callee, c2.receiver);
