@@ -225,7 +225,9 @@ target, an ambiguous symbol, or an unknown node.
 
 ### `paths`
 List the candidate source→sink **chains**. `--run` (default `.ultrasec`) · `--kind <k>` ·
-`--severity <s>` · `--surface code|supply|deps|all` · `--json`.
+`--min-severity <s>` (that severity **and above**, as on `check`) · `--severity <s>` (exactly that
+severity — it prints how many chains above it were left out) · `--surface code|supply|deps|all` ·
+`--json`.
 
 `--surface` splits the candidates the way the report does — `code` is what you wrote (`taint`,
 `sast`, `authz`, `crypto`, `logs`, `privacy`), `supply` is your repo's credentials and CI/IaC

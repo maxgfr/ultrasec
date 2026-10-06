@@ -75,7 +75,7 @@ ultrasec scan    --repo . --out .ultrasec       # graph + cross-file taint + too
   # recall: --sinks (orphan sinks: calls AND assignments)  --log-hygiene  --blame
   #         --no-env-sources (drop env-rooted flows)  --strict-scope (drop cross-function-in-file)
   # net:    --offline / --no-enrich (no EPSS/KEV)      --docker (scanners without installing)
-ultrasec paths   --run .ultrasec                # the candidate chains  (--kind sql --severity high)
+ultrasec paths   --run .ultrasec                # the candidate chains  (--kind sql --min-severity high)
   # --surface code|supply|deps|all              # YOUR code · secrets+CI/IaC · advisories  (also on triage/orchestrate)
 ultrasec dossier <id> --run .ultrasec           # ONE finding: enclosing function, callers, route, guards, sanitizers
   # --brief                                     # the compact packet, for batch fan-out

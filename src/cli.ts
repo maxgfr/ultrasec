@@ -75,8 +75,10 @@ COMMANDS
   paths      List candidate cross-file source→sink chains.
              --surface narrows to one half of the report: 'code' (this repo's
              own source), 'supply' (secrets + CI/IaC), 'deps' (advisories) or
-             'all' (default). Flags: --run · --kind <k> · --severity <s> ·
-             --surface <s> · --json.
+             'all' (default). --min-severity <s> keeps <s> AND above (as on
+             check); --severity <s> keeps exactly <s> and names what it hid
+             above it. Flags: --run · --kind <k> · --min-severity <s> ·
+             --severity <s> · --surface <s> · --json.
   dossier    Print the grounding packet for one finding (real code + neighbours).
              The id may be a unique PREFIX. CONTEXT.md is reprinted before each
              finding: --compact keeps only the hunt-list/exposure/criticality

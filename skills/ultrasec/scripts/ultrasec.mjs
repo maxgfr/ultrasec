@@ -12627,10 +12627,10 @@ function resolveRust(fromRel, spec, ctx) {
 }
 function* javaPackagesOf(dir, rootRank) {
   for (let d = dir; ; d = d.includes("/") ? posix2.dirname(d) : "") {
-    const rank = rootRank.get(d);
-    if (rank !== void 0) {
+    const rank2 = rootRank.get(d);
+    if (rank2 !== void 0) {
       const below = d ? dir.slice(d.length + 1) : dir;
-      if (!below.includes(".")) yield { rank, pkg: below.replace(/\//g, ".") };
+      if (!below.includes(".")) yield { rank: rank2, pkg: below.replace(/\//g, ".") };
     }
     if (!d) return;
   }
@@ -12663,20 +12663,20 @@ function addJavaToIndex(index, ctx) {
   const { types, packages } = index;
   const typeRank = /* @__PURE__ */ new Map();
   const pkgRank = /* @__PURE__ */ new Map();
-  const keep = (map, ranks, key, rank, file) => {
-    if (rank >= (ranks.get(key) ?? Infinity)) return;
-    ranks.set(key, rank);
+  const keep = (map, ranks, key, rank2, file) => {
+    if (rank2 >= (ranks.get(key) ?? Infinity)) return;
+    ranks.set(key, rank2);
     map.set(key, file);
   };
   for (const [dir, list] of ctx.filesByDir) {
     const java2 = list.filter((f) => f.endsWith(".java"));
     if (!java2.length) continue;
     const first = java2.reduce((a, b) => b < a ? b : a);
-    for (const { rank, pkg } of javaPackagesOf(dir, rootRank)) {
-      keep(packages, pkgRank, pkg, rank, first);
+    for (const { rank: rank2, pkg } of javaPackagesOf(dir, rootRank)) {
+      keep(packages, pkgRank, pkg, rank2, first);
       for (const f of java2) {
         const stem2 = f.slice(f.lastIndexOf("/") + 1, -".java".length);
-        if (!stem2.includes(".")) keep(types, typeRank, pkg ? pkg + "." + stem2 : stem2, rank, f);
+        if (!stem2.includes(".")) keep(types, typeRank, pkg ? pkg + "." + stem2 : stem2, rank2, f);
       }
     }
   }
@@ -18773,8 +18773,8 @@ function productionRank(graph) {
 function renderRepoMap(scan2, graph, opts = {}) {
   const budgetChars = (opts.budgetTokens ?? 1024) * CHARS_PER_TOKEN;
   const maxSymbols = opts.maxSymbolsPerFile ?? 8;
-  const rank = productionRank(graph);
-  const ranked = graph.files.filter((f) => f.fileKind === "code" && !f.testFile).sort((a, b) => rank.get(b.rel) - rank.get(a.rel) || b.symbols - a.symbols || byStr(a.rel, b.rel));
+  const rank2 = productionRank(graph);
+  const ranked = graph.files.filter((f) => f.fileKind === "code" && !f.testFile).sort((a, b) => rank2.get(b.rel) - rank2.get(a.rel) || b.symbols - a.symbols || byStr(a.rel, b.rel));
   const records = new Map(scan2.files.map((f) => [f.rel, f]));
   let out2 = opts.bare ? "" : `# repo map \u2014 ${graph.fileCount} files
 `;
@@ -18841,7 +18841,7 @@ function changeCoupling(dir, opts = {}) {
   const rel2 = repoPaths(log);
   const names = rel2.filter((p) => p !== void 0 && (!indexed || indexed.has(p))).sort(byStr);
   const rankOf = new Map(names.map((name2, i2) => [name2, i2]));
-  const rank = rel2.map((p) => p === void 0 ? -1 : rankOf.get(p) ?? -1);
+  const rank2 = rel2.map((p) => p === void 0 ? -1 : rankOf.get(p) ?? -1);
   const m = names.length;
   const totals = new Int32Array(m);
   const pairs = /* @__PURE__ */ new Map();
@@ -18855,7 +18855,7 @@ function changeCoupling(dir, opts = {}) {
       if (seen[id] === c2) continue;
       seen[id] = c2;
       size++;
-      if (rank[id] >= 0) files.push(rank[id]);
+      if (rank2[id] >= 0) files.push(rank2[id]);
     }
     if (size === 0 || size > maxCommitFiles) continue;
     files.sort((x, y) => x - y);
@@ -20997,8 +20997,8 @@ function dependencyPath(graph, from, to, opts = {}) {
       const list = out2.get(e.from) ?? out2.set(e.from, []).get(e.from);
       for (const t of targets) list.push([t, e.kind]);
     }
-    const rank = (k) => k === "import" ? 0 : k === "use" ? 1 : 2;
-    for (const list of out2.values()) list.sort((a, b) => byStr(a[0], b[0]) || rank(a[1]) - rank(b[1]));
+    const rank2 = (k) => k === "import" ? 0 : k === "use" ? 1 : 2;
+    for (const list of out2.values()) list.sort((a, b) => byStr(a[0], b[0]) || rank2(a[1]) - rank2(b[1]));
     return (node) => out2.get(node) ?? [];
   };
   const includeInferred = opts.includeInferred === true;
@@ -35946,7 +35946,7 @@ function capBySite(items, weight, bySite) {
 }
 function buildContextScaffold(repo, scan2, surface) {
   const frameworks = detectFrameworks(repo);
-  const rank = new Map(surface.byFile.map((f) => [f.file, f.score]));
+  const rank2 = new Map(surface.byFile.map((f) => [f.file, f.score]));
   const perFile = /* @__PURE__ */ new Map();
   for (const g of surface.entryPoints) {
     for (const s of g.samples) {
@@ -35968,7 +35968,7 @@ function buildContextScaffold(repo, scan2, surface) {
       // real surface. `--include-tests` is for auditing the suite itself.
       (isTestPath(a.file) ? 1 : 0) - (isTestPath(b.file) ? 1 : 0) || // Kind next: in a capped brief, an HTTP route earns its slot ahead of
       // an environment read, which presumes a much narrower attacker.
-      entryWeight(b.kind) - entryWeight(a.kind) || (rank.get(b.file) ?? 0) - (rank.get(a.file) ?? 0) || byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind)
+      entryWeight(b.kind) - entryWeight(a.kind) || (rank2.get(b.file) ?? 0) - (rank2.get(a.file) ?? 0) || byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind)
     )
   ).slice(0, MAX_SCAFFOLD_ENTRIES).sort((a, b) => byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind));
   const authMiddleware = [];
@@ -39834,10 +39834,22 @@ function runInvestigate(args2) {
 
 // src/commands/paths.ts
 import { resolve as resolve27 } from "path";
+var isSeverity = (s) => SEVERITIES2.includes(s);
+var rank = (s) => SEVERITIES2.indexOf(s);
 function runPaths(args2) {
   const run2 = resolve27(flagStr(args2, "run") ?? ".ultrasec");
   const kind = flagStr(args2, "kind");
   const sev = flagStr(args2, "severity");
+  const floor = flagStr(args2, "min-severity");
+  for (const [flag, value] of [
+    ["severity", sev],
+    ["min-severity", floor]
+  ]) {
+    if (value !== void 0 && !isSeverity(value)) {
+      eprintln(`ultrasec paths: unknown --${flag} '${value}' (expected ${SEVERITIES2.join("|")}).`);
+      return 2;
+    }
+  }
   const surfaceFlag = flagStr(args2, "surface");
   if (surfaceFlag !== void 0 && !SURFACE_FILTERS.includes(surfaceFlag)) {
     eprintln(`ultrasec paths: unknown --surface "${surfaceFlag}" \u2014 expected one of: ${SURFACE_FILTERS.join(", ")}.`);
@@ -39855,7 +39867,14 @@ function runPaths(args2) {
   let findings = chained;
   if (surface !== "all") findings = findings.filter((f) => surfaceOf(f) === surface);
   if (kind) findings = findings.filter((f) => f.sink?.kind === kind);
+  const hiddenAbove = sev && !floor ? findings.filter((f) => rank(f.severity) < rank(sev)) : [];
+  if (floor) findings = findings.filter((f) => rank(f.severity) <= rank(floor));
   if (sev) findings = findings.filter((f) => f.severity === sev);
+  const aboveNote = () => {
+    if (!hiddenAbove.length || !sev) return;
+    const bySev = SEVERITIES2.filter((s) => rank(s) < rank(sev)).map((s) => [s, hiddenAbove.filter((f) => f.severity === s).length]).filter(([, n]) => n > 0).map(([s, n]) => `${n} ${s}`).join(", ");
+    eprintln(`  note: --severity is an exact match \u2014 ${bySev} chain(s) above this severity are not listed (use --min-severity ${sev} for "${sev} and above").`);
+  };
   const pathlessOfKind = kind ? d.findings.filter((f) => !(f.path && f.path.length) && f.sink?.kind === kind).length : 0;
   if (flagBool(args2, "json")) {
     println(
@@ -39869,6 +39888,7 @@ function runPaths(args2) {
   }
   if (!findings.length) {
     println("no candidate taint paths match.");
+    aboveNote();
     if (pathlessOfKind) {
       println(
         `  but ${pathlessOfKind} \`${kind}\` finding(s) exist WITHOUT a proven source path (orphan sinks) \u2014 this command lists chains only. See DOSSIER.md, or \`--json\` on findings.json.`
@@ -39883,6 +39903,7 @@ function runPaths(args2) {
   if (pathlessOfKind) {
     println(`  (+${pathlessOfKind} \`${kind}\` finding(s) with no proven source path \u2014 not chains, so not listed here.)`);
   }
+  aboveNote();
   return 0;
 }
 
@@ -44218,7 +44239,14 @@ async function dispatch(name2, args2, repo, run2) {
     }
     case "ultrasec_paths":
       requireRun(run2);
-      return runCommand(name2, [], { repo, run: run2, kind: str2(args2.kind), severity: str2(args2.severity), json: true });
+      return runCommand(name2, [], {
+        repo,
+        run: run2,
+        kind: str2(args2.kind),
+        severity: str2(args2.severity),
+        "min-severity": str2(args2.min_severity),
+        json: true
+      });
     case "ultrasec_verify": {
       requireRun(run2);
       const shards = positive(args2.shards, "shards");
@@ -44452,7 +44480,8 @@ var TOOLS3 = [
         repo: repoProp2,
         run: runProp,
         kind: { type: "string", description: "Keep only this sink kind (e.g. sql, command, path, ssrf, xss)." },
-        severity: { type: "string", enum: SEVERITY_ENUM, description: "Keep only findings at this severity." }
+        severity: { type: "string", enum: SEVERITY_ENUM, description: "Keep only findings at exactly this severity." },
+        min_severity: { type: "string", enum: SEVERITY_ENUM, description: "Keep only findings at or above this severity." }
       },
       required: ["repo"]
     }
@@ -45333,8 +45362,10 @@ COMMANDS
   paths      List candidate cross-file source\u2192sink chains.
              --surface narrows to one half of the report: 'code' (this repo's
              own source), 'supply' (secrets + CI/IaC), 'deps' (advisories) or
-             'all' (default). Flags: --run \xB7 --kind <k> \xB7 --severity <s> \xB7
-             --surface <s> \xB7 --json.
+             'all' (default). --min-severity <s> keeps <s> AND above (as on
+             check); --severity <s> keeps exactly <s> and names what it hid
+             above it. Flags: --run \xB7 --kind <k> \xB7 --min-severity <s> \xB7
+             --severity <s> \xB7 --surface <s> \xB7 --json.
   dossier    Print the grounding packet for one finding (real code + neighbours).
              The id may be a unique PREFIX. CONTEXT.md is reprinted before each
              finding: --compact keeps only the hunt-list/exposure/criticality
