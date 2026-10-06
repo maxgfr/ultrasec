@@ -281,6 +281,14 @@ function scanCors(rel: string, content: string, out: Finding[]): void {
 // statement. Java `new Cookie(...)` stays with the catalog `cookie` sink.
 const COOKIE_CALL = /\b(?:res(?:ponse)?\.cookie|reply\.setCookie|ctx\.cookies\.set|cookies\.set|setcookie)\s*\(/gi;
 
+/** `flag: <expression>` in an options object — not a literal false/0/null/undefined. */
+function dynamicFlag(args: string, flag: string): boolean {
+  const m = new RegExp(`\\b${flag}\\s*:\\s*([^,}\\s][^,}]*)`, "i").exec(args);
+  if (!m) return false;
+  const v = m[1]!.trim();
+  return !/^(?:false|0|null|undefined|true|1)\b/i.test(v) && /^[!A-Za-z_$(]/.test(v);
+}
+
 function scanCookies(rel: string, content: string, out: Finding[]): void {
   for (const m of content.matchAll(COOKIE_CALL)) {
     if (/clearCookie/i.test(m[0])) continue;
@@ -295,8 +303,12 @@ function scanCookies(rel: string, content: string, out: Finding[]): void {
       out.push(hit(rel, ln, WEBCONFIG_SHAPES["cookie-secure"]!, `${m[0]}…`));
       continue;
     }
-    const hasHttpOnly = /httponly\s*[:=]?\s*(?:true|1)/i.test(args) || /['"]httponly['"]\s*=>\s*true/i.test(args);
-    const hasSecure = /\bsecure\s*[:=]?\s*(?:true|1)/i.test(args) || /['"]secure['"]\s*=>\s*true/i.test(args);
+    // A flag bound to an expression (`secure: isHttps`, `secure: env.PROD`) is
+    // SET — to whatever the deployment decides — not missing. Only a literal
+    // false/0, or no flag at all, is a finding. Reading `secure: isSecure` as
+    // absent put a "Cookie without Secure" on a logout route that sets it.
+    const hasHttpOnly = /httponly\s*[:=]?\s*(?:true|1)/i.test(args) || /['"]httponly['"]\s*=>\s*true/i.test(args) || dynamicFlag(args, "httponly");
+    const hasSecure = /\bsecure\s*[:=]?\s*(?:true|1)/i.test(args) || /['"]secure['"]\s*=>\s*true/i.test(args) || dynamicFlag(args, "secure");
     const sameSite = /samesite\s*[:=]?\s*['"]?(strict|lax|none)/i.exec(args) || /['"]samesite['"]\s*=>\s*['"]?(strict|lax|none)/i.exec(args);
     if (!hasHttpOnly) out.push(hit(rel, ln, WEBCONFIG_SHAPES["cookie-httponly"]!, m[0]));
     if (!hasSecure) out.push(hit(rel, ln, WEBCONFIG_SHAPES["cookie-secure"]!, m[0]));

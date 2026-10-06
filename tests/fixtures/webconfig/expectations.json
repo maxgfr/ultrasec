@@ -78,5 +78,9 @@
   "hardening/body-limit.js": [
     "body-limit-missing"
   ],
-  "hardening/safe.js": []
+  "hardening/safe.js": [],
+  "cookie/dynamic-flags.js": [],
+  "cookie/secure-false.js": [
+    "cookie-secure"
+  ]
 }

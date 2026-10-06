@@ -33561,6 +33561,12 @@ function scanCors(rel2, content, out2) {
   }
 }
 var COOKIE_CALL = /\b(?:res(?:ponse)?\.cookie|reply\.setCookie|ctx\.cookies\.set|cookies\.set|setcookie)\s*\(/gi;
+function dynamicFlag(args2, flag) {
+  const m = new RegExp(`\\b${flag}\\s*:\\s*([^,}\\s][^,}]*)`, "i").exec(args2);
+  if (!m) return false;
+  const v = m[1].trim();
+  return !/^(?:false|0|null|undefined|true|1)\b/i.test(v) && /^[!A-Za-z_$(]/.test(v);
+}
 function scanCookies(rel2, content, out2) {
   for (const m of content.matchAll(COOKIE_CALL)) {
     if (/clearCookie/i.test(m[0])) continue;
@@ -33574,8 +33580,8 @@ function scanCookies(rel2, content, out2) {
       out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-secure"], `${m[0]}\u2026`));
       continue;
     }
-    const hasHttpOnly = /httponly\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]httponly['"]\s*=>\s*true/i.test(args2);
-    const hasSecure = /\bsecure\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]secure['"]\s*=>\s*true/i.test(args2);
+    const hasHttpOnly = /httponly\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]httponly['"]\s*=>\s*true/i.test(args2) || dynamicFlag(args2, "httponly");
+    const hasSecure = /\bsecure\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]secure['"]\s*=>\s*true/i.test(args2) || dynamicFlag(args2, "secure");
     const sameSite = /samesite\s*[:=]?\s*['"]?(strict|lax|none)/i.exec(args2) || /['"]samesite['"]\s*=>\s*['"]?(strict|lax|none)/i.exec(args2);
     if (!hasHttpOnly) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-httponly"], m[0]));
     if (!hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-secure"], m[0]));
