@@ -36278,6 +36278,12 @@ var PRESENCE_NEGATION = /\b(?:aucune?s?|nulle\s+part|jamais|n['’]existe|n['’
 var CODE_SPAN = /`([^`\n]+)`/g;
 var NEGATION_WINDOW = 16;
 var isSearchable = (rel2) => langForFile(rel2) !== void 0;
+var ATTRIBUTIVE_NEGATION = /\b(?:with|avec)\s+$/i;
+var GENERIC_SUBJECT = /^[\s>*_-]*(?:a|an|any|every|each|if|when|whenever|unless|un|une|tout|toute|si|lorsqu['’]?\w*|quand)\s/i;
+function attributive(sentence, negationAt) {
+  const before = sentence.slice(0, negationAt);
+  return ATTRIBUTIVE_NEGATION.test(before) && GENERIC_SUBJECT.test(sentence);
+}
 var MIN_TOKEN = 4;
 var MAX_CLAIMS = 20;
 var MAX_HITS = 3;
@@ -36294,6 +36300,10 @@ function extractNegativeClaims(md) {
       PRESENCE_NEGATION.lastIndex = 0;
       let m = PRESENCE_NEGATION.exec(sentence);
       while (m) {
+        if (attributive(sentence, m.index)) {
+          m = PRESENCE_NEGATION.exec(sentence);
+          continue;
+        }
         const at = m.index + m[0].length;
         const rest = sentence.slice(at);
         CODE_SPAN.lastIndex = 0;
