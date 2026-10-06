@@ -64,7 +64,7 @@
     "semantic-release": "^24.2.0",
     "tsup": "^8.3.0",
     "typescript": "^5.5.0",
-    "vitest": "^4.1.10",
+    "vitest": "^5.0.3",
     "@maxgfr/webindex": "https://codeload.github.com/maxgfr/webindex/tar.gz/844bb81c9868f54e996e444797ad3cf54b61ded5"
   },
   "pnpm": {
