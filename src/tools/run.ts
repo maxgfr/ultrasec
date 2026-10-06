@@ -5,6 +5,7 @@ import type { Category, Finding, PathStep, CodeLoc } from "../types.js";
 import { detect } from "./registry.js";
 import { correlate } from "./correlate.js";
 import { PartialToolReportError } from "./partial-report.js";
+import type { StagedTarget } from "./snapshot.js";
 
 // Adapter contract: each scanner provides how to invoke it and how to parse its
 // JSON into normalized Findings. The runner detects presence, runs the installed
@@ -51,6 +52,14 @@ export interface RunContext {
    * adapter runs, as before.
    */
   cache?: ToolResultCache;
+  /**
+   * Scan version-control HISTORY where the tool can (`scan --secrets-history`).
+   * Absent ⇒ history-capable tools scan the tree as it stands, and say so as
+   * degraded coverage.
+   */
+  history?: boolean;
+  /** Per-exec timeout override in ms (default `TIMEOUT_MS`). For tests. */
+  timeoutMs?: number;
 }
 
 /** One cached scanner result, keyed on everything that could change its output. */
@@ -135,6 +144,24 @@ export interface ToolAdapter {
    * pulls rules, so `!network` would be the wrong test — they stay uncached.
    */
   cacheable?: boolean;
+  /**
+   * Scan a staged copy instead of the repository itself — for a tool that walks
+   * a directory with no notion of `.gitignore`, where the raw tree is mostly
+   * node_modules and build output. Called right before the exec; the returned
+   * directory replaces the repo as argv target, cwd and docker mount, findings
+   * are relativized against it, and it is disposed once the output is parsed.
+   * Null ⇒ scan the repository as before. Its `degraded` note says what the
+   * staged target leaves out, and lands on the tool's status.
+   */
+  stage?(repo: string, ctx: RunContext): StagedTarget | null;
+  /**
+   * When a `ctx.history` pass times out, run once more with `history: false`
+   * (which may `stage`) instead of reporting the tool as failed. The result is
+   * then ok, and `degraded` says the history was abandoned. A history walk is
+   * the one pass whose length grows with the age of the repo rather than its
+   * size — timing out on it must not cost the working-tree coverage too.
+   */
+  historyFallback?: boolean;
 }
 
 export interface ToolRunResult {
@@ -145,6 +172,8 @@ export interface ToolRunResult {
   note: string;
   /** Optional execution stays tolerant, but required scanners need every workspace. */
   workspaceCoverage?: { total: number; completed: number };
+  /** The tool ran, but over less than it could have — what it left out. */
+  degraded?: string;
 }
 
 /** Per-tool outcome, persisted so a report distinguishes "ran, 0 findings" from
@@ -155,12 +184,14 @@ export interface ToolStatus {
   findings?: number;
   note?: string;
   workspaceCoverage?: { total: number; completed: number };
+  /** Coverage the run gave up although it succeeded (see `ToolRunResult.degraded`). */
+  degraded?: string;
 }
 
 /** Collapse the rich run results into a persisted per-tool status. */
 export function toolStatus(results: ToolRunResult[]): ToolStatus[] {
   return results.map((r) => {
-    const coverage = r.workspaceCoverage ? { workspaceCoverage: r.workspaceCoverage } : {};
+    const coverage = { ...(r.workspaceCoverage ? { workspaceCoverage: r.workspaceCoverage } : {}), ...(r.degraded ? { degraded: r.degraded } : {}) };
     if (!r.ran) return { name: r.name, status: "skipped", ...(r.note ? { note: r.note } : {}), ...coverage };
     if (!r.ok) return { name: r.name, status: "failed", ...(r.note ? { note: r.note } : {}), ...coverage };
     const status = r.findings.length ? "ran" : "empty";
@@ -178,6 +209,8 @@ interface ExecResult {
   stdout: string;
   failed: boolean;
   err?: string;
+  /** Killed by the timeout rather than failing on its own. */
+  timedOut?: boolean;
 }
 
 /**
@@ -193,11 +226,14 @@ interface ExecResult {
  *   exit non-zero WHEN they find issues, and still print JSON.
  * - `useStderr` returns fd 2 as the report (cppcheck writes there by convention).
  */
-function execAsync(name: string, args: string[], cwd: string, useStderr = false): Promise<ExecResult> {
+function execAsync(name: string, args: string[], cwd: string, useStderr = false, timeout = TIMEOUT_MS): Promise<ExecResult> {
   return new Promise((resolve) => {
-    execFile(name, args, { cwd, encoding: "utf8", timeout: TIMEOUT_MS, maxBuffer: MAX_BUFFER, windowsHide: true }, (error, stdout, stderr) => {
+    execFile(name, args, { cwd, encoding: "utf8", timeout, maxBuffer: MAX_BUFFER, windowsHide: true }, (error, stdout, stderr) => {
       const out = String(stdout ?? "");
       const errText = String(stderr ?? "");
+      if (error && (error as { killed?: boolean }).killed && (error as { signal?: unknown }).signal) {
+        return resolve({ stdout: "", failed: true, timedOut: true, err: `timed out after ${Math.round(timeout / 1000)} s` });
+      }
       if (useStderr) {
         // The report lives on fd 2, whatever the exit code. Only a failure to
         // run at all (ENOENT/EACCES — a string code — or a timeout, no code)
@@ -339,13 +375,65 @@ async function runNative(adapter: ToolAdapter, repo: string, ctx: RunContext): P
     if (hit && hit.key === key) return { ...hit.result, findings: [...hit.result.findings], note: `${hit.result.note} · ${CACHED_NOTE}` };
   }
 
-  const { stdout, failed, err } = await execAsync(cmd[0]!, [...cmd.slice(1), ...argv], repo, adapter.stderr);
-  const result = finish(adapter, repo, stdout, failed, err, false, ctx);
+  const run = (c: RunContext) =>
+    staged(adapter, repo, c, async (target) => {
+      const args = target === repo ? argv : (buildArgv(adapter, repo, target, c) ?? argv);
+      return execAsync(cmd[0]!, [...cmd.slice(1), ...args], target, adapter.stderr, c.timeoutMs);
+    });
+  const result = await withHistoryFallback(adapter, ctx, run);
   // Only a run that actually produced a report is worth replaying: a failure
   // is re-attempted next time, and "0 findings" from a crash never becomes
   // "0 findings" from a scan.
   if (cache && key && result.ran && result.ok) cache.entries.set(adapter.name, { key, result });
   return result;
+}
+
+/**
+ * One exec of `adapter`, against a staged copy when the adapter asks for one.
+ *
+ * `exec` receives the directory to scan — the repo, or the staged copy — and the
+ * findings are relativized against that same directory, so they cite
+ * repo-relative paths either way. The copy is disposed whatever happened.
+ */
+async function staged(
+  adapter: ToolAdapter,
+  repo: string,
+  ctx: RunContext,
+  exec: (target: string) => Promise<ExecResult>,
+  docker = false,
+): Promise<ToolRunResult & { timedOut?: boolean }> {
+  let target: StagedTarget | null = null;
+  try {
+    target = adapter.stage?.(repo, ctx) ?? null;
+  } catch (e) {
+    // Never fall back to the raw tree here: that is the scan staging exists to avoid.
+    return { name: adapter.name, ran: false, ok: false, findings: [], note: `could not stage the files to scan: ${(e as Error).message}` };
+  }
+  try {
+    const dir = target?.dir ?? repo;
+    const { stdout, failed, err, timedOut } = await exec(dir);
+    const result = finish(adapter, repo, stdout, failed, err, docker, ctx, docker ? undefined : dir);
+    return { ...result, ...(target?.degraded && result.ok ? { degraded: target.degraded } : {}), ...(timedOut ? { timedOut } : {}) };
+  } finally {
+    target?.dispose();
+  }
+}
+
+/** Run `run` once; if a history pass timed out and the adapter allows it, once more without history. */
+async function withHistoryFallback(
+  adapter: ToolAdapter,
+  ctx: RunContext,
+  run: (c: RunContext) => Promise<ToolRunResult & { timedOut?: boolean }>,
+): Promise<ToolRunResult> {
+  const { timedOut, ...first } = await run(ctx);
+  if (!(timedOut && ctx.history && adapter.historyFallback)) return first;
+  const { timedOut: _again, ...second } = await run({ ...ctx, history: false });
+  if (!second.ok) return { ...second, note: `${first.note} · fallback: ${second.note}` };
+  return {
+    ...second,
+    note: `${second.note} · history pass ${first.note.replace(/^run failed: /, "")}`,
+    degraded: `git history scan abandoned (${first.note.replace(/^run failed: /, "")}) — scanned the working tree only`,
+  };
 }
 
 /**
@@ -399,10 +487,20 @@ async function runDocker(adapter: ToolAdapter, repo: string, ctx: RunContext): P
   if (applicableNote) return { name: adapter.name, ran: false, ok: false, findings: [], note: applicableNote };
   const argv = buildArgv(adapter, repo, MOUNT, ctx);
   if (!argv) return { name: adapter.name, ran: false, ok: false, findings: [], note: "no target files" };
-  const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(argv);
-  const args = ["run", "--rm", "--pull", "always", "-v", `${repo}:${MOUNT}`, "-w", MOUNT, adapter.dockerImage, ...inner];
-  const { stdout, failed, err } = await execAsync("docker", args, repo, adapter.stderr);
-  return finish(adapter, repo, stdout, failed, err, true, ctx);
+  const image = adapter.dockerImage;
+  const run = (c: RunContext) =>
+    staged(
+      adapter,
+      repo,
+      c,
+      async (mount) => {
+        const inner = (adapter.dockerEntrypointIsTool === false ? [adapter.name] : []).concat(buildArgv(adapter, repo, MOUNT, c) ?? argv);
+        const args = ["run", "--rm", "--pull", "always", "-v", `${mount}:${MOUNT}`, "-w", MOUNT, image, ...inner];
+        return execAsync("docker", args, repo, adapter.stderr, c.timeoutMs);
+      },
+      true,
+    );
+  return withHistoryFallback(adapter, ctx, run);
 }
 
 function finish(
@@ -413,6 +511,8 @@ function finish(
   err: string | undefined,
   docker: boolean,
   ctx?: RunContext,
+  /** The directory the tool actually scanned, when it was not `repo` (a staged copy). */
+  scanned?: string,
 ): ToolRunResult {
   if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
   try {
@@ -426,7 +526,7 @@ function finish(
       incomplete = e.message;
     }
     // Normalize paths to repo-relative: strip /work (docker) or the repo dir (native).
-    const base = docker ? MOUNT : repo;
+    const base = docker ? MOUNT : (scanned ?? repo);
     const relativized = relativizeFindings(parsed, base);
     // …then apply the SAME prune the walk applied, so `--gitignore` means one
     // thing across the whole run. The count is reported, not swallowed: the
@@ -489,6 +589,8 @@ export interface OrchestrateOptions {
   concurrency?: number;
   /** Result cache for `cacheable` adapters (`scan --resume`). */
   cache?: ToolResultCache;
+  /** `scan --secrets-history`: history-capable scanners walk every commit. */
+  history?: boolean;
 }
 
 /** How many scanners run at once when the caller does not say. */
@@ -511,7 +613,13 @@ export async function orchestrate(adapters: ToolAdapter[], repo: string, opts: O
   let selected = opts.which?.length ? adapters.filter((a) => opts.which!.includes(a.name)) : adapters;
   if (opts.useDocker) selected = selected.filter((a) => a.dockerImage);
 
-  const ctx: RunContext = { offline: opts.offline, sbom: opts.sbom, pruned: opts.pruned, ...(opts.cache ? { cache: opts.cache } : {}) };
+  const ctx: RunContext = {
+    offline: opts.offline,
+    sbom: opts.sbom,
+    pruned: opts.pruned,
+    ...(opts.cache ? { cache: opts.cache } : {}),
+    ...(opts.history ? { history: true } : {}),
+  };
   const total = selected.length;
   const results: ToolRunResult[] = new Array(total);
   const concurrency = Math.max(1, Math.floor(opts.concurrency ?? DEFAULT_TOOL_CONCURRENCY));

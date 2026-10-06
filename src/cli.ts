@@ -42,6 +42,8 @@ COMMANDS
              --scope/--include/--exclude/--max-files/--gitignore (focus) ·
              --budget quick|standard|thorough · --max-candidates · --max-depth ·
              --diff <ref>/--since <commit> · --merge · --resume (incremental) ·
+             --secrets-history (gitleaks walks every commit; default scans a
+             snapshot of the tracked files and reports history as not scanned) ·
              --quiet (mute the stderr progress stream) · --json.
   import     Ingest an upstream AI scanner's exported findings (deepsec) into the
              dossier: map → correlate → risk-rank → fold in (preserving verdicts).

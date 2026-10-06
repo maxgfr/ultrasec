@@ -262,7 +262,9 @@ export function toolStatusLines(status: NonNullable<Manifest["toolStatus"]>): st
   return status.map((s) => {
     const count = typeof s.findings === "number" && (s.status === "ran" || s.status === "empty") ? ` (${s.findings})` : "";
     const why = s.note && (s.status === "skipped" || s.status === "failed") ? ` — ${s.note}` : "";
-    return `${s.name}: ${s.status}${count}${why}`;
+    // A pass that succeeded over less than it could have must not read as a full one.
+    const degraded = s.degraded && (s.status === "ran" || s.status === "empty") ? ` — ⚠️ degraded: ${s.degraded}` : "";
+    return `${s.name}: ${s.status}${count}${why}${degraded}`;
   });
 }
 

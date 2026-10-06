@@ -589,6 +589,8 @@ export interface Manifest {
     findings?: number;
     note?: string;
     workspaceCoverage?: { total: number; completed: number };
+    /** The tool ran, over less than it could have (gitleaks without history). */
+    degraded?: string;
   }[];
   /** Required scanner execution for THIS pass only, not a vulnerability or whole-repo coverage verdict. */
   scannerPolicy?: { required: string[]; complete: boolean; incomplete: string[] };
