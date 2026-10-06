@@ -79,3 +79,23 @@ describe("guard matrix noise", () => {
     expect(buildGuardMatrix(scanRepo(r), "auth", [], { includeTests: true }).map((x) => x.file)).toContain("app/api/report/__tests__/route.test.ts");
   });
 });
+
+// The throttle lens labelled `auth/logout` "auth endpoint — brute force /
+// account enumeration" because the path contains `auth`. Ending a session
+// checks no credential; there is nothing to stuff or enumerate.
+describe("throttle lens: what counts as an authentication endpoint", () => {
+  const route = `export async function GET(request: Request) {\n  const next = new URL(request.url).searchParams.get("next");\n  return Response.redirect(next ?? "/");\n}\n`;
+  it("a logout / sign-out route is not login-shaped, a sign-in route still is", () => {
+    const r = repo({
+      "app/api/auth/logout/route.ts": route,
+      "app/api/auth/signout/callback/route.ts": route,
+      "app/api/auth/signin/route.ts": route,
+    });
+    const shaped = Object.fromEntries(buildGuardMatrix(scanRepo(r), "throttle").map((x) => [x.file, !!x.loginShape]));
+    expect(shaped).toEqual({
+      "app/api/auth/logout/route.ts": false,
+      "app/api/auth/signin/route.ts": true,
+      "app/api/auth/signout/callback/route.ts": false,
+    });
+  });
+});

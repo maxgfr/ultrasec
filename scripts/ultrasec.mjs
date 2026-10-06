@@ -40499,6 +40499,11 @@ var REQUEST_KINDS = /* @__PURE__ */ new Set(["http", "ws"]);
 var MODULE_SCOPE = "(module scope)";
 var GUARD_LENSES = ["auth", "throttle"];
 var LOGIN_SHAPE = /\b(sign-?in|log-?in|log-?on|auth|password|passwd|reset|forgot|recover|register|sign-?up|otp|mfa|2fa|token|verify|magic-?link|invite|activation)\b/i;
+var LOGOUT_SHAPE = /\b(sign-?out|log-?out|log-?off|end-?session)\b/i;
+function isLoginShaped(rel2, handler) {
+  if (LOGOUT_SHAPE.test(rel2) || handler !== void 0 && LOGOUT_SHAPE.test(handler)) return false;
+  return LOGIN_SHAPE.test(rel2) || handler !== void 0 && LOGIN_SHAPE.test(handler);
+}
 var LENSES2 = {
   auth: {
     marker: AUTH_MARKER,
@@ -40669,7 +40674,7 @@ function buildGuardMatrix(scan2, lens = "auth", extraMarkers = [], opts = {}) {
         reads: h.reads,
         guards,
         ...lens === "auth" ? {} : { lens },
-        ...LOGIN_SHAPE.test(file.rel) || (h.handler ? LOGIN_SHAPE.test(h.handler) : false) ? { loginShape: true } : {},
+        ...isLoginShaped(file.rel, h.handler) ? { loginShape: true } : {},
         scope,
         ...wraps.length ? { wraps } : {},
         state: guards.length ? "guarded" : "unguarded",

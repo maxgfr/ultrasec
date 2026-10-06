@@ -89,6 +89,16 @@ export type GuardLens = (typeof GUARD_LENSES)[number];
 const LOGIN_SHAPE =
   /\b(sign-?in|log-?in|log-?on|auth|password|passwd|reset|forgot|recover|register|sign-?up|otp|mfa|2fa|token|verify|magic-?link|invite|activation)\b/i;
 
+/** Ending a session checks no credential: nothing to stuff, nothing to
+ *  enumerate. `auth/logout` matched LOGIN_SHAPE on `auth` and was labelled a
+ *  brute-force target on a real audit. Wins over LOGIN_SHAPE when both match. */
+const LOGOUT_SHAPE = /\b(sign-?out|log-?out|log-?off|end-?session)\b/i;
+
+function isLoginShaped(rel: string, handler?: string): boolean {
+  if (LOGOUT_SHAPE.test(rel) || (handler !== undefined && LOGOUT_SHAPE.test(handler))) return false;
+  return LOGIN_SHAPE.test(rel) || (handler !== undefined && LOGIN_SHAPE.test(handler));
+}
+
 interface LensSpec {
   /** The vocabulary of markers this lens looks for. */
   marker: RegExp;
@@ -463,7 +473,7 @@ export function buildGuardMatrix(
         reads: h.reads,
         guards,
         ...(lens === "auth" ? {} : { lens }),
-        ...(LOGIN_SHAPE.test(file.rel) || (h.handler ? LOGIN_SHAPE.test(h.handler) : false) ? { loginShape: true } : {}),
+        ...(isLoginShaped(file.rel, h.handler) ? { loginShape: true } : {}),
         scope,
         ...(wraps.length ? { wraps } : {}),
         state: guards.length ? "guarded" : "unguarded",
