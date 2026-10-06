@@ -33717,6 +33717,22 @@ var AUTH_SHAPES = {
     category: "crypto",
     note: "MD5/SHA-1 (or a bcrypt cost < 10) for passwords is brute-forceable at scale. Use bcrypt/scrypt/argon2 with a sound work factor."
   },
+  "secret-compare-timing": {
+    id: "secret-compare-timing",
+    title: "Secret compared with a non-constant-time operator",
+    severity: "medium",
+    cwe: "CWE-208",
+    category: "crypto",
+    note: "A bearer token, API key or shared secret checked with `===`/`!==` (or looked up in a Set) returns as soon as the first byte differs, so the response time leaks how much of a guess is right. Compare fixed-length digests with `crypto.timingSafeEqual` (Python: `hmac.compare_digest`). Remote exploitation is noisy but has been demonstrated; on a static shared secret it is the whole defence."
+  },
+  "session-chunks-not-cleared": {
+    id: "session-chunks-not-cleared",
+    title: "Hand-written logout clears the session cookie but not its chunks",
+    severity: "medium",
+    cwe: "CWE-613",
+    category: "authz",
+    note: "NextAuth/Auth.js splits a session cookie larger than ~4 KB into `<name>.0`, `<name>.1`, \u2026 and reads them back as one. Expiring only `<name>` leaves the chunks in the browser, and the session they hold is still accepted. Clear every cookie whose name starts with the session cookie's name (or call the library's own signOut), on both the `__Secure-` and plain names."
+  },
   "committed-password-hash": {
     id: "committed-password-hash",
     title: "Password hash committed to the repository",
@@ -33811,6 +33827,28 @@ var LINE_RULES = [
   // loose redirect_uri validation.
   { langs: null, re: /(?:redirect_uri|redirecturi|redirect_url|redirecturl)[^\n]*\.(?:startsWith|indexOf|includes|search)\s*\(/i, shape: "oauth-redirect-uri" }
 ];
+var SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
+var EQ = "(?:===|!==|==|!=)";
+var COMPARE_RULES = [
+  { langs: JS2, re: new RegExp(`${EQ}\\s*\`Bearer \\$\\{|\`Bearer \\$\\{[^\`]*\`\\s*${EQ}`) },
+  { langs: JS2, re: new RegExp(`${EQ}\\s*${SECRET_ENV}|${SECRET_ENV}\\s*${EQ}(?!\\s*(?:undefined|null|""|''|\`\`)\\b)`) },
+  // A credential looked up in a Set/Map: `allowedKeys.has(bearer)`.
+  // The receiver has to be named for credentials: `allowedKeys.has(key)` is as
+  // often an object-key allow-list as an API-key one.
+  { langs: JS2, re: /\b\w*(?:tokens|secrets|api_?keys|bearers)\w*\s*\.\s*has\s*\(\s*(?:bearer|token|apiKey|api_key|key|secret|provided)\w*\s*\)/i },
+  { langs: /* @__PURE__ */ new Set(["py"]), re: /(?:==|!=)\s*os\.(?:environ\[|getenv\()\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']/ }
+];
+var CONSTANT_TIME = /timingSafeEqual|safeCompare|secureCompare|constantTime|compare_digest|tsscmp|safe-compare/i;
+var PRESENCE_CHECK = new RegExp(`${SECRET_ENV}\\s*${EQ}\\s*(?:undefined|null|""|''|\`\`)(?![\\w$])|(?:undefined|null|""|'')\\s*${EQ}\\s*${SECRET_ENV}`);
+var isCommentLine = (t) => /^\s*(?:\/\/|\*|\/\*|#)/.test(t);
+var SESSION_COOKIE = /(?:__Secure-)?(?:next-auth|authjs)\.session-token/;
+var EXPIRES_COOKIE = /maxAge\s*:\s*0\b|expires\s*:\s*new\s+Date\(\s*0\s*\)|Max-Age=0|\.delete\s*\(|expires=Thu, 01 Jan 1970/i;
+var HANDLES_CHUNKS = /session-token\.\d|session-token\.\$\{|session-token\.["'`]|\.startsWith\s*\([^)]*(?:session|token|name|cookie)|\\\.\\d|\.\$\{\s*i\s*\}|getAll\s*\(/i;
+function scanSessionChunks(rel2, content, out2) {
+  if (!SESSION_COOKIE.test(content) || !EXPIRES_COOKIE.test(content) || HANDLES_CHUNKS.test(content)) return;
+  const at = lines3(content).find((l) => SESSION_COOKIE.test(l.text) && !isCommentLine(l.text));
+  if (at) out2.push(hit3(rel2, at.n, AUTH_SHAPES["session-chunks-not-cleared"], at.text));
+}
 var PWHASH_RULES = [
   { langs: JS2, re: /createHash\(\s*['"](?:md5|sha1)['"]\s*\)[^\n]*(?:pass|pwd)/i },
   { langs: /* @__PURE__ */ new Set(["py"]), re: /hashlib\.(?:md5|sha1)\(\s*[^)]*(?:pass|pwd)/i },
@@ -33865,11 +33903,15 @@ function auditAuthTokens(repo, prune, tree) {
     for (const l of lines3(content)) {
       for (const r of LINE_RULES) if ((r.langs === null || r.langs.has(ext)) && r.re.test(l.text)) out2.push(hit3(rel2, l.n, AUTH_SHAPES[r.shape], l.text));
       for (const r of PWHASH_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit3(rel2, l.n, AUTH_SHAPES["password-hash"], l.text));
+      if (!isCommentLine(l.text) && !CONSTANT_TIME.test(l.text) && !PRESENCE_CHECK.test(l.text)) {
+        if (COMPARE_RULES.some((r) => r.langs.has(ext) && r.re.test(l.text))) out2.push(hit3(rel2, l.n, AUTH_SHAPES["secret-compare-timing"], l.text));
+      }
       const cost = /(?:genSalt(?:Sync)?|bcrypt\.hash(?:Sync)?)\s*\([^)]*?(?:^|,)\s*(\d{1,2})\s*[,)]/.exec(l.text);
       if (cost && Number(cost[1]) < 10) out2.push(hit3(rel2, l.n, AUTH_SHAPES["password-hash"], l.text));
     }
     scanJwtCalls(rel2, content, ext, out2);
     scanOAuthStatePkce(rel2, content, out2);
+    if (JS2.has(ext)) scanSessionChunks(rel2, content, out2);
   }
   return out2;
 }
