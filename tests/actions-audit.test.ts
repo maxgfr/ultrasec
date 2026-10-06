@@ -111,6 +111,7 @@ describe("agentic CI audit", () => {
       const v = /vector ([A-Z]):/.exec(f.title)![1]!;
       if (v === "J") expect(f.cwe).toBe("CWE-829");
       else if (v === "K") expect(f.cwe).toBe("CWE-250");
+      else if (v === "L") expect(f.cwe).toBe("CWE-668");
       else expect(f.cwe, f.title).toBe("CWE-1427");
     }
   });
@@ -134,6 +135,17 @@ describe("agentic CI audit", () => {
     const vulnerable = vec("K").filter((f) => f.sink?.file.endsWith("vulnerable.yml"));
     expect(vulnerable).toHaveLength(1);
     expect(vulnerable[0]!.message).toMatch(/no permissions: block/);
+  });
+
+  // A `pull_request` job runs the PR's code (install scripts, tests) and, for a
+  // branch of the same repository, receives the repository's secrets. Without an
+  // `environment:` (whose protection rules gate them) any collaborator's branch —
+  // or a dependency added in it — reads them.
+  it("L: flags a pull_request job that hands secrets to the PR's code without an environment", () => {
+    const l = vec("L");
+    expect(l.map((f) => f.sink!.file)).toEqual([".github/workflows/pr-secrets.yml"]);
+    expect(l[0]!.sink!.line).toBe(11);
+    expect(l[0]!.severity).toBe("medium");
   });
 
   it("reports nothing on a repo with no workflows", () => {

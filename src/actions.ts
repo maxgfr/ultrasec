@@ -111,6 +111,12 @@ export const VECTORS: Record<string, ActionsVector> = {
     severity: "high",
     note: "No `permissions:` block, or `permissions: write-all`: the GITHUB_TOKEN carries whatever the repository default grants — historically write to contents, packages and pull requests. Every step, including an injected instruction or a compromised action, gets it. Declare the minimum (`permissions: contents: read`) at the workflow level and widen per job only where a write is needed.",
   },
+  L: {
+    id: "L",
+    title: "`pull_request` job hands secrets to the PR's code without an environment",
+    severity: "medium",
+    note: "`pull_request` withholds secrets from forks only. On a branch of the same repository the job receives them and runs the branch's code — install scripts, build, tests — so any collaborator, or a dependency their branch adds, can read and exfiltrate them. Move the secret-bearing steps to a job with an `environment:` whose protection rules require a reviewer, or to a trigger that does not run unreviewed code.",
+  },
 };
 
 interface Line {
@@ -204,7 +210,7 @@ function promptValue(ls: Line[], start: number): string {
 /** The CWE each vector files under: prompt injection for the agent vectors,
  *  untrusted-component inclusion for the unpinned action, excess privilege for
  *  the token. */
-const VECTOR_CWE: Record<string, string> = { J: "CWE-829", K: "CWE-250" };
+const VECTOR_CWE: Record<string, string> = { J: "CWE-829", K: "CWE-250", L: "CWE-668" };
 
 function hit(rel: string, line: number, v: ActionsVector, evidence: string): Finding {
   return makeToolFinding({
@@ -230,6 +236,66 @@ function unpinnedRef(usesValue: string): boolean {
   const at = usesValue.lastIndexOf("@");
   if (at === -1) return true; // no ref at all: the default branch
   return !FULL_SHA.test(usesValue.slice(at + 1));
+}
+
+// ── L: secrets handed to a pull_request job that runs the PR's code ────────
+// `pull_request` withholds secrets from FORK pull requests, which is why it is
+// called the safe trigger. A branch of the same repository gets them all, and
+// the job then runs that branch's code — install scripts, build, tests — so any
+// collaborator, or a dependency their branch adds, can read them. An
+// `environment:` is the one place GitHub lets a reviewer gate that.
+
+/** `on:` lists `pull_request` (not `pull_request_target`). */
+function triggersOnPullRequest(ls: Line[]): boolean {
+  const start = ls.findIndex((l) => /^(?:on|"on"|'on')\s*:/.test(l.text));
+  if (start < 0) return false;
+  const head = ls[start]!.text;
+  if (/\bpull_request\b(?!_target)/.test(head)) return true;
+  for (let i = start + 1; i < ls.length; i++) {
+    const t = ls[i]!.text;
+    if (/^\S/.test(t)) break;
+    if (/^\s*-?\s*pull_request\s*(?::|$)/.test(t)) return true;
+  }
+  return false;
+}
+
+/** A secret other than the job token, which every job gets anyway. */
+const NON_TOKEN_SECRET = /\$\{\{\s*secrets\.(?!GITHUB_TOKEN\b)[A-Za-z_][\w]*\s*\}\}/;
+/** Steps that execute the checked-out code (or a dependency's install script). */
+const RUNS_CODE = /^\s*(?:-\s+)?run\s*:/;
+/** A job condition that keeps it off pull_request events. */
+const SKIPS_PULL_REQUEST = /github\.event_name\s*!=\s*['"]pull_request['"]|github\.event_name\s*==\s*['"](?!pull_request['"])\w+['"]/;
+
+function scanPullRequestSecrets(rel: string, ls: Line[], out: Finding[]): void {
+  if (!triggersOnPullRequest(ls)) return;
+  const jobsAt = ls.findIndex((l) => /^jobs\s*:/.test(l.text));
+  if (jobsAt < 0) return;
+  // Workflow-level env reaches every job.
+  const topSecret = ls.slice(0, jobsAt).find((l) => NON_TOKEN_SECRET.test(l.text));
+  let jobIndent = -1;
+  const jobs: Line[][] = [];
+  for (let i = jobsAt + 1; i < ls.length; i++) {
+    const t = ls[i]!.text;
+    if (/^\S/.test(t)) break;
+    if (!t.trim() || /^\s*#/.test(t)) {
+      jobs[jobs.length - 1]?.push(ls[i]!);
+      continue;
+    }
+    const indent = t.length - t.trimStart().length;
+    if (jobIndent === -1) jobIndent = indent;
+    if (indent === jobIndent) jobs.push([ls[i]!]);
+    else jobs[jobs.length - 1]?.push(ls[i]!);
+  }
+  for (const job of jobs) {
+    const keyIndent = jobIndent + 2;
+    const atKey = (re: RegExp) => job.find((l) => l.text.length - l.text.trimStart().length === keyIndent && re.test(l.text));
+    if (atKey(/^\s*environment\s*:/)) continue;
+    const cond = atKey(/^\s*if\s*:/);
+    if (cond && SKIPS_PULL_REQUEST.test(cond.text)) continue;
+    if (!job.some((l) => RUNS_CODE.test(l.text))) continue;
+    const secret = job.find((l) => NON_TOKEN_SECRET.test(l.text)) ?? topSecret;
+    if (secret) out.push(hit(rel, secret.n, VECTORS.L!, secret.text));
+  }
 }
 
 /**
@@ -271,6 +337,7 @@ export function auditAgenticWorkflows(repo: string, prune?: (rel: string) => boo
     } else {
       for (const l of permissionLines) if (/^\s*permissions\s*:\s*write-all\b/.test(l.text)) findings.push(hit(rel, l.n, VECTORS.K!, l.text));
     }
+    scanPullRequestSecrets(rel, ls, findings);
 
     if (!usesAi) continue;
 

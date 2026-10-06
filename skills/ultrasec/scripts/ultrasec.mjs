@@ -33198,6 +33198,12 @@ var VECTORS = {
     title: "Job token permissions not restricted",
     severity: "high",
     note: "No `permissions:` block, or `permissions: write-all`: the GITHUB_TOKEN carries whatever the repository default grants \u2014 historically write to contents, packages and pull requests. Every step, including an injected instruction or a compromised action, gets it. Declare the minimum (`permissions: contents: read`) at the workflow level and widen per job only where a write is needed."
+  },
+  L: {
+    id: "L",
+    title: "`pull_request` job hands secrets to the PR's code without an environment",
+    severity: "medium",
+    note: "`pull_request` withholds secrets from forks only. On a branch of the same repository the job receives them and runs the branch's code \u2014 install scripts, build, tests \u2014 so any collaborator, or a dependency their branch adds, can read and exfiltrate them. Move the secret-bearing steps to a job with an `environment:` whose protection rules require a reviewer, or to a trigger that does not run unreviewed code."
   }
 };
 function lines(content) {
@@ -33258,7 +33264,7 @@ function promptValue(ls, start2) {
   }
   return parts2.join("\n");
 }
-var VECTOR_CWE = { J: "CWE-829", K: "CWE-250" };
+var VECTOR_CWE = { J: "CWE-829", K: "CWE-250", L: "CWE-668" };
 function hit(rel2, line2, v, evidence) {
   return makeToolFinding({
     tool: "ultrasec",
@@ -33281,6 +33287,51 @@ function unpinnedRef(usesValue) {
   const at = usesValue.lastIndexOf("@");
   if (at === -1) return true;
   return !FULL_SHA.test(usesValue.slice(at + 1));
+}
+function triggersOnPullRequest(ls) {
+  const start2 = ls.findIndex((l) => /^(?:on|"on"|'on')\s*:/.test(l.text));
+  if (start2 < 0) return false;
+  const head = ls[start2].text;
+  if (/\bpull_request\b(?!_target)/.test(head)) return true;
+  for (let i2 = start2 + 1; i2 < ls.length; i2++) {
+    const t = ls[i2].text;
+    if (/^\S/.test(t)) break;
+    if (/^\s*-?\s*pull_request\s*(?::|$)/.test(t)) return true;
+  }
+  return false;
+}
+var NON_TOKEN_SECRET = /\$\{\{\s*secrets\.(?!GITHUB_TOKEN\b)[A-Za-z_][\w]*\s*\}\}/;
+var RUNS_CODE = /^\s*(?:-\s+)?run\s*:/;
+var SKIPS_PULL_REQUEST = /github\.event_name\s*!=\s*['"]pull_request['"]|github\.event_name\s*==\s*['"](?!pull_request['"])\w+['"]/;
+function scanPullRequestSecrets(rel2, ls, out2) {
+  if (!triggersOnPullRequest(ls)) return;
+  const jobsAt = ls.findIndex((l) => /^jobs\s*:/.test(l.text));
+  if (jobsAt < 0) return;
+  const topSecret = ls.slice(0, jobsAt).find((l) => NON_TOKEN_SECRET.test(l.text));
+  let jobIndent = -1;
+  const jobs = [];
+  for (let i2 = jobsAt + 1; i2 < ls.length; i2++) {
+    const t = ls[i2].text;
+    if (/^\S/.test(t)) break;
+    if (!t.trim() || /^\s*#/.test(t)) {
+      jobs[jobs.length - 1]?.push(ls[i2]);
+      continue;
+    }
+    const indent = t.length - t.trimStart().length;
+    if (jobIndent === -1) jobIndent = indent;
+    if (indent === jobIndent) jobs.push([ls[i2]]);
+    else jobs[jobs.length - 1]?.push(ls[i2]);
+  }
+  for (const job of jobs) {
+    const keyIndent = jobIndent + 2;
+    const atKey = (re) => job.find((l) => l.text.length - l.text.trimStart().length === keyIndent && re.test(l.text));
+    if (atKey(/^\s*environment\s*:/)) continue;
+    const cond = atKey(/^\s*if\s*:/);
+    if (cond && SKIPS_PULL_REQUEST.test(cond.text)) continue;
+    if (!job.some((l) => RUNS_CODE.test(l.text))) continue;
+    const secret = job.find((l) => NON_TOKEN_SECRET.test(l.text)) ?? topSecret;
+    if (secret) out2.push(hit(rel2, secret.n, VECTORS.L, secret.text));
+  }
 }
 function auditAgenticWorkflows(repo, prune, tree) {
   const findings = [];
@@ -33308,6 +33359,7 @@ function auditAgenticWorkflows(repo, prune, tree) {
     } else {
       for (const l of permissionLines) if (/^\s*permissions\s*:\s*write-all\b/.test(l.text)) findings.push(hit(rel2, l.n, VECTORS.K, l.text));
     }
+    scanPullRequestSecrets(rel2, ls, findings);
     if (!usesAi) continue;
     const envKeys = taintedEnvKeys(ls);
     const aiIds = aiStepIds(ls);
