@@ -27882,7 +27882,8 @@ function requireVocabulary(i2) {
 }
 function makeToolFinding(i2) {
   requireVocabulary(i2);
-  const id = shortHash2(`${i2.tool}:${i2.ident}:${i2.file ?? ""}:${i2.line ?? ""}${i2.version ? `:${i2.version}` : ""}`);
+  const pkgPart = i2.pkg && i2.pkg !== i2.ident ? `:${i2.pkg}` : "";
+  const id = shortHash2(`${i2.tool}:${i2.ident}:${i2.file ?? ""}:${i2.line ?? ""}${i2.version ? `:${i2.version}` : ""}${pkgPart}`);
   const f = {
     id,
     category: i2.category,
