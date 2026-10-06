@@ -167,6 +167,11 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   both report zero logging findings. `coverage` reads it so it never advises you to enable an
   option you already enabled. Absent on dossiers written before schema 8 — `undefined` means
   **unknown**, never "off".
+- **`duplicateIds`** — `[{id, dropped, differing}]`, present only when `findings.json` carried the
+  same id on more than one row. Every reader collapses them to one row per id (an adjudicated row
+  wins over an open one), prints `✗ dropped … duplicate finding row(s)` on stderr and records it
+  here, instead of refusing the run. `differing: true` means the rows had different content: a
+  finding was actually lost and the id derivation collided — re-scan once that is fixed.
 
 ## `TRIAGE.todo.json` → `TRIAGE.json`
 

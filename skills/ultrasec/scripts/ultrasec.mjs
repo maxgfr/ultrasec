@@ -27477,7 +27477,8 @@ function appendJournal(runDir, t) {
   mkdirSync5(runDir, { recursive: true });
   const path = join29(runDir, JOURNAL_FILE);
   if (!existsSync12(path)) writeFileSync7(path, JOURNAL_HEADER);
-  const summary = [headline(t), ...t.stdout.split("\n").filter((l) => l.includes("\u2717 dropped") || l.includes("\u2717 rejected"))];
+  const lost = (l) => l.includes("\u2717 dropped") || l.includes("\u2717 rejected");
+  const summary = [headline(t), ...t.stdout.split("\n").filter(lost), ...t.stderr.split("\n").filter(lost)].filter((l, i2, all) => all.indexOf(l) === i2);
   const entry2 = [`## ${t.at} \xB7 \`${t.command}\``, "", ...summary.map((s) => `- ${s.trim()}`), `- exit ${t.code}`, ""].join("\n");
   appendFileSync(path, `${entry2}
 `);
@@ -31875,7 +31876,55 @@ function countBySeverity(findings) {
   }
   return c2;
 }
+function dedupeFindings(findings) {
+  const kept = /* @__PURE__ */ new Map();
+  const seen = /* @__PURE__ */ new Map();
+  for (const f of findings) {
+    const prior = kept.get(f.id);
+    if (!prior) {
+      kept.set(f.id, f);
+      continue;
+    }
+    const at = seen.get(f.id) ?? { dropped: 0, differing: false };
+    at.dropped++;
+    if (JSON.stringify(prior) !== JSON.stringify(f)) at.differing = true;
+    seen.set(f.id, at);
+    if (prior.status === "open" && f.status !== void 0 && f.status !== "open") kept.set(f.id, f);
+  }
+  if (!seen.size) return { findings, duplicates: [] };
+  const duplicates = [...seen].map(([id, s]) => ({ id, dropped: s.dropped, differing: s.differing })).sort((a, b) => byStr(a.id, b.id));
+  return { findings: [...kept.values()], duplicates };
+}
+function recordDuplicates(prior, next) {
+  const byId = new Map((prior ?? []).map((d) => [d.id, { ...d }]));
+  for (const d of next) {
+    const at = byId.get(d.id);
+    if (at) {
+      at.dropped += d.dropped;
+      at.differing ||= d.differing;
+    } else byId.set(d.id, { ...d });
+  }
+  return [...byId.values()].sort((a, b) => byStr(a.id, b.id));
+}
+function warnDuplicates(duplicates) {
+  const rows = duplicates.reduce((n, d) => n + d.dropped, 0);
+  const differing = duplicates.filter((d) => d.differing).map((d) => d.id);
+  eprintln(
+    `ultrasec: \u2717 dropped ${rows} duplicate finding row(s) from findings.json \u2014 ${duplicates.map((d) => d.id).join(", ")}. Kept one row per id (an adjudicated one when there was one); recorded in manifest.duplicateIds.${differing.length ? ` Rows with different content were lost for: ${differing.join(", ")} \u2014 the id derivation collided, re-scan once it is fixed.` : ""}`
+  );
+}
 function writeDossier(outDir, d) {
+  const { findings, duplicates } = dedupeFindings(d.findings);
+  let manifest = d.manifest;
+  if (duplicates.length) {
+    warnDuplicates(duplicates);
+    manifest = {
+      ...manifest,
+      duplicateIds: recordDuplicates(manifest.duplicateIds, duplicates),
+      counts: { findings: findings.length, bySeverity: countBySeverity(findings) }
+    };
+  }
+  d = { ...d, manifest, findings };
   mkdirSync7(outDir, { recursive: true });
   writeFileSync9(join36(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
   writeFileSync9(join36(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
@@ -31941,15 +31990,24 @@ function loadDossier(outDir) {
   }
   const findings = read("findings.json");
   if (!Array.isArray(findings)) throw new Error("findings.json must contain a JSON array");
-  const ids = /* @__PURE__ */ new Set();
   for (const [index, finding] of findings.entries()) {
     if (!finding || typeof finding !== "object" || typeof finding.id !== "string" || !finding.id.trim()) {
       throw new Error(`findings.json row ${index + 1} requires a non-empty string id`);
     }
-    if (ids.has(finding.id)) throw new Error(`findings.json contains duplicate finding id: ${finding.id}`);
-    ids.add(finding.id);
   }
-  return { manifest: read("manifest.json"), findings, graph: read("graph.json") };
+  const manifest = read("manifest.json");
+  const { findings: unique, duplicates } = dedupeFindings(findings);
+  if (!duplicates.length) return { manifest, findings: unique, graph: read("graph.json") };
+  warnDuplicates(duplicates);
+  return {
+    manifest: {
+      ...manifest,
+      duplicateIds: recordDuplicates(manifest.duplicateIds, duplicates),
+      ...manifest.counts ? { counts: { findings: unique.length, bySeverity: countBySeverity(unique) } } : {}
+    },
+    findings: unique,
+    graph: read("graph.json")
+  };
 }
 function severityBadge(s) {
   return { critical: "\u{1F7E5} CRIT", high: "\u{1F7E7} HIGH", medium: "\u{1F7E8} MED", low: "\u{1F7E9} LOW", info: "\u2B1C INFO" }[s];

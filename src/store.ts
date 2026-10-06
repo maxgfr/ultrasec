@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { mergeGraphs, type Graph } from "./graph.js";
-import { byStr } from "./util.js";
+import { byStr, eprintln } from "./util.js";
 import { SEVERITIES, type Finding, type Manifest, type Severity } from "./types.js";
 import { proposedFor, renderProposalSummary } from "./noise.js";
 import { sortFindings } from "./rank.js";
@@ -37,7 +37,78 @@ export function countBySeverity(findings: Finding[]): Record<Severity, number> {
   return c;
 }
 
+type DuplicateId = NonNullable<Manifest["duplicateIds"]>[number];
+
+/**
+ * One row per finding id.
+ *
+ * Every verdict, every `--apply` and every citation names a finding by its id,
+ * so two rows sharing one are ambiguous: a verdict would land on whichever the
+ * reader met first. That is why a duplicate used to be fatal — and why, after a
+ * dependency adapter derived the same id for two sibling packages, every stage
+ * after `scan` refused a 354-finding run over one pair.
+ *
+ * Kept: the first occurrence, unless a later one carries an adjudication and the
+ * first does not — losing an auditor's verdict is worse than losing a
+ * re-derivable scanner row. Each collapse is returned so the caller can say so.
+ */
+export function dedupeFindings(findings: Finding[]): { findings: Finding[]; duplicates: DuplicateId[] } {
+  const kept = new Map<string, Finding>();
+  const seen = new Map<string, { dropped: number; differing: boolean }>();
+  for (const f of findings) {
+    const prior = kept.get(f.id);
+    if (!prior) {
+      kept.set(f.id, f);
+      continue;
+    }
+    const at = seen.get(f.id) ?? { dropped: 0, differing: false };
+    at.dropped++;
+    if (JSON.stringify(prior) !== JSON.stringify(f)) at.differing = true;
+    seen.set(f.id, at);
+    if (prior.status === "open" && f.status !== undefined && f.status !== "open") kept.set(f.id, f);
+  }
+  if (!seen.size) return { findings, duplicates: [] };
+  const duplicates = [...seen].map(([id, s]) => ({ id, dropped: s.dropped, differing: s.differing })).sort((a, b) => byStr(a.id, b.id));
+  return { findings: [...kept.values()], duplicates };
+}
+
+/** Fold this collapse into whatever the manifest already recorded, one entry per id. */
+function recordDuplicates(prior: Manifest["duplicateIds"], next: DuplicateId[]): DuplicateId[] {
+  const byId = new Map((prior ?? []).map((d) => [d.id, { ...d }]));
+  for (const d of next) {
+    const at = byId.get(d.id);
+    if (at) {
+      at.dropped += d.dropped;
+      at.differing ||= d.differing;
+    } else byId.set(d.id, { ...d });
+  }
+  return [...byId.values()].sort((a, b) => byStr(a.id, b.id));
+}
+
+function warnDuplicates(duplicates: DuplicateId[]): void {
+  const rows = duplicates.reduce((n, d) => n + d.dropped, 0);
+  const differing = duplicates.filter((d) => d.differing).map((d) => d.id);
+  eprintln(
+    `ultrasec: ✗ dropped ${rows} duplicate finding row(s) from findings.json — ${duplicates.map((d) => d.id).join(", ")}. Kept one row per id (an adjudicated one when there was one); recorded in manifest.duplicateIds.${
+      differing.length ? ` Rows with different content were lost for: ${differing.join(", ")} — the id derivation collided, re-scan once it is fixed.` : ""
+    }`,
+  );
+}
+
 export function writeDossier(outDir: string, d: Dossier): void {
+  // The invariant lives at the writer: whatever a stage produced, the file on
+  // disk never carries two rows with one id.
+  const { findings, duplicates } = dedupeFindings(d.findings);
+  let manifest = d.manifest;
+  if (duplicates.length) {
+    warnDuplicates(duplicates);
+    manifest = {
+      ...manifest,
+      duplicateIds: recordDuplicates(manifest.duplicateIds, duplicates),
+      counts: { findings: findings.length, bySeverity: countBySeverity(findings) },
+    };
+  }
+  d = { ...d, manifest, findings };
   mkdirSync(outDir, { recursive: true });
   writeFileSync(join(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
   writeFileSync(join(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
@@ -153,15 +224,26 @@ export function loadDossier(outDir: string): Dossier {
   }
   const findings: unknown = read("findings.json");
   if (!Array.isArray(findings)) throw new Error("findings.json must contain a JSON array");
-  const ids = new Set<string>();
   for (const [index, finding] of findings.entries()) {
     if (!finding || typeof finding !== "object" || typeof finding.id !== "string" || !finding.id.trim()) {
       throw new Error(`findings.json row ${index + 1} requires a non-empty string id`);
     }
-    if (ids.has(finding.id)) throw new Error(`findings.json contains duplicate finding id: ${finding.id}`);
-    ids.add(finding.id);
   }
-  return { manifest: read("manifest.json"), findings, graph: read("graph.json") };
+  // A missing id is unreadable; a repeated one is not. Collapse it, say so, and
+  // carry the record in the manifest so the next write persists it.
+  const manifest: Manifest = read("manifest.json");
+  const { findings: unique, duplicates } = dedupeFindings(findings as Finding[]);
+  if (!duplicates.length) return { manifest, findings: unique, graph: read("graph.json") };
+  warnDuplicates(duplicates);
+  return {
+    manifest: {
+      ...manifest,
+      duplicateIds: recordDuplicates(manifest.duplicateIds, duplicates),
+      ...(manifest.counts ? { counts: { findings: unique.length, bySeverity: countBySeverity(unique) } } : {}),
+    },
+    findings: unique,
+    graph: read("graph.json"),
+  };
 }
 
 function severityBadge(s: Severity): string {

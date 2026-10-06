@@ -680,4 +680,13 @@ export interface Manifest {
    * `package.json` alone classifies direct devDependencies only.
    */
   reachability?: { toolchain: number; sources: string[] };
+  /**
+   * Finding ids that appeared more than once in `findings.json` and were
+   * collapsed to one row each (`store.ts` `dedupeFindings`). A duplicate used to
+   * make every downstream command refuse the whole run; it is now read, and this
+   * is the record that it happened. `differing` says whether the dropped rows
+   * carried different content — the case where a finding was actually lost and
+   * the id derivation needs fixing. Additive/optional — absent on a clean run.
+   */
+  duplicateIds?: { id: string; dropped: number; differing: boolean }[];
 }
