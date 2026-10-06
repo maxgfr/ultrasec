@@ -40527,6 +40527,11 @@ function parseGuardVerdicts(raw, lens = "auth") {
     })
   });
 }
+function passedByValue(text, name2) {
+  const n = name2.replace(/[$]/g, "\\$");
+  return new RegExp(`[(,]\\s*${n}\\s*[,)]`).test(text);
+}
+var SCOPE_STRENGTH = { file: 0, approx: 1, symbol: 2 };
 function guardScope(symbols, line2, lines5) {
   const lineCount2 = lines5.length;
   let best;
@@ -40597,13 +40602,14 @@ function withProjectMarkers(base, names) {
   const escaped = valid.map((n) => n.replace(/[.$]/g, "\\$&"));
   return new RegExp(`(?:${base.source})|(?<![\\w$.])(?:${escaped.join("|")})(?![\\w$])`, base.flags);
 }
-function buildGuardMatrix(scan2, lens = "auth", extraMarkers = []) {
+function buildGuardMatrix(scan2, lens = "auth", extraMarkers = [], opts = {}) {
   const spec = LENSES2[lens];
   const marker = withProjectMarkers(spec.marker, extraMarkers);
   const rows = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
+    if (!opts.includeTests && isTestPath(file.rel)) continue;
     const text = readText2(join67(scan2.repo, file.rel));
     const sources = findSources(lang, text, file.rel).filter((s) => REQUEST_KINDS.has(s.kind));
     if (!sources.length) continue;
@@ -40626,9 +40632,31 @@ function buildGuardMatrix(scan2, lens = "auth", extraMarkers = []) {
         byHandler.set(key, { line: s.line, kinds: /* @__PURE__ */ new Set([s.kind]), reads: 1, handler });
       }
     }
-    for (const [, h] of byHandler) {
-      const { from, to, scope } = guardScope(file.symbols, h.line, lines5);
-      const guards = markers.filter((m) => m.line >= from && m.line <= to);
+    const groups = [...byHandler.values()].map((h) => ({ h, ...guardScope(file.symbols, h.line, lines5) }));
+    const wrapped = /* @__PURE__ */ new Map();
+    const absorbed = /* @__PURE__ */ new Set();
+    for (const w of groups) {
+      if (!w.h.handler) continue;
+      const text2 = lines5.slice(w.from - 1, w.to).join("\n");
+      for (const g of groups) {
+        if (g === w || !g.h.handler || g.h.handler === w.h.handler || absorbed.has(w)) continue;
+        if (!passedByValue(text2, g.h.handler)) continue;
+        wrapped.set(w, [...wrapped.get(w) ?? [], g]);
+        absorbed.add(g);
+      }
+    }
+    for (const group of groups) {
+      if (absorbed.has(group) && !wrapped.has(group)) continue;
+      const parts2 = [group, ...wrapped.get(group) ?? []];
+      const h = {
+        ...group.h,
+        line: Math.min(...parts2.map((p) => p.h.line)),
+        reads: parts2.reduce((n, p) => n + p.h.reads, 0),
+        kinds: new Set(parts2.flatMap((p) => [...p.h.kinds]))
+      };
+      const scope = parts2.reduce((weakest, p) => SCOPE_STRENGTH[p.scope] < SCOPE_STRENGTH[weakest] ? p.scope : weakest, "symbol");
+      const guards = markers.filter((m) => parts2.some((p) => m.line >= p.from && m.line <= p.to));
+      const wraps = parts2.slice(1).map((p) => p.h.handler);
       rows.push({
         // The auth lens keeps its historical id, so a GUARDS.json written before
         // lenses existed still names the same rows. A throttle row is a
@@ -40643,6 +40671,7 @@ function buildGuardMatrix(scan2, lens = "auth", extraMarkers = []) {
         ...lens === "auth" ? {} : { lens },
         ...LOGIN_SHAPE.test(file.rel) || (h.handler ? LOGIN_SHAPE.test(h.handler) : false) ? { loginShape: true } : {},
         scope,
+        ...wraps.length ? { wraps } : {},
         state: guards.length ? "guarded" : "unguarded",
         verdict: null
       });
@@ -40662,6 +40691,9 @@ function guardTotals(rows) {
     noMarkerAnywhere: rows.length >= 3 && unguarded.length === rows.length,
     unguardedLoginShaped: unguarded.filter((r) => r.loginShape).length
   };
+}
+function wrapsNote(r) {
+  return r.wraps?.length ? ` (wraps ${r.wraps.map((w) => `\`${w}()\``).join(", ")})` : "";
 }
 function renderGuardsMd(rows, context, lens = "auth") {
   const t = guardTotals(rows);
@@ -40765,7 +40797,7 @@ function renderGuardsMd(rows, context, lens = "auth") {
     for (const r of unguarded) {
       const shape = throttling && r.loginShape ? ` \xB7 **auth endpoint \u2014 brute force / account enumeration**` : "";
       L.push(
-        `- \`${r.id}\` \u2014 \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : " (module scope)"} \xB7 ${r.kinds.join("/")} \xB7 ${r.reads} request read(s)${shape}`
+        `- \`${r.id}\` \u2014 \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : " (module scope)"}${wrapsNote(r)} \xB7 ${r.kinds.join("/")} \xB7 ${r.reads} request read(s)${shape}`
       );
     }
     L.push("");
@@ -40778,7 +40810,7 @@ function renderGuardsMd(rows, context, lens = "auth") {
     for (const r of guarded) {
       const hints = r.guards.slice(0, 3).map((g) => `\`${g.hint}\`:${g.line}`).join(", ");
       L.push(
-        `- \`${r.id}\` \u2014 \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : ""} \xB7 ${hints}${r.guards.length > 3 ? ` +${r.guards.length - 3} more` : ""}${r.scope === "symbol" ? "" : ` \xB7 \u26A0\uFE0F ${r.scope}-scoped`}`
+        `- \`${r.id}\` \u2014 \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : ""}${wrapsNote(r)} \xB7 ${hints}${r.guards.length > 3 ? ` +${r.guards.length - 3} more` : ""}${r.scope === "symbol" ? "" : ` \xB7 \u26A0\uFE0F ${r.scope}-scoped`}`
       );
     }
     L.push("");
@@ -40844,6 +40876,7 @@ function runGuards(args2) {
   }
   const repo = resolve31(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const markers = [.../* @__PURE__ */ new Set([...contextMarkers(loadContextDoc(run2), lens), ...markerFlags(args2)])];
+  const matrixOpts = { includeTests: dossier.manifest.passes?.includeTests === true };
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -40853,7 +40886,7 @@ function runGuards(args2) {
       eprintln(`ultrasec guards --apply: ${e.message}`);
       return 2;
     }
-    const byId = new Map(buildGuardMatrix(scanRepo2(repo), lens, markers).map((r) => [r.id, r]));
+    const byId = new Map(buildGuardMatrix(scanRepo2(repo), lens, markers, matrixOpts).map((r) => [r.id, r]));
     const unknown = [];
     const discoveries = [];
     let confirmedPresent = 0;
@@ -40883,7 +40916,7 @@ function runGuards(args2) {
     if (strict && (unknown.length || res.rejected.length)) return 1;
     return code;
   }
-  const rows = buildGuardMatrix(scanRepo2(repo), lens, markers);
+  const rows = buildGuardMatrix(scanRepo2(repo), lens, markers, matrixOpts);
   const todoPath = emitWorklist(run2, stageFiles(spec.stem), rows, renderGuardsMd(rows, loadContextDoc(run2), lens));
   const t = guardTotals(rows);
   writeDossier(run2, { ...dossier, manifest: { ...dossier.manifest, passes: { ...dossier.manifest.passes, [spec.pass]: true } } });

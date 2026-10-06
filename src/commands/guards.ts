@@ -70,6 +70,8 @@ export function runGuards(args: ParsedArgs): number {
   // The project's own guard helpers: declared once in CONTEXT.md (`Auth markers:`
   // / `Throttle markers:`) so every run inherits them, or ad hoc with --marker.
   const markers = [...new Set([...contextMarkers(loadContextDoc(run), lens), ...markerFlags(args)])];
+  // Test files are left out unless the scan kept them (`scan --include-tests`).
+  const matrixOpts = { includeTests: dossier.manifest.passes?.includeTests === true };
 
   const applyPath = flagStr(args, "apply");
   if (applyPath) {
@@ -84,7 +86,7 @@ export function runGuards(args: ParsedArgs): number {
     // Re-derive the matrix rather than trusting the worklist on disk: a verdict
     // must name a handler that exists in the CODE, so a stale or hand-edited
     // GUARDS.json cannot introduce a finding whose citation nobody checked.
-    const byId = new Map(buildGuardMatrix(scanRepo(repo), lens, markers).map((r) => [r.id, r]));
+    const byId = new Map(buildGuardMatrix(scanRepo(repo), lens, markers, matrixOpts).map((r) => [r.id, r]));
     const unknown: string[] = [];
     const discoveries = [];
     let confirmedPresent = 0;
@@ -117,7 +119,7 @@ export function runGuards(args: ParsedArgs): number {
     return code;
   }
 
-  const rows: GuardRow[] = buildGuardMatrix(scanRepo(repo), lens, markers);
+  const rows: GuardRow[] = buildGuardMatrix(scanRepo(repo), lens, markers, matrixOpts);
   const todoPath = emitWorklist(run, stageFiles(spec.stem), rows, renderGuardsMd(rows, loadContextDoc(run), lens));
   const t = guardTotals(rows);
 

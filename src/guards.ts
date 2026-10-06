@@ -8,6 +8,7 @@ import { AUTH_MARKER, THROTTLE_MARKER } from "./context.js";
 import { shortHash, byStr } from "./util.js";
 import type { Discovery } from "./investigate.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
+import { isTestPath } from "./vendor/codeindex-engine.mjs";
 
 // The entry-point × guard matrix — enumerating the vulnerability that is an
 // ABSENCE.
@@ -186,9 +187,22 @@ export interface GuardRow {
    *   may guard a different handler.
    */
   scope: "symbol" | "approx" | "file";
+  /** Same-file handlers this one hands its requests to by value
+   *  (`export const GET = withX(opts, handler)`), folded into this row: their
+   *  reads and their markers are this route's. */
+  wraps?: string[];
   state: "guarded" | "unguarded";
   verdict: null;
 }
+
+/** `name` passed by VALUE as a positional argument — `withX(opts, name)`,
+ *  `withX(name)` — not called and not assigned to a property. */
+function passedByValue(text: string, name: string): boolean {
+  const n = name.replace(/[$]/g, "\\$");
+  return new RegExp(`[(,]\\s*${n}\\s*[,)]`).test(text);
+}
+
+const SCOPE_STRENGTH: Record<GuardRow["scope"], number> = { file: 0, approx: 1, symbol: 2 };
 
 /**
  * The line range to search for a guard, and how much to trust it.
@@ -360,7 +374,12 @@ function withProjectMarkers(base: RegExp, names: readonly string[]): RegExp {
  * `lens` defaults to `auth`, so every existing caller gets exactly the matrix it
  * got before lenses existed.
  */
-export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth", extraMarkers: readonly string[] = []): GuardRow[] {
+export function buildGuardMatrix(
+  scan: RepoScan,
+  lens: GuardLens = "auth",
+  extraMarkers: readonly string[] = [],
+  opts: { includeTests?: boolean } = {},
+): GuardRow[] {
   const spec = LENSES[lens];
   const marker = withProjectMarkers(spec.marker, extraMarkers);
   const rows: GuardRow[] = [];
@@ -368,6 +387,10 @@ export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth", extra
   for (const file of scan.files) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
+    // A test that builds a Request is not an entry point. On a real Next.js app
+    // test files were 187 of 358 rows. `scan --include-tests` keeps them, as it
+    // keeps test-path candidates at full severity.
+    if (!opts.includeTests && isTestPath(file.rel)) continue;
     const text = readText(join(scan.repo, file.rel));
     const sources = findSources(lang, text, file.rel).filter((s) => REQUEST_KINDS.has(s.kind));
     if (!sources.length) continue;
@@ -396,9 +419,38 @@ export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth", extra
       }
     }
 
-    for (const [, h] of byHandler) {
-      const { from, to, scope } = guardScope(file.symbols, h.line, lines);
-      const guards = markers.filter((m) => m.line >= from && m.line <= to);
+    // A route written `export const GET = withX(opts, handler)` is ONE entry
+    // point. Its request reads and its guard usually live in `handler`, which is
+    // a symbol of its own — so without this the route was two rows (two findings
+    // once adjudicated), and a guard inside the handler left the exported row
+    // "unguarded". A handler passed by value to another handler's call is folded
+    // into that row; a helper that is CALLED stays its own row.
+    const groups = [...byHandler.values()].map((h) => ({ h, ...guardScope(file.symbols, h.line, lines) }));
+    const wrapped = new Map<(typeof groups)[number], (typeof groups)[number][]>();
+    const absorbed = new Set<(typeof groups)[number]>();
+    for (const w of groups) {
+      if (!w.h.handler) continue;
+      const text = lines.slice(w.from - 1, w.to).join("\n");
+      for (const g of groups) {
+        if (g === w || !g.h.handler || g.h.handler === w.h.handler || absorbed.has(w)) continue;
+        if (!passedByValue(text, g.h.handler)) continue;
+        wrapped.set(w, [...(wrapped.get(w) ?? []), g]);
+        absorbed.add(g);
+      }
+    }
+
+    for (const group of groups) {
+      if (absorbed.has(group) && !wrapped.has(group)) continue;
+      const parts = [group, ...(wrapped.get(group) ?? [])];
+      const h = {
+        ...group.h,
+        line: Math.min(...parts.map((p) => p.h.line)),
+        reads: parts.reduce((n, p) => n + p.h.reads, 0),
+        kinds: new Set(parts.flatMap((p) => [...p.h.kinds])),
+      };
+      const scope = parts.reduce<GuardRow["scope"]>((weakest, p) => (SCOPE_STRENGTH[p.scope] < SCOPE_STRENGTH[weakest] ? p.scope : weakest), "symbol");
+      const guards = markers.filter((m) => parts.some((p) => m.line >= p.from && m.line <= p.to));
+      const wraps = parts.slice(1).map((p) => p.h.handler!);
       rows.push({
         // The auth lens keeps its historical id, so a GUARDS.json written before
         // lenses existed still names the same rows. A throttle row is a
@@ -413,6 +465,7 @@ export function buildGuardMatrix(scan: RepoScan, lens: GuardLens = "auth", extra
         ...(lens === "auth" ? {} : { lens }),
         ...(LOGIN_SHAPE.test(file.rel) || (h.handler ? LOGIN_SHAPE.test(h.handler) : false) ? { loginShape: true } : {}),
         scope,
+        ...(wraps.length ? { wraps } : {}),
         state: guards.length ? "guarded" : "unguarded",
         verdict: null,
       });
@@ -454,6 +507,11 @@ export function guardTotals(rows: readonly GuardRow[]): {
     noMarkerAnywhere: rows.length >= 3 && unguarded.length === rows.length,
     unguardedLoginShaped: unguarded.filter((r) => r.loginShape).length,
   };
+}
+
+/** " (wraps `handler()`)" — the same-file handler(s) folded into a route row. */
+function wrapsNote(r: GuardRow): string {
+  return r.wraps?.length ? ` (wraps ${r.wraps.map((w) => `\`${w}()\``).join(", ")})` : "";
 }
 
 export function renderGuardsMd(rows: GuardRow[], context?: string, lens: GuardLens = "auth"): string {
@@ -565,7 +623,7 @@ export function renderGuardsMd(rows: GuardRow[], context?: string, lens: GuardLe
     for (const r of unguarded) {
       const shape = throttling && r.loginShape ? ` · **auth endpoint — brute force / account enumeration**` : "";
       L.push(
-        `- \`${r.id}\` — \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : " (module scope)"} · ${r.kinds.join("/")} · ${r.reads} request read(s)${shape}`,
+        `- \`${r.id}\` — \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : " (module scope)"}${wrapsNote(r)} · ${r.kinds.join("/")} · ${r.reads} request read(s)${shape}`,
       );
     }
     L.push("");
@@ -583,7 +641,7 @@ export function renderGuardsMd(rows: GuardRow[], context?: string, lens: GuardLe
         .map((g) => `\`${g.hint}\`:${g.line}`)
         .join(", ");
       L.push(
-        `- \`${r.id}\` — \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : ""} · ${hints}${r.guards.length > 3 ? ` +${r.guards.length - 3} more` : ""}${r.scope === "symbol" ? "" : ` · ⚠️ ${r.scope}-scoped`}`,
+        `- \`${r.id}\` — \`${r.file}:${r.line}\`${r.handler ? ` in \`${r.handler}()\`` : ""}${wrapsNote(r)} · ${hints}${r.guards.length > 3 ? ` +${r.guards.length - 3} more` : ""}${r.scope === "symbol" ? "" : ` · ⚠️ ${r.scope}-scoped`}`,
       );
     }
     L.push("");
