@@ -1,13 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import type { Finding } from "../types.js";
 import type { ToolAdapter } from "./run.js";
 import { makeToolFinding, normalizeSeverity } from "./normalize.js";
 import { detect, resolveCompatibleBash } from "./registry.js";
 import { cacheDir } from "./scoring.js";
 import { PACKAGE_CHECKER_SH, PACKAGE_CHECKER_SHA256, PACKAGE_CHECKER_TAG } from "../vendor/package-checker-script.js";
+import { declaredRange, installedVersions } from "./lockfile-versions.js";
 
 // package-checker.sh (https://github.com/maxgfr/package-checker.sh, same author
 // as ultrasec) — a single self-contained bash script covering 12 ecosystems
@@ -202,9 +203,57 @@ export function splitPkgVersion(raw: string): { pkg: string; version?: string } 
   return { pkg: raw.slice(0, at), version: raw.slice(at + 1) };
 }
 
+const MANIFEST = /(?:^|\/)package\.json$/;
+
+/**
+ * A finding cited on a package.json names a version the script read off a
+ * RANGE (`"next": "^16.2.11"` → 16.2.11). Replace it with what the lockfile
+ * installs, or say it is the declared floor. On a real monorepo the unfixed
+ * shape was a critical for next@16.2.11 with only 16.3.3 installed.
+ *
+ * The advisory itself is not re-evaluated — the export carries no affected
+ * range — so a moved version lowers confidence and says what to check.
+ */
+function resolveManifestVersion(
+  repo: string,
+  file: string,
+  pkg: string,
+  version: string,
+): { version: string; versionSource?: "lockfile" | "declared-range"; note?: string } {
+  if (!MANIFEST.test(file)) return { version };
+  // The script reports the path it was handed — absolute on a real run.
+  if (isAbsolute(file)) file = relative(repo, file);
+  const range = declaredRange(repo, file, pkg);
+  const declared = range ? `\`${range}\`` : `a range with floor ${version}`;
+  const installed = installedVersions(repo, file, pkg);
+  if (!installed) {
+    return {
+      version,
+      versionSource: "declared-range",
+      note: `${version} is the declared range floor (${file} declares ${declared}), not an installed version: no lockfile records ${pkg}, so the installed version may differ.`,
+    };
+  }
+  if (installed.versions.includes(version)) return { version };
+  if (installed.versions.length === 1) {
+    const actual = installed.versions[0]!;
+    return {
+      version: actual,
+      versionSource: "lockfile",
+      note: `${file} declares ${declared}; ${installed.lockfile} resolves ${actual}. The advisory was matched against the range floor ${version} — confirm ${actual} is inside its affected range before trusting it.`,
+    };
+  }
+  return {
+    version,
+    versionSource: "declared-range",
+    note: `${version} is the declared range floor (${file} declares ${declared}); ${installed.lockfile} installs ${installed.versions.join(", ")}, none of them ${version}.`,
+  };
+}
+
 /** Map the script's `--export-json` shape into Findings. Exported (rather than
- *  inlined in `parse`) so the mapping is unit-testable without touching disk. */
-export function mapExport(data: unknown): Finding[] {
+ *  inlined in `parse`) so the mapping is unit-testable without touching disk.
+ *  With `repo`, a finding cited on a package.json names the lockfile-installed
+ *  version (see `resolveManifestVersion`). */
+export function mapExport(data: unknown, repo?: string): Finding[] {
   const vulns = (data as { vulnerabilities?: unknown[] } | null)?.vulnerabilities;
   if (!Array.isArray(vulns)) return [];
   const out: Finding[] = [];
@@ -213,7 +262,8 @@ export function mapExport(data: unknown): Finding[] {
     const entry = v as Record<string, unknown>;
     const rawPkg = typeof entry.package === "string" ? entry.package : "";
     if (!rawPkg) continue;
-    const { pkg, version } = splitPkgVersion(rawPkg);
+    const split = splitPkgVersion(rawPkg);
+    const { pkg } = split;
     const ghsa = typeof entry.ghsa === "string" && entry.ghsa ? entry.ghsa : undefined;
     const cve = typeof entry.cve === "string" && entry.cve ? entry.cve : undefined;
     const ecosystem = typeof entry.ecosystem === "string" && entry.ecosystem ? entry.ecosystem : "unknown";
@@ -222,23 +272,47 @@ export function mapExport(data: unknown): Finding[] {
     const advisory = ghsa ?? cve ?? "advisory";
     const ident = ghsa ?? cve ?? pkg;
     const reference = ghsa ? `https://github.com/advisories/${ghsa}` : cve ? `https://nvd.nist.gov/vuln/detail/${cve}` : undefined;
-    out.push(
-      makeToolFinding({
-        tool: "package-checker",
-        category: "dep",
-        ident,
-        title: `${pkg}: ${advisory}`,
-        severity: normalizeSeverity(typeof entry.severity === "string" ? entry.severity : undefined, "medium"),
-        message: `${pkg}${version ? `@${version}` : ""}: ${advisory} (${ecosystem}${source ? `, via ${source}` : ""})`,
-        file,
-        references: reference ? [reference] : [],
-        pkg,
-        version,
-        aliases: [ghsa, cve].filter((x): x is string => Boolean(x)),
-      }),
-    );
+    const resolved: { version?: string; versionSource?: "lockfile" | "declared-range"; note?: string } =
+      repo && file && split.version ? resolveManifestVersion(repo, file, pkg, split.version) : { version: split.version };
+    const version = resolved.version;
+    const f = makeToolFinding({
+      tool: "package-checker",
+      category: "dep",
+      ident,
+      title: `${pkg}: ${advisory}`,
+      severity: normalizeSeverity(typeof entry.severity === "string" ? entry.severity : undefined, "medium"),
+      message: `${pkg}${version ? `@${version}` : ""}: ${advisory} (${ecosystem}${source ? `, via ${source}` : ""})${resolved.note ? `. ${resolved.note}` : ""}`,
+      file,
+      references: reference ? [reference] : [],
+      pkg,
+      version,
+      aliases: [ghsa, cve].filter((x): x is string => Boolean(x)),
+      ...(resolved.versionSource ? { confidence: "low" as const } : {}),
+    });
+    if (resolved.versionSource) f.versionSource = resolved.versionSource;
+    out.push(f);
   }
-  return out;
+  return demotePhantoms(out);
+}
+
+/** `pkg@version:advisory` for the hits cited on a lockfile, i.e. on an install. */
+const installKey = (f: Finding): string => `${f.pkg}@${f.version}:${f.aliases?.[0] ?? f.title}`;
+
+/**
+ * A manifest hit moved to the lockfile-installed version that the script's
+ * OWN lockfile pass did not report at that version describes nothing that is
+ * installed: the advisory matched a range floor only. It is kept — at info, and
+ * saying why — rather than dropped, so the report still shows it was seen. On
+ * the real monorepo this was a critical for next@16.2.11 with 16.3.3 installed.
+ */
+function demotePhantoms(findings: Finding[]): Finding[] {
+  const onLockfile = new Set(findings.filter((f) => !f.versionSource && f.sink && !MANIFEST.test(f.sink.file)).map(installKey));
+  for (const f of findings) {
+    if (f.versionSource !== "lockfile" || onLockfile.has(installKey(f))) continue;
+    f.severity = "info";
+    f.message += ` package-checker's lockfile pass reported no ${f.aliases?.[0] ?? "advisory"} for ${f.pkg}@${f.version}, so nothing installed is known to be affected — kept at info rather than dropped.`;
+  }
+  return findings;
 }
 
 export const packageChecker: ToolAdapter = {
@@ -269,7 +343,7 @@ export const packageChecker: ToolAdapter = {
     if (ctx?.sbom) args.push("--source", ctx.sbom);
     return args;
   },
-  parse(_raw): Finding[] {
+  parse(_raw, repo): Finding[] {
     const path = exportPath();
     let raw: string;
     try {
@@ -283,7 +357,7 @@ export const packageChecker: ToolAdapter = {
       /* best-effort cleanup */
     }
     try {
-      return mapExport(JSON.parse(raw));
+      return mapExport(JSON.parse(raw), repo);
     } catch {
       return []; // malformed export — never throw
     }

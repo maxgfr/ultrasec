@@ -415,6 +415,14 @@ export interface Finding {
   /** Installed/affected version. */
   version?: string;
   /**
+   * Where `version` came from, when a scanner cited a MANIFEST rather than a
+   * lockfile. `lockfile`: the scanner read a range floor and the lockfile
+   * installs a different version, which is the one named here.
+   * `declared-range`: no lockfile records the package, so the version is the
+   * range floor and the installed one may differ. Absent ⇒ the scanner's own.
+   */
+  versionSource?: "lockfile" | "declared-range";
+  /**
    * The first version that fixes the advisory, when the scanner named one.
    *
    * Trivy and osv-scanner both know it and both used to spend it on prose —
