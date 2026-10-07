@@ -1,5 +1,5 @@
 import type { Pack, QueryIdiom } from "../types.js";
-import { EXPORT_PATH, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, XFF, XFF_LOOKBACK } from "./shared.js";
+import { COOKIE_HTTPONLY_SET, COOKIE_SECURE_SET, EXPORT_PATH, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, XFF, XFF_LOOKBACK } from "./shared.js";
 
 // Ruby: the language idioms, then Rails.
 
@@ -67,6 +67,12 @@ export const RUBY_PACK: Pack = {
       notApplicable:
         "Rails' cookie store keeps the session in one cookie and raises CookieOverflow past 4 KB rather than splitting it; there are no chunks for a logout to miss.",
     },
+    "request-body-unbounded": {
+      hunt: "Rack and Puma set no request-body limit and Rails parses JSON bodies whole; check what bounds them — a Rack middleware, the app server, or the proxy's client_max_body_size.",
+    },
+    "graphql-introspection-enabled": {
+      hunt: "graphql-ruby answers introspection unless the schema calls `disable_introspection_entry_points`, and GraphiQL is a mounted engine (`GraphiQL::Rails::Engine`); check both against the production environment.",
+    },
   },
 };
 
@@ -122,6 +128,66 @@ export const RAILS_PACK: Pack = {
           routeDecl: /^\s*def\s+(\w+)/,
           queries: RAILS_QUERIES,
           statement: "balanced",
+        },
+      ],
+    },
+    // The original web-config detector's Rails rules (raw lines: a
+    // commented-out `protect_from_forgery` IS the finding).
+    "csrf-protection-disabled": {
+      rules: [
+        { id: "protect-commented", kind: "line", languages: RB, text: "raw", match: /^\s*#\s*protect_from_forgery\b/, emit: "webconfig/csrf-disabled" },
+        {
+          id: "skip-verify",
+          kind: "line",
+          languages: RB,
+          text: "raw",
+          match: /\bskip_before_action\s+:verify_authenticity_token\b/,
+          emit: "webconfig/csrf-disabled",
+        },
+        {
+          id: "null-session",
+          kind: "line",
+          languages: RB,
+          text: "raw",
+          match: /\bprotect_from_forgery\s+with:\s*:null_session\b/,
+          emit: "webconfig/csrf-disabled",
+        },
+      ],
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "all-requests-local", kind: "line", languages: RB, text: "raw", match: /consider_all_requests_local\s*=\s*true/, emit: "webconfig/debug" }],
+    },
+    // A cookie written through the jar with a bare value gets neither flag;
+    // the hash form is where `httponly:`/`secure:` go.
+    // Source: https://api.rubyonrails.org/classes/ActionDispatch/Cookies.html
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "cookie-jar-assign",
+          kind: "call",
+          languages: RB,
+          call: /\bcookies(?:\.(?:signed|encrypted|permanent))*\s*\[[^\]\n]+\]\s*=(?!=)/,
+          scope: "statement",
+          options: { args: /\{/ },
+          bare: ["webconfig/cookie-httponly", "webconfig/cookie-secure"],
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+            { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET },
+          ],
+        },
+      ],
+    },
+    // Rails rejects a request whose Client-IP and X-Forwarded-For disagree;
+    // switched off, `request.remote_ip` follows whichever the caller sent.
+    // Source: https://guides.rubyonrails.org/configuring.html#config-action-dispatch-ip-spoofing-check
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "ip-spoofing-check-off",
+          kind: "line",
+          languages: RB,
+          match: /\bip_spoofing_check\s*=\s*false\b/,
+          note: "`ip_spoofing_check = false` turns off the check that makes Rails refuse a request whose Client-IP and X-Forwarded-For disagree, so `request.remote_ip` follows whatever the caller sent. Leave it on and configure `trusted_proxies` instead.",
         },
       ],
     },

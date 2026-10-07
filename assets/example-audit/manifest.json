@@ -120,6 +120,72 @@
       "packs": [
         "node"
       ]
+    },
+    {
+      "class": "insecure-session-cookie",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "proxy-headers-trusted",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "express"
+      ]
+    },
+    {
+      "class": "request-body-unbounded",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "express"
+      ]
+    },
+    {
+      "class": "graphql-introspection-enabled",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "csrf-protection-disabled",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "debug-mode-enabled",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
     }
   ]
 }

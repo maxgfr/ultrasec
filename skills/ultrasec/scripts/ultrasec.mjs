@@ -33631,8 +33631,6 @@ var WEBCONFIG_SHAPES = {
     note: "This `next.config` defines no `headers()`, and nothing in the app sets a Content-Security-Policy (no middleware, no helper). Next.js sends no CSP, HSTS, X-Frame-Options, X-Content-Type-Options or Referrer-Policy by default. Add them in `headers()` or middleware \u2014 unless a reverse proxy or CDN in front sets them, which is the thing to check (`ultrasec probe` sees what is actually served)."
   }
 };
-var TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
-var BODY_PARSER = /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\(([^)]*)\)/g;
 function lines2(content) {
   return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
 }
@@ -33658,18 +33656,6 @@ Evidence: \`${evidence.trim().slice(0, 160)}\``,
     cwe: shape.cwe
   });
 }
-function balanced(hay, open) {
-  let depth = 0;
-  for (let i2 = open; i2 < hay.length; i2++) {
-    const c2 = hay[i2];
-    if (c2 === "(") depth++;
-    else if (c2 === ")") {
-      depth--;
-      if (depth === 0) return hay.slice(open + 1, i2);
-    }
-  }
-  return null;
-}
 function lineOf(content, index) {
   let n = 1;
   for (let i2 = 0; i2 < index && i2 < content.length; i2++) if (content[i2] === "\n") n++;
@@ -33682,21 +33668,6 @@ var TLS_RULES = [
   { langs: /* @__PURE__ */ new Set(["go"]), re: /InsecureSkipVerify\s*:\s*true/ },
   { langs: /* @__PURE__ */ new Set(["php"]), re: /CURLOPT_SSL_VERIFY(?:PEER|HOST)\s*,\s*(?:0|false)\b/i },
   { langs: /* @__PURE__ */ new Set(["java", "kt", "scala"]), re: /ALLOW_ALL_HOSTNAME_VERIFIER|NoopHostnameVerifier|TrustAllCerts|trustAllCerts/ }
-];
-var CSRF_RULES = [
-  { langs: /* @__PURE__ */ new Set(["rb"]), re: /^\s*#\s*protect_from_forgery\b/ },
-  { langs: /* @__PURE__ */ new Set(["rb"]), re: /\bskip_before_action\s+:verify_authenticity_token\b/ },
-  { langs: /* @__PURE__ */ new Set(["rb"]), re: /\bprotect_from_forgery\s+with:\s*:null_session\b/ },
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /^\s*@csrf_exempt\b/ },
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /^\s*#\s*['"]django\.middleware\.csrf\.CsrfViewMiddleware['"]/ },
-  { langs: JS, re: /\bcsrf(?:Prevention)?\s*:\s*false\b/ },
-  { langs: /* @__PURE__ */ new Set(["php"]), re: /['"]csrf(?:_protection)?['"]\s*=>\s*false/i }
-];
-var DEBUG_RULES = [
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /\.run\([^)]*\bdebug\s*=\s*True/ },
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /^\s*DEBUG\s*=\s*True\b/ },
-  { langs: /* @__PURE__ */ new Set(["rb"]), re: /consider_all_requests_local\s*=\s*true/ },
-  { langs: /* @__PURE__ */ new Set(["php"]), re: /['"]debug['"]\s*=>\s*true/ }
 ];
 function scanCors(rel2, content, out2) {
   const credentials = /Access-Control-Allow-Credentials['"]?\s*[:,]\s*['"]?\s*true/i.test(content) || /\bcredentials\s*:\s*true/.test(content);
@@ -33714,35 +33685,6 @@ function scanCors(rel2, content, out2) {
     out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES[credentials ? "cors-wildcard-credentials" : "cors-wildcard"], m[0]));
   }
 }
-var COOKIE_CALL = /\b(?:res(?:ponse)?\.cookie|reply\.setCookie|ctx\.cookies\.set|cookies\.set|setcookie)\s*\(/gi;
-function dynamicFlag(args2, flag) {
-  const m = new RegExp(`\\b${flag}\\s*:\\s*([^,}\\s][^,}]*)`, "i").exec(args2);
-  if (!m) return false;
-  const v = m[1].trim();
-  return !/^(?:false|0|null|undefined|true|1)\b/i.test(v) && /^[!A-Za-z_$(]/.test(v);
-}
-function scanCookies(rel2, content, out2) {
-  for (const m of content.matchAll(COOKIE_CALL)) {
-    if (/clearCookie/i.test(m[0])) continue;
-    const open = (m.index ?? 0) + m[0].length - 1;
-    const args2 = balanced(content, open);
-    if (args2 === null) continue;
-    const ln = lineOf(content, m.index ?? 0);
-    const hasOptions = /\{/.test(args2) || /setcookie/i.test(m[0]);
-    if (!hasOptions) {
-      out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-httponly"], `${m[0]}\u2026`));
-      out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-secure"], `${m[0]}\u2026`));
-      continue;
-    }
-    const hasHttpOnly = /httponly\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]httponly['"]\s*=>\s*true/i.test(args2) || dynamicFlag(args2, "httponly");
-    const hasSecure = /\bsecure\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]secure['"]\s*=>\s*true/i.test(args2) || dynamicFlag(args2, "secure");
-    const sameSite = /samesite\s*[:=]?\s*['"]?(strict|lax|none)/i.exec(args2) || /['"]samesite['"]\s*=>\s*['"]?(strict|lax|none)/i.exec(args2);
-    if (!hasHttpOnly) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-httponly"], m[0]));
-    if (!hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-secure"], m[0]));
-    if (!sameSite) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-samesite"], m[0]));
-    else if (sameSite[1]?.toLowerCase() === "none" && !hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-samesite-none-insecure"], m[0]));
-  }
-}
 function auditWebConfig(repo, prune, tree) {
   const out2 = [];
   const read = tree?.read ?? readText2;
@@ -33757,22 +33699,14 @@ function auditWebConfig(repo, prune, tree) {
     for (const l of ls) {
       for (const r of TLS_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["tls-verify"], l.text));
       if (/NODE_TLS_REJECT_UNAUTHORIZED\s*[:=]\s*['"]?0\b/.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["tls-verify"], l.text));
-      for (const r of DEBUG_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES.debug, l.text));
       if (/Content-Security-Policy/i.test(l.text) && /unsafe-inline|unsafe-eval|(?:default|script|object)-src[^;'"]*\*/i.test(l.text))
         out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["header-csp"], l.text));
       if (/X-Frame-Options['"]?\s*[:,]\s*['"]?\s*(?:ALLOWALL|ALLOW-FROM)/i.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["header-xfo"], l.text));
       if (/Strict-Transport-Security[^\n]*max-age\s*=\s*0\b/i.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["header-hsts"], l.text));
       if (/Referrer-Policy['"]?\s*[:,]\s*['"]?\s*unsafe-url/i.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["header-referrer"], l.text));
       if (/^\s*autoindex\s+on\b/i.test(l.text) || /\bserve-index\s*\(/.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["dir-listing"], l.text));
-      if (/\b(?:introspection|graphiql|playground)\s*:\s*true\b/.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["graphql-introspection"], l.text));
-      for (const r of CSRF_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["csrf-disabled"], l.text));
-      if (TRUST_PROXY.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["trust-proxy"], l.text));
-      for (const m of l.text.matchAll(BODY_PARSER)) {
-        if (!/\blimit\s*:/.test(m[1] ?? "")) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["body-limit-missing"], m[0]));
-      }
     }
     scanCors(rel2, content, out2);
-    scanCookies(rel2, content, out2);
   }
   return out2;
 }
@@ -33938,7 +33872,7 @@ Evidence: \`${evidence.trim().slice(0, 160)}\``,
     cwe: shape.cwe
   });
 }
-function balanced2(hay, open) {
+function balanced(hay, open) {
   let depth = 0;
   for (let i2 = open; i2 < hay.length; i2++) {
     const c2 = hay[i2];
@@ -33994,7 +33928,7 @@ function scanJwtCalls(rel2, content, ext, out2) {
   if (JS2.has(ext)) {
     for (const m of content.matchAll(/\bjwt\.verify\s*\(/g)) {
       const open = (m.index ?? 0) + m[0].length - 1;
-      const args2 = balanced2(content, open);
+      const args2 = balanced(content, open);
       if (args2 === null) continue;
       if (!/algorithms/.test(args2)) out2.push(hit3(rel2, lineOf2(content, m.index ?? 0), AUTH_SHAPES["jwt-no-verify-alg"], m[0]));
     }
@@ -34219,6 +34153,131 @@ writer.writerow([cell(u.name), cell(u.email)])`
       },
       { language: "php", vulnerable: "$debug = (bool) getenv('APP_DEBUG');", fixed: "$debug = filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN);" }
     ]
+  },
+  "insecure-session-cookie": {
+    id: "insecure-session-cookie",
+    title: "Session cookie written without its protective flags",
+    cwe: "CWE-614",
+    severity: "medium",
+    category: "config",
+    invariant: "A cookie that carries a session or an auth token is written with HttpOnly (no script can read it), Secure (never sent over plain HTTP) and a SameSite policy \u2014 by the call that writes it, or by a framework default the code leaves on.",
+    guard: 'The flags set on the write itself (`httpOnly: true, secure: true, sameSite: "lax"`, `set_cookie(..., httponly=True, secure=True, samesite="Lax")`, `HttpOnly: true, Secure: true`, `ResponseCookie\u2026httpOnly(true).secure(true)`, a Rails cookie hash with `httponly: true, secure: true`), or a session middleware configured with them. A flag bound to an expression (`secure: isProd`) is set \u2014 to whatever the deployment decides.',
+    rubric: "medium for a session or auth cookie; low for a preference cookie with no authority; high when the missing flag is Secure on a cookie sent to an HTTP origin, or SameSite=None without Secure.",
+    note: "A cookie is written without HttpOnly or Secure. A session cookie readable from script is stolen by any XSS; one without Secure travels over plain HTTP. Set both on the write, and a SameSite policy.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: 'res.cookie("sid", token);',
+        fixed: 'res.cookie("sid", token, { httpOnly: true, secure: true, sameSite: "lax" });'
+      },
+      {
+        language: "python",
+        vulnerable: 'response.set_cookie("sid", token)',
+        fixed: 'response.set_cookie("sid", token, httponly=True, secure=True, samesite="Lax")'
+      },
+      {
+        language: "go",
+        vulnerable: 'http.SetCookie(w, &http.Cookie{Name: "sid", Value: token})',
+        fixed: 'http.SetCookie(w, &http.Cookie{Name: "sid", Value: token, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})'
+      },
+      { language: "ruby", vulnerable: "cookies[:sid] = token", fixed: "cookies[:sid] = { value: token, httponly: true, secure: true, same_site: :lax }" }
+    ]
+  },
+  "proxy-headers-trusted": {
+    id: "proxy-headers-trusted",
+    title: "Forwarded headers trusted without a proxy allow-list",
+    cwe: "CWE-290",
+    severity: "low",
+    category: "config",
+    invariant: "The framework takes the client address, scheme and host from X-Forwarded-* (or Forwarded) only from the proxies the deployment actually runs \u2014 a hop count or an address list \u2014 never from any caller.",
+    guard: "Trust configured with a hop count or the proxy's addresses (Express `trust proxy` = 1 or a subnet, Gin `SetTrustedProxies([proxy])`, Werkzeug `ProxyFix(x_for=1)`, uvicorn `--forwarded-allow-ips=<proxy>`, Laravel `trustProxies(at: [proxy])`), on an app that is not reachable except through that proxy.",
+    rubric: "low as a posture note when the app is only reachable through a proxy that rewrites the headers; medium when the address keys a rate limit, lockout or audit log and the app is reachable directly; high when it keys an allow-list that grants access.",
+    note: "The framework is told to trust X-Forwarded-* from every caller, so the client IP, scheme and host it reports are whatever the request says \u2014 for rate limits, allow-lists, audit logs and absolute URLs alike. Trust only your own proxy (a hop count or its address), and confirm the app is not reachable around it.",
+    examples: [
+      { language: "javascript", vulnerable: 'app.set("trust proxy", true);', fixed: 'app.set("trust proxy", 1); // exactly one proxy in front' },
+      {
+        language: "python",
+        vulnerable: "USE_X_FORWARDED_HOST = True",
+        fixed: "# Host comes from the request line; the proxy rewrites it if it must\nUSE_X_FORWARDED_HOST = False"
+      },
+      { language: "php", vulnerable: "$middleware->trustProxies(at: '*');", fixed: "$middleware->trustProxies(at: ['10.0.0.0/8']);" }
+    ]
+  },
+  "request-body-unbounded": {
+    id: "request-body-unbounded",
+    title: "Request body read with no size limit",
+    cwe: "CWE-770",
+    severity: "low",
+    category: "config",
+    invariant: "Every request body the application buffers \u2014 JSON, form, multipart, raw \u2014 is bounded by a size limit the code (or the server in front) sets explicitly, below what one request may cost in memory.",
+    guard: 'An explicit limit where the body is read (`express.json({ limit: "100kb" })`, Go `http.MaxBytesReader`, Flask `MAX_CONTENT_LENGTH`, Django `DATA_UPLOAD_MAX_MEMORY_SIZE`, Spring `spring.servlet.multipart.max-request-size`), or a proxy limit (`client_max_body_size`) the app cannot be reached around.',
+    rubric: "low as a hardening note when a default limit exists; medium when the body is read whole into memory with no limit anywhere and the route is anonymous.",
+    note: "A request body is read with no size limit \u2014 or with the framework's limit switched off \u2014 so one request can make the process buffer as much as the client sends. Set an explicit limit where the body is read, or confirm the proxy in front enforces one.",
+    examples: [
+      { language: "javascript", vulnerable: "app.use(express.json());", fixed: 'app.use(express.json({ limit: "100kb" }));' },
+      { language: "go", vulnerable: "body, _ := io.ReadAll(r.Body)", fixed: "r.Body = http.MaxBytesReader(w, r.Body, 1<<20)\nbody, err := io.ReadAll(r.Body)" },
+      { language: "python", vulnerable: "DATA_UPLOAD_MAX_MEMORY_SIZE = None", fixed: "DATA_UPLOAD_MAX_MEMORY_SIZE = 2_621_440  # Django's default, 2.5 MB" }
+    ]
+  },
+  "graphql-introspection-enabled": {
+    id: "graphql-introspection-enabled",
+    title: "GraphQL introspection or IDE served in production",
+    cwe: "CWE-200",
+    severity: "medium",
+    category: "config",
+    invariant: "A production GraphQL endpoint does not answer introspection queries nor serve an IDE (GraphiQL, Playground, Sandbox) unless the schema is meant to be public.",
+    guard: 'Introspection and the IDE turned off outside development (`introspection: process.env.NODE_ENV !== "production"`, graphene `graphiql=settings.DEBUG`, a `DisableIntrospection` validation rule, `spring.graphql.graphiql.enabled=false`), or a schema that is public by design.',
+    rubric: "medium when the schema exposes internal or administrative operations; low when the API is public and documented anyway; high when introspection reveals operations that lack authorization.",
+    note: "GraphQL introspection or an IDE is switched on, which hands anyone the whole schema \u2014 every type, field and mutation, including the ones the UI never calls. Turn both off in production unless the schema is public by design.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: "new ApolloServer({ schema, introspection: true });",
+        fixed: 'new ApolloServer({ schema, introspection: process.env.NODE_ENV !== "production" });'
+      },
+      {
+        language: "python",
+        vulnerable: 'path("graphql", GraphQLView.as_view(graphiql=True))',
+        fixed: 'path("graphql", GraphQLView.as_view(graphiql=settings.DEBUG))'
+      },
+      {
+        language: "go",
+        vulnerable: 'http.Handle("/", playground.Handler("GraphQL", "/query"))',
+        fixed: 'if os.Getenv("ENV") == "dev" {\n    http.Handle("/", playground.Handler("GraphQL", "/query"))\n}'
+      }
+    ]
+  },
+  "csrf-protection-disabled": {
+    id: "csrf-protection-disabled",
+    title: "CSRF protection switched off",
+    cwe: "CWE-352",
+    severity: "high",
+    category: "config",
+    invariant: "Every state-changing route an authenticated browser can reach with ambient credentials (cookies, HTTP auth) is protected against cross-site requests \u2014 the framework's CSRF guard left on, an Origin check, or credentials that are never ambient.",
+    guard: "The framework's guard left enabled (Django CsrfViewMiddleware, Rails `protect_from_forgery`, Spring Security's CSRF filter, Laravel's token middleware, Next.js Server Actions' origin check), or an API authenticated only by a header the browser does not attach on its own (a bearer token) \u2014 which is the thing to verify before calling an exemption a bug.",
+    rubric: "high when the exempted routes change state under cookie authentication; medium when they are only reachable with a non-ambient credential; nothing when every exempted route is read-only or authenticated by a bearer header.",
+    note: "The framework's CSRF guard is switched off (commented out, skipped, exempted or disabled). Any state-changing route it covered can now be driven from an attacker's page using the victim's cookies. Turn it back on, or prove the routes are authenticated by a credential the browser does not attach on its own.",
+    examples: [
+      { language: "ruby", vulnerable: "skip_before_action :verify_authenticity_token", fixed: "protect_from_forgery with: :exception" },
+      { language: "java", vulnerable: "http.csrf(AbstractHttpConfigurer::disable);", fixed: "http.csrf(withDefaults());" },
+      { language: "python", vulnerable: "@csrf_exempt\ndef transfer(request):", fixed: "def transfer(request):  # CsrfViewMiddleware checks the token" }
+    ]
+  },
+  "debug-mode-enabled": {
+    id: "debug-mode-enabled",
+    title: "Framework debug mode or verbose errors enabled",
+    cwe: "CWE-489",
+    severity: "medium",
+    category: "config",
+    invariant: "The deployed application runs with the framework's debug mode off: no interactive debugger, no stack traces, configuration or source in error responses.",
+    guard: 'Debug tied to an environment that is false in production (`DEBUG = env.bool("DEBUG", False)`, `app.run(debug=os.getenv("FLASK_DEBUG") == "1")`, `gin.SetMode(gin.ReleaseMode)`, `server.error.include-stacktrace=never`), and the setting checked in the deployed configuration, not the development one.',
+    rubric: "medium when stack traces or settings reach a remote caller; high when the debugger is interactive (Werkzeug console, Rails web-console) and reachable; low when the file is development-only configuration \u2014 say why.",
+    note: "Framework debug mode is on: error responses carry stack traces, settings or source, and some debuggers (Werkzeug, web-console) give a remote console. Turn it off in production, driven by the environment rather than hard-coded.",
+    examples: [
+      { language: "python", vulnerable: "DEBUG = True", fixed: 'DEBUG = os.environ.get("DJANGO_DEBUG", "false") == "true"' },
+      { language: "go", vulnerable: "gin.SetMode(gin.DebugMode)", fixed: "gin.SetMode(gin.ReleaseMode)" },
+      { language: "ruby", vulnerable: "config.consider_all_requests_local = true", fixed: "config.consider_all_requests_local = false" }
+    ]
   }
 };
 var CLASS_LIST = Object.values(CLASSES);
@@ -34236,6 +34295,24 @@ var EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|x
 var HEADERS_MIDDLEWARE = /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
 var SETS_SECURITY_HEADER = /Content-Security-Policy|X-Frame-Options|Strict-Transport-Security/i;
 var FLAG_NAME = String.raw`\w*(?:enabled|disabled|enable|disable|flag|debug|mock|fake|skip|bypass|allow|insecure|feature|dry_?run|test_?mode)\w*`;
+var COOKIE_CALL = /\b(?:res(?:ponse)?\.cookie|reply\.setCookie|ctx\.cookies\.set|cookies\.set|setcookie)\s*\(/gi;
+var boundFlag = (flag) => String.raw`\b${flag}\s*:\s*(?!(?:false|0|null|undefined|true|1)\b)[!A-Za-z_$(]`;
+var COOKIE_HTTPONLY_SET = new RegExp(String.raw`httponly\s*[:=]?\s*(?:true|1)|['"]httponly['"]\s*=>\s*true|${boundFlag("httponly")}`, "i");
+var COOKIE_SECURE_SET = new RegExp(String.raw`\bsecure\s*[:=]?\s*(?:true|1)|['"]secure['"]\s*=>\s*true|${boundFlag("secure")}`, "i");
+var COOKIE_SAMESITE_SET = /samesite\s*[:=]?\s*['"]?(?:strict|lax|none)|['"]samesite['"]\s*=>\s*['"]?(?:strict|lax|none)/i;
+var COOKIE_SAMESITE_NONE = /samesite\s*[:=]?\s*['"]?none|['"]samesite['"]\s*=>\s*['"]?none/i;
+var LEGACY_COOKIE_FLAGS = {
+  options: { args: /\{/, head: /setcookie/i },
+  bare: ["webconfig/cookie-httponly", "webconfig/cookie-secure"],
+  flags: [
+    { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+    { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET },
+    { emit: "webconfig/cookie-samesite", present: COOKIE_SAMESITE_SET },
+    { emit: "webconfig/cookie-samesite-none-insecure", when: COOKIE_SAMESITE_NONE, present: COOKIE_SECURE_SET }
+  ]
+};
+var EXPRESS_TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
+var GRAPHQL_INTROSPECTION_ON = /\b(?:introspection|graphiql|playground)\s*:\s*true\b/;
 
 // src/classes/packs/common.ts
 var FIRST_HOP = /\.split\(\s*(["'])\s*,\s*\1\s*\)\s*(?:\[\s*0\s*\]|\.shift\(\s*\)|\.at\(\s*0\s*\))/;
@@ -34253,6 +34330,13 @@ var COMMON_PACK = {
           context: { re: XFF, before: XFF_LOOKBACK },
           emit: "webconfig/xff-first-hop"
         }
+      ]
+    },
+    // A gateway/router config file (Apollo Router, Hive, a server YAML) that
+    // switches introspection or an IDE on — the original detector read these.
+    "graphql-introspection-enabled": {
+      rules: [
+        { id: "config-true", kind: "line", languages: ["yaml", "conf"], text: "raw", match: GRAPHQL_INTROSPECTION_ON, emit: "webconfig/graphql-introspection" }
       ]
     }
   }
@@ -34349,6 +34433,33 @@ var NODE_PACK = {
           note: '`Boolean(process.env.X)` is true for every non-empty string, including "false" and "0" \u2014 an operator writing X=false turns the flag ON. Compare the string explicitly (`process.env.X === "true"`).'
         }
       ]
+    },
+    // The original web-config detector's rules (src/webconfig.ts ≤ v1.58.0),
+    // moved here with their shapes so their findings keep their ids.
+    "insecure-session-cookie": {
+      rules: [{ id: "cookie-call", kind: "call", languages: JS3, call: COOKIE_CALL, scope: "args", ...LEGACY_COOKIE_FLAGS }]
+    },
+    "graphql-introspection-enabled": {
+      rules: [{ id: "options-true", kind: "line", languages: JS3, text: "raw", match: GRAPHQL_INTROSPECTION_ON, emit: "webconfig/graphql-introspection" }]
+    },
+    "csrf-protection-disabled": {
+      rules: [{ id: "csrf-false", kind: "line", languages: JS3, text: "raw", match: /\bcsrf(?:Prevention)?\s*:\s*false\b/, emit: "webconfig/csrf-disabled" }]
+    },
+    "debug-mode-enabled": {
+      rules: [
+        // The `errorhandler` middleware renders stack traces to the client; its
+        // own README says development only. Registered with no environment check.
+        {
+          id: "errorhandler-unconditional",
+          kind: "file",
+          languages: JS3,
+          gate: [/require\(\s*["']errorhandler["']\s*\)|from\s+["']errorhandler["']/],
+          anchor: /\.use\s*\(\s*\w*[eE]rror[hH]andler\s*\(/,
+          pick: "first",
+          unless: /NODE_ENV|\.get\(\s*["']env["']\s*\)|isDev\w*|isProd\w*|development/,
+          emit: "webconfig/debug"
+        }
+      ]
     }
   }
 };
@@ -34415,6 +34526,30 @@ var NEXTJS_PACK = {
           emit: "webconfig/unbounded-export"
         }
       ]
+    },
+    // Server Actions check that the Origin matches the host; `allowedOrigins`
+    // widens that list, and a `*` entry turns the check off.
+    // Source: https://nextjs.org/docs/app/api-reference/config/next-config-js/serverActions
+    "csrf-protection-disabled": {
+      rules: [
+        {
+          id: "server-actions-any-origin",
+          kind: "line",
+          languages: JS3,
+          files: NEXT_CONFIG,
+          match: /\ballowedOrigins\s*:\s*\[[^\]]*["'`]\*["'`]/,
+          note: "`serverActions.allowedOrigins` lists `*`, which turns off the Origin check Next.js applies to every Server Action \u2014 its CSRF protection. Any site can invoke the app's actions with the visitor's cookies. List the exact origins a proxy forwards from."
+        }
+      ]
+    },
+    "proxy-headers-trusted": {
+      hunt: "Next.js derives the request host and protocol from X-Forwarded-Host/-Proto and exposes no trust setting of its own; whether a caller can forge them depends on the proxy in front \u2014 check how the app reads them and what the deployment strips."
+    },
+    "request-body-unbounded": {
+      hunt: "App-Router route handlers read `await req.json()` with no size limit of their own (Server Actions default to 1 MB, `api.bodyParser.sizeLimit` bounds Pages-Router routes); check what bounds the bodies this app reads."
+    },
+    "debug-mode-enabled": {
+      hunt: "Next.js has no debug switch in code \u2014 `next dev` vs `next start` and `productionBrowserSourceMaps` decide what an error exposes; check the deployed start command and config."
     }
   }
 };
@@ -34440,6 +34575,22 @@ var EXPRESS_PACK = {
           routeDecl: JS_ROUTE_DECL,
           queries: NODE_ORM_QUERIES,
           statement: "balanced"
+        }
+      ]
+    },
+    "proxy-headers-trusted": {
+      rules: [{ id: "trust-proxy", kind: "line", languages: JS3, text: "raw", match: EXPRESS_TRUST_PROXY, emit: "webconfig/trust-proxy" }]
+    },
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "body-parser-no-limit",
+          kind: "line",
+          languages: JS3,
+          text: "raw",
+          evidence: "match",
+          match: /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\((?![^)]*\blimit\s*:)[^)]*\)/,
+          emit: "webconfig/body-limit-missing"
         }
       ]
     }
@@ -34476,6 +34627,14 @@ var NESTJS_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // On the Express adapter Nest forwards `app.set` to Express.
+    // Source: https://docs.nestjs.com/faq/http-adapter
+    "proxy-headers-trusted": {
+      rules: [{ id: "trust-proxy", kind: "line", languages: JS3, text: "raw", match: EXPRESS_TRUST_PROXY, emit: "webconfig/trust-proxy" }]
+    },
+    "request-body-unbounded": {
+      hunt: "Nest registers the adapter's body parser itself (`NestFactory.create(\u2026, { bodyParser })`, `app.useBodyParser('json', { limit })`); check which limit the app sets."
     }
   }
 };
@@ -34520,6 +34679,21 @@ var FASTIFY_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // `trustProxy: true` trusts every hop. Source: https://fastify.dev/docs/latest/Reference/Server/#trustproxy
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "trust-proxy-true",
+          kind: "line",
+          languages: JS3,
+          match: /\btrustProxy\s*:\s*true\b/,
+          note: "`trustProxy: true` makes Fastify take `request.ip`, `request.protocol` and `request.host` from X-Forwarded-* sent by ANY caller. Give it the proxy's address or a hop count instead, and confirm the app is not reachable around the proxy."
+        }
+      ]
+    },
+    "request-body-unbounded": {
+      hunt: "Fastify bounds bodies with `bodyLimit` (1 MiB by default); check whether the app raises it or reads `request.raw` itself."
     }
   }
 };
@@ -34536,7 +34710,21 @@ var ctorPack = (id, ctor, testedWith) => ({
     }
   }
 });
-var KOA_PACK = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
+var KOA_PACK = (() => {
+  const pack = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
+  pack.classes["proxy-headers-trusted"] = {
+    rules: [
+      {
+        id: "app-proxy-true",
+        kind: "line",
+        languages: JS3,
+        match: /\b(?:app|server)\s*\.\s*proxy\s*=\s*true\b/,
+        note: "`app.proxy = true` makes Koa take `ctx.ip`, `ctx.protocol` and `ctx.host` from X-Forwarded-* sent by ANY caller. Set `proxyIpHeader`/`maxIpsCount` to your proxy's hop count, and confirm the app is not reachable around the proxy."
+      }
+    ]
+  };
+  return pack;
+})();
 var HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
 var ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
 var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK, NEXT_AUTH_PACK];
@@ -34641,6 +34829,28 @@ var PYTHON_PACK = {
     },
     "session-cookie-chunks-on-logout": {
       notApplicable: "Python web frameworks keep the session server-side (Django, Flask-Session) or in one signed cookie (Flask's default); none splits it into numbered chunks that a logout could leave behind."
+    },
+    // `set_cookie` is Django's HttpResponse, Werkzeug/Flask's Response and
+    // Starlette's Response alike, and all three default HttpOnly and Secure off.
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "set-cookie",
+          kind: "call",
+          languages: PY3,
+          call: /\.set_cookie\s*\(/,
+          scope: "args",
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+            { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET },
+            { emit: "webconfig/cookie-samesite-none-insecure", when: COOKIE_SAMESITE_NONE, present: COOKIE_SECURE_SET }
+          ]
+        }
+      ]
+    },
+    // graphene-django / Flask-GraphQL `GraphQLView.as_view(graphiql=True)`.
+    "graphql-introspection-enabled": {
+      rules: [{ id: "graphiql-true", kind: "line", languages: PY3, match: /\bgraphiql\s*=\s*True\b/, emit: "webconfig/graphql-introspection" }]
     }
   }
 };
@@ -34690,6 +34900,50 @@ var DJANGO_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // The original web-config detector's Django rules (raw lines: a
+    // commented-out middleware IS the finding).
+    "csrf-protection-disabled": {
+      rules: [
+        { id: "csrf-exempt", kind: "line", languages: PY3, text: "raw", match: /^\s*@csrf_exempt\b/, emit: "webconfig/csrf-disabled" },
+        {
+          id: "middleware-commented",
+          kind: "line",
+          languages: PY3,
+          text: "raw",
+          match: /^\s*#\s*['"]django\.middleware\.csrf\.CsrfViewMiddleware['"]/,
+          emit: "webconfig/csrf-disabled"
+        }
+      ]
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "debug-true", kind: "line", languages: PY3, text: "raw", match: /^\s*DEBUG\s*=\s*True\b/, emit: "webconfig/debug" }]
+    },
+    // USE_X_FORWARDED_HOST trusts X-Forwarded-Host for `get_host()` and every
+    // absolute URL (password-reset links). Source: https://docs.djangoproject.com/en/stable/ref/settings/#use-x-forwarded-host
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "use-x-forwarded-host",
+          kind: "line",
+          languages: PY3,
+          match: /^\s*USE_X_FORWARDED_HOST\s*=\s*True\b/,
+          note: "`USE_X_FORWARDED_HOST = True` makes `request.get_host()` \u2014 and every absolute URL Django builds, password-reset links included \u2014 come from X-Forwarded-Host, which any caller can send unless the proxy in front overwrites it. Confirm the proxy sets it on every request, or leave it off."
+        }
+      ]
+    },
+    // DATA_UPLOAD_MAX_MEMORY_SIZE = None removes Django's 2.5 MB body cap.
+    // Source: https://docs.djangoproject.com/en/stable/ref/settings/#data-upload-max-memory-size
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "upload-max-none",
+          kind: "line",
+          languages: PY3,
+          match: /^\s*DATA_UPLOAD_MAX_(?:MEMORY_SIZE|NUMBER_FIELDS|NUMBER_FILES)\s*=\s*None\b/,
+          note: "A Django request-size guard is set to `None`, which removes it: a single request can make the process buffer an arbitrarily large body (or field count). Keep a bound \u2014 the 2.5 MB default, or the largest body the app really accepts."
+        }
+      ]
     }
   }
 };
@@ -34737,6 +34991,33 @@ var FLASK_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "run-debug", kind: "line", languages: PY3, text: "raw", match: /\.run\([^)]*\bdebug\s*=\s*True/, emit: "webconfig/debug" }]
+    },
+    // Flask-WTF's CSRF protection, switched off.
+    // Source: https://flask-wtf.readthedocs.io/en/stable/config/
+    "csrf-protection-disabled": {
+      rules: [{ id: "wtf-csrf-off", kind: "line", languages: PY3, match: /\bWTF_CSRF_ENABLED["']?\s*\]?\s*=\s*False\b/, emit: "webconfig/csrf-disabled" }]
+    },
+    // Flask reads JSON and raw bodies whole and sets no MAX_CONTENT_LENGTH.
+    // Source: https://flask.palletsprojects.com/en/stable/config/#MAX_CONTENT_LENGTH
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "no-max-content-length",
+          kind: "absent",
+          languages: PY3,
+          requiresFramework: "flask",
+          anchor: /\bFlask\s*\(\s*__name__/,
+          presentInFile: /MAX_CONTENT_LENGTH/,
+          presentInTree: { re: /MAX_CONTENT_LENGTH/, scope: "package", languages: PY3 },
+          note: "The Flask app is built and nothing in the package sets `MAX_CONTENT_LENGTH`, so Flask reads request bodies of any size (`request.get_json()`, `request.data`). Set it to the largest body the app accepts \u2014 unless the proxy in front enforces a limit."
+        }
+      ]
+    },
+    "proxy-headers-trusted": {
+      hunt: "Flask trusts no forwarded header unless the app wraps itself in Werkzeug's `ProxyFix`; check whether it does, and with how many hops (`x_for`, `x_host`, `x_proto`)."
     }
   }
 };
@@ -34771,6 +35052,30 @@ var FASTAPI_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // Starlette's debug mode renders tracebacks to the client.
+    // Source: https://www.starlette.io/applications/
+    "debug-mode-enabled": {
+      rules: [{ id: "app-debug", kind: "line", languages: PY3, match: /\bFastAPI\s*\([^)]*\bdebug\s*=\s*True\b/, emit: "webconfig/debug" }]
+    },
+    // uvicorn trusts X-Forwarded-For/-Proto only from `forwarded_allow_ips`; `*` is everyone.
+    // Source: https://www.uvicorn.org/settings/#http
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "forwarded-allow-any",
+          kind: "line",
+          languages: PY3,
+          match: /\bforwarded_allow_ips\s*=\s*["']\*["']/,
+          note: '`forwarded_allow_ips="*"` makes uvicorn take the client address and scheme from X-Forwarded-* sent by ANY caller. List the proxy\'s address instead, and confirm the app is not reachable around it.'
+        }
+      ]
+    },
+    "request-body-unbounded": {
+      hunt: "FastAPI/Starlette read `await request.json()` and `request.body()` whole with no size limit of their own; check what bounds the bodies (a middleware, the ASGI server, the proxy)."
+    },
+    "csrf-protection-disabled": {
+      hunt: "FastAPI ships no CSRF protection to switch off; check whether any state-changing route is authenticated by a cookie the browser attaches on its own."
     }
   }
 };
@@ -34778,6 +35083,8 @@ var PYTHON_PACKS = [PYTHON_PACK, DJANGO_PACK, FLASK_PACK, FASTAPI_PACK];
 
 // src/classes/packs/java.ts
 var JVM2 = ["java", "kotlin"];
+var BOOT_CONFIG = /(?:^|\/)(?:application|bootstrap)(?:-[\w-]+)?\.(?:properties|ya?ml)$/;
+var BOOT_CONFIG_LANGS = ["properties", "yaml"];
 var SECRET2 = String.raw`"[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
 var SECRET_FIELD = String.raw`\w*(?:apiKey|ApiKey|API_KEY|sharedSecret|SharedSecret|webhookSecret|WebhookSecret|clientSecret|ClientSecret|apiToken|ApiToken)\w*`;
 var JAVA_PACK = {
@@ -34880,6 +35187,84 @@ var SPRING_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // `ResponseCookie` builds with HttpOnly and Secure off unless the chain sets them.
+    // Source: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/http/ResponseCookie.html
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "response-cookie",
+          kind: "call",
+          languages: JVM2,
+          call: /\bResponseCookie\s*\.\s*(?:from|fromClientResponse)\s*\(/,
+          scope: "statement",
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: /\.httpOnly\s*\(\s*(?!false\b)[^)\s]/ },
+            { emit: "webconfig/cookie-secure", present: /\.secure\s*\(\s*(?!false\b)[^)\s]/ }
+          ]
+        }
+      ]
+    },
+    "csrf-protection-disabled": {
+      rules: [
+        {
+          id: "csrf-disabled",
+          kind: "line",
+          languages: JVM2,
+          match: /\.csrf\s*\(\s*(?:AbstractHttpConfigurer\s*::\s*disable|\(?\s*\w+\s*\)?\s*->\s*\w+\s*\.\s*disable\s*\(\s*\))\s*\)|\.csrf\s*\(\s*\)\s*\.\s*disable\s*\(|\bcsrf\s*\{\s*disable\s*\(\s*\)/,
+          emit: "webconfig/csrf-disabled"
+        }
+      ]
+    },
+    // Settings that live in application.properties / application.yml.
+    // Sources: https://docs.spring.io/spring-boot/appendix/application-properties/
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "forward-headers-strategy",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\bforward-headers-strategy\s*[:=]\s*["']?(?:native|framework)\b/i,
+          note: "`server.forward-headers-strategy` makes Spring take the client address, scheme and host from X-Forwarded-*/Forwarded. Right behind a proxy that overwrites them; when the app is reachable directly, any caller sets its own IP and scheme. Pair it with `server.tomcat.remoteip.internal-proxies` (or the proxy's network) and confirm the topology."
+        }
+      ]
+    },
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "multipart-unlimited",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\bmax-(?:file|request)-size\s*[:=]\s*["']?-1\b/,
+          note: "A multipart size limit is set to `-1`, which removes it: one upload can be as large as the client sends. Keep a bound (Spring Boot's defaults are 1 MB per file and 10 MB per request)."
+        }
+      ]
+    },
+    "graphql-introspection-enabled": {
+      rules: [
+        {
+          id: "graphiql-enabled",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\bgraphiql\.enabled\s*[:=]\s*true\b/,
+          emit: "webconfig/graphql-introspection"
+        }
+      ]
+    },
+    "debug-mode-enabled": {
+      rules: [
+        {
+          id: "stacktrace-always",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\binclude-stacktrace\s*[:=]\s*["']?always\b/,
+          emit: "webconfig/debug"
+        }
+      ]
     }
   }
 };
@@ -34954,6 +35339,54 @@ var GO_PACK = {
     },
     "session-cookie-chunks-on-logout": {
       notApplicable: "Go session libraries (gorilla/sessions, scs) keep one cookie per session and refuse an oversized value; none splits it into numbered chunks."
+    },
+    // `http.Cookie` defaults HttpOnly and Secure to false; the literal is where they are set.
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "cookie-literal",
+          kind: "call",
+          languages: GO,
+          call: /\bhttp\.Cookie\s*\{/,
+          scope: "args",
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+            { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET }
+          ]
+        }
+      ]
+    },
+    // A body read whole with no `http.MaxBytesReader` anywhere in the file.
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "readall-body",
+          kind: "file",
+          languages: GO,
+          gate: [/\.Body\b/],
+          anchor: /\b(?:io|ioutil)\.ReadAll\s*\(\s*(?:\w+\.)?(?:r|req|request|Request)\.Body\s*\)|json\.NewDecoder\s*\(\s*(?:\w+\.)?(?:r|req|request|Request)\.Body\s*\)/,
+          pick: "first",
+          unless: /\bMaxBytesReader\b|\bLimitReader\b|MaxMultipartMemory/,
+          note: "A request body is read whole (`io.ReadAll`, `json.NewDecoder`) and nothing in the file bounds it \u2014 net/http sets no body limit, and neither does Gin outside multipart. Wrap it first: `r.Body = http.MaxBytesReader(w, r.Body, limit)`."
+        }
+      ]
+    },
+    // gqlgen's playground/sandbox handlers serve a GraphQL IDE.
+    "graphql-introspection-enabled": {
+      rules: [
+        {
+          id: "playground-handler",
+          kind: "line",
+          languages: GO,
+          match: /\bplayground\.(?:Handler|ApolloSandboxHandler|AltairHandler)\s*\(/,
+          emit: "webconfig/graphql-introspection"
+        }
+      ]
+    },
+    // Go 1.25's CrossOriginProtection, with a pattern exempted from it.
+    // Source: https://pkg.go.dev/net/http#CrossOriginProtection
+    "csrf-protection-disabled": {
+      rules: [{ id: "cop-bypass", kind: "line", languages: GO, match: /\.AddInsecureBypassPattern\s*\(/, emit: "webconfig/csrf-disabled" }]
     }
   }
 };
@@ -34990,6 +35423,9 @@ var NET_HTTP_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    "proxy-headers-trusted": {
+      notApplicable: "net/http never rewrites RemoteAddr, Host or the scheme from forwarded headers; code that reads X-Forwarded-For itself is the client-ip-first-xff class."
     }
   }
 };
@@ -35036,6 +35472,22 @@ var GIN_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "trust-everyone",
+          kind: "line",
+          languages: GO,
+          match: /\.SetTrustedProxies\s*\(\s*\[\]string\s*\{[^}]*"(?:0\.0\.0\.0\/0|::\/0)"/,
+          note: "`SetTrustedProxies` is given the whole address space, so Gin trusts X-Forwarded-For from ANY caller and `c.ClientIP()` returns what the client wrote. List your proxy's address, or pass `nil` when there is none."
+        }
+      ]
+    },
+    // Debug mode logs every route and request and is meant for development.
+    // Source: https://gin-gonic.com/en/docs/deployment/
+    "debug-mode-enabled": {
+      rules: [{ id: "set-debug-mode", kind: "line", languages: GO, match: /\bgin\.SetMode\s*\(\s*gin\.DebugMode\s*\)/, emit: "webconfig/debug" }]
     }
   }
 };
@@ -35102,6 +35554,12 @@ var RUBY_PACK = {
     },
     "session-cookie-chunks-on-logout": {
       notApplicable: "Rails' cookie store keeps the session in one cookie and raises CookieOverflow past 4 KB rather than splitting it; there are no chunks for a logout to miss."
+    },
+    "request-body-unbounded": {
+      hunt: "Rack and Puma set no request-body limit and Rails parses JSON bodies whole; check what bounds them \u2014 a Rack middleware, the app server, or the proxy's client_max_body_size."
+    },
+    "graphql-introspection-enabled": {
+      hunt: "graphql-ruby answers introspection unless the schema calls `disable_introspection_entry_points`, and GraphiQL is a mounted engine (`GraphiQL::Rails::Engine`); check both against the production environment."
     }
   }
 };
@@ -35149,6 +35607,66 @@ var RAILS_PACK = {
           routeDecl: /^\s*def\s+(\w+)/,
           queries: RAILS_QUERIES,
           statement: "balanced"
+        }
+      ]
+    },
+    // The original web-config detector's Rails rules (raw lines: a
+    // commented-out `protect_from_forgery` IS the finding).
+    "csrf-protection-disabled": {
+      rules: [
+        { id: "protect-commented", kind: "line", languages: RB, text: "raw", match: /^\s*#\s*protect_from_forgery\b/, emit: "webconfig/csrf-disabled" },
+        {
+          id: "skip-verify",
+          kind: "line",
+          languages: RB,
+          text: "raw",
+          match: /\bskip_before_action\s+:verify_authenticity_token\b/,
+          emit: "webconfig/csrf-disabled"
+        },
+        {
+          id: "null-session",
+          kind: "line",
+          languages: RB,
+          text: "raw",
+          match: /\bprotect_from_forgery\s+with:\s*:null_session\b/,
+          emit: "webconfig/csrf-disabled"
+        }
+      ]
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "all-requests-local", kind: "line", languages: RB, text: "raw", match: /consider_all_requests_local\s*=\s*true/, emit: "webconfig/debug" }]
+    },
+    // A cookie written through the jar with a bare value gets neither flag;
+    // the hash form is where `httponly:`/`secure:` go.
+    // Source: https://api.rubyonrails.org/classes/ActionDispatch/Cookies.html
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "cookie-jar-assign",
+          kind: "call",
+          languages: RB,
+          call: /\bcookies(?:\.(?:signed|encrypted|permanent))*\s*\[[^\]\n]+\]\s*=(?!=)/,
+          scope: "statement",
+          options: { args: /\{/ },
+          bare: ["webconfig/cookie-httponly", "webconfig/cookie-secure"],
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+            { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET }
+          ]
+        }
+      ]
+    },
+    // Rails rejects a request whose Client-IP and X-Forwarded-For disagree;
+    // switched off, `request.remote_ip` follows whichever the caller sent.
+    // Source: https://guides.rubyonrails.org/configuring.html#config-action-dispatch-ip-spoofing-check
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "ip-spoofing-check-off",
+          kind: "line",
+          languages: RB,
+          match: /\bip_spoofing_check\s*=\s*false\b/,
+          note: "`ip_spoofing_check = false` turns off the check that makes Rails refuse a request whose Client-IP and X-Forwarded-For disagree, so `request.remote_ip` follows whatever the caller sent. Leave it on and configure `trusted_proxies` instead."
         }
       ]
     }
@@ -35220,6 +35738,25 @@ var PHP_PACK = {
     },
     "session-cookie-chunks-on-logout": {
       notApplicable: "PHP sessions (native and Laravel's drivers) keep one session cookie; none splits it into numbered chunks for a logout to miss."
+    },
+    // The original web-config detector's rules (src/webconfig.ts ≤ v1.58.0),
+    // moved here with their shapes so their findings keep their ids.
+    "insecure-session-cookie": {
+      rules: [{ id: "setcookie", kind: "call", languages: PHP, call: COOKIE_CALL, scope: "args", ...LEGACY_COOKIE_FLAGS }]
+    },
+    "csrf-protection-disabled": {
+      rules: [
+        { id: "csrf-false", kind: "line", languages: PHP, text: "raw", match: /['"]csrf(?:_protection)?['"]\s*=>\s*false/i, emit: "webconfig/csrf-disabled" }
+      ]
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "debug-true", kind: "line", languages: PHP, text: "raw", match: /['"]debug['"]\s*=>\s*true/, emit: "webconfig/debug" }]
+    },
+    "request-body-unbounded": {
+      notApplicable: "PHP enforces `post_max_size` (8 MB by default) before application code runs; a body limit is an ini/web-server setting, not an application idiom."
+    },
+    "graphql-introspection-enabled": {
+      hunt: "webonyx/graphql-php and Lighthouse answer introspection unless a `DisableIntrospection` validation rule is added (Lighthouse: `security.disable_introspection`); check the production config."
     }
   }
 };
@@ -35264,6 +35801,32 @@ var LARAVEL_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // Trusting every proxy (`*`) lets any caller set the IP and scheme.
+    // Source: https://laravel.com/docs/12.x/requests#configuring-trusted-proxies
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "trust-all-proxies",
+          kind: "line",
+          languages: PHP,
+          match: /\btrustProxies\s*\(\s*at\s*:\s*['"]\*\*?['"]|\$proxies\s*=\s*['"]\*\*?['"]/,
+          note: "Every proxy is trusted (`*`), so `$request->ip()`, the scheme and the host come from X-Forwarded-* sent by ANY caller that reaches the app directly. List the proxy's addresses, and confirm the app is not reachable around them."
+        }
+      ]
+    },
+    // Every route exempted from the CSRF token check.
+    // Source: https://laravel.com/docs/12.x/csrf#csrf-excluding-uris
+    "csrf-protection-disabled": {
+      rules: [
+        {
+          id: "except-everything",
+          kind: "line",
+          languages: PHP,
+          match: /\bvalidateCsrfTokens\s*\(\s*except\s*:\s*\[\s*['"]\*['"]|\$except\s*=\s*\[\s*['"]\*['"]/,
+          emit: "webconfig/csrf-disabled"
+        }
+      ]
     }
   }
 };
@@ -35271,6 +35834,24 @@ var PHP_PACKS = [PHP_PACK, LARAVEL_PACK];
 
 // src/classes/packs/index.ts
 var PACKS = [COMMON_PACK, ...NODE_PACKS, ...PYTHON_PACKS, ...JAVA_PACKS, ...GO_PACKS, ...RUBY_PACKS, ...PHP_PACKS];
+
+// src/classes/types.ts
+var CLASS_IDS = [
+  "timing-unsafe-secret-compare",
+  "csv-formula-injection",
+  "client-ip-first-xff",
+  "unbounded-public-export",
+  "security-headers-absent",
+  "session-cookie-chunks-on-logout",
+  "env-bool-coercion",
+  "insecure-session-cookie",
+  "proxy-headers-trusted",
+  "request-body-unbounded",
+  "graphql-introspection-enabled",
+  "csrf-protection-disabled",
+  "debug-mode-enabled"
+];
+var CONFIG_FORMATS = { yaml: "yaml", yml: "yaml", properties: "properties", conf: "conf", nginx: "conf" };
 
 // src/classes/engine.ts
 var SKIPPED_EXTS = /* @__PURE__ */ new Set(["ipynb", "pyi"]);
@@ -35284,9 +35865,9 @@ function boundRules(packs = PACKS) {
     }
   return out2;
 }
-function shapeFor(classId, rule2) {
-  if (rule2.emit) {
-    const [family, id] = rule2.emit.split("/");
+function shapeFor(classId, rule2, emit2 = rule2.emit) {
+  if (emit2) {
+    const [family, id] = emit2.split("/");
     if (family === "webconfig") {
       const s = WEBCONFIG_SHAPES[id];
       if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: "config", note: s.note };
@@ -35295,7 +35876,7 @@ function shapeFor(classId, rule2) {
       const s = AUTH_SHAPES[id];
       if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: s.category, note: s.note };
     }
-    throw new Error(`classes: rule ${rule2.id} emits unknown shape ${rule2.emit}`);
+    throw new Error(`classes: rule ${rule2.id} emits unknown shape ${emit2}`);
   }
   const c2 = CLASSES[classId];
   return { family: "class", id: c2.id, title: c2.title, severity: c2.severity, cwe: c2.cwe, category: c2.category, note: rule2.note ?? c2.note };
@@ -35334,16 +35915,49 @@ function view(rel2, lang, content) {
 }
 function runLine(v, r, emit2) {
   if (r.fileGate && !r.fileGate.test(v.content)) return;
+  const raw = r.text === "raw";
   for (let i2 = 0; i2 < v.raw.length; i2++) {
-    if (v.comment[i2]) continue;
-    const c2 = v.code[i2];
-    if (!r.match.test(c2) || r.unless?.test(c2)) continue;
+    if (!raw && v.comment[i2]) continue;
+    const c2 = raw ? v.raw[i2] : v.code[i2];
+    const m = r.match.exec(c2);
+    if (!m || r.unless?.test(c2)) continue;
     if (r.context) {
       let seen = false;
       for (let j = Math.max(0, i2 - r.context.before); j <= i2 && !seen; j++) seen = !v.comment[j] && r.context.re.test(v.code[j]);
       if (!seen) continue;
     }
-    emit2(i2 + 1, v.raw[i2]);
+    emit2(i2 + 1, r.evidence === "match" ? m[0] : v.raw[i2]);
+  }
+}
+function balancedArgs(content, open) {
+  const o = content[open];
+  const c2 = o === "{" ? "}" : ")";
+  let depth = 0;
+  for (let i2 = open; i2 < content.length; i2++) {
+    const ch = content[i2];
+    if (ch === o) depth++;
+    else if (ch === c2) {
+      depth--;
+      if (depth === 0) return content.slice(open + 1, i2);
+    }
+  }
+  return null;
+}
+function runCall(v, r, emit2) {
+  const re = new RegExp(r.call.source, r.call.flags.includes("g") ? r.call.flags : `${r.call.flags}g`);
+  for (const m of v.content.matchAll(re)) {
+    const at = m.index ?? 0;
+    const head = m[0];
+    const open = at + head.length - 1;
+    const text = r.scope === "args" ? balancedArgs(v.content, open) : statementAt2(v.content, at, "balanced").slice(head.length);
+    if (text === null) continue;
+    const ln = lineOf3(v.content, at);
+    const hasOptions = !r.options || !!r.options.args?.test(text) || !!r.options.head?.test(head);
+    if (!hasOptions) {
+      for (const shape of r.bare ?? []) emit2(ln, `${head}\u2026`, shape);
+      continue;
+    }
+    for (const f of r.flags ?? []) if ((!f.when || f.when.test(text)) && !f.present.test(text)) emit2(ln, head, f.emit);
   }
 }
 function runFile(v, r, emit2) {
@@ -35427,18 +36041,19 @@ function auditWeaknessClasses(repo, prune, tree, frameworks = [], packs = PACKS)
   const seen = /* @__PURE__ */ new Set();
   const pending2 = [];
   const presentDirs = /* @__PURE__ */ new Map();
-  const record2 = (b, rel2, line2, evidence) => {
+  const record2 = (b, rel2, line2, evidence, emit2) => {
     hits.push({ classId: b.classId, packId: b.pack.id, ruleId: b.rule.id, file: rel2, line: line2 });
-    const key = `${b.classId}\0${rel2}\0${line2}`;
+    const shape = shapeFor(b.classId, b.rule, emit2 ?? b.rule.emit);
+    const key = `${b.classId}\0${shape.family}:${shape.id}\0${rel2}\0${line2}`;
     if (seen.has(key)) return;
     seen.add(key);
-    findings.push(hit4(rel2, line2, shapeFor(b.classId, b.rule), evidence));
+    findings.push(hit4(rel2, line2, shape, evidence));
   };
   for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf5(wf.rel);
     if (SKIPPED_EXTS.has(ext)) continue;
-    const lang = langForFile(wf.rel)?.id;
+    const lang = langForFile(wf.rel)?.id ?? CONFIG_FORMATS[ext];
     const forFile = lang ? rules.filter((b) => b.rule.languages.includes(lang) && (!b.rule.files || b.rule.files.test(wf.rel))) : [];
     const treeChecks = rules.filter((b) => {
       const t = b.rule.kind === "absent" ? b.rule.presentInTree : void 0;
@@ -35458,8 +36073,9 @@ function auditWeaknessClasses(repo, prune, tree, frameworks = [], packs = PACKS)
     for (const b of forFile) {
       const r = b.rule;
       if (r.requiresFramework && !frameworkAt(v.rel, r.requiresFramework, frameworks)) continue;
-      const emit2 = (line2, evidence) => record2(b, v.rel, line2, evidence);
+      const emit2 = (line2, evidence, shape) => record2(b, v.rel, line2, evidence, shape);
       if (r.kind === "line") runLine(v, r, emit2);
+      else if (r.kind === "call") runCall(v, r, emit2);
       else if (r.kind === "file") runFile(v, r, emit2);
       else if (r.kind === "route-query") runRouteQuery(v, r, emit2);
       else {
@@ -36294,6 +36910,8 @@ function classCoverage(stack, packs = PACKS) {
         continue;
       }
       const why = [];
+      const fwWord = fwPack?.classes[c2.id];
+      if (ruled.length && fwWord && "hunt" in fwWord) why.push(fwWord.hunt);
       if (columnOutOfRange) why.push(columnOutOfRange);
       for (const { lib: lib2, pack } of libPacks) {
         const off = ruled.includes(pack) ? outside(lib2, pack) : void 0;
@@ -42192,19 +42810,6 @@ function leadsForRegion(leads, region, files) {
 // src/classes/hunt.ts
 import { existsSync as existsSync34, readFileSync as readFileSync36, writeFileSync as writeFileSync19 } from "fs";
 import { join as join67 } from "path";
-
-// src/classes/types.ts
-var CLASS_IDS = [
-  "timing-unsafe-secret-compare",
-  "csv-formula-injection",
-  "client-ip-first-xff",
-  "unbounded-public-export",
-  "security-headers-absent",
-  "session-cookie-chunks-on-logout",
-  "env-bool-coercion"
-];
-
-// src/classes/hunt.ts
 var MAX_HUNT_FILES = 8;
 var MAX_EXAMPLES = 3;
 function huntPrompt(h) {

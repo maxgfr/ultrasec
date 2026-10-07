@@ -15,7 +15,9 @@ const idByTitle = new Map(Object.values(AUTH_SHAPES).map((s) => [`Auth token —
 
 // The shapes that became weakness classes run on the class engine and keep
 // their shape ids, so this fixture's expectations hold unchanged across both.
-const findings = [...auditAuthTokens(FIXTURE), ...auditWeaknessClasses(FIXTURE).findings];
+// The class engine also reports the web-config postures it now carries (a
+// cookie's flags), which are not this detector's — they are left out here.
+const findings = [...auditAuthTokens(FIXTURE), ...auditWeaknessClasses(FIXTURE).findings.filter((f) => f.title.startsWith("Auth token — "))];
 const shapesByFile = new Map<string, Set<string>>();
 for (const f of findings) {
   const rel = f.sink!.file;

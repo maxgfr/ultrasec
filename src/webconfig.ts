@@ -199,9 +199,6 @@ export const WEBCONFIG_SHAPES: Record<string, WebConfigShape> = {
   },
 };
 
-const TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
-const BODY_PARSER = /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\(([^)]*)\)/g;
-
 interface Line {
   n: number;
   text: string;
@@ -236,20 +233,6 @@ function hit(rel: string, line: number, shape: WebConfigShape, evidence: string)
   });
 }
 
-/** Extract the balanced `(...)` argument text starting at the `(` at `open`. */
-function balanced(hay: string, open: number): string | null {
-  let depth = 0;
-  for (let i = open; i < hay.length; i++) {
-    const c = hay[i];
-    if (c === "(") depth++;
-    else if (c === ")") {
-      depth--;
-      if (depth === 0) return hay.slice(open + 1, i);
-    }
-  }
-  return null;
-}
-
 function lineOf(content: string, index: number): number {
   let n = 1;
   for (let i = 0; i < index && i < content.length; i++) if (content[i] === "\n") n++;
@@ -265,27 +248,6 @@ const TLS_RULES: { langs: Set<string>; re: RegExp }[] = [
   { langs: new Set(["go"]), re: /InsecureSkipVerify\s*:\s*true/ },
   { langs: new Set(["php"]), re: /CURLOPT_SSL_VERIFY(?:PEER|HOST)\s*,\s*(?:0|false)\b/i },
   { langs: new Set(["java", "kt", "scala"]), re: /ALLOW_ALL_HOSTNAME_VERIFIER|NoopHostnameVerifier|TrustAllCerts|trustAllCerts/ },
-];
-
-// ── CSRF guard disabled (CWE-352) ───────────────────────────────────────────
-// Measured on railsgoat, whose `#protect_from_forgery with: :exception` is the
-// single line that opens every state-changing route in the app.
-const CSRF_RULES: { langs: Set<string>; re: RegExp }[] = [
-  { langs: new Set(["rb"]), re: /^\s*#\s*protect_from_forgery\b/ },
-  { langs: new Set(["rb"]), re: /\bskip_before_action\s+:verify_authenticity_token\b/ },
-  { langs: new Set(["rb"]), re: /\bprotect_from_forgery\s+with:\s*:null_session\b/ },
-  { langs: new Set(["py"]), re: /^\s*@csrf_exempt\b/ },
-  { langs: new Set(["py"]), re: /^\s*#\s*['"]django\.middleware\.csrf\.CsrfViewMiddleware['"]/ },
-  { langs: JS, re: /\bcsrf(?:Prevention)?\s*:\s*false\b/ },
-  { langs: new Set(["php"]), re: /['"]csrf(?:_protection)?['"]\s*=>\s*false/i },
-];
-
-// ── Framework debug mode (CWE-489) ──────────────────────────────────────────
-const DEBUG_RULES: { langs: Set<string>; re: RegExp }[] = [
-  { langs: new Set(["py"]), re: /\.run\([^)]*\bdebug\s*=\s*True/ },
-  { langs: new Set(["py"]), re: /^\s*DEBUG\s*=\s*True\b/ },
-  { langs: new Set(["rb"]), re: /consider_all_requests_local\s*=\s*true/ },
-  { langs: new Set(["php"]), re: /['"]debug['"]\s*=>\s*true/ },
 ];
 
 function scanCors(rel: string, content: string, out: Finding[]): void {
@@ -307,51 +269,15 @@ function scanCors(rel: string, content: string, out: Finding[]): void {
   }
 }
 
-// Cookie-setting calls whose flags we can read on the (possibly multi-line)
-// statement. Java `new Cookie(...)` stays with the catalog `cookie` sink.
-const COOKIE_CALL = /\b(?:res(?:ponse)?\.cookie|reply\.setCookie|ctx\.cookies\.set|cookies\.set|setcookie)\s*\(/gi;
-
-/** `flag: <expression>` in an options object — not a literal false/0/null/undefined. */
-function dynamicFlag(args: string, flag: string): boolean {
-  const m = new RegExp(`\\b${flag}\\s*:\\s*([^,}\\s][^,}]*)`, "i").exec(args);
-  if (!m) return false;
-  const v = m[1]!.trim();
-  return !/^(?:false|0|null|undefined|true|1)\b/i.test(v) && /^[!A-Za-z_$(]/.test(v);
-}
-
-function scanCookies(rel: string, content: string, out: Finding[]): void {
-  for (const m of content.matchAll(COOKIE_CALL)) {
-    if (/clearCookie/i.test(m[0])) continue;
-    const open = (m.index ?? 0) + m[0].length - 1; // index of '('
-    const args = balanced(content, open);
-    if (args === null) continue;
-    const ln = lineOf(content, m.index ?? 0);
-    const hasOptions = /\{/.test(args) || /setcookie/i.test(m[0]);
-    if (!hasOptions) {
-      // res.cookie('n','v') with no options object — the two flags that matter most.
-      out.push(hit(rel, ln, WEBCONFIG_SHAPES["cookie-httponly"]!, `${m[0]}…`));
-      out.push(hit(rel, ln, WEBCONFIG_SHAPES["cookie-secure"]!, `${m[0]}…`));
-      continue;
-    }
-    // A flag bound to an expression (`secure: isHttps`, `secure: env.PROD`) is
-    // SET — to whatever the deployment decides — not missing. Only a literal
-    // false/0, or no flag at all, is a finding. Reading `secure: isSecure` as
-    // absent put a "Cookie without Secure" on a logout route that sets it.
-    const hasHttpOnly = /httponly\s*[:=]?\s*(?:true|1)/i.test(args) || /['"]httponly['"]\s*=>\s*true/i.test(args) || dynamicFlag(args, "httponly");
-    const hasSecure = /\bsecure\s*[:=]?\s*(?:true|1)/i.test(args) || /['"]secure['"]\s*=>\s*true/i.test(args) || dynamicFlag(args, "secure");
-    const sameSite = /samesite\s*[:=]?\s*['"]?(strict|lax|none)/i.exec(args) || /['"]samesite['"]\s*=>\s*['"]?(strict|lax|none)/i.exec(args);
-    if (!hasHttpOnly) out.push(hit(rel, ln, WEBCONFIG_SHAPES["cookie-httponly"]!, m[0]));
-    if (!hasSecure) out.push(hit(rel, ln, WEBCONFIG_SHAPES["cookie-secure"]!, m[0]));
-    if (!sameSite) out.push(hit(rel, ln, WEBCONFIG_SHAPES["cookie-samesite"]!, m[0]));
-    else if (sameSite[1]?.toLowerCase() === "none" && !hasSecure) out.push(hit(rel, ln, WEBCONFIG_SHAPES["cookie-samesite-none-insecure"]!, m[0]));
-  }
-}
-
 // The application-code shapes (csv-formula, env-coerce-boolean, xff-first-hop,
-// unbounded-export) and the two header-posture absences (helmet-missing,
-// next-headers-missing) are weakness classes now: their idioms live in the
-// packs under src/classes/packs and run on the class engine, which reports
-// them under the shapes above so their ids are unchanged.
+// unbounded-export), the two header-posture absences (helmet-missing,
+// next-headers-missing), and the framework postures (cookie flags, trust
+// proxy, body limit, GraphQL introspection, CSRF disabled, debug mode) are
+// weakness classes now: their idioms live in the packs under
+// src/classes/packs, per framework, and run on the class engine, which
+// reports them under the shapes above so their ids are unchanged. What stays
+// here is framework-agnostic: CORS, TLS verification, header VALUES written
+// literally, directory listing.
 
 /**
  * Audit a repo for API / web misconfiguration. Returns candidates — a wildcard
@@ -374,7 +300,6 @@ export function auditWebConfig(repo: string, prune?: (rel: string) => boolean, t
       for (const r of TLS_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["tls-verify"]!, l.text));
       // NODE_TLS_REJECT_UNAUTHORIZED=0 is dangerous in any file (code, shell, yaml).
       if (/NODE_TLS_REJECT_UNAUTHORIZED\s*[:=]\s*['"]?0\b/.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["tls-verify"]!, l.text));
-      for (const r of DEBUG_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES.debug!, l.text));
 
       if (/Content-Security-Policy/i.test(l.text) && /unsafe-inline|unsafe-eval|(?:default|script|object)-src[^;'"]*\*/i.test(l.text))
         out.push(hit(rel, l.n, WEBCONFIG_SHAPES["header-csp"]!, l.text));
@@ -383,22 +308,9 @@ export function auditWebConfig(repo: string, prune?: (rel: string) => boolean, t
       if (/Referrer-Policy['"]?\s*[:,]\s*['"]?\s*unsafe-url/i.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["header-referrer"]!, l.text));
 
       if (/^\s*autoindex\s+on\b/i.test(l.text) || /\bserve-index\s*\(/.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["dir-listing"]!, l.text));
-      if (/\b(?:introspection|graphiql|playground)\s*:\s*true\b/.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["graphql-introspection"]!, l.text));
-
-      // CSRF guard switched off. Only shapes that HAVE a line to cite: a
-      // commented-out guard, an explicit skip/exempt, or a `false` setting.
-      // (A framework that never had one at all is an absence — that's the
-      // access-control lens's job, not a groundable finding.)
-      for (const r of CSRF_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["csrf-disabled"]!, l.text));
-
-      if (TRUST_PROXY.test(l.text)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["trust-proxy"]!, l.text));
-      for (const m of l.text.matchAll(BODY_PARSER)) {
-        if (!/\blimit\s*:/.test(m[1] ?? "")) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["body-limit-missing"]!, m[0]));
-      }
     }
 
     scanCors(rel, content, out);
-    scanCookies(rel, content, out);
   }
   return out;
 }

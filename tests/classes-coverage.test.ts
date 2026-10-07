@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { classCoverage, huntId, matrixStack, needsHunt, renderClassCoverageMd, withHuntProgress, PACK_SUGGESTIONS_FILE } from "../src/classes/coverage.js";
-import type { Pack } from "../src/classes/types.js";
+import { CLASS_IDS, type Pack } from "../src/classes/types.js";
 import type { DetectedFramework } from "../src/frameworks.js";
 
 // The class × framework matrix is a coverage CLAIM, so its failure modes are
@@ -27,12 +27,21 @@ const cell = (cells: ReturnType<typeof classCoverage>, c: string, f: string) => 
 describe("classCoverage", () => {
   it("covers every class deterministically for a framework inside its pack's testedWith", () => {
     const cells = classCoverage([fw("nextjs", "node", "16.3.3", "packages/app"), lib("next-auth", "4.24.13", "packages/app")]);
-    expect(cells).toHaveLength(7);
+    expect(cells).toHaveLength(CLASS_IDS.length);
+    // What the Next.js pack declares hunted is hunted; everything else is a pack's claim.
+    const declaredHunt = ["proxy-headers-trusted", "request-body-unbounded", "debug-mode-enabled"];
     for (const c of cells) {
+      if (declaredHunt.includes(c.class)) {
+        expect(needsHunt(c), c.class).toBe(true);
+        continue;
+      }
       expect(c.state, c.class).toBe("deterministic");
       expect(c.degraded, c.class).toBeUndefined();
       expect(needsHunt(c)).toBe(false);
     }
+    // A language idiom does not outrank the framework's own "hunt this".
+    expect(cell(cells, "debug-mode-enabled", "nextjs")).toMatchObject({ state: "deterministic", packs: ["node"] });
+    expect(cell(cells, "debug-mode-enabled", "nextjs").degraded).toMatch(/next dev/);
     expect(cell(cells, "security-headers-absent", "nextjs").packs).toEqual(["nextjs"]);
     // The first-hop idiom reads the same in every language: the common pack carries it.
     expect(cell(cells, "client-ip-first-xff", "nextjs").packs).toEqual(["common"]);
@@ -52,7 +61,7 @@ describe("classCoverage", () => {
 
   it("hunts every class of a framework that has no pack in an ecosystem that has none", () => {
     const cells = classCoverage([fw("phoenix", "elixir", "1.7.14")]);
-    expect(cells).toHaveLength(7);
+    expect(cells).toHaveLength(CLASS_IDS.length);
     for (const c of cells) {
       expect(c, c.class).toMatchObject({ state: "not-covered", degraded: "no phoenix pack" });
       expect(needsHunt(c)).toBe(true);
@@ -108,7 +117,7 @@ describe("classCoverage", () => {
     const unknown = fw("unknown", "node", "", "services/edge", { kind: "inferred", title: "unknown web framework", evidence: "services/edge/server.js:3" });
     delete unknown.version;
     const cells = classCoverage([unknown]);
-    expect(cells).toHaveLength(7);
+    expect(cells).toHaveLength(CLASS_IDS.length);
     for (const c of cells) expect(needsHunt(c) || c.state === "not-applicable", c.class).toBe(true);
     expect(cell(cells, "security-headers-absent", "unknown").degraded).toBe("unknown web framework — no pack can know it");
     expect(huntId(cell(cells, "security-headers-absent", "unknown"))).toBe("hunt:security-headers-absent:unknown@services/edge");

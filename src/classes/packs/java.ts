@@ -6,6 +6,10 @@ import { EXPORT_PATH, FLAG_NAME, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, SETS_SEC
 
 const JVM = ["java", "kotlin"];
 
+/** Spring Boot's own configuration files. */
+const BOOT_CONFIG = /(?:^|\/)(?:application|bootstrap)(?:-[\w-]+)?\.(?:properties|ya?ml)$/;
+const BOOT_CONFIG_LANGS = ["properties", "yaml"];
+
 const SECRET = String.raw`"[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
 /** A field/variable named for a shared credential (`apiKey`, `webhookSecret`). */
 const SECRET_FIELD = String.raw`\w*(?:apiKey|ApiKey|API_KEY|sharedSecret|SharedSecret|webhookSecret|WebhookSecret|clientSecret|ClientSecret|apiToken|ApiToken)\w*`;
@@ -117,6 +121,85 @@ export const SPRING_PACK: Pack = {
           routeDecl: /@(?:Get|Request|Post)Mapping\s*\(\s*(?:value\s*=\s*|path\s*=\s*)?\{?\s*"([^"]+)"/,
           queries: SPRING_QUERIES,
           statement: "balanced",
+        },
+      ],
+    },
+    // `ResponseCookie` builds with HttpOnly and Secure off unless the chain sets them.
+    // Source: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/http/ResponseCookie.html
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "response-cookie",
+          kind: "call",
+          languages: JVM,
+          call: /\bResponseCookie\s*\.\s*(?:from|fromClientResponse)\s*\(/,
+          scope: "statement",
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: /\.httpOnly\s*\(\s*(?!false\b)[^)\s]/ },
+            { emit: "webconfig/cookie-secure", present: /\.secure\s*\(\s*(?!false\b)[^)\s]/ },
+          ],
+        },
+      ],
+    },
+    "csrf-protection-disabled": {
+      rules: [
+        {
+          id: "csrf-disabled",
+          kind: "line",
+          languages: JVM,
+          match:
+            /\.csrf\s*\(\s*(?:AbstractHttpConfigurer\s*::\s*disable|\(?\s*\w+\s*\)?\s*->\s*\w+\s*\.\s*disable\s*\(\s*\))\s*\)|\.csrf\s*\(\s*\)\s*\.\s*disable\s*\(|\bcsrf\s*\{\s*disable\s*\(\s*\)/,
+          emit: "webconfig/csrf-disabled",
+        },
+      ],
+    },
+    // Settings that live in application.properties / application.yml.
+    // Sources: https://docs.spring.io/spring-boot/appendix/application-properties/
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "forward-headers-strategy",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\bforward-headers-strategy\s*[:=]\s*["']?(?:native|framework)\b/i,
+          note: "`server.forward-headers-strategy` makes Spring take the client address, scheme and host from X-Forwarded-*/Forwarded. Right behind a proxy that overwrites them; when the app is reachable directly, any caller sets its own IP and scheme. Pair it with `server.tomcat.remoteip.internal-proxies` (or the proxy's network) and confirm the topology.",
+        },
+      ],
+    },
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "multipart-unlimited",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\bmax-(?:file|request)-size\s*[:=]\s*["']?-1\b/,
+          note: "A multipart size limit is set to `-1`, which removes it: one upload can be as large as the client sends. Keep a bound (Spring Boot's defaults are 1 MB per file and 10 MB per request).",
+        },
+      ],
+    },
+    "graphql-introspection-enabled": {
+      rules: [
+        {
+          id: "graphiql-enabled",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\bgraphiql\.enabled\s*[:=]\s*true\b/,
+          emit: "webconfig/graphql-introspection",
+        },
+      ],
+    },
+    "debug-mode-enabled": {
+      rules: [
+        {
+          id: "stacktrace-always",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\binclude-stacktrace\s*[:=]\s*["']?always\b/,
+          emit: "webconfig/debug",
         },
       ],
     },

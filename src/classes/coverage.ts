@@ -107,6 +107,10 @@ export function classCoverage(stack: readonly DetectedFramework[], packs: readon
         continue;
       }
       const why: string[] = [];
+      // A framework pack that says "hunt this" outranks the language floor: the
+      // floor still ran, but the framework's own idiom is not encoded.
+      const fwWord = fwPack?.classes[c.id];
+      if (ruled.length && fwWord && "hunt" in fwWord) why.push(fwWord.hunt);
       if (columnOutOfRange) why.push(columnOutOfRange);
       for (const { lib, pack } of libPacks) {
         const off = ruled.includes(pack) ? outside(lib, pack) : undefined;

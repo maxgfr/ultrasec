@@ -1,5 +1,5 @@
 import type { Pack } from "../types.js";
-import { XFF, XFF_LOOKBACK } from "./shared.js";
+import { GRAPHQL_INTROSPECTION_ON, XFF, XFF_LOOKBACK } from "./shared.js";
 
 // Idioms that read the same in every language the engine parses. Kept as one
 // pack rather than copied into each ecosystem's, which is exactly the
@@ -22,6 +22,13 @@ export const COMMON_PACK: Pack = {
           context: { re: XFF, before: XFF_LOOKBACK },
           emit: "webconfig/xff-first-hop",
         },
+      ],
+    },
+    // A gateway/router config file (Apollo Router, Hive, a server YAML) that
+    // switches introspection or an IDE on — the original detector read these.
+    "graphql-introspection-enabled": {
+      rules: [
+        { id: "config-true", kind: "line", languages: ["yaml", "conf"], text: "raw", match: GRAPHQL_INTROSPECTION_ON, emit: "webconfig/graphql-introspection" },
       ],
     },
   },
