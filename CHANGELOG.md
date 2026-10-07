@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.57.0](https://github.com/maxgfr/ultrasec/compare/v1.56.0...v1.57.0) (2026-10-07)
+
+
+### Bug Fixes
+
+* **catalog:** tRPC procedures and Drizzle sql templates are not SQL sinks ([b941d9a](https://github.com/maxgfr/ultrasec/commit/b941d9ad05ddaed3725a5bddfb3a793f9f18d7fd))
+* **check:** a "with no `X`" clause after a generic subject is not a claim ([35d98fc](https://github.com/maxgfr/ultrasec/commit/35d98fcf15764cc05315a5b4b6d665dfa273ab5c))
+* **guards:** a logout route is not an authentication endpoint ([8f6862f](https://github.com/maxgfr/ultrasec/commit/8f6862f86d941a03dc55f1a25e60c81b4017c79c))
+* **guards:** skip test files and fold wrapped handlers into their route ([4025bec](https://github.com/maxgfr/ultrasec/commit/4025bec5ae9a359de21ac13e2895e6865f12bf9e))
+* **paths:** add --min-severity and say what an exact --severity hides ([f89a48a](https://github.com/maxgfr/ultrasec/commit/f89a48abcb2adeaa1fb54dd97f53122ef9fdade5))
+* **store:** collapse duplicate finding ids instead of refusing the run ([516c7db](https://github.com/maxgfr/ultrasec/commit/516c7dbc96e349cd33a07577a6abcfed00db6032))
+* **tools:** include the package in dependency finding ids ([702721d](https://github.com/maxgfr/ultrasec/commit/702721dc0801fb4cfb19e80c78358c824d606b07))
+* **tools:** name the lockfile-installed version on package-checker manifest hits ([77a6ef9](https://github.com/maxgfr/ultrasec/commit/77a6ef9384c1f71ad491e756bb62400bf5e42abe))
+* **tools:** scan a snapshot of tracked files with gitleaks, history on request ([156cba5](https://github.com/maxgfr/ultrasec/commit/156cba50869ded886fafb1553052069f20dc9dd9))
+* **webconfig:** a cookie flag bound to an expression is set, not missing ([b2fdf0d](https://github.com/maxgfr/ultrasec/commit/b2fdf0d35a290e4409fc3efc30e3ca904ffc1973))
+
+
+### Features
+
+* **actions:** flag pull_request jobs that hand secrets to the PR's code ([851d1d4](https://github.com/maxgfr/ultrasec/commit/851d1d494675fb157626de5987c3083e9d141982))
+* **authtokens:** flag timing-unsafe secret checks and leftover session chunks ([c88fff0](https://github.com/maxgfr/ultrasec/commit/c88fff01d33ff2eb886fbd7e964924f18a7cdfae))
+* **cloud:** flag admin-UI ingresses, public compose ports and .env in images ([34550e6](https://github.com/maxgfr/ultrasec/commit/34550e6fc007fcf6fa070ec50ce7bfe025208065))
+* **webconfig:** add CSV formula, env coercion, XFF, export and header shapes ([b3ddeba](https://github.com/maxgfr/ultrasec/commit/b3ddeba2d9d2bd0a4b8ac95158c17d393d5c3edc))
+
 # [1.56.0](https://github.com/maxgfr/ultrasec/compare/v1.55.1...v1.56.0) (2026-10-06)
 
 
