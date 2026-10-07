@@ -42,8 +42,10 @@ export const VERSION = "1.58.0";
 // (the weakness-class × framework coverage matrix). Additive + optional —
 // older dossiers omit both and every reader treats that as "not recorded".
 // 11: manifest gained optional `resolutionGaps` (files the import resolver
-// left out because the vendored engine could not index them). Additive +
-// optional — absent on a clean run.
+// left out because the vendored engine could not index them); `frameworks`
+// entries gained optional `kind` (library | inferred) and `languages`, and
+// `weaknessClasses` a `taint-catalog` row per column. Additive + optional —
+// older readers ignore them.
 export const SCHEMA_VERSION = 11;
 
 // ── Severity / confidence ──────────────────────────────────────────────────

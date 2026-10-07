@@ -136,14 +136,21 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   a coverage hole) from `failed`.
 - **`scopes[]`** accumulates every scope/diff that fed a merged run — this is what makes a
   map-first audit resumable across sessions.
-- **`frameworks[]`** (schema 10) — each web framework per package directory:
-  `{ id, title, ecosystem, dir, version, versionSource: lockfile|declared|toolchain, evidence: "file:line" }`.
-  `declared` means the floor of a range, not an installed version.
-- **`weaknessClasses[]`** (schema 10) — the class × framework matrix:
+- **`frameworks[]`** (schema 10; `kind`, `languages` since 11) — each web framework per package
+  directory, plus the libraries a pack or a catalog row is written against:
+  `{ id, title, ecosystem, kind?: library|inferred, dir, version, versionSource: lockfile|declared|toolchain, evidence: "file:line", languages? }`.
+  `declared` means the floor of a range, not an installed version; `inferred` is the `unknown`
+  framework of a package whose code declares routes the stack table cannot attribute.
+- **`weaknessClasses[]`** (schema 10) — the class × framework matrix, one cell per class and one
+  `taint-catalog` cell per column:
   `{ class, framework, ecosystem, dir, version, state, packs[], degraded?, reason? }`, `state` one of
   `deterministic|not-applicable|not-covered` (`coverage` overlays `ai-hunt|ai-hunted`). A
-  `degraded` cell (no framework pack, or a version outside the pack's `testedWith`) is a coverage
-  gap to state, and `investigate` hunts it.
+  `degraded` cell (no framework pack; a framework or library version outside `testedWith` — the
+  whole column for a framework; a pack's own `hunt` declaration; catalog rows that do not know the
+  framework) is a coverage gap to state, and `investigate` hunts it.
+- **`resolutionGaps[]`** (schema 11) — `{ ext, files, reason }`: file types the import resolver
+  had to leave out because the vendored engine could not index them; imports into those files
+  are not followed.
 - **`downgraded`** counts findings de-prioritized as noise BY CONSTRUCTION, one row per class
   (`{reason, count}`). The classes, and the ground each one proposes:
 
@@ -345,7 +352,8 @@ of duplicating it.
 ### Weakness-class hunts and `PACK-SUGGESTIONS.json`
 
 Items whose `region` is `hunt:<class>:<framework>[@<dir>]` are weakness-class hunts, emitted for
-every class × framework no pack settles. Their `hunt` object carries `class`, `cwe`, `framework`,
+every class × framework no pack settles (`class` may also be `taint-catalog`: the framework's
+request inputs and routes; `framework` may be `unknown`, a framework inferred from routes). Their `hunt` object carries `class`, `cwe`, `framework`,
 `version`, `reason`, `packsApplied`, `invariant`, `guard`, `rubric` and `examples[]`. Answer them
 in the same file, as an object:
 
@@ -358,7 +366,7 @@ in the same file, as an object:
 ```
 
 `kind` is `unsafe` (breaks the invariant) or `guard` (establishes it); `class` must be a registry
-id. An idiom whose `file:line` does not resolve is rejected like a discovery. Accepted ones are
+id or `taint-catalog`. An idiom whose `file:line` does not resolve is rejected like a discovery. Accepted ones are
 merged into `<run>/PACK-SUGGESTIONS.json` — `{ schema: 1, note, hunted[], suggestions[] }`, each
 suggestion the idiom plus `evidence` (the cited line), `seenOn` (framework version) and `pack` (the
 pack it would extend). **The engine never applies a suggestion**; a maintainer promotes it into

@@ -71,10 +71,15 @@ are folded rather than stored.
 
 ## 2b. Weakness-class hunts
 
-After the regions, the worklist carries one item per **weakness class × framework that no pack
-settles** (`region: "hunt:<class>:<framework>[@<dir>]"`): the framework has no pack, the pack has no
-idiom for that class, or the detected version is outside the pack's `testedWith`. Cells a pack
-covers emit nothing — the engine already matched them.
+After the regions, the worklist carries one item per **matrix cell that no pack settles**
+(`region: "hunt:<class>:<framework>[@<dir>]"`): the framework has no pack (a whole column, for a
+framework in an ecosystem with no pack — Phoenix, axum, ASP.NET Core — or an `unknown` framework
+inferred from the package's routes), the pack has no idiom for that class or declares it hunted,
+or the detected framework or library version is outside the pack's `testedWith` (the whole column
+is then hunted). The extra row `taint-catalog` asks for the framework's own request-input APIs and
+route conventions — what the taint walk needs to see the framework at all; report them as idioms
+(`unsafe` = an input accessor or a route declaration). Cells a pack covers emit nothing — the
+engine already matched them.
 
 Work a hunt from its `hunt` object, not from memory: the `invariant` says what must hold, the
 `guard` what establishes it, the `examples` how the bug looks in the framework's language. Then
