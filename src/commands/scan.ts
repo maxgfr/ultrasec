@@ -332,6 +332,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
         sbom: sbomResult?.path,
         pruned: prune,
         concurrency: toolConcurrency,
+        ...(flagBool(args, "secrets-history") ? { history: true } : {}),
         ...(toolsCache
           ? {
               cache: {

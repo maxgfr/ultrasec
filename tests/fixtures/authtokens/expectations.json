@@ -39,5 +39,19 @@
   "jwt/safe.py": [],
   "oauth/safe.js": [],
   "saml/safe.js": [],
-  "pwhash/safe.js": []
+  "pwhash/safe.js": [],
+  "compare/bearer.ts": [
+    "secret-compare-timing"
+  ],
+  "compare/env-token.js": [
+    "secret-compare-timing"
+  ],
+  "compare/key-set.ts": [
+    "secret-compare-timing"
+  ],
+  "compare/safe.ts": [],
+  "session/manual-logout.ts": [
+    "session-chunks-not-cleared"
+  ],
+  "session/safe.ts": []
 }

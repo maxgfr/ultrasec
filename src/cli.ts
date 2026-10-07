@@ -42,6 +42,8 @@ COMMANDS
              --scope/--include/--exclude/--max-files/--gitignore (focus) ·
              --budget quick|standard|thorough · --max-candidates · --max-depth ·
              --diff <ref>/--since <commit> · --merge · --resume (incremental) ·
+             --secrets-history (gitleaks walks every commit; default scans a
+             snapshot of the tracked files and reports history as not scanned) ·
              --quiet (mute the stderr progress stream) · --json.
   import     Ingest an upstream AI scanner's exported findings (deepsec) into the
              dossier: map → correlate → risk-rank → fold in (preserving verdicts).
@@ -73,8 +75,10 @@ COMMANDS
   paths      List candidate cross-file source→sink chains.
              --surface narrows to one half of the report: 'code' (this repo's
              own source), 'supply' (secrets + CI/IaC), 'deps' (advisories) or
-             'all' (default). Flags: --run · --kind <k> · --severity <s> ·
-             --surface <s> · --json.
+             'all' (default). --min-severity <s> keeps <s> AND above (as on
+             check); --severity <s> keeps exactly <s> and names what it hid
+             above it. Flags: --run · --kind <k> · --min-severity <s> ·
+             --severity <s> · --surface <s> · --json.
   dossier    Print the grounding packet for one finding (real code + neighbours).
              The id may be a unique PREFIX. CONTEXT.md is reprinted before each
              finding: --compact keeps only the hunt-list/exposure/criticality

@@ -76,7 +76,16 @@ cross-tool correlation → EPSS/KEV/CVSS risk ranking → dossier.
 **Output** `--out` (default `.ultrasec`) · `--json` · `--quiet`
 **Tools** `--tools auto|none|<a,b>` (default `auto`) · `--no-tools` (= `--tools none`) ·
 `--docker` · `--offline` / `--no-enrich` · `--tool-concurrency N` (scanners run in a pool of N,
-default 4; `1` = serial)
+default 4; `1` = serial) · `--secrets-history` (gitleaks walks every commit)
+
+**Secrets: snapshot by default, history on request.** gitleaks scans a copy of the files a commit
+would contain (`git ls-files --cached --others --exclude-standard`), not the raw directory and not
+the history. The raw directory is node_modules and build output (17 GB, killed after ten minutes
+on a real monorepo), and the history walk is the pass that grows with the repo's age (it hit the
+300 s timeout on the same repo); the snapshot took seconds. `toolStatus` then carries
+`degraded: "git history not scanned …"` — a deleted-but-committed credential is only found with
+`--secrets-history`. A history pass that times out falls back to the snapshot and is reported
+`degraded`, never `failed`.
 **Focus** `--scope` · `--include` · `--exclude` · `--max-files` · `--gitignore` · `--include-vendored`
 **Budget** `--budget quick|standard|thorough` · `--max-depth` · `--max-candidates`
 **Incremental** `--diff <ref>` / `--since <commit>` · `--merge` · `--resume`
@@ -216,7 +225,9 @@ target, an ambiguous symbol, or an unknown node.
 
 ### `paths`
 List the candidate source→sink **chains**. `--run` (default `.ultrasec`) · `--kind <k>` ·
-`--severity <s>` · `--surface code|supply|deps|all` · `--json`.
+`--min-severity <s>` (that severity **and above**, as on `check`) · `--severity <s>` (exactly that
+severity — it prints how many chains above it were left out) · `--surface code|supply|deps|all` ·
+`--json`.
 
 `--surface` splits the candidates the way the report does — `code` is what you wrote (`taint`,
 `sast`, `authz`, `crypto`, `logs`, `privacy`), `supply` is your repo's credentials and CI/IaC

@@ -1,4 +1,4 @@
-# Agents in CI — the nine injection vectors
+# Agents in CI — the injection and exposure vectors
 
 A workflow that invokes a coding agent (Claude Code Action, Gemini CLI, Codex, GitHub AI
 Inference) turns the repository's own event data into a **prompt**. On any repo that accepts
@@ -26,9 +26,10 @@ you know which this is.
 | **I** | wildcard allow-list — `allowed_non_write_users: "*"` | any first-time contributor can drive the agent |
 | **J** | `uses: owner/repo@v1` — a movable tag or branch, not a 40-hex commit SHA | whoever controls (or compromises) the upstream repository replaces what runs in this job, with this job's token; applies to every workflow, agent or not |
 | **K** | no `permissions:` block, or `permissions: write-all` | the GITHUB_TOKEN carries the repository default — historically write to contents, packages, pull requests — for every step, injected instruction or compromised action included |
+| **L** | a `pull_request` job that runs the PR's code (`run:` steps) with `${{ secrets.* }}` (other than `GITHUB_TOKEN`) and no `environment:` | `pull_request` withholds secrets from forks only; a same-repo branch gets them and runs its own install scripts and tests with them. An `environment:` with required reviewers is the gate. A job whose `if:` excludes `pull_request` is skipped |
 
-**A, B, C, D, G, H, I, J and K are detected mechanically** (J and K on every workflow in the tree,
-filed under CWE-829 and CWE-250 rather than prompt injection). E and F need judgment: whether a log line
+**A, B, C, D, G, H, I, J, K and L are detected mechanically** (J, K and L on every workflow in the
+tree, filed under CWE-829, CWE-250 and CWE-668 rather than prompt injection). E and F need judgment: whether a log line
 carries user data, and whether a permitted command can be made to expand a subshell, are questions
 about the rest of the repo.
 

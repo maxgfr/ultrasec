@@ -228,7 +228,14 @@ async function dispatch(name: string, args: Record<string, unknown>, repo: strin
 
     case "ultrasec_paths":
       requireRun(run);
-      return runCommand(name, [], { repo, run, kind: str(args.kind), severity: str(args.severity), json: true });
+      return runCommand(name, [], {
+        repo,
+        run,
+        kind: str(args.kind),
+        severity: str(args.severity),
+        "min-severity": str(args.min_severity),
+        json: true,
+      });
 
     case "ultrasec_verify": {
       requireRun(run);

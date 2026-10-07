@@ -78,5 +78,29 @@
   "hardening/body-limit.js": [
     "body-limit-missing"
   ],
-  "hardening/safe.js": []
+  "hardening/safe.js": [],
+  "cookie/dynamic-flags.js": [],
+  "cookie/secure-false.js": [
+    "cookie-secure"
+  ],
+  "appcode/csv-export.ts": [
+    "csv-formula"
+  ],
+  "appcode/csv-safe.ts": [],
+  "appcode/env.js": [
+    "env-coerce-boolean"
+  ],
+  "appcode/env-safe.js": [],
+  "appcode/client-ip.ts": [
+    "xff-first-hop"
+  ],
+  "appcode/client-ip-safe.ts": [],
+  "app/api/public/catalog/route.ts": [
+    "unbounded-export"
+  ],
+  "app/api/public/catalog-paged/route.ts": [],
+  "next/next.config.mjs": [
+    "next-headers-missing"
+  ],
+  "next-safe/next.config.mjs": []
 }

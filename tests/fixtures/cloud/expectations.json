@@ -37,5 +37,17 @@
     "iac-public-instance",
     "iac-hardcoded-secret"
   ],
-  "iac/safe-db.tf": []
+  "iac/safe-db.tf": [],
+  "k8s/mail-ingress.yaml": [
+    "k8s-ingress-unauthenticated"
+  ],
+  "k8s/mail-ingress-auth.yaml": [],
+  "compose/docker-compose.yml": [
+    "compose-public-port"
+  ],
+  "compose-safe/docker-compose.yml": [],
+  "docker/Dockerfile": [
+    "dockerignore-env"
+  ],
+  "docker-safe/Dockerfile": []
 }

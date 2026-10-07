@@ -257,12 +257,23 @@ candidates (`category: config`/`authz`/`crypto`), correlated with the scanners l
   **CSRF guard switched off** (CWE-352 — a commented-out `protect_from_forgery`, a
   `skip_before_action :verify_authenticity_token`, `@csrf_exempt`, `csrf: false`). Only shapes with
   a line to cite: a framework that never had a guard is an *absence*, which is the access-control
-  lens's job, not a groundable finding.
+  lens's job, not a groundable finding. Also, from application code: a **CSV built by hand**
+  (`.join(";")`) with no formula neutralization (CWE-1236 — the catalog rule only knows CSV
+  libraries); **`z.coerce.boolean()` on an env var**, where `"false"` is true (CWE-704); the
+  **client IP taken from the first `X-Forwarded-For` hop** (CWE-348); a **public/export route
+  querying without a row limit** (CWE-770); a **Next.js app with no `headers()` and no CSP**
+  anywhere in its tree (CWE-693, low — `probe` confirms what is served).
 - **Auth tokens** (`src/authtokens.ts`) — JWT `alg:none`, verified without pinning `algorithms`
   (RS256→HS256 key confusion), decoded without verifying, expiry not enforced (CWE-347/613);
   hardcoded or weak/default secrets (CWE-798/521); OAuth implicit flow, loose `redirect_uri`,
   missing state+PKCE (CWE-757/1385/352); SAML signature disabled (CWE-347); weak password hashing
-  (CWE-916).
+  (CWE-916); a **secret compared with `===`/`!==`** (a rebuilt `Bearer ${…}`, a credential-named
+  env var, a `tokens.has(bearer)` lookup — CWE-208); a **hand-written NextAuth logout** that
+  expires the session cookie but not its `.0`/`.1` chunks (CWE-613).
+- **Cloud / IaC** (`src/cloud.ts`) — besides the K8s/IAM/storage shapes: an **Ingress in front of a
+  mail catcher or admin/metrics UI** with no auth annotation (CWE-306); **docker-compose data
+  services published on 0.0.0.0** (`"5432:5432"`, CWE-284); a **Dockerfile copying a directory**
+  while no `.dockerignore` of its context excludes `.env` (CWE-538).
 
 These are CANDIDATES like taint: an unsafe value in a test or an internal-only service is a
 different risk from the same in production. The deeper, absence-based half of these same classes

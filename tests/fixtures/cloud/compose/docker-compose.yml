@@ -1,0 +1,15 @@
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: app
+    ports:
+      - "5432:5432"
+  cache:
+    image: redis:7-alpine
+    ports:
+      - "${REDIS_PORT:-6379}:6379"

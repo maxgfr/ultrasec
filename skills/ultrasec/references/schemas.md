@@ -101,6 +101,7 @@ Written by `scan`/`import`, rewritten by every `--apply`. The dossier's core rec
 | `noise` | the noise-by-construction class the finding was DEMOTED under (never dismissed). Engine-set, re-derived every scan. See below. |
 | `flow` | `{assigned?, tainted?}` — for an assignment sink the value assigned, plus the bindings the def-use walk followed. Evidence for the **Reachability evidence** block; the engine never acts on it. Note the walk is PER FILE, so on a cross-file path the assigned value is a parameter and "no tracked binding" is expected, not suspicious. |
 | `atCommit` | set when the finding came from a scan of git HISTORY: the commit its `file:line` belongs to. `check` resolves the citation against THAT tree, so a secret in a file since deleted is still graded — and a fabricated path still fails. |
+| `versionSource` | set on a dependency finding cited on a `package.json`, where the scanner read a RANGE (`^16.2.11` → 16.2.11). `lockfile`: the lockfile installs another version, which `version` now names — the advisory was matched against the floor, so confirm the installed version is in its affected range — and when package-checker's own lockfile pass reported nothing for that advisory at that version, the finding is demoted to `info` (kept, not dropped). `declared-range`: no lockfile records the package; `version` is the floor, not an install. Both lower `confidence` to `low`. |
 | `priorAnalysis` | `{tool, reasoning?, mitigationsChecked?, revalidationVerdict?}` ingested from an upstream agent. A **signal**, never a status. |
 
 ## `manifest.json` — run metadata (read this every run)
@@ -167,6 +168,11 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   both report zero logging findings. `coverage` reads it so it never advises you to enable an
   option you already enabled. Absent on dossiers written before schema 8 — `undefined` means
   **unknown**, never "off".
+- **`duplicateIds`** — `[{id, dropped, differing}]`, present only when `findings.json` carried the
+  same id on more than one row. Every reader collapses them to one row per id (an adjudicated row
+  wins over an open one), prints `✗ dropped … duplicate finding row(s)` on stderr and records it
+  here, instead of refusing the run. `differing: true` means the rows had different content: a
+  finding was actually lost and the id derivation collided — re-scan once that is fixed.
 
 ## `TRIAGE.todo.json` → `TRIAGE.json`
 

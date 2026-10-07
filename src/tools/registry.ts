@@ -114,10 +114,10 @@ export const TOOLS: ToolSpec[] = [
   {
     name: "gitleaks",
     category: "secret",
-    description: "Hardcoded-secret detector (git history + working tree).",
+    description: "Hardcoded-secret detector (tracked-file snapshot; git history with scan --secrets-history).",
     languages: ["*"],
     install: { brew: "brew install gitleaks", url: "https://github.com/gitleaks/gitleaks" },
-    runHint: "gitleaks detect --report-format json --no-banner --source <repo>",
+    runHint: "gitleaks dir <snapshot of tracked files> --report-format json --no-banner (gitleaks git <repo> with --secrets-history)",
     primary: true,
   },
   {

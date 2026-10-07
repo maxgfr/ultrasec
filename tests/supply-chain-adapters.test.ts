@@ -499,6 +499,19 @@ describe("package-checker adapter — mapExport (the export-JSON -> Finding[] ma
     expect(mapExport({ vulnerabilities: [null, undefined, {}, { package: "" }] })).toEqual([]);
   });
 
+  it("gives two packages that share one advisory at the same version distinct ids, and both survive correlation", () => {
+    const pair = mapExport({
+      vulnerabilities: [
+        { package: "vitest@3.2.4", ghsa: "GHSA-82fw-gwwq-j7x9", severity: "critical", ecosystem: "npm" },
+        { package: "@vitest/mocker@3.2.4", ghsa: "GHSA-82fw-gwwq-j7x9", severity: "critical", ecosystem: "npm" },
+      ],
+    });
+    expect(pair).toHaveLength(2);
+    expect(pair[0]!.id).not.toBe(pair[1]!.id);
+    const merged = correlate(pair);
+    expect(new Set(merged.map((x) => x.id)).size).toBe(merged.length);
+  });
+
   it("argv(): scans target with the default GHSA+OSV source and the process export path; appends --source for an SBOM ctx", () => {
     const base = packageChecker.argv("/repo");
     expect(base.slice(0, 3)).toEqual(["/repo", "--default-source-ghsa-osv", "--export-json"]);

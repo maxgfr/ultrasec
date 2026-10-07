@@ -633,6 +633,22 @@ const NEGATION_WINDOW = 16;
  *  language recognises are searched; the message says so. */
 const isSearchable = (rel: string): boolean => langForFile(rel) !== undefined;
 
+/**
+ * "with no `X`" right after a GENERIC subject ("a route … with no `X` is
+ * unauthenticated", "any handler with no `X`") describes a hypothetical item,
+ * not the repository. A real CONTEXT.md sentence of that shape failed
+ * `check --semantic` because the helper it names is called 29 times — which the
+ * sentence never denied. "The service ships with no `X`" has a definite subject
+ * and stays a claim.
+ */
+const ATTRIBUTIVE_NEGATION = /\b(?:with|avec)\s+$/i;
+const GENERIC_SUBJECT = /^[\s>*_-]*(?:a|an|any|every|each|if|when|whenever|unless|un|une|tout|toute|si|lorsqu['’]?\w*|quand)\s/i;
+
+function attributive(sentence: string, negationAt: number): boolean {
+  const before = sentence.slice(0, negationAt);
+  return ATTRIBUTIVE_NEGATION.test(before) && GENERIC_SUBJECT.test(sentence);
+}
+
 /** Below this, a token is too generic to mean anything (`id`, `os`, `req`). */
 const MIN_TOKEN = 4;
 
@@ -691,6 +707,10 @@ export function extractNegativeClaims(md: string): NegativeClaim[] {
       PRESENCE_NEGATION.lastIndex = 0;
       let m: RegExpExecArray | null = PRESENCE_NEGATION.exec(sentence);
       while (m) {
+        if (attributive(sentence, m.index)) {
+          m = PRESENCE_NEGATION.exec(sentence);
+          continue;
+        }
         // The window bounds where the span STARTS, not where it ends — a
         // 24-character identifier must not be missed for being longer than the
         // window that is meant to sit in front of it.

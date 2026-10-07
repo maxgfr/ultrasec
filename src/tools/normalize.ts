@@ -116,7 +116,11 @@ export function makeToolFinding(i: ToolFindingInput): Finding {
   // the same lockfile is one finding PER installed version pre-correlation (the
   // correlator then merges them into one with `locations[]`). Version-less
   // findings (sast/secret/config) keep their historical hash input — no id churn.
-  const id = shortHash(`${i.tool}:${i.ident}:${i.file ?? ""}:${i.line ?? ""}${i.version ? `:${i.version}` : ""}`);
+  // The package is part of it too: one advisory routinely covers sibling packages
+  // released in lockstep (vitest + @vitest/mocker), which then share version and
+  // lockfile, and only the package name tells the two findings apart.
+  const pkgPart = i.pkg && i.pkg !== i.ident ? `:${i.pkg}` : "";
+  const id = shortHash(`${i.tool}:${i.ident}:${i.file ?? ""}:${i.line ?? ""}${i.version ? `:${i.version}` : ""}${pkgPart}`);
   const f: Finding = {
     id,
     category: i.category,

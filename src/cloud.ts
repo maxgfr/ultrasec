@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { readText, walk, type RepoTree } from "./walk.js";
 import type { Finding, Severity } from "./types.js";
 import { makeToolFinding } from "./tools/normalize.js";
@@ -91,6 +93,27 @@ export const CLOUD_SHAPES: Record<string, CloudShape> = {
     severity: "high",
     cwe: "CWE-798",
     note: "A password/secret/token written as a literal in IaC lands in git history and in every plan/state file. Use a variable bound to a secret manager (vault, SSM, Key Vault) instead.",
+  },
+  "k8s-ingress-unauthenticated": {
+    id: "k8s-ingress-unauthenticated",
+    title: "Admin/debug UI exposed by an Ingress with no authentication",
+    severity: "high",
+    cwe: "CWE-306",
+    note: "An Ingress publishes a tool that has no login of its own — a mail catcher (every password-reset and magic-link mail of the environment, readable by anyone: account takeover), a database console, a metrics or log UI — and carries no auth annotation (`auth-url`/`auth-type`, an allow-list, an oauth2-proxy or Traefik middleware). Put it behind authentication or an IP allow-list, or reach it with `kubectl port-forward` instead.",
+  },
+  "compose-public-port": {
+    id: "compose-public-port",
+    title: "Data service port published on all interfaces",
+    severity: "medium",
+    cwe: "CWE-284",
+    note: '`ports: - "5432:5432"` binds the host side to 0.0.0.0: the database, cache or mail catcher is reachable from the network the machine is on (a café Wi-Fi, a CI runner\'s neighbours), usually with the compose file\'s default password. Docker\'s own iptables rules bypass a host firewall like ufw. Bind to loopback (`"127.0.0.1:5432:5432"`) or drop the mapping and use the compose network.',
+  },
+  "dockerignore-env": {
+    id: "dockerignore-env",
+    title: "Directory copied into the image while `.dockerignore` lets `.env` through",
+    severity: "medium",
+    cwe: "CWE-538",
+    note: "The Dockerfile copies a whole directory (`COPY . .`, `COPY app/ ./app/`), and no `.dockerignore` for its build context excludes `.env` files. A developer's or CI's local `.env` — database URLs, API keys — is baked into an image layer, where anyone who can pull the image reads it with `docker history`/`docker save`. Add `.env*` (and `**/.env*`) to `.dockerignore`.",
   },
   "cloud-metadata": {
     id: "cloud-metadata",
@@ -188,6 +211,134 @@ function isEgressRule(ls: Line[], line: number): boolean {
   return false; // no marker found — keep the finding (fail toward reporting)
 }
 
+// ── Ingress in front of a tool with no login of its own (CWE-306) ───────────
+// Matched on what the Ingress routes to (backend service, metadata name, host).
+// Deliberately a short list: each of these serves its data to whoever reaches
+// it, so the Ingress annotation is the only door.
+const SENSITIVE_UI =
+  /\b(?:mail(?:pit|hog|dev|catcher|crab|trap)|maildev|smtp4dev|inbucket|adminer|phpmyadmin|pgadmin|mongo-?express|redis-?commander|redisinsight|kibana|kubernetes-dashboard|prometheus|alertmanager)\b/i;
+const INGRESS_AUTH =
+  /auth-(?:url|type|signin|secret|tls-secret)|(?:whitelist|allowlist)-source-range|oauth2|basic-?auth|forward-?auth|router\.middlewares|appgw-ssl|azure-ad|iap\b/i;
+
+function scanIngresses(rel: string, ls: Line[], out: Finding[]): void {
+  // One YAML document at a time: an Ingress's annotations are its own.
+  const docs: Line[][] = [[]];
+  for (const l of ls) {
+    if (/^---\s*$/.test(l.text)) docs.push([]);
+    else docs[docs.length - 1]!.push(l);
+  }
+  for (const doc of docs) {
+    const kind = doc.find((l) => /^\s*kind:\s*(?:Ingress|IngressRoute)\s*$/.test(l.text));
+    if (!kind) continue;
+    const routed = doc.map((l) => /^\s*(?:-\s+)?(?:name|serviceName|host):\s*["']?([^"'\s#]+)/.exec(l.text)?.[1]).filter((v): v is string => !!v);
+    if (!routed.some((v) => SENSITIVE_UI.test(v))) continue;
+    if (doc.some((l) => INGRESS_AUTH.test(l.text))) continue;
+    out.push(hit(rel, kind.n, CLOUD_SHAPES["k8s-ingress-unauthenticated"]!, kind.text));
+  }
+}
+
+// ── docker-compose ports on 0.0.0.0 for data services (CWE-284) ───────────
+const COMPOSE_FILE = /(?:^|\/)(?:docker-)?compose(?:[.-][\w.-]+)?\.ya?ml$/;
+const DATA_IMAGE =
+  /(?:^|\/)(?:postgres|postgis|mysql|mariadb|mongo|redis|valkey|keydb|memcached|elasticsearch|opensearch|rabbitmq|kafka|zookeeper|minio|clickhouse|cassandra|couchdb|neo4j|influxdb|etcd|mssql|mailpit|mailhog|maildev|adminer|pgadmin4?|phpmyadmin)(?:[:@\s]|$)/i;
+
+/** The published host side of a short-syntax mapping has no IP: `"5432:5432"`, `"${P:-5432}:5432"`. */
+function publishedOnAllInterfaces(spec: string): boolean {
+  const flat = spec.replace(/\$\{[^}]*\}/g, "VAR").replace(/\/(?:tcp|udp)$/, "");
+  const parts = flat.split(":");
+  if (parts.length === 2) return true; // HOST:CONTAINER — no IP, so 0.0.0.0
+  if (parts.length === 3) return parts[0] === "0.0.0.0" || parts[0] === "";
+  return false; // a bare container port, or an IPv6 form this reader does not parse
+}
+
+function scanCompose(rel: string, ls: Line[], out: Finding[]): void {
+  // Service blocks are the keys one level under `services:`.
+  let inServices = false;
+  let serviceIndent = -1;
+  let image = "";
+  let pending: Line[] = [];
+  let inPorts = false;
+  let portsIndent = -1;
+  const flush = (): void => {
+    if (DATA_IMAGE.test(image)) for (const l of pending) out.push(hit(rel, l.n, CLOUD_SHAPES["compose-public-port"]!, l.text));
+    pending = [];
+    image = "";
+  };
+  for (const l of ls) {
+    const t = l.text;
+    if (!t.trim() || /^\s*#/.test(t)) continue;
+    const indent = t.length - t.trimStart().length;
+    if (indent === 0) {
+      flush();
+      inServices = /^services\s*:/.test(t);
+      serviceIndent = -1;
+      continue;
+    }
+    if (!inServices) continue;
+    if (serviceIndent === -1 || indent <= serviceIndent) {
+      if (/^\s*[\w.-]+\s*:\s*$/.test(t)) {
+        flush();
+        serviceIndent = indent;
+        inPorts = false;
+      }
+      continue;
+    }
+    const img = /^\s*image\s*:\s*["']?([^"'\s#]+)/.exec(t);
+    if (img) image = img[1]!;
+    if (/^\s*ports\s*:\s*$/.test(t)) {
+      inPorts = true;
+      portsIndent = indent;
+      continue;
+    }
+    if (inPorts && indent <= portsIndent) inPorts = false;
+    if (!inPorts) continue;
+    const item = /^\s*-\s*["']?([^"'\s#]+)["']?\s*$/.exec(t);
+    if (item && publishedOnAllInterfaces(item[1]!)) pending.push(l);
+  }
+  flush();
+}
+
+// ── COPY of a directory with `.env` not excluded (CWE-538) ──────────────────
+const DOCKERFILE = /(?:^|\/)(?:Dockerfile(?:\.[\w.-]+)?|[\w.-]+\.[Dd]ockerfile)$/;
+/** A `.dockerignore` line that keeps `.env` (and its variants) out of the context. */
+const IGNORES_ENV = /^(?:\*\*\/|\/)?(?:\.env\*?|\.env\.?\*|\*\.env|\*)$/;
+
+/** COPY/ADD (not `--from`) whose sources include a whole directory. */
+function copiesDirectory(line: string): boolean {
+  const m = /^\s*(?:COPY|ADD)\s+(.+)$/i.exec(line);
+  if (!m || /--from[=\s]/i.test(m[1]!)) return false;
+  const args = m[1]!
+    .trim()
+    .split(/\s+/)
+    .filter((a) => !a.startsWith("--"));
+  if (args[0]?.startsWith("[")) return false; // JSON form: rare, not parsed here
+  const sources = args.slice(0, -1);
+  return sources.some((s) => s === "." || s === "./" || s.endsWith("/") || s === "*");
+}
+
+function dockerignoreExcludesEnv(text: string): boolean {
+  return text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .some((l) => l && !l.startsWith("#") && !l.startsWith("!") && IGNORES_ENV.test(l));
+}
+
+function scanDockerfile(repo: string, rel: string, ls: Line[], out: Finding[]): void {
+  const copy = ls.find((l) => copiesDirectory(l.text));
+  if (!copy) return;
+  // The build context is the Dockerfile's directory or the repository root —
+  // the two places a build is normally run from — plus the per-Dockerfile
+  // `<Dockerfile>.dockerignore` BuildKit reads first. Any of them excluding
+  // `.env` answers the question.
+  const dir = rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "";
+  const candidates = [`${rel}.dockerignore`, join(dir, ".dockerignore"), ".dockerignore"];
+  for (const c of candidates) {
+    const abs = join(repo, c);
+    if (existsSync(abs) && dockerignoreExcludesEnv(readFileSync(abs, "utf8"))) return;
+  }
+  out.push(hit(rel, copy.n, CLOUD_SHAPES["dockerignore-env"]!, copy.text));
+}
+
 /** Audit a repo for cloud / K8s / IaC misconfiguration. Returns candidates. */
 export function auditCloud(repo: string, prune?: (rel: string) => boolean, tree?: RepoTree): Finding[] {
   const out: Finding[] = [];
@@ -195,6 +346,12 @@ export function auditCloud(repo: string, prune?: (rel: string) => boolean, tree?
   for (const wf of tree?.files ?? walk(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
+    // A Dockerfile has no extension to gate on.
+    if (DOCKERFILE.test(wf.rel)) {
+      const content = read(wf.abs);
+      if (content) scanDockerfile(repo, wf.rel, lines(content), out);
+      continue;
+    }
     if (!SCAN.has(ext)) continue;
     const content = read(wf.abs);
     if (!content) continue;
@@ -212,6 +369,8 @@ export function auditCloud(repo: string, prune?: (rel: string) => boolean, tree?
     // manifest (has both apiVersion: and kind:), so a stray `privileged: true`
     // in unrelated YAML isn't flagged.
     const isK8s = /(^|\n)\s*apiVersion:/.test(content) && /(^|\n)\s*kind:/.test(content);
+    if (isK8s) scanIngresses(rel, ls, out);
+    if (COMPOSE_FILE.test(rel)) scanCompose(rel, ls, out);
     if (isK8s) {
       for (const l of ls) {
         if (/^\s*privileged:\s*true\b/i.test(l.text)) out.push(hit(rel, l.n, CLOUD_SHAPES["k8s-privileged"]!, l.text));

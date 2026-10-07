@@ -415,6 +415,14 @@ export interface Finding {
   /** Installed/affected version. */
   version?: string;
   /**
+   * Where `version` came from, when a scanner cited a MANIFEST rather than a
+   * lockfile. `lockfile`: the scanner read a range floor and the lockfile
+   * installs a different version, which is the one named here.
+   * `declared-range`: no lockfile records the package, so the version is the
+   * range floor and the installed one may differ. Absent ⇒ the scanner's own.
+   */
+  versionSource?: "lockfile" | "declared-range";
+  /**
    * The first version that fixes the advisory, when the scanner named one.
    *
    * Trivy and osv-scanner both know it and both used to spend it on prose —
@@ -589,6 +597,8 @@ export interface Manifest {
     findings?: number;
     note?: string;
     workspaceCoverage?: { total: number; completed: number };
+    /** The tool ran, over less than it could have (gitleaks without history). */
+    degraded?: string;
   }[];
   /** Required scanner execution for THIS pass only, not a vulnerability or whole-repo coverage verdict. */
   scannerPolicy?: { required: string[]; complete: boolean; incomplete: string[] };
@@ -680,4 +690,13 @@ export interface Manifest {
    * `package.json` alone classifies direct devDependencies only.
    */
   reachability?: { toolchain: number; sources: string[] };
+  /**
+   * Finding ids that appeared more than once in `findings.json` and were
+   * collapsed to one row each (`store.ts` `dedupeFindings`). A duplicate used to
+   * make every downstream command refuse the whole run; it is now read, and this
+   * is the record that it happened. `differing` says whether the dropped rows
+   * carried different content — the case where a finding was actually lost and
+   * the id derivation needs fixing. Additive/optional — absent on a clean run.
+   */
+  duplicateIds?: { id: string; dropped: number; differing: boolean }[];
 }

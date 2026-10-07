@@ -113,8 +113,11 @@ export function appendJournal(runDir: string, t: Transcript): void {
   const path = join(runDir, JOURNAL_FILE);
   if (!existsSync(path)) writeFileSync(path, JOURNAL_HEADER);
   // Keep the entry to the summary line plus anything that signals lost coverage —
-  // a journal nobody reads is as useless as no journal.
-  const summary = [headline(t), ...t.stdout.split("\n").filter((l) => l.includes("✗ dropped") || l.includes("✗ rejected"))];
+  // a journal nobody reads is as useless as no journal. Both streams: the
+  // commands print their rejections and dropped rows with `eprintln`, so a
+  // stdout-only filter recorded none of them.
+  const lost = (l: string) => l.includes("✗ dropped") || l.includes("✗ rejected");
+  const summary = [headline(t), ...t.stdout.split("\n").filter(lost), ...t.stderr.split("\n").filter(lost)].filter((l, i, all) => all.indexOf(l) === i);
   const entry = [`## ${t.at} · \`${t.command}\``, "", ...summary.map((s) => `- ${s.trim()}`), `- exit ${t.code}`, ""].join("\n");
   appendFileSync(path, `${entry}\n`);
 }

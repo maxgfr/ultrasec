@@ -71,6 +71,17 @@ describe("extractNegativeClaims", () => {
     expect(extractNegativeClaims(md2)).toHaveLength(0);
   });
 
+  it("does NOT read a conditional 'a route … with no `X`' as a claim that X is absent", () => {
+    // Shape of a real CONTEXT.md sentence: it DEFINES what an unauthenticated
+    // route looks like, and `check --semantic` failed the run on it because the
+    // helper is called 29 times — which the sentence never denied.
+    const md = "A route wrapped in it with no `getSessionSiren` / `cachedAuth` / Bearer check is unauthenticated.";
+    expect(extractNegativeClaims(md)).toHaveLength(0);
+    expect(extractNegativeClaims("Any handler with no `requireUser` call is public.")).toHaveLength(0);
+    // …while a definite statement about the repo still is one.
+    expect(extractNegativeClaims("The service ships with no `child_process` usage.")[0]?.tokens).toEqual(["child_process"]);
+  });
+
   it("ignores a code span that is prose or a command, not a name", () => {
     expect(extractNegativeClaims("Aucun rôle anonyme : les métadonnées ne contiennent que `role: super`.")).toHaveLength(0);
     expect(extractNegativeClaims("No `id` is exposed.")).toHaveLength(0); // under the length floor
