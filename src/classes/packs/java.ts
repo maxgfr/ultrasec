@@ -6,7 +6,7 @@ import { EXPORT_PATH, FLAG_NAME, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, SETS_SEC
 
 const JVM = ["java", "kotlin"];
 
-const SECRET = String.raw`"[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
+const SECRET = String.raw`"[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
 /** A field/variable named for a shared credential (`apiKey`, `webhookSecret`). */
 const SECRET_FIELD = String.raw`\w*(?:apiKey|ApiKey|API_KEY|sharedSecret|SharedSecret|webhookSecret|WebhookSecret|clientSecret|ClientSecret|apiToken|ApiToken)\w*`;
 

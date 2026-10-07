@@ -5,7 +5,7 @@ import { EXPORT_PATH, FLAG_NAME, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, SETS_SEC
 
 const GO = ["go"];
 
-const SECRET = String.raw`"[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
+const SECRET = String.raw`"[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
 const NOT_EMPTY = String.raw`(?!\s*"")`;
 
 const GO_QUERIES: QueryIdiom[] = [

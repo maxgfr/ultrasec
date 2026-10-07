@@ -5,7 +5,7 @@ import { EXPORT_PATH, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, XFF, XFF_LOOKBACK }
 
 const RB = ["ruby"];
 
-const SECRET = String.raw`["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
+const SECRET = String.raw`["'][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
 const ENV_SECRET = String.raw`ENV(?:\[\s*${SECRET}\s*\]|\.fetch\(\s*${SECRET}\s*\))`;
 
 export const RUBY_PACK: Pack = {

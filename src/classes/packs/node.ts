@@ -13,7 +13,7 @@ const JS = ["javascript"];
 // from config, or an environment variable named like a credential. A variable
 // called `token` compared with `===` is far more often a CSRF/nonce equality
 // or a type check than an authentication decision, so it is not matched.
-const SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
+const SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
 const EQ = "(?:===|!==|==|!=)";
 const CONSTANT_TIME = /timingSafeEqual|safeCompare|secureCompare|constantTime|compare_digest|tsscmp|safe-compare/i;
 /** A comparison against "unset" is a presence check, not a secret comparison. */

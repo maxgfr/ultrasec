@@ -37,6 +37,3 @@ export const SETS_SECURITY_HEADER = /Content-Security-Policy|X-Frame-Options|Str
 
 /** A name that says "this boolean is a feature/security switch". */
 export const FLAG_NAME = String.raw`\w*(?:enabled|disabled|enable|disable|flag|debug|mock|fake|skip|bypass|allow|insecure|feature|dry_?run|test_?mode)\w*`;
-
-/** A secret-bearing environment/config key name. */
-export const SECRET_KEY_NAME = "[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)";

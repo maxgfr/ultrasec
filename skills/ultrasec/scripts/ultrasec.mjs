@@ -34195,7 +34195,7 @@ var COMMON_PACK = {
 
 // src/classes/packs/node.ts
 var JS3 = ["javascript"];
-var SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
+var SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
 var EQ = "(?:===|!==|==|!=)";
 var CONSTANT_TIME = /timingSafeEqual|safeCompare|secureCompare|constantTime|compare_digest|tsscmp|safe-compare/i;
 var PRESENCE_CHECK = new RegExp(`${SECRET_ENV}\\s*${EQ}\\s*(?:undefined|null|""|''|\`\`)(?![\\w$])|(?:undefined|null|""|'')\\s*${EQ}\\s*${SECRET_ENV}`);
@@ -34469,7 +34469,7 @@ var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PAC
 
 // src/classes/packs/python.ts
 var PY3 = ["python"];
-var SECRET = String.raw`["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
+var SECRET = String.raw`["'][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
 var NOT_PRESENCE = String.raw`(?!\s*(?:None|""|''))`;
 var PY_CONSTANT_TIME = /compare_digest|constant_time_compare/;
 var SQLALCHEMY_QUERIES = [
@@ -34512,7 +34512,7 @@ var PYTHON_PACK = {
           kind: "line",
           languages: PY3,
           match: new RegExp(
-            `(?:==|!=)\\s*(?:settings\\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])|(?:settings\\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])\\s*(?:==|!=)${NOT_PRESENCE}`
+            `(?:==|!=)\\s*(?:settings\\.[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])|(?:settings\\.[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])\\s*(?:==|!=)${NOT_PRESENCE}`
           ),
           unless: PY_CONSTANT_TIME,
           emit: "authtokens/secret-compare-timing"
@@ -34704,7 +34704,7 @@ var PYTHON_PACKS = [PYTHON_PACK, DJANGO_PACK, FLASK_PACK, FASTAPI_PACK];
 
 // src/classes/packs/java.ts
 var JVM2 = ["java", "kotlin"];
-var SECRET2 = String.raw`"[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
+var SECRET2 = String.raw`"[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
 var SECRET_FIELD = String.raw`\w*(?:apiKey|ApiKey|API_KEY|sharedSecret|SharedSecret|webhookSecret|WebhookSecret|clientSecret|ClientSecret|apiToken|ApiToken)\w*`;
 var JAVA_PACK = {
   id: "java",
@@ -34813,7 +34813,7 @@ var JAVA_PACKS = [JAVA_PACK, SPRING_PACK];
 
 // src/classes/packs/go.ts
 var GO = ["go"];
-var SECRET3 = String.raw`"[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
+var SECRET3 = String.raw`"[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
 var NOT_EMPTY = String.raw`(?!\s*"")`;
 var GO_QUERIES = [
   // GORM: `db.Find(&rows)` with no `.Limit(` anywhere on the statement.
@@ -34969,7 +34969,7 @@ var GO_PACKS = [GO_PACK, NET_HTTP_PACK, GIN_PACK];
 
 // src/classes/packs/ruby.ts
 var RB = ["ruby"];
-var SECRET4 = String.raw`["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
+var SECRET4 = String.raw`["'][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
 var ENV_SECRET = String.raw`ENV(?:\[\s*${SECRET4}\s*\]|\.fetch\(\s*${SECRET4}\s*\))`;
 var RUBY_PACK = {
   id: "ruby",

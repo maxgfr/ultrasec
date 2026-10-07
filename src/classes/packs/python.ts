@@ -5,7 +5,7 @@ import { EXPORT_PATH, HEADERS_MIDDLEWARE, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY,
 
 const PY = ["python"];
 
-const SECRET = String.raw`["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
+const SECRET = String.raw`["'][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
 /** A comparison operand that is a presence test, not a value. */
 const NOT_PRESENCE = String.raw`(?!\s*(?:None|""|''))`;
 const PY_CONSTANT_TIME = /compare_digest|constant_time_compare/;
@@ -54,7 +54,7 @@ export const PYTHON_PACK: Pack = {
           kind: "line",
           languages: PY,
           match: new RegExp(
-            `(?:==|!=)\\s*(?:settings\\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])|(?:settings\\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])\\s*(?:==|!=)${NOT_PRESENCE}`,
+            `(?:==|!=)\\s*(?:settings\\.[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])|(?:settings\\.[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])\\s*(?:==|!=)${NOT_PRESENCE}`,
           ),
           unless: PY_CONSTANT_TIME,
           emit: "authtokens/secret-compare-timing",
