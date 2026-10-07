@@ -2,6 +2,23 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.59.0](https://github.com/maxgfr/ultrasec/compare/v1.58.0...v1.59.0) (2026-10-07)
+
+
+### Bug Fixes
+
+* **resolve:** keep the scan when the engine cannot index a file type ([eda80de](https://github.com/maxgfr/ultrasec/commit/eda80de0b312a688c4690789800abe5900f93067))
+
+
+### Features
+
+* **catalog:** label framework idioms with a version range and put them in the matrix ([a4bec98](https://github.com/maxgfr/ultrasec/commit/a4bec987cfab78730a99dd0f6c30a201d31875f1))
+* **classes:** hunt whole columns — packless, unknown and out-of-range frameworks ([5ab7cf8](https://github.com/maxgfr/ultrasec/commit/5ab7cf8ac94d3fd59f38ac6ad1a13b25ef988908))
+* **classes:** port the framework postures from webconfig onto classes and packs ([daf8547](https://github.com/maxgfr/ultrasec/commit/daf854739c7823d7476c9defe347e0a0258664fd))
+* **deps:** re-pin package-checker at v1.11.72 ([1d9feed](https://github.com/maxgfr/ultrasec/commit/1d9feedf0a9f7f292e6a5e282b88b2c7b6a6a498))
+* **frameworks:** one stack table for the context brief and the matrix ([36d04e3](https://github.com/maxgfr/ultrasec/commit/36d04e37a168eeef60d160bebb655e8d63cd1675))
+* **guards:** auth and throttle markers supplied by the detected packs ([1d1843f](https://github.com/maxgfr/ultrasec/commit/1d1843fc1739c53635926b600ca32e5edbb5df6b))
+
 # [1.58.0](https://github.com/maxgfr/ultrasec/compare/v1.57.0...v1.58.0) (2026-10-07)
 
 
