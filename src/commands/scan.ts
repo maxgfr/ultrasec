@@ -11,6 +11,7 @@ import { auditAgenticWorkflows } from "../actions.js";
 import { auditWebConfig } from "../webconfig.js";
 import { auditAuthTokens } from "../authtokens.js";
 import { auditWeaknessClasses } from "../classes/engine.js";
+import { detectFrameworks } from "../frameworks.js";
 import { auditCloud } from "../cloud.js";
 import { buildPruneMatcher, snapshotTree } from "../walk.js";
 import { createFileFacts } from "../facts.js";
@@ -292,7 +293,11 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // absent security headers, session chunks left on logout, env booleans
   // parsed by truthiness — each defined once, its idioms per ecosystem and
   // framework kept as data in packs. Always on, grounded [file:line].
-  const classAudit = auditWeaknessClasses(repo, prune, tree);
+  // Frameworks and versions per package, read from the dependency manifests:
+  // they gate the framework-specific idioms and say which packs ran inside the
+  // version range they were validated against.
+  const frameworks = detectFrameworks(repo, prune, tree);
+  const classAudit = auditWeaknessClasses(repo, prune, tree, frameworks);
 
   // Cloud / K8s / IaC misconfiguration (privileged containers, host namespaces,
   // wildcard IAM, public principals/storage, open ingress, instance-metadata
@@ -467,6 +472,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
     ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),
+    ...(frameworks.length ? { frameworks } : {}),
   };
 
   const nextDossier: Dossier = { manifest, findings, graph };
@@ -560,6 +566,8 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     );
     if (nb.note) println(`  ⚠️  ${nb.note}`);
   }
+  if (fm.frameworks?.length)
+    println(`  frameworks: ${fm.frameworks.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ")}`);
   if (diffNote) println(`  ${diffNote}`);
   if (toolsAutoSkipped) {
     println(`  external scanners skipped in scoped mode — pass \`--tools auto\` to run them.`);
