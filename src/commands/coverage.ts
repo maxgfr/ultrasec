@@ -3,8 +3,9 @@ import { join, resolve } from "node:path";
 import { flagStr, flagBool, own, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { buildCoverage, renderCoverageMd, enumeratedKindsOf, STANDARDS, DEFAULT_STANDARD } from "../coverage.js";
+import { withHuntProgress } from "../classes/coverage.js";
 
-// `ultrasec coverage --run <dir> [--standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25]`
+// `ultrasec coverage --run <dir> [--standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25] [--classes]`
 //
 // The honest complement to "only report what you can exploit": a short report
 // reads as "nothing there" when it means "nothing there, in what I looked at".
@@ -35,10 +36,13 @@ export function runCoverage(args: ParsedArgs): number {
   // counts as walked — the pass ran, it simply found nothing.
   const enumerated = enumeratedKindsOf(dossier.findings);
   const rows = buildCoverage(dossier, enumerated, standardId);
-  const md = renderCoverageMd(rows, STANDARDS[standardId]!.title, dossier);
+  // The weakness-class × framework matrix, with this run's AI-hunt progress.
+  const classCells = withHuntProgress(dossier.manifest.weaknessClasses ?? [], run);
+  const md = renderCoverageMd(rows, STANDARDS[standardId]!.title, dossier, classCells);
 
   if (flagBool(args, "json")) {
-    println(JSON.stringify(rows, null, 2));
+    // `--classes` selects the class matrix; the standard rows stay the default shape.
+    println(JSON.stringify(flagBool(args, "classes") ? classCells : rows, null, 2));
     return 0;
   }
   if (flagBool(args, "write")) {

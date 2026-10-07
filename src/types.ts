@@ -1,4 +1,5 @@
 import type { DetectedFramework } from "./frameworks.js";
+import type { ClassCoverageCell } from "./classes/coverage.js";
 
 // Single source of truth for the version the bundle reports. `sync-version.mjs`
 // rewrites this string at release time (kept in lockstep with package.json and
@@ -712,4 +713,12 @@ export interface Manifest {
    * optional — absent when no known framework is declared.
    */
   frameworks?: DetectedFramework[];
+  /**
+   * The weakness-class × framework matrix as the scan left it: matched by a
+   * pack (`deterministic`, `degraded` when the framework has no pack or its
+   * version is outside the pack's `testedWith`), `not-applicable`, or
+   * `not-covered`. `coverage` overlays the AI-hunt progress of the run.
+   * Additive/optional — absent when no framework was detected.
+   */
+  weaknessClasses?: ClassCoverageCell[];
 }

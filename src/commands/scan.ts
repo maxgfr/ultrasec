@@ -12,6 +12,7 @@ import { auditWebConfig } from "../webconfig.js";
 import { auditAuthTokens } from "../authtokens.js";
 import { auditWeaknessClasses } from "../classes/engine.js";
 import { detectFrameworks } from "../frameworks.js";
+import { classCoverage, needsHunt } from "../classes/coverage.js";
 import { auditCloud } from "../cloud.js";
 import { buildPruneMatcher, snapshotTree } from "../walk.js";
 import { createFileFacts } from "../facts.js";
@@ -298,6 +299,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // version range they were validated against.
   const frameworks = detectFrameworks(repo, prune, tree);
   const classAudit = auditWeaknessClasses(repo, prune, tree, frameworks);
+  const classCells = classCoverage(frameworks);
 
   // Cloud / K8s / IaC misconfiguration (privileged containers, host namespaces,
   // wildcard IAM, public principals/storage, open ingress, instance-metadata
@@ -473,6 +475,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
     ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),
     ...(frameworks.length ? { frameworks } : {}),
+    ...(classCells.length ? { weaknessClasses: classCells } : {}),
   };
 
   const nextDossier: Dossier = { manifest, findings, graph };
@@ -568,6 +571,13 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   }
   if (fm.frameworks?.length)
     println(`  frameworks: ${fm.frameworks.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ")}`);
+  if (fm.weaknessClasses?.length) {
+    const cells = fm.weaknessClasses;
+    const hunt = cells.filter(needsHunt).length;
+    println(
+      `  weakness classes: ${cells.filter((c) => c.state === "deterministic" && !c.degraded).length} class × framework cell(s) matched by a pack · ${cells.filter((c) => c.state === "not-applicable").length} n/a · ${hunt} degraded or uncovered${hunt ? " — `investigate` hunts them" : ""}`,
+    );
+  }
   if (diffNote) println(`  ${diffNote}`);
   if (toolsAutoSkipped) {
     println(`  external scanners skipped in scoped mode — pass \`--tools auto\` to run them.`);

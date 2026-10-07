@@ -179,9 +179,12 @@ COMMANDS
              there, in what I looked at" — this separates the two, and names the
              categories no deterministic signal can cover so you answer them
              explicitly. --standard scores against ASVS (default), the OWASP
-             Top 10, the OWASP API Top 10, MASVS or the CWE Top 25. Read-only.
-             Flags: --run · --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25 ·
-             --write (COVERAGE.md) · --json.
+             Top 10, the OWASP API Top 10, MASVS or the CWE Top 25. Also the
+             weakness-class × framework matrix: matched by a pack, degraded
+             (no pack, version outside testedWith), AI-hunted, or not covered.
+             Read-only. Flags: --run ·
+             --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25 ·
+             --write (COVERAGE.md) · --json (--classes: the class matrix).
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
              READ-ONLY — it writes nothing and changes no status; --semantic ALSO
              fails when a candidate is still unadjudicated. Exit 0 ok · 1 gate
