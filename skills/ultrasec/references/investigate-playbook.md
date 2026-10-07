@@ -69,6 +69,29 @@ don't agonize — but it is not purely cosmetic either: it keys deduplication, c
 correlation and ASVS coverage scoring, which is why the vocabulary stays closed and class names
 are folded rather than stored.
 
+## 2b. Weakness-class hunts
+
+After the regions, the worklist carries one item per **weakness class × framework that no pack
+settles** (`region: "hunt:<class>:<framework>[@<dir>]"`): the framework has no pack, the pack has no
+idiom for that class, or the detected version is outside the pack's `testedWith`. Cells a pack
+covers emit nothing — the engine already matched them.
+
+Work a hunt from its `hunt` object, not from memory: the `invariant` says what must hold, the
+`guard` what establishes it, the `examples` how the bug looks in the framework's language. Then
+find how **this** repository writes the class with that framework — its own helpers, middlewares,
+config and wrappers — starting in `files` (the framework's manifest line and the package's
+busiest files), and check every place the invariant can break.
+
+- Each break is a **Discovery** with `"hunt": "<id>"`, rated with the hunt's `rubric`.
+- Each idiom you recognized — the unsafe call **and** the guard the code relies on — is an
+  **idiom** row (`kind: unsafe|guard`, the `pattern` as it reads, optionally a `regex`, cited).
+  Report the guard even when it is applied correctly: a pack needs both halves.
+- List the hunt id in **`hunted`** when you worked it, including when you found nothing.
+
+Idioms land in `PACK-SUGGESTIONS.json` as proposals for a maintainer; nothing you suggest changes
+what the engine matches until it is promoted with fixtures. Format:
+[schemas.md](schemas.md#weakness-class-hunts-and-pack-suggestionsjson).
+
 ## 3. Apply (ingest)
 
 ```

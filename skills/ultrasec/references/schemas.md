@@ -136,6 +136,14 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   a coverage hole) from `failed`.
 - **`scopes[]`** accumulates every scope/diff that fed a merged run — this is what makes a
   map-first audit resumable across sessions.
+- **`frameworks[]`** (schema 10) — each web framework per package directory:
+  `{ id, title, ecosystem, dir, version, versionSource: lockfile|declared|toolchain, evidence: "file:line" }`.
+  `declared` means the floor of a range, not an installed version.
+- **`weaknessClasses[]`** (schema 10) — the class × framework matrix:
+  `{ class, framework, ecosystem, dir, version, state, packs[], degraded?, reason? }`, `state` one of
+  `deterministic|not-applicable|not-covered` (`coverage` overlays `ai-hunt|ai-hunted`). A
+  `degraded` cell (no framework pack, or a version outside the pack's `testedWith`) is a coverage
+  gap to state, and `investigate` hunts it.
 - **`downgraded`** counts findings de-prioritized as noise BY CONSTRUCTION, one row per class
   (`{reason, count}`). The classes, and the ground each one proposes:
 
@@ -333,6 +341,28 @@ adjudicated like any candidate. **Citations are checked first** — an unresolva
 (primary or any path step) is rejected and reported, so `check` can never fail on an invented
 line. A discovery at an existing finding's location folds into that finding's `sources` instead
 of duplicating it.
+
+### Weakness-class hunts and `PACK-SUGGESTIONS.json`
+
+Items whose `region` is `hunt:<class>:<framework>[@<dir>]` are weakness-class hunts, emitted for
+every class × framework no pack settles. Their `hunt` object carries `class`, `cwe`, `framework`,
+`version`, `reason`, `packsApplied`, `invariant`, `guard`, `rubric` and `examples[]`. Answer them
+in the same file, as an object:
+
+```json
+{ "discoveries": [ { "…": "a Discovery as above", "hunt": "hunt:csv-formula-injection:koa" } ],
+  "idioms": [ { "hunt": "hunt:csv-formula-injection:koa", "class": "csv-formula-injection",
+                "framework": "koa", "kind": "unsafe", "pattern": "ctx.body = rows.join(\"\\n\")",
+                "regex": "optional, must compile", "file": "src/export.js", "line": 12, "note": "why" } ],
+  "hunted": [ "hunt:csv-formula-injection:koa" ] }
+```
+
+`kind` is `unsafe` (breaks the invariant) or `guard` (establishes it); `class` must be a registry
+id. An idiom whose `file:line` does not resolve is rejected like a discovery. Accepted ones are
+merged into `<run>/PACK-SUGGESTIONS.json` — `{ schema: 1, note, hunted[], suggestions[] }`, each
+suggestion the idiom plus `evidence` (the cited line), `seenOn` (framework version) and `pack` (the
+pack it would extend). **The engine never applies a suggestion**; a maintainer promotes it into
+pack data with fixtures. `hunted` marks a hunt worked even when it found nothing.
 
 ## `REVALIDATE.todo.json` → `REVALIDATE.json`
 

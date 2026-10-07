@@ -166,6 +166,8 @@ each: [references/schemas.md](references/schemas.md).
      cross-file command-injection candidate missing. Re-run with the grammars, or say so.
    - `truncation` non-zero ⇒ a cap was hit; raise `--max-candidates` or narrow `--scope`.
    - `toolStatus` ⇒ which scanners ran, which were skipped (a coverage hole), which failed.
+   - `weaknessClasses` ⇒ a `degraded` cell (no framework pack, version outside `testedWith`) is a
+     gap `investigate` hunts, not covered ground.
 
    A degraded run must never be reported as a complete one.
 
@@ -203,7 +205,8 @@ each: [references/schemas.md](references/schemas.md).
 7. **Hunt what the engine can't enumerate.** `investigate --run <run>` groups the attack surface
    by region; find broken access control/IDOR, business logic, auth/session/JWT, crypto, races,
    feature abuse, chained attacks, and emit grounded `Discovery[]` — citations are checked before
-   ingest, so over-reporting is cheap.
+   ingest, so over-reporting is cheap. `hunt:` items are weakness classes no pack covers for a
+   framework: answer with discoveries, the `idioms` you recognized (unsafe and guard) and `hunted`.
    [references/investigate-playbook.md](references/investigate-playbook.md).
 
 8. **Verify.** `verify --run <run>` → worklist; record `supported|partial|unsupported|refuted`
