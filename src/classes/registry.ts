@@ -1,4 +1,4 @@
-import type { ClassId, WeaknessClass } from "./types.js";
+import { CATALOG_ROW, type ClassId, type HuntSubject, type MatrixRowId, type WeaknessClass } from "./types.js";
 
 // The weakness classes, defined once and independently of any framework.
 //
@@ -207,7 +207,190 @@ export const CLASSES: Record<ClassId, WeaknessClass> = {
       { language: "php", vulnerable: "$debug = (bool) getenv('APP_DEBUG');", fixed: "$debug = filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN);" },
     ],
   },
+  "insecure-session-cookie": {
+    id: "insecure-session-cookie",
+    title: "Session cookie written without its protective flags",
+    cwe: "CWE-614",
+    severity: "medium",
+    category: "config",
+    invariant:
+      "A cookie that carries a session or an auth token is written with HttpOnly (no script can read it), Secure (never sent over plain HTTP) and a SameSite policy — by the call that writes it, or by a framework default the code leaves on.",
+    guard:
+      'The flags set on the write itself (`httpOnly: true, secure: true, sameSite: "lax"`, `set_cookie(..., httponly=True, secure=True, samesite="Lax")`, `HttpOnly: true, Secure: true`, `ResponseCookie…httpOnly(true).secure(true)`, a Rails cookie hash with `httponly: true, secure: true`), or a session middleware configured with them. A flag bound to an expression (`secure: isProd`) is set — to whatever the deployment decides.',
+    rubric:
+      "medium for a session or auth cookie; low for a preference cookie with no authority; high when the missing flag is Secure on a cookie sent to an HTTP origin, or SameSite=None without Secure.",
+    note: "A cookie is written without HttpOnly or Secure. A session cookie readable from script is stolen by any XSS; one without Secure travels over plain HTTP. Set both on the write, and a SameSite policy.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: 'res.cookie("sid", token);',
+        fixed: 'res.cookie("sid", token, { httpOnly: true, secure: true, sameSite: "lax" });',
+      },
+      {
+        language: "python",
+        vulnerable: 'response.set_cookie("sid", token)',
+        fixed: 'response.set_cookie("sid", token, httponly=True, secure=True, samesite="Lax")',
+      },
+      {
+        language: "go",
+        vulnerable: 'http.SetCookie(w, &http.Cookie{Name: "sid", Value: token})',
+        fixed: 'http.SetCookie(w, &http.Cookie{Name: "sid", Value: token, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})',
+      },
+      { language: "ruby", vulnerable: "cookies[:sid] = token", fixed: "cookies[:sid] = { value: token, httponly: true, secure: true, same_site: :lax }" },
+    ],
+  },
+  "proxy-headers-trusted": {
+    id: "proxy-headers-trusted",
+    title: "Forwarded headers trusted without a proxy allow-list",
+    cwe: "CWE-290",
+    severity: "low",
+    category: "config",
+    invariant:
+      "The framework takes the client address, scheme and host from X-Forwarded-* (or Forwarded) only from the proxies the deployment actually runs — a hop count or an address list — never from any caller.",
+    guard:
+      "Trust configured with a hop count or the proxy's addresses (Express `trust proxy` = 1 or a subnet, Gin `SetTrustedProxies([proxy])`, Werkzeug `ProxyFix(x_for=1)`, uvicorn `--forwarded-allow-ips=<proxy>`, Laravel `trustProxies(at: [proxy])`), on an app that is not reachable except through that proxy.",
+    rubric:
+      "low as a posture note when the app is only reachable through a proxy that rewrites the headers; medium when the address keys a rate limit, lockout or audit log and the app is reachable directly; high when it keys an allow-list that grants access.",
+    note: "The framework is told to trust X-Forwarded-* from every caller, so the client IP, scheme and host it reports are whatever the request says — for rate limits, allow-lists, audit logs and absolute URLs alike. Trust only your own proxy (a hop count or its address), and confirm the app is not reachable around it.",
+    examples: [
+      { language: "javascript", vulnerable: 'app.set("trust proxy", true);', fixed: 'app.set("trust proxy", 1); // exactly one proxy in front' },
+      {
+        language: "python",
+        vulnerable: "USE_X_FORWARDED_HOST = True",
+        fixed: "# Host comes from the request line; the proxy rewrites it if it must\nUSE_X_FORWARDED_HOST = False",
+      },
+      { language: "php", vulnerable: "$middleware->trustProxies(at: '*');", fixed: "$middleware->trustProxies(at: ['10.0.0.0/8']);" },
+    ],
+  },
+  "request-body-unbounded": {
+    id: "request-body-unbounded",
+    title: "Request body read with no size limit",
+    cwe: "CWE-770",
+    severity: "low",
+    category: "config",
+    invariant:
+      "Every request body the application buffers — JSON, form, multipart, raw — is bounded by a size limit the code (or the server in front) sets explicitly, below what one request may cost in memory.",
+    guard:
+      'An explicit limit where the body is read (`express.json({ limit: "100kb" })`, Go `http.MaxBytesReader`, Flask `MAX_CONTENT_LENGTH`, Django `DATA_UPLOAD_MAX_MEMORY_SIZE`, Spring `spring.servlet.multipart.max-request-size`), or a proxy limit (`client_max_body_size`) the app cannot be reached around.',
+    rubric:
+      "low as a hardening note when a default limit exists; medium when the body is read whole into memory with no limit anywhere and the route is anonymous.",
+    note: "A request body is read with no size limit — or with the framework's limit switched off — so one request can make the process buffer as much as the client sends. Set an explicit limit where the body is read, or confirm the proxy in front enforces one.",
+    examples: [
+      { language: "javascript", vulnerable: "app.use(express.json());", fixed: 'app.use(express.json({ limit: "100kb" }));' },
+      { language: "go", vulnerable: "body, _ := io.ReadAll(r.Body)", fixed: "r.Body = http.MaxBytesReader(w, r.Body, 1<<20)\nbody, err := io.ReadAll(r.Body)" },
+      { language: "python", vulnerable: "DATA_UPLOAD_MAX_MEMORY_SIZE = None", fixed: "DATA_UPLOAD_MAX_MEMORY_SIZE = 2_621_440  # Django's default, 2.5 MB" },
+    ],
+  },
+  "graphql-introspection-enabled": {
+    id: "graphql-introspection-enabled",
+    title: "GraphQL introspection or IDE served in production",
+    cwe: "CWE-200",
+    severity: "medium",
+    category: "config",
+    invariant:
+      "A production GraphQL endpoint does not answer introspection queries nor serve an IDE (GraphiQL, Playground, Sandbox) unless the schema is meant to be public.",
+    guard:
+      'Introspection and the IDE turned off outside development (`introspection: process.env.NODE_ENV !== "production"`, graphene `graphiql=settings.DEBUG`, a `DisableIntrospection` validation rule, `spring.graphql.graphiql.enabled=false`), or a schema that is public by design.',
+    rubric:
+      "medium when the schema exposes internal or administrative operations; low when the API is public and documented anyway; high when introspection reveals operations that lack authorization.",
+    note: "GraphQL introspection or an IDE is switched on, which hands anyone the whole schema — every type, field and mutation, including the ones the UI never calls. Turn both off in production unless the schema is public by design.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: "new ApolloServer({ schema, introspection: true });",
+        fixed: 'new ApolloServer({ schema, introspection: process.env.NODE_ENV !== "production" });',
+      },
+      {
+        language: "python",
+        vulnerable: 'path("graphql", GraphQLView.as_view(graphiql=True))',
+        fixed: 'path("graphql", GraphQLView.as_view(graphiql=settings.DEBUG))',
+      },
+      {
+        language: "go",
+        vulnerable: 'http.Handle("/", playground.Handler("GraphQL", "/query"))',
+        fixed: 'if os.Getenv("ENV") == "dev" {\n    http.Handle("/", playground.Handler("GraphQL", "/query"))\n}',
+      },
+    ],
+  },
+  "csrf-protection-disabled": {
+    id: "csrf-protection-disabled",
+    title: "CSRF protection switched off",
+    cwe: "CWE-352",
+    severity: "high",
+    category: "config",
+    invariant:
+      "Every state-changing route an authenticated browser can reach with ambient credentials (cookies, HTTP auth) is protected against cross-site requests — the framework's CSRF guard left on, an Origin check, or credentials that are never ambient.",
+    guard:
+      "The framework's guard left enabled (Django CsrfViewMiddleware, Rails `protect_from_forgery`, Spring Security's CSRF filter, Laravel's token middleware, Next.js Server Actions' origin check), or an API authenticated only by a header the browser does not attach on its own (a bearer token) — which is the thing to verify before calling an exemption a bug.",
+    rubric:
+      "high when the exempted routes change state under cookie authentication; medium when they are only reachable with a non-ambient credential; nothing when every exempted route is read-only or authenticated by a bearer header.",
+    note: "The framework's CSRF guard is switched off (commented out, skipped, exempted or disabled). Any state-changing route it covered can now be driven from an attacker's page using the victim's cookies. Turn it back on, or prove the routes are authenticated by a credential the browser does not attach on its own.",
+    examples: [
+      { language: "ruby", vulnerable: "skip_before_action :verify_authenticity_token", fixed: "protect_from_forgery with: :exception" },
+      { language: "java", vulnerable: "http.csrf(AbstractHttpConfigurer::disable);", fixed: "http.csrf(withDefaults());" },
+      { language: "python", vulnerable: "@csrf_exempt\ndef transfer(request):", fixed: "def transfer(request):  # CsrfViewMiddleware checks the token" },
+    ],
+  },
+  "debug-mode-enabled": {
+    id: "debug-mode-enabled",
+    title: "Framework debug mode or verbose errors enabled",
+    cwe: "CWE-489",
+    severity: "medium",
+    category: "config",
+    invariant:
+      "The deployed application runs with the framework's debug mode off: no interactive debugger, no stack traces, configuration or source in error responses.",
+    guard:
+      'Debug tied to an environment that is false in production (`DEBUG = env.bool("DEBUG", False)`, `app.run(debug=os.getenv("FLASK_DEBUG") == "1")`, `gin.SetMode(gin.ReleaseMode)`, `server.error.include-stacktrace=never`), and the setting checked in the deployed configuration, not the development one.',
+    rubric:
+      "medium when stack traces or settings reach a remote caller; high when the debugger is interactive (Werkzeug console, Rails web-console) and reachable; low when the file is development-only configuration — say why.",
+    note: "Framework debug mode is on: error responses carry stack traces, settings or source, and some debuggers (Werkzeug, web-console) give a remote console. Turn it off in production, driven by the environment rather than hard-coded.",
+    examples: [
+      { language: "python", vulnerable: "DEBUG = True", fixed: 'DEBUG = os.environ.get("DJANGO_DEBUG", "false") == "true"' },
+      { language: "go", vulnerable: "gin.SetMode(gin.DebugMode)", fixed: "gin.SetMode(gin.ReleaseMode)" },
+      { language: "ruby", vulnerable: "config.consider_all_requests_local = true", fixed: "config.consider_all_requests_local = false" },
+    ],
+  },
 };
 
 /** Class ids in registry order. */
 export const CLASS_LIST = Object.values(CLASSES);
+
+/**
+ * The taint-catalog row of the matrix (see `CATALOG_ROW`). Its hunt asks for
+ * the framework's own input APIs and route conventions as this repository
+ * uses them — what the taint walk needs to see the framework at all.
+ */
+export const CATALOG_SUBJECT: HuntSubject = {
+  id: CATALOG_ROW,
+  title: "Framework request inputs and routes known to the taint catalog",
+  cwe: "CWE-20",
+  invariant:
+    "Every way the framework hands request data to application code (parameters, bodies, headers, cookies, path segments, procedure inputs) is a taint SOURCE the engine knows, and every way it exposes code to the network (routes, actions, controllers) is an ENTRY POINT — for the version the repository runs.",
+  guard:
+    "Not a guard: recognition. The framework's input accessors and route declarations, as THIS repository writes them, matched by catalog rows labelled for the framework at a version range that includes the one detected.",
+  rubric:
+    "An unrecognized input API is not a vulnerability; it is a blind spot for every taint class at once. Report what the code reads and where it is routed, then hunt the classes the walk could not reach from it.",
+  examples: [
+    {
+      language: "javascript",
+      vulnerable: 'app.get("/export", (c) => db.query(c.req.query("q")));',
+      fixed: "// Hono: `c.req.query(...)` is the request input; the route is `app.get(path, handler)`.",
+    },
+    {
+      language: "elixir",
+      vulnerable: 'def index(conn, params) do\n  Repo.query("SELECT * FROM t WHERE q = \'#{params["q"]}\'")',
+      fixed: "# Phoenix: `params` (and `conn.params`) is the request input; the router line is the route.",
+    },
+    {
+      language: "python",
+      vulnerable: '@app.get("/export")\nasync def export(request):\n    q = request.args.get("q")',
+      fixed: "# Sanic: `request.args` / `request.json` are the inputs; `@app.get` declares the route.",
+    },
+  ],
+};
+
+/** Every matrix row, in order: the classes, then the taint-catalog row. */
+export const MATRIX_ROWS: readonly HuntSubject[] = [...CLASS_LIST, CATALOG_SUBJECT];
+
+/** A matrix row's hunt subject, by id. */
+export const HUNT_SUBJECTS: Record<MatrixRowId, HuntSubject> = { ...CLASSES, [CATALOG_ROW]: CATALOG_SUBJECT };

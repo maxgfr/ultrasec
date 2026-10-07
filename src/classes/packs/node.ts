@@ -1,5 +1,14 @@
 import type { Pack, QueryIdiom } from "../types.js";
-import { EXPORT_PATH, HEADERS_MIDDLEWARE, MENTIONS_CSV, NEUTRALIZES_FORMULA } from "./shared.js";
+import {
+  COOKIE_CALL,
+  EXPORT_PATH,
+  EXPRESS_TRUST_PROXY,
+  GRAPHQL_INTROSPECTION_ON,
+  HEADERS_MIDDLEWARE,
+  LEGACY_COOKIE_FLAGS,
+  MENTIONS_CSV,
+  NEUTRALIZES_FORMULA,
+} from "./shared.js";
 
 // Node.js: the language idioms (any framework), then one pack per framework.
 // The rules emitting a `webconfig/…` or `authtokens/…` shape are the original
@@ -26,7 +35,7 @@ const COERCE_BOOLEAN = /\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
 const ENV_KEY_COERCE = /^\s*["']?[A-Z][A-Z0-9_]*["']?\s*:.*\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
 const READS_ENV = /\bprocess\.env\b|\bimport\.meta\.env\b|\bcreateEnv\s*\(|\bDeno\.env\b|\bBun\.env\b/;
 
-// ── NextAuth / Auth.js session chunks ───────────────────────────────────────
+// ── NextAuth / Auth.js session chunks (NEXT_AUTH_PACK below) ────────────────
 const SESSION_COOKIE = /(?:__Secure-)?(?:next-auth|authjs)\.session-token/;
 const EXPIRES_COOKIE = /maxAge\s*:\s*0\b|expires\s*:\s*new\s+Date\(\s*0\s*\)|Max-Age=0|\.delete\s*\(|expires=Thu, 01 Jan 1970/i;
 /** Any sign the code knows about `<name>.N`: a prefix match, a `.N` suffix, a loop over the jar. */
@@ -119,6 +128,55 @@ export const NODE_PACK: Pack = {
         },
       ],
     },
+    // The original web-config detector's rules (src/webconfig.ts ≤ v1.58.0),
+    // moved here with their shapes so their findings keep their ids.
+    "insecure-session-cookie": {
+      rules: [{ id: "cookie-call", kind: "call", languages: JS, call: COOKIE_CALL, scope: "args", ...LEGACY_COOKIE_FLAGS }],
+    },
+    "graphql-introspection-enabled": {
+      rules: [{ id: "options-true", kind: "line", languages: JS, text: "raw", match: GRAPHQL_INTROSPECTION_ON, emit: "webconfig/graphql-introspection" }],
+    },
+    "csrf-protection-disabled": {
+      rules: [{ id: "csrf-false", kind: "line", languages: JS, text: "raw", match: /\bcsrf(?:Prevention)?\s*:\s*false\b/, emit: "webconfig/csrf-disabled" }],
+    },
+    "debug-mode-enabled": {
+      rules: [
+        // The `errorhandler` middleware renders stack traces to the client; its
+        // own README says development only. Registered with no environment check.
+        {
+          id: "errorhandler-unconditional",
+          kind: "file",
+          languages: JS,
+          gate: [/require\(\s*["']errorhandler["']\s*\)|from\s+["']errorhandler["']/],
+          anchor: /\.use\s*\(\s*\w*[eE]rror[hH]andler\s*\(/,
+          pick: "first",
+          unless: /NODE_ENV|\.get\(\s*["']env["']\s*\)|isDev\w*|isProd\w*|development/,
+          emit: "webconfig/debug",
+        },
+      ],
+    },
+  },
+};
+
+// ── NextAuth.js / Auth.js — a LIBRARY's idiom ──────────────────────────────
+// The session cookie is NextAuth's, not Next.js's nor Node's: its name and its
+// chunking (`<name>.0`, `<name>.1`, … once the JWT outgrows one cookie) are
+// what the library does, at the versions below. Kept in a library pack so the
+// matrix checks `testedWith` against NextAuth's own version, wherever the
+// library is declared. Source: https://github.com/nextauthjs/next-auth (cookie chunking, v4 and v5).
+export const NEXT_AUTH_PACK: Pack = {
+  id: "next-auth",
+  ecosystem: "node",
+  library: "next-auth",
+  testedWith: ">=4 <6",
+  sources: ["https://github.com/nextauthjs/next-auth"],
+  // `getServerSession` (v4) is NextAuth's alone; v5's `auth()` and `getToken`
+  // are names any codebase might use, so they count only where NextAuth is declared.
+  markers: {
+    global: { auth: { words: ["getServerSession"] } },
+    detected: { auth: { patterns: [/\bawait\s+auth\s*\(\s*\)/, /\bgetToken\s*\(/] } },
+  },
+  classes: {
     "session-cookie-chunks-on-logout": {
       rules: [
         {
@@ -183,6 +241,30 @@ export const NEXTJS_PACK: Pack = {
         },
       ],
     },
+    // Server Actions check that the Origin matches the host; `allowedOrigins`
+    // widens that list, and a `*` entry turns the check off.
+    // Source: https://nextjs.org/docs/app/api-reference/config/next-config-js/serverActions
+    "csrf-protection-disabled": {
+      rules: [
+        {
+          id: "server-actions-any-origin",
+          kind: "line",
+          languages: JS,
+          files: NEXT_CONFIG,
+          match: /\ballowedOrigins\s*:\s*\[[^\]]*["'`]\*["'`]/,
+          note: "`serverActions.allowedOrigins` lists `*`, which turns off the Origin check Next.js applies to every Server Action — its CSRF protection. Any site can invoke the app's actions with the visitor's cookies. List the exact origins a proxy forwards from.",
+        },
+      ],
+    },
+    "proxy-headers-trusted": {
+      hunt: "Next.js derives the request host and protocol from X-Forwarded-Host/-Proto and exposes no trust setting of its own; whether a caller can forge them depends on the proxy in front — check how the app reads them and what the deployment strips.",
+    },
+    "request-body-unbounded": {
+      hunt: "App-Router route handlers read `await req.json()` with no size limit of their own (Server Actions default to 1 MB, `api.bodyParser.sizeLimit` bounds Pages-Router routes); check what bounds the bodies this app reads.",
+    },
+    "debug-mode-enabled": {
+      hunt: "Next.js has no debug switch in code — `next dev` vs `next start` and `productionBrowserSourceMaps` decide what an error exposes; check the deployed start command and config.",
+    },
   },
 };
 
@@ -195,6 +277,7 @@ export const EXPRESS_PACK: Pack = {
   framework: "express",
   testedWith: ">=4 <6",
   sources: ["https://expressjs.com/en/advanced/best-practice-security.html"],
+  markers: { global: { auth: { words: ["passport\\.authenticate"] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -214,6 +297,22 @@ export const EXPRESS_PACK: Pack = {
         },
       ],
     },
+    "proxy-headers-trusted": {
+      rules: [{ id: "trust-proxy", kind: "line", languages: JS, text: "raw", match: EXPRESS_TRUST_PROXY, emit: "webconfig/trust-proxy" }],
+    },
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "body-parser-no-limit",
+          kind: "line",
+          languages: JS,
+          text: "raw",
+          evidence: "match",
+          match: /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\((?![^)]*\blimit\s*:)[^)]*\)/,
+          emit: "webconfig/body-limit-missing",
+        },
+      ],
+    },
   },
 };
 
@@ -227,6 +326,7 @@ export const NESTJS_PACK: Pack = {
   framework: "nestjs",
   testedWith: ">=9 <13",
   sources: ["https://docs.nestjs.com/security/helmet"],
+  markers: { global: { auth: { annotations: ["UseGuards"] } }, detected: { auth: { words: ["AuthGuard"] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -252,6 +352,14 @@ export const NESTJS_PACK: Pack = {
           statement: "balanced",
         },
       ],
+    },
+    // On the Express adapter Nest forwards `app.set` to Express.
+    // Source: https://docs.nestjs.com/faq/http-adapter
+    "proxy-headers-trusted": {
+      rules: [{ id: "trust-proxy", kind: "line", languages: JS, text: "raw", match: EXPRESS_TRUST_PROXY, emit: "webconfig/trust-proxy" }],
+    },
+    "request-body-unbounded": {
+      hunt: "Nest registers the adapter's body parser itself (`NestFactory.create(…, { bodyParser })`, `app.useBodyParser('json', { limit })`); check which limit the app sets.",
     },
   },
 };
@@ -301,12 +409,30 @@ export const FASTIFY_PACK: Pack = {
         },
       ],
     },
+    // `trustProxy: true` trusts every hop. Source: https://fastify.dev/docs/latest/Reference/Server/#trustproxy
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "trust-proxy-true",
+          kind: "line",
+          languages: JS,
+          match: /\btrustProxy\s*:\s*true\b/,
+          note: "`trustProxy: true` makes Fastify take `request.ip`, `request.protocol` and `request.host` from X-Forwarded-* sent by ANY caller. Give it the proxy's address or a hop count instead, and confirm the app is not reachable around the proxy.",
+        },
+      ],
+    },
+    "request-body-unbounded": {
+      hunt: "Fastify bounds bodies with `bodyLimit` (1 MiB by default); check whether the app raises it or reads `request.raw` itself.",
+    },
   },
 };
 
 // ── Koa / Hono / Elysia — header posture only (partial packs) ──────────────
 // Carried over from the original detector, which grounded the absence on the
-// constructor. Every other class is hunted for these frameworks.
+// constructor. For every other class these frameworks get what the Node
+// language idioms above match (the timing, CSV, first-hop and env-boolean
+// rules read any JavaScript) — and where no rule applies at all, the cell is
+// hunted. The framework's own idioms for those classes are not encoded.
 const ctorPack = (id: string, ctor: RegExp, testedWith: string): Pack => ({
   id,
   ecosystem: "node",
@@ -320,8 +446,50 @@ const ctorPack = (id: string, ctor: RegExp, testedWith: string): Pack => ({
     },
   },
 });
-export const KOA_PACK = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
+// `app.proxy = true` makes Koa trust X-Forwarded-* from every caller.
+// Source: https://koajs.com/#settings
+export const KOA_PACK: Pack = (() => {
+  const pack = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
+  pack.classes["proxy-headers-trusted"] = {
+    rules: [
+      {
+        id: "app-proxy-true",
+        kind: "line",
+        languages: JS,
+        match: /\b(?:app|server)\s*\.\s*proxy\s*=\s*true\b/,
+        note: "`app.proxy = true` makes Koa take `ctx.ip`, `ctx.protocol` and `ctx.host` from X-Forwarded-* sent by ANY caller. Set `proxyIpHeader`/`maxIpsCount` to your proxy's hop count, and confirm the app is not reachable around the proxy.",
+      },
+    ],
+  };
+  return pack;
+})();
 export const HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
 export const ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
 
-export const NODE_PACKS: Pack[] = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];
+// ── tRPC — a library's guard vocabulary ────────────────────────────────────
+// A procedure built from an authenticated base is the guard: the middleware
+// that checks the session runs before every procedure derived from it. The
+// names are conventions of the tRPC docs and templates, so they count only
+// where tRPC is declared. Source: https://trpc.io/docs/server/authorization
+export const TRPC_PACK: Pack = {
+  id: "trpc",
+  ecosystem: "node",
+  library: "trpc",
+  testedWith: ">=10 <12",
+  sources: ["https://trpc.io/docs/server/authorization"],
+  markers: { detected: { auth: { words: ["protectedProcedure", "authedProcedure", "adminProcedure", "privateProcedure"] } } },
+  classes: {},
+};
+
+export const NODE_PACKS: Pack[] = [
+  NODE_PACK,
+  NEXTJS_PACK,
+  EXPRESS_PACK,
+  NESTJS_PACK,
+  FASTIFY_PACK,
+  KOA_PACK,
+  HONO_PACK,
+  ELYSIA_PACK,
+  NEXT_AUTH_PACK,
+  TRPC_PACK,
+];

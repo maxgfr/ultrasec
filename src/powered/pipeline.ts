@@ -21,12 +21,22 @@ import { buildWorklist, renderWorklistMd, applyVerdicts, parseVerdicts } from ".
 import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../revalidate.js";
 import { buildAssumptionWorklist, renderAssumptionsMd, parseAssumptionResults, renderAssumptionMap, unenforced, LEADS_FILE } from "../assumptions.js";
 import { buildVariantWorklist, renderVariantsMd, parseVariantResults, renderRegressionRules } from "../variants.js";
+import { detectedIds } from "../classes/markers.js";
 import { buildGuardMatrix, renderGuardsMd, parseGuardVerdicts, guardDiscovery, LENSES } from "../guards.js";
 import { buildNarrativeWorklist, renderNarrativeWorklistMd, parseNarrative, mergeNarrative, hasNarrativeContent } from "../narrative.js";
 import { buildImplementWorklist, renderImplementMd, loadNarrative } from "../implement.js";
 import type { AgentRunner } from "./agent.js";
 import { formatDropped, type ParseResult } from "../apply-parse.js";
 import { eprintln } from "../util.js";
+
+/** The stack the run's scan detected — the guard names only it uses come from its packs. */
+function runStack(run: string): string[] {
+  try {
+    return detectedIds(loadDossier(run).manifest.frameworks);
+  } catch {
+    return [];
+  }
+}
 
 // The powered-mode pipeline. The keyless DEFAULT (no `--powered`) sequences only
 // the deterministic emit stages and makes ZERO external calls. `--powered` drives
@@ -146,13 +156,13 @@ const STAGES: Record<StageName, StageDef> = {
   guards: {
     crossCheckable: false,
     emit(repo, run) {
-      const rows = buildGuardMatrix(scanRepo(repo));
+      const rows = buildGuardMatrix(scanRepo(repo), "auth", [], { detected: runStack(run) });
       const f = stageFiles("GUARDS");
       emitWorklist(run, f, rows, renderGuardsMd(rows, loadContextDoc(run)));
       return { worklist: join(run, f.md), outName: "GUARDS.json" };
     },
     applyPure: (repo, run, dossier, raw) => {
-      const byId = new Map(buildGuardMatrix(scanRepo(repo)).map((r) => [r.id, r]));
+      const byId = new Map(buildGuardMatrix(scanRepo(repo), "auth", [], { detected: detectedIds(dossier.manifest.frameworks) }).map((r) => [r.id, r]));
       const discoveries = rowsOf("guards", parseGuardVerdicts(raw))
         .filter((r) => r.verdict === "unguarded")
         .map((r) => {
@@ -171,13 +181,13 @@ const STAGES: Record<StageName, StageDef> = {
   throttle: {
     crossCheckable: false,
     emit(repo, run) {
-      const rows = buildGuardMatrix(scanRepo(repo), "throttle");
+      const rows = buildGuardMatrix(scanRepo(repo), "throttle", [], { detected: runStack(run) });
       const f = stageFiles(LENSES.throttle.stem);
       emitWorklist(run, f, rows, renderGuardsMd(rows, loadContextDoc(run), "throttle"));
       return { worklist: join(run, f.md), outName: "THROTTLE.json" };
     },
     applyPure: (repo, run, dossier, raw) => {
-      const byId = new Map(buildGuardMatrix(scanRepo(repo), "throttle").map((r) => [r.id, r]));
+      const byId = new Map(buildGuardMatrix(scanRepo(repo), "throttle", [], { detected: detectedIds(dossier.manifest.frameworks) }).map((r) => [r.id, r]));
       const discoveries = rowsOf("throttle", parseGuardVerdicts(raw, "throttle"))
         .filter((r) => r.verdict === "unthrottled")
         .map((r) => {

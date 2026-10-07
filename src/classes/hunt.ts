@@ -6,9 +6,10 @@ import type { InvestigateRegion } from "../investigate.js";
 import { citationProblem } from "../investigate.js";
 import { badField, describeValue, notInVocabulary, type DroppedRow } from "../apply-parse.js";
 import { byStr } from "../util.js";
-import { CLASSES } from "./registry.js";
+import { HUNT_SUBJECTS } from "./registry.js";
 import { huntId, needsHunt, PACK_SUGGESTIONS_FILE, type ClassCoverageCell } from "./coverage.js";
-import { CLASS_IDS, type ClassExample, type ClassId } from "./types.js";
+import { CATALOG_ROW, MATRIX_ROW_IDS, type ClassExample, type Ecosystem, type MatrixRowId } from "./types.js";
+import { ECOSYSTEM_LANGUAGES } from "../stack.js";
 
 // The AI half of the weakness classes.
 //
@@ -31,7 +32,7 @@ import { CLASS_IDS, type ClassExample, type ClassId } from "./types.js";
 /** The class-hunt payload of an investigate worklist item. */
 export interface ClassHunt {
   id: string;
-  class: ClassId;
+  class: MatrixRowId;
   title: string;
   cwe: string;
   framework: string;
@@ -49,16 +50,15 @@ export interface ClassHunt {
   examples: ClassExample[];
 }
 
-/** The language an ecosystem's examples are shown in first. */
-const ECOSYSTEM_LANGUAGE: Record<string, string> = { node: "javascript", python: "python", java: "java", go: "go", ruby: "ruby", php: "php" };
-
 const MAX_HUNT_FILES = 8;
 const MAX_EXAMPLES = 3;
 
 function huntPrompt(h: ClassHunt): string {
+  const subject = HUNT_SUBJECTS[h.class];
+  const what = h.class === CATALOG_ROW ? "Taint-catalog coverage" : `Weakness class \`${h.class}\` (${h.cwe})`;
   return (
-    `Weakness class \`${h.class}\` (${h.cwe}) on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""} — ${h.reason}. ` +
-    `INVARIANT: ${CLASSES[h.class].invariant} A VALID GUARD: ${CLASSES[h.class].guard} ` +
+    `${what} on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""} — ${h.reason}. ` +
+    `INVARIANT: ${subject.invariant} A VALID GUARD: ${subject.guard} ` +
     `Find how THIS repository writes the class with ${h.framework} — its own helpers, middlewares, config and wrappers — and check every place the invariant can break. ` +
     `Each break is a Discovery (cite a resolvable [file:line], set "hunt": "${h.id}"). Each idiom you recognize — the unsafe call AND the guard the code relies on — ` +
     `goes to \`idioms[]\` ({hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}) so a maintainer can turn it into pack data. ` +
@@ -71,9 +71,10 @@ export function buildClassHunts(manifest: Pick<Manifest, "weaknessClasses" | "fr
   const cells: ClassCoverageCell[] = (manifest.weaknessClasses ?? []).filter(needsHunt);
   const out: InvestigateRegion[] = [];
   for (const cell of cells) {
-    const cls = CLASSES[cell.class];
+    const cls = HUNT_SUBJECTS[cell.class];
     const fw = manifest.frameworks?.find((f) => f.id === cell.framework && f.dir === cell.dir);
-    const lang = ECOSYSTEM_LANGUAGE[cell.ecosystem];
+    // The language an ecosystem's examples are shown in first.
+    const lang = ECOSYSTEM_LANGUAGES[cell.ecosystem as Ecosystem]?.[0];
     const examples = [...cls.examples].sort((a, b) => Number(b.language === lang) - Number(a.language === lang)).slice(0, MAX_EXAMPLES);
     const prefix = cell.dir ? `${cell.dir}/` : "";
     // Where the framework lives: its manifest line first, then the package's
@@ -114,7 +115,7 @@ export function buildClassHunts(manifest: Pick<Manifest, "weaknessClasses" | "fr
 /** One idiom the auditor recognized, as submitted in INVESTIGATE.json `idioms[]`. */
 export interface IdiomRow {
   hunt?: string;
-  class: ClassId;
+  class: MatrixRowId;
   framework: string;
   kind: "unsafe" | "guard";
   language?: string;
@@ -140,7 +141,7 @@ function parseIdiom(raw: unknown): { row?: IdiomRow; reason?: string } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { reason: badField("idiom", raw, "an object") };
   const d = raw as Record<string, unknown>;
   const bad: string[] = [];
-  if (!(CLASS_IDS as readonly string[]).includes(d.class as string)) bad.push(notInVocabulary("class", d.class, CLASS_IDS));
+  if (!(MATRIX_ROW_IDS as readonly string[]).includes(d.class as string)) bad.push(notInVocabulary("class", d.class, MATRIX_ROW_IDS));
   if (!(IDIOM_KINDS as readonly string[]).includes(d.kind as string)) bad.push(notInVocabulary("kind", d.kind, IDIOM_KINDS));
   for (const field of ["framework", "pattern", "file"] as const) {
     if (typeof d[field] !== "string" || !(d[field] as string).trim()) bad.push(badField(field, d[field], "a non-empty string"));
@@ -161,7 +162,7 @@ function parseIdiom(raw: unknown): { row?: IdiomRow; reason?: string } {
   return {
     row: {
       ...(typeof d.hunt === "string" ? { hunt: d.hunt } : {}),
-      class: d.class as ClassId,
+      class: d.class as MatrixRowId,
       framework: (d.framework as string).trim(),
       kind: d.kind as IdiomRow["kind"],
       ...(typeof d.language === "string" ? { language: d.language } : {}),

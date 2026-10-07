@@ -1,7 +1,9 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { buildPruneMatcher, findManifestDirs, readText, walk } from "./walk.js";
-import { detectWorkspaces, isTestPath } from "./vendor/codeindex-engine.mjs";
+import { join } from "node:path";
+import { buildPruneMatcher, readText, walk } from "./walk.js";
+import { isTestPath } from "./vendor/codeindex-engine.mjs";
+import { detectFrameworks, stackLabels } from "./frameworks.js";
+import { markerFor } from "./classes/markers.js";
 import { langForFile, type LangSpec } from "./lang.js";
 import { SANITIZERS, findSinks, findTextSinks } from "./catalog.js";
 import type { RepoScan } from "./scan.js";
@@ -25,251 +27,32 @@ import { byStr } from "./util.js";
 const MAX_SCAFFOLD = 40;
 const MAX_SCAFFOLD_ENTRIES = 80;
 
-// Auth / authorization markers, across ecosystems. Recall-oriented: a match is a
-// CANDIDATE protection site for the agent to confirm, not proof a route is guarded.
+// Auth / authorization and rate-limiting markers. Recall-oriented: a match is
+// a CANDIDATE protection site for the agent to confirm, not proof a route is
+// guarded.
 //
-// Exported as `AUTH_MARKER` because the guard matrix (`guards.ts`) asks the other
-// half of the same question — which of these markers is in scope for which entry
-// point. Two copies of this vocabulary would let the context brief and the matrix
-// disagree about what a protection even looks like.
-//
-// The annotations sit in their own alternative, outside the leading `\b`. Inside
-// it they could never match where they are written: `\b` before `@` needs a word
-// character on its left, and an annotation is preceded by indentation or nothing.
-// `@Secured("ROLE_ADMIN")` — the whole guard, with no call-site twin in the body —
-// was invisible to both the brief and the matrix.
-//
-// `getServerSession` is NextAuth's server-side session read — the canonical
-// first line of a guarded Route Handler or Server Action, and the only thing
-// that tells one from an open one. NextAuth v5's `auth()` is the same check under
-// a name too generic to match on.
-export const AUTH_MARKER =
-  /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|getServerSession|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
-
-// Rate-limiting / throttling markers, the same shape of vocabulary for the other
-// absence the matrix can enumerate.
-//
-// "No throttling anywhere" is a FACT about an application, and a real audit
-// established it with `grep -E 'rate|429'` returning nothing — then wrote it up
-// as one medium finding, correctly. Nothing in the engine could produce that
-// fact, so the coverage matrix carried "missing rate limiting" as advice in a
-// hint string and no run ever answered it.
-//
-// `429` earns its place: a repo that answers `TooManyRequests` anywhere has a
-// limiter, whatever it is called. It is matched as a bare number only next to a
-// status-shaped context, since a bare 429 in a fixture or a phone number would
-// otherwise read as a protection.
-export const THROTTLE_MARKER =
-  /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
-
-// Dependency name → friendly framework label (package.json deps/devDeps keys).
-const JS_FRAMEWORKS: Record<string, string> = {
-  express: "express",
-  koa: "koa",
-  fastify: "fastify",
-  "@nestjs/core": "nestjs",
-  next: "next.js",
-  nuxt: "nuxt",
-  "@hapi/hapi": "hapi",
-  hapi: "hapi",
-  sails: "sails",
-  restify: "restify",
-  react: "react",
-  vue: "vue",
-  "@angular/core": "angular",
-  svelte: "svelte",
-  "apollo-server": "apollo",
-  graphql: "graphql",
-  "socket.io": "socket.io",
-  mongoose: "mongoose",
-  sequelize: "sequelize",
-  prisma: "prisma",
-  knex: "knex",
-  typeorm: "typeorm",
-  passport: "passport",
-  jsonwebtoken: "jwt",
-};
-
-/** Shared by every Python manifest — the framework names are the same whichever
- *  file declares them. */
-const PY_RULES: [RegExp, string][] = [
-  [/\bflask\b/i, "flask"],
-  [/\bdjango\b/i, "django"],
-  [/\bfastapi\b/i, "fastapi"],
-  [/\btornado\b/i, "tornado"],
-  [/\bbottle\b/i, "bottle"],
-  [/\bpyramid\b/i, "pyramid"],
-  [/\bsanic\b/i, "sanic"],
-  [/\baiohttp\b/i, "aiohttp"],
-  [/\bsqlalchemy\b/i, "sqlalchemy"],
-];
-
-// Substring/regex detectors for text-based manifests (offline, tolerant of format).
-const TEXT_MANIFESTS: { file: string; rules: [RegExp, string][] }[] = [
-  {
-    file: "requirements.txt",
-    rules: PY_RULES,
-  },
-  // Same rules, the manifests modern Python actually uses. requirements.txt alone
-  // reported "none detected" on any Poetry/PDM/uv or setuptools project.
-  {
-    file: "pyproject.toml",
-    rules: PY_RULES,
-  },
-  {
-    file: "Pipfile",
-    rules: PY_RULES,
-  },
-  {
-    file: "setup.py",
-    rules: PY_RULES,
-  },
-  {
-    file: "Cargo.toml",
-    rules: [
-      [/^\s*actix-web\s*=/m, "actix-web"],
-      [/^\s*axum\s*=/m, "axum"],
-      [/^\s*rocket\s*=/m, "rocket"],
-      [/^\s*warp\s*=/m, "warp"],
-      [/^\s*tide\s*=/m, "tide"],
-      [/^\s*diesel\s*=/m, "diesel"],
-      [/^\s*sqlx\s*=/m, "sqlx"],
-    ],
-  },
-  {
-    file: "build.gradle.kts",
-    rules: [[/org\.springframework/, "spring"]],
-  },
-  {
-    file: "mix.exs",
-    rules: [
-      [/:phoenix\b/, "phoenix"],
-      [/:plug\b/, "plug"],
-      [/:ecto\b/, "ecto"],
-    ],
-  },
-  {
-    file: "deno.json",
-    rules: [
-      [/\boak\b/, "oak"],
-      [/\bfresh\b/, "fresh"],
-    ],
-  },
-  {
-    file: "go.mod",
-    rules: [
-      [/gin-gonic\/gin/, "gin"],
-      [/labstack\/echo/, "echo"],
-      [/gofiber\/fiber/, "fiber"],
-      [/go-chi\/chi/, "chi"],
-      [/gorilla\/mux/, "gorilla/mux"],
-      [/gorm\.io\/gorm/, "gorm"],
-    ],
-  },
-  {
-    file: "Gemfile",
-    rules: [
-      [/\brails\b/i, "rails"],
-      [/\bsinatra\b/i, "sinatra"],
-      [/\bsequel\b/i, "sequel"],
-      [/\bhanami\b/i, "hanami"],
-    ],
-  },
-  {
-    file: "composer.json",
-    rules: [
-      [/laravel\/framework/, "laravel"],
-      [/symfony\//, "symfony"],
-      [/slim\/slim/, "slim"],
-    ],
-  },
-  {
-    file: "build.gradle",
-    rules: [[/springframework|org\.springframework|spring-boot/i, "spring"]],
-  },
-  {
-    file: "pom.xml",
-    rules: [
-      [/springframework/i, "spring"],
-      [/jersey/i, "jersey"],
-    ],
-  },
-];
+// The vocabulary lives in src/classes/markers.ts: a generic floor plus the
+// names each pack contributes for its framework or library. These two exports
+// are the vocabulary EVERY repository gets (floor + the packs' unambiguous
+// names) — the guard matrix (`guards.ts`) and the dossier read the same one, so
+// the brief and the matrix cannot disagree about what a protection looks like.
+// Where the stack is known, `markerFor(lens, detected)` adds the names that
+// only mean something for that stack (NextAuth v5's `auth()`, tRPC's
+// `protectedProcedure`, a Laravel `->middleware('auth')`).
+export const AUTH_MARKER = markerFor("auth");
+export const THROTTLE_MARKER = markerFor("throttle");
 
 /**
- * Detect frameworks from on-disk manifests. Offline + tolerant: a missing or
- * malformed manifest contributes nothing rather than throwing.
- *
- * EVERY manifest in the tree is read, not just the root's. A monorepo keeps its
- * dependencies in the workspace packages — `targets/frontend/package.json`, not
- * `./package.json` — so reading only the root reported `frameworks: —` on a
- * repo whose whole attack surface was a Next.js app, and the trust boundaries
- * inferred from that emptiness were wrong for the same reason. `findManifestDirs`
- * is the same bounded walk the lockfile adapters already use for exactly this.
+ * The stack the brief names: every web framework and library of the one stack
+ * table (`src/stack.ts`), read from every manifest in the tree by the same
+ * detection the weakness-class matrix uses — so the brief and the matrix can no
+ * longer disagree about what a repository is built with. A monorepo keeps its
+ * dependencies in the workspace packages, not the root, which is why the whole
+ * tree is read.
  */
-/**
- * Directories to look for manifests in: the bounded basename walk, UNION the
- * workspaces the repo actually declares.
- *
- * The walk alone is capped at `MANIFEST_MAX_DEPTH` and knows nothing about
- * membership, so a two-deep `packages` layout is found and a four-deep one is
- * not — and it counts a `package.json` in an untracked scratch tree no build sees.
- * `detectWorkspaces` reads the declarations instead (npm/yarn `workspaces`,
- * `pnpm-workspace.yaml`, `lerna.json`, `nx.json`, Cargo, go.work, Maven, uv,
- * Composer, Gradle). It is already vendored and already used by `regionKeyer`
- * for `investigate` regions — so those were workspace-aware while the stack
- * detection right next to them was not.
- *
- * Union, not replacement: a manifest outside any declared workspace is still a
- * manifest, and losing it to be principled would be a worse bug than the one
- * being fixed.
- */
-function manifestDirs(repo: string, names: readonly string[]): string[] {
-  const dirs = new Set(findManifestDirs(repo, names));
-  try {
-    for (const w of detectWorkspaces(repo).packages) {
-      const dir = resolve(repo, w.dir);
-      for (const name of names) if (existsSync(join(dir, name))) dirs.add(dir);
-    }
-  } catch {
-    /* not a workspace, or an unreadable declaration — the walk still stands */
-  }
-  return [...dirs].sort(byStr);
-}
-
-function detectFrameworks(repo: string): string[] {
-  const found = new Set<string>();
-
-  for (const dir of manifestDirs(repo, ["package.json"])) {
-    try {
-      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
-        dependencies?: Record<string, string>;
-        devDependencies?: Record<string, string>;
-        peerDependencies?: Record<string, string>;
-      };
-      const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}), ...(pkg.peerDependencies ?? {}) };
-      for (const name of Object.keys(deps)) {
-        const label = Object.hasOwn(JS_FRAMEWORKS, name) ? JS_FRAMEWORKS[name] : undefined;
-        if (label) found.add(label);
-      }
-    } catch {
-      /* malformed package.json — skip */
-    }
-  }
-
-  for (const m of TEXT_MANIFESTS) {
-    for (const dir of manifestDirs(repo, [m.file])) {
-      let raw: string;
-      try {
-        raw = readFileSync(join(dir, m.file), "utf8");
-      } catch {
-        continue;
-      }
-      for (const [re, name] of m.rules) if (re.test(raw)) found.add(name);
-    }
-  }
-
-  return [...found].sort(byStr);
+function detectStack(repo: string): { labels: string[]; ids: string[] } {
+  const stack = detectFrameworks(repo);
+  return { labels: stackLabels(stack), ids: stack.map((f) => f.id) };
 }
 
 function appliesTo(languages: string[], langId: string): boolean {
@@ -366,7 +149,9 @@ function capBySite<T extends { file: string; line: number; kind?: string }>(item
 }
 
 export function buildContextScaffold(repo: string, scan: RepoScan, surface: AttackSurface): ContextScaffold {
-  const frameworks = detectFrameworks(repo);
+  const stack = detectStack(repo);
+  const frameworks = stack.labels;
+  const authMarker = markerFor("auth", stack.ids);
 
   // ONE entry point per (file, kind), selected by rank, presented by path.
   //
@@ -424,7 +209,7 @@ export function buildContextScaffold(repo: string, scan: RepoScan, surface: Atta
     const lines = readText(join(repo, fileScan.rel)).split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
-      const am = AUTH_MARKER.exec(line);
+      const am = authMarker.exec(line);
       if (am) authMiddleware.push({ file: fileScan.rel, line: i + 1, hint: am[0] });
       for (const rule of SANITIZERS) {
         if (!appliesTo(rule.languages, spec.id)) continue;

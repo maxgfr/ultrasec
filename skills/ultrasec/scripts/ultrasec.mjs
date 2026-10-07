@@ -5030,8 +5030,8 @@ async function Module2(moduleArg = {}) {
       return;
     }
     addRunDependency("loadDylibs");
-    for (var lib of dynamicLibraries) {
-      await loadDynamicLibrary(lib, {
+    for (var lib2 of dynamicLibraries) {
+      await loadDynamicLibrary(lib2, {
         loadAsync: true,
         global: true,
         nodelete: true,
@@ -12180,9 +12180,9 @@ function buildRustCrates(root, fileSet) {
   for (const m of packages) {
     const defaultSrc = norm(posix2.join(m.dir, "src")).replace(/^\.$/, "");
     const libPath = m.libPath ? norm(posix2.join(m.dir, m.libPath)) : void 0;
-    const lib = libPath && !libPath.startsWith("..") && fileSet.has(libPath) ? libPath : void 0;
-    const srcDir = lib ? lib.includes("/") ? posix2.dirname(lib) : "" : defaultSrc;
-    const rootFile = lib ?? firstThat(fileSet, [posix2.join(defaultSrc, "lib.rs"), posix2.join(defaultSrc, "main.rs")]);
+    const lib2 = libPath && !libPath.startsWith("..") && fileSet.has(libPath) ? libPath : void 0;
+    const srcDir = lib2 ? lib2.includes("/") ? posix2.dirname(lib2) : "" : defaultSrc;
+    const rootFile = lib2 ?? firstThat(fileSet, [posix2.join(defaultSrc, "lib.rs"), posix2.join(defaultSrc, "main.rs")]);
     const ws = manifests.filter((w) => w.workspaceDeps && within(m.dir, w.dir)).sort((a, b) => b.dir.length - a.dir.length)[0];
     const renames = /* @__PURE__ */ new Map();
     for (const [alias, dep] of [...m.deps].sort((a, b) => byStr(a[0], b[0]))) {
@@ -27098,7 +27098,7 @@ init_text();
 
 // src/types.ts
 var VERSION = "1.58.0";
-var SCHEMA_VERSION2 = 10;
+var SCHEMA_VERSION2 = 11;
 var SEVERITIES2 = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
 var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "privacy", "other"];
@@ -28129,21 +28129,21 @@ var TIMEOUT_MS = 3e5;
 var MAX_BUFFER = 64 * 1024 * 1024;
 var MOUNT = "/work";
 function execAsync(name2, args2, cwd, useStderr = false, timeout = TIMEOUT_MS) {
-  return new Promise((resolve44) => {
+  return new Promise((resolve43) => {
     execFile(name2, args2, { cwd, encoding: "utf8", timeout, maxBuffer: MAX_BUFFER, windowsHide: true }, (error, stdout, stderr) => {
       const out2 = String(stdout ?? "");
       const errText = String(stderr ?? "");
       if (error && error.killed && error.signal) {
-        return resolve44({ stdout: "", failed: true, timedOut: true, err: `timed out after ${Math.round(timeout / 1e3)} s` });
+        return resolve43({ stdout: "", failed: true, timedOut: true, err: `timed out after ${Math.round(timeout / 1e3)} s` });
       }
       if (useStderr) {
         const code = error?.code;
-        if (error && typeof code !== "number") return resolve44({ stdout: "", failed: true, err: error.message });
-        return resolve44({ stdout: errText, failed: false });
+        if (error && typeof code !== "number") return resolve43({ stdout: "", failed: true, err: error.message });
+        return resolve43({ stdout: errText, failed: false });
       }
-      if (!error) return resolve44({ stdout: out2, failed: false });
-      if (out2.trim()) return resolve44({ stdout: out2, failed: false });
-      resolve44({ stdout: "", failed: true, err: withDiagnostic(error.message, errText) });
+      if (!error) return resolve43({ stdout: out2, failed: false });
+      if (out2.trim()) return resolve43({ stdout: out2, failed: false });
+      resolve43({ stdout: "", failed: true, err: withDiagnostic(error.message, errText) });
     });
   });
 }
@@ -28983,11 +28983,75 @@ function engineScan(scan2, tree) {
   }
   return { root: scan2.repo, files };
 }
-function buildFileResolver(scan2, tree) {
-  const ctx = buildResolveContext(engineScan(scan2, tree));
+function guardedContext(scan2, tree, gaps) {
+  const es = engineScan(scan2, tree);
+  let reason;
+  try {
+    return buildResolveContext(es);
+  } catch (e) {
+    reason = e instanceof Error ? e.message : String(e);
+  }
+  const files = es.files;
+  const bad = [...new Set(files.map((f) => f.ext))].sort().filter((ext) => {
+    try {
+      buildResolveContext({ ...es, files: files.filter((f) => f.ext === ext) });
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (bad.length) {
+    const kept = files.filter((f) => !bad.includes(f.ext));
+    try {
+      const ctx = buildResolveContext({ ...es, files: kept });
+      for (const ext of bad) gaps.push({ ext: ext || "(none)", files: files.filter((f) => f.ext === ext).length, reason });
+      return ctx;
+    } catch {
+    }
+  }
+  gaps.push({ ext: "*", files: files.length, reason });
+  return ctxFromFileSet(new Set(files.map((f) => f.rel)));
+}
+function buildFileResolver(scan2, tree, gaps = []) {
+  const ctx = guardedContext(scan2, tree, gaps);
   return (fromRel, spec) => {
     const r = resolveImport(fromRel, extOf(fromRel), spec, ctx);
     return r.kind === "resolved" && r.target !== fromRel ? r.target : void 0;
+  };
+}
+function ctxFromFileSet(fileSet) {
+  const filesByDir = /* @__PURE__ */ new Map();
+  const dirSet = /* @__PURE__ */ new Set();
+  for (const rel2 of fileSet) {
+    const slash = rel2.lastIndexOf("/");
+    const dir = slash < 0 ? "" : rel2.slice(0, slash);
+    let list = filesByDir.get(dir);
+    if (!list) filesByDir.set(dir, list = []);
+    list.push(rel2);
+    let d = dir;
+    while (d) {
+      if (dirSet.has(d)) break;
+      dirSet.add(d);
+      const s = d.lastIndexOf("/");
+      d = s < 0 ? "" : d.slice(0, s);
+    }
+  }
+  return {
+    fileSet,
+    dirSet,
+    filesByDir,
+    tsConfigs: [],
+    goModules: [],
+    rustCrates: [],
+    javaRoots: [],
+    pyRoots: [""],
+    workspacePackages: [],
+    packageScopes: [],
+    cIncludeRoots: [],
+    rubyLibRoots: [],
+    phpPsr4: [],
+    csharpNamespaces: /* @__PURE__ */ new Map(),
+    warnings: []
   };
 }
 
@@ -29018,11 +29082,11 @@ function buildGraph2(scan2, opts = {}) {
   const symbolDefs = {};
   for (const [name2, files] of defs) symbolDefs[name2] = [...files].sort(byStr);
   const edgeMap = /* @__PURE__ */ new Map();
-  const resolve44 = buildFileResolver(scan2, opts.tree);
+  const resolve43 = buildFileResolver(scan2, opts.tree, opts.resolutionGaps);
   const importsOf = /* @__PURE__ */ new Map();
   for (const f of scan2.files) {
     for (const imp of f.imports) {
-      const to = resolve44(f.rel, imp.spec);
+      const to = resolve43(f.rel, imp.spec);
       if (!to || to === f.rel) continue;
       add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
       let set = importsOf.get(f.rel);
@@ -29290,6 +29354,8 @@ var SINKS = [
     ],
     jsFirstArgument: {
       callback: true,
+      // The callback refutation is tRPC's procedure shape.
+      idioms: [{ framework: "trpc", testedWith: ">=10 <12" }],
       tags: [
         {
           tag: "sql",
@@ -30952,10 +31018,21 @@ var SOURCES = [
     kind: "http",
     languages: ["javascript"],
     re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|rawBody|params|headers|cookies|method|url|originalUrl|hostname|ip|files|file)\b/,
-    title: "HTTP request input"
+    title: "HTTP request input",
+    idioms: [
+      { framework: "express", testedWith: ">=4 <6" },
+      { framework: "fastify", testedWith: ">=4 <6" }
+    ],
+    shared: true
   },
   { kind: "ws", languages: ["javascript"], re: /\.on\s*\(\s*['"](?:message|data)['"]/, title: "WebSocket/stream message" },
-  { kind: "http", languages: ["javascript"], re: /\bctx\s*\.\s*(?:request|query|params|body)\b/, title: "Koa/HTTP context input" },
+  {
+    kind: "http",
+    languages: ["javascript"],
+    re: /\bctx\s*\.\s*(?:request|query|params|body)\b/,
+    title: "Koa/HTTP context input",
+    idioms: [{ framework: "koa", testedWith: ">=2 <4" }]
+  },
   // ── Handler SIGNATURES ────────────────────────────────────────────────────
   // The request/response parameter pair is the one shape every HTTP framework
   // in a given language agrees on, so matching the signature covers Express,
@@ -30976,7 +31053,12 @@ var SOURCES = [
     // entry point, and treating it as one would tell the taint walk that a
     // constant-command handler shares a scope with untrusted input.
     re: /\(\s*(?:req|request)\w*\s*(?::[^,)]+)?\s*,\s*_?(?:res|response|reply)\w*\s*(?::[^,)]+)?\s*[,)]/,
-    title: "HTTP handler signature (request/response pair)"
+    title: "HTTP handler signature (request/response pair)",
+    idioms: [
+      { framework: "express", testedWith: ">=4 <6" },
+      { framework: "fastify", testedWith: ">=4 <6" }
+    ],
+    shared: true
   },
   {
     kind: "http",
@@ -30991,7 +31073,8 @@ var SOURCES = [
     kind: "http",
     languages: ["go"],
     re: /\(\s*\w+\s+http\.ResponseWriter\s*,\s*\w+\s+\*http\.Request\s*\)/,
-    title: "net/http handler signature"
+    title: "net/http handler signature",
+    idioms: [{ framework: "net-http", testedWith: ">=1.18 <2" }]
   },
   {
     kind: "http",
@@ -31006,13 +31089,19 @@ var SOURCES = [
     // where the request object is a positional parameter and the body may never
     // spell out `request.GET`.
     re: /\bdef\s+\w+\s*\(\s*(?:self\s*,\s*|cls\s*,\s*)?request\b/,
-    title: "Django/DRF view signature"
+    title: "Django/DRF view signature",
+    idioms: [{ framework: "django", testedWith: ">=3.2 <7" }]
   },
   {
     kind: "http",
     languages: ["python"],
     re: /(?<![\w.])request\s*\.\s*(?:args|form|values|json|data|files|cookies|headers|GET|POST)\b/,
-    title: "HTTP request input"
+    title: "HTTP request input",
+    idioms: [
+      { framework: "flask", testedWith: ">=2 <4" },
+      { framework: "django", testedWith: ">=3.2 <7" }
+    ],
+    shared: true
   },
   { kind: "http", languages: ["php"], re: /\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\b/, title: "HTTP superglobal input" },
   {
@@ -31029,8 +31118,14 @@ var SOURCES = [
   // `theCookie.getValue()` — gated on a cookie-shaped receiver so a generic
   // `.getValue()` (a Map.Entry, an Optional) does not match.
   { kind: "http", languages: ["java", "kotlin", "scala"], re: /\b\w*[Cc]ookie\w*\s*\.\s*getValue\s*\(/, title: "Cookie value (attacker-controlled)" },
-  { kind: "http", languages: ["ruby"], re: /(?<![\w.])params\s*\[/, title: "Rails params input" },
-  { kind: "http", languages: ["go"], re: /\br\s*\.\s*(?:URL|FormValue|PostFormValue|Header)\b/, title: "net/http request input" },
+  { kind: "http", languages: ["ruby"], re: /(?<![\w.])params\s*\[/, title: "Rails params input", idioms: [{ framework: "rails", testedWith: ">=6 <9" }] },
+  {
+    kind: "http",
+    languages: ["go"],
+    re: /\br\s*\.\s*(?:URL|FormValue|PostFormValue|Header)\b/,
+    title: "net/http request input",
+    idioms: [{ framework: "net-http", testedWith: ">=1.18 <2" }]
+  },
   { kind: "cli", languages: ["javascript"], re: /\bprocess\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["python"], re: /\bsys\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["go"], re: /\bos\.Args\b/, title: "CLI argument" },
@@ -31066,44 +31161,102 @@ var SOURCES = [
     kind: "http",
     languages: ["java", "kotlin", "scala"],
     re: /@(?:RequestParam|PathVariable|RequestBody|RequestHeader|CookieValue|ModelAttribute|MatrixVariable)\b/,
-    title: "Spring request binding"
+    title: "Spring request binding",
+    idioms: [{ framework: "spring", testedWith: ">=2.7 <5" }]
   },
-  { kind: "http", languages: ["java", "kotlin"], re: /\bcall\s*\.\s*(?:receive|parameters|request)\b/, title: "Ktor request input" },
+  {
+    kind: "http",
+    languages: ["java", "kotlin"],
+    re: /\bcall\s*\.\s*(?:receive|parameters|request)\b/,
+    title: "Ktor request input",
+    idioms: [{ framework: "ktor", testedWith: ">=2 <4" }]
+  },
   {
     kind: "http",
     languages: ["csharp"],
     re: /\bRequest\s*\.\s*(?:Query|Form|Headers|Cookies|Body|QueryString|Params|RouteValues)\b|\[From(?:Body|Query|Route|Form|Header)\]/,
-    title: "ASP.NET request input"
+    title: "ASP.NET request input",
+    idioms: [{ framework: "aspnetcore", testedWith: ">=6 <10" }]
   },
-  { kind: "http", languages: ["rust"], re: /\b(?:Query|Path|Json|Form)\s*<|\bweb\s*::\s*(?:Query|Path|Json|Form)\b/, title: "axum/actix extractor" },
-  { kind: "http", languages: ["elixir"], re: /\bconn\s*\.\s*(?:params|body_params|query_params|path_params|req_headers)\b/, title: "Phoenix conn input" },
+  {
+    kind: "http",
+    languages: ["rust"],
+    re: /\b(?:Query|Path|Json|Form)\s*<|\bweb\s*::\s*(?:Query|Path|Json|Form)\b/,
+    title: "axum/actix extractor",
+    idioms: [
+      { framework: "axum", testedWith: ">=0.6 <0.9" },
+      { framework: "actix-web", testedWith: ">=4 <5" }
+    ]
+  },
+  {
+    kind: "http",
+    languages: ["elixir"],
+    re: /\bconn\s*\.\s*(?:params|body_params|query_params|path_params|req_headers)\b/,
+    title: "Phoenix conn input",
+    idioms: [{ framework: "phoenix", testedWith: ">=1.6 <2" }]
+  },
   {
     kind: "http",
     languages: ["go"],
     re: /\bc\s*\.\s*(?:Param|Query|PostForm|DefaultQuery|GetHeader|ShouldBind|ShouldBindJSON|BindJSON|FormValue)\s*\(/,
-    title: "gin/echo/fiber request input"
+    title: "gin/echo/fiber request input",
+    idioms: [
+      { framework: "gin", testedWith: ">=1.7 <2" },
+      { framework: "echo", testedWith: ">=4 <5" },
+      { framework: "fiber", testedWith: ">=2 <4" }
+    ]
   },
-  { kind: "http", languages: ["go"], re: /\bmux\s*\.\s*Vars\s*\(|\bchi\s*\.\s*URLParam\s*\(/, title: "gorilla/chi route parameter" },
+  {
+    kind: "http",
+    languages: ["go"],
+    re: /\bmux\s*\.\s*Vars\s*\(|\bchi\s*\.\s*URLParam\s*\(/,
+    title: "gorilla/chi route parameter",
+    idioms: [
+      { framework: "gorilla-mux", testedWith: ">=1.8 <2" },
+      { framework: "chi", testedWith: ">=5 <6" }
+    ]
+  },
   {
     kind: "http",
     languages: ["php"],
     re: /\$request\s*->\s*(?:input|query|get|post|all|json|header|cookie|file)\s*\(/,
-    title: "Laravel/Symfony request input"
+    title: "Laravel/Symfony request input",
+    idioms: [
+      { framework: "laravel", testedWith: ">=9 <14" },
+      { framework: "symfony", testedWith: ">=5 <8" }
+    ]
   },
   {
     kind: "http",
     languages: ["python"],
     re: /\b(?:Query|Body|Form|Path|Header|Cookie|File|UploadFile)\s*\(\s*(?:\.\.\.|None|default)/,
-    title: "FastAPI parameter binding"
+    title: "FastAPI parameter binding",
+    idioms: [{ framework: "fastapi", testedWith: ">=0.100 <1" }]
   },
-  { kind: "http", languages: ["python"], re: /\brequest\s*\.\s*(?:query_params|path_params|body|stream|form\b)/, title: "Starlette/FastAPI request input" },
-  { kind: "http", languages: ["javascript"], re: /@(?:Body|Query|Param|Headers|UploadedFile)\s*\(/, title: "NestJS parameter decorator" },
+  {
+    kind: "http",
+    languages: ["python"],
+    re: /\brequest\s*\.\s*(?:query_params|path_params|body|stream|form\b)/,
+    title: "Starlette/FastAPI request input",
+    idioms: [
+      { framework: "starlette", testedWith: ">=0.27 <1" },
+      { framework: "fastapi", testedWith: ">=0.100 <1" }
+    ]
+  },
+  {
+    kind: "http",
+    languages: ["javascript"],
+    re: /@(?:Body|Query|Param|Headers|UploadedFile)\s*\(/,
+    title: "NestJS parameter decorator",
+    idioms: [{ framework: "nestjs", testedWith: ">=9 <13" }]
+  },
   {
     // Hono: `c.req.query("q")`, `c.req.param("id")`, `await c.req.json()`.
     kind: "http",
     languages: ["javascript"],
     re: /\b(?:c|ctx|context)\s*\.\s*req\s*\.\s*(?:query|queries|param|header|json|text|valid|raw|parseBody|formData|arrayBuffer|url|path)\b/,
-    title: "Hono request input"
+    title: "Hono request input",
+    idioms: [{ framework: "hono", testedWith: ">=3 <5" }]
   },
   {
     // tRPC / oRPC procedures: everything after `.input(schema)` reads the
@@ -31111,7 +31264,8 @@ var SOURCES = [
     kind: "http",
     languages: ["javascript"],
     re: /\.\s*input\s*\(\s*(?:z\.|v\.|t\.|\w+Schema\b|\w+Input\b|\{)/,
-    title: "tRPC/oRPC procedure input"
+    title: "tRPC/oRPC procedure input",
+    idioms: [{ framework: "trpc", testedWith: ">=10 <12" }]
   },
   {
     // GraphQL resolvers: `(parent, args, ctx)` / `(_, { id })` — `args` is the
@@ -31128,20 +31282,23 @@ var SOURCES = [
     kind: "http",
     languages: ["java", "kotlin", "scala"],
     re: /@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/,
-    title: "Spring request mapping"
+    title: "Spring request mapping",
+    idioms: [{ framework: "spring", testedWith: ">=2.7 <5" }]
   },
   {
     // Django REST framework: the decorated function IS the endpoint.
     kind: "http",
     languages: ["python"],
     re: /@api_view\s*\(|@action\s*\(|\bAPIView\b|\bViewSet\b/,
-    title: "Django REST framework view"
+    title: "Django REST framework view",
+    idioms: [{ framework: "django", testedWith: ">=3.2 <7" }]
   },
   {
     kind: "http",
     languages: ["javascript"],
     re: /\b(?:searchParams|nextUrl)\s*\.\s*get\s*\(|\bawait\s+(?:req|request)\s*\.\s*(?:json|formData|text)\s*\(/,
-    title: "Next.js / fetch API request input"
+    title: "Next.js / fetch API request input",
+    idioms: [{ framework: "nextjs", testedWith: ">=13 <17" }]
   },
   {
     kind: "http",
@@ -31184,18 +31341,50 @@ var DEFAULT_HANDLER_DECL = /^\s*(?:export\s+default\s+|export\s+|module\.exports
 var VERB_EXPORT_DECL = /^\s*export\s+(?:async\s+)?(?:function\s+)?(?:const\s+)?(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|ALL|default)\b/;
 var ROUTE_FILES = [
   // ── File-system routers (JS/TS) ───────────────────────────────────────────
-  { kind: "http", files: ["**/pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}", "pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}"], title: "Pages-Router API route" },
-  { kind: "http", files: ["**/app/**/route.{js,ts,jsx,tsx}", "app/**/route.{js,ts,jsx,tsx}"], decl: VERB_EXPORT_DECL, title: "App-Router route handler" },
-  { kind: "http", files: ["**/server/api/**/*.{js,ts}", "**/server/routes/**/*.{js,ts}"], title: "Nitro/Nuxt server route" },
-  { kind: "http", files: ["**/routes/**/+server.{js,ts}"], decl: VERB_EXPORT_DECL, title: "SvelteKit endpoint" },
-  { kind: "http", files: ["**/routes/**/+page.server.{js,ts}", "**/routes/**/*.server.{js,ts}"], title: "Server-side route module" },
+  {
+    kind: "http",
+    files: ["**/pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}", "pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}"],
+    title: "Pages-Router API route",
+    idioms: [{ framework: "nextjs", testedWith: ">=12 <17" }]
+  },
+  {
+    kind: "http",
+    files: ["**/app/**/route.{js,ts,jsx,tsx}", "app/**/route.{js,ts,jsx,tsx}"],
+    decl: VERB_EXPORT_DECL,
+    title: "App-Router route handler",
+    idioms: [{ framework: "nextjs", testedWith: ">=13 <17" }]
+  },
+  {
+    kind: "http",
+    files: ["**/server/api/**/*.{js,ts}", "**/server/routes/**/*.{js,ts}"],
+    title: "Nitro/Nuxt server route",
+    idioms: [{ framework: "nuxt", testedWith: ">=3 <5" }]
+  },
+  {
+    kind: "http",
+    files: ["**/routes/**/+server.{js,ts}"],
+    decl: VERB_EXPORT_DECL,
+    title: "SvelteKit endpoint",
+    idioms: [{ framework: "sveltekit", testedWith: ">=1 <3" }]
+  },
+  {
+    kind: "http",
+    files: ["**/routes/**/+page.server.{js,ts}", "**/routes/**/*.server.{js,ts}"],
+    title: "Server-side route module",
+    idioms: [{ framework: "sveltekit", testedWith: ">=1 <3" }]
+  },
   // ── Serverless / edge ─────────────────────────────────────────────────────
   { kind: "http", files: ["api/**/*.{js,ts,py,go,rb}", "**/netlify/functions/**/*.{js,ts}", "**/functions/**/*.{js,ts}"], title: "Serverless function" },
   { kind: "http", files: ["**/handler.{js,ts,py,rb}", "**/lambda_function.py", "**/*_handler.py"], title: "Serverless handler module" },
   // ── Controller conventions ────────────────────────────────────────────────
   { kind: "http", files: ["**/app/controllers/**/*.rb", "**/controllers/**/*.{js,ts,php,py,rb}"], title: "Controller action" },
   { kind: "http", files: ["**/*Controller.{java,kt,cs,php,ts}", "**/*_controller.rb"], title: "Controller action" },
-  { kind: "http", files: ["**/views.py", "**/urls.py", "**/routes.py"], title: "Django view / URL module" },
+  {
+    kind: "http",
+    files: ["**/views.py", "**/urls.py", "**/routes.py"],
+    title: "Django view / URL module",
+    idioms: [{ framework: "django", testedWith: ">=3.2 <7" }]
+  },
   // ── PHP web roots: any reachable script is an entry point ──────────────────
   {
     kind: "http",
@@ -31212,19 +31401,28 @@ var ROUTE_FILES = [
     kind: "http",
     files: ["routes/{web,api,channels,console}.php", "**/routes/{web,api}.php"],
     decl: /^\s*Route\s*::\s*\w+\s*\(/,
-    title: "Laravel route declaration"
+    title: "Laravel route declaration",
+    idioms: [{ framework: "laravel", testedWith: ">=9 <14" }]
   },
   {
     kind: "http",
     files: ["config/routes.rb", "**/config/routes.rb", "**/config/routes/*.rb"],
     decl: /^\s*(?:get|post|put|patch|delete|match|resources?|root|mount|namespace|scope)\b/,
-    title: "Rails route declaration"
+    title: "Rails route declaration",
+    idioms: [{ framework: "rails", testedWith: ">=6 <9" }]
   }
 ];
 var routeMatchers = ROUTE_FILES.map((r) => ({ rule: r, res: r.files.flatMap(expandBraces).map(globToRe) }));
 var JS_MODULE = /\.(?:[cm]?[jt]sx?)$/;
 var DIRECTIVE2 = /^(["'])([^"'\\]*)\1\s*;?$/;
 var SERVER_ACTION_DECL = /^\s*export\s+(?:default\s+)?(?:async\s+)?function\b|^\s*export\s+(?:const|let|var)\s+\w+\s*(?::[^=]+)?=|^\s*export\s+default\s+async\b/;
+var SERVER_ACTION_RULE = {
+  kind: "http",
+  files: [],
+  decl: SERVER_ACTION_DECL,
+  title: "Next.js Server Action",
+  idioms: [{ framework: "nextjs", testedWith: ">=14 <17" }]
+};
 function hasUseServerDirective(content) {
   let inBlock = false;
   for (const raw of content.split(/\r?\n/, 200)) {
@@ -31251,10 +31449,21 @@ function hasUseServerDirective(content) {
   }
   return false;
 }
+function catalogIdioms() {
+  const out2 = [];
+  for (const r of SOURCES) for (const l of r.idioms ?? []) out2.push({ ...l, kind: "source", title: r.title });
+  for (const r of [...ROUTE_FILES, SERVER_ACTION_RULE]) for (const l of r.idioms ?? []) out2.push({ ...l, kind: "route", title: r.title });
+  for (const r of SINKS)
+    for (const l of r.jsFirstArgument?.idioms ?? []) out2.push({ ...l, kind: "refutation", title: `${r.title}: first argument a callback` });
+  return out2;
+}
+function genericRequestSources(language) {
+  return SOURCES.filter((r) => (!r.idioms || r.shared) && (r.kind === "http" || r.kind === "ws") && r.languages.includes(language));
+}
 function findRouteEntryPoints(rel2, content) {
   const matched = routeMatchers.filter((m) => m.res.some((re) => re.test(rel2)));
   if (JS_MODULE.test(rel2) && hasUseServerDirective(content)) {
-    matched.unshift({ rule: { kind: "http", files: [], decl: SERVER_ACTION_DECL, title: "Next.js Server Action" } });
+    matched.unshift({ rule: SERVER_ACTION_RULE });
   }
   if (!matched.length) return [];
   const out2 = [];
@@ -32504,7 +32713,7 @@ wrote ${join38(resolve14(out2), "MAP.md")} + attack-surface.json`);
 }
 
 // src/commands/scan.ts
-import { resolve as resolve17, join as join57, relative as relative13 } from "path";
+import { resolve as resolve16, join as join57, relative as relative13 } from "path";
 import { existsSync as existsSync29 } from "fs";
 
 // src/facts.ts
@@ -33567,8 +33776,6 @@ var WEBCONFIG_SHAPES = {
     note: "This `next.config` defines no `headers()`, and nothing in the app sets a Content-Security-Policy (no middleware, no helper). Next.js sends no CSP, HSTS, X-Frame-Options, X-Content-Type-Options or Referrer-Policy by default. Add them in `headers()` or middleware \u2014 unless a reverse proxy or CDN in front sets them, which is the thing to check (`ultrasec probe` sees what is actually served)."
   }
 };
-var TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
-var BODY_PARSER = /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\(([^)]*)\)/g;
 function lines2(content) {
   return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
 }
@@ -33594,18 +33801,6 @@ Evidence: \`${evidence.trim().slice(0, 160)}\``,
     cwe: shape.cwe
   });
 }
-function balanced(hay, open) {
-  let depth = 0;
-  for (let i2 = open; i2 < hay.length; i2++) {
-    const c2 = hay[i2];
-    if (c2 === "(") depth++;
-    else if (c2 === ")") {
-      depth--;
-      if (depth === 0) return hay.slice(open + 1, i2);
-    }
-  }
-  return null;
-}
 function lineOf(content, index) {
   let n = 1;
   for (let i2 = 0; i2 < index && i2 < content.length; i2++) if (content[i2] === "\n") n++;
@@ -33618,21 +33813,6 @@ var TLS_RULES = [
   { langs: /* @__PURE__ */ new Set(["go"]), re: /InsecureSkipVerify\s*:\s*true/ },
   { langs: /* @__PURE__ */ new Set(["php"]), re: /CURLOPT_SSL_VERIFY(?:PEER|HOST)\s*,\s*(?:0|false)\b/i },
   { langs: /* @__PURE__ */ new Set(["java", "kt", "scala"]), re: /ALLOW_ALL_HOSTNAME_VERIFIER|NoopHostnameVerifier|TrustAllCerts|trustAllCerts/ }
-];
-var CSRF_RULES = [
-  { langs: /* @__PURE__ */ new Set(["rb"]), re: /^\s*#\s*protect_from_forgery\b/ },
-  { langs: /* @__PURE__ */ new Set(["rb"]), re: /\bskip_before_action\s+:verify_authenticity_token\b/ },
-  { langs: /* @__PURE__ */ new Set(["rb"]), re: /\bprotect_from_forgery\s+with:\s*:null_session\b/ },
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /^\s*@csrf_exempt\b/ },
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /^\s*#\s*['"]django\.middleware\.csrf\.CsrfViewMiddleware['"]/ },
-  { langs: JS, re: /\bcsrf(?:Prevention)?\s*:\s*false\b/ },
-  { langs: /* @__PURE__ */ new Set(["php"]), re: /['"]csrf(?:_protection)?['"]\s*=>\s*false/i }
-];
-var DEBUG_RULES = [
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /\.run\([^)]*\bdebug\s*=\s*True/ },
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /^\s*DEBUG\s*=\s*True\b/ },
-  { langs: /* @__PURE__ */ new Set(["rb"]), re: /consider_all_requests_local\s*=\s*true/ },
-  { langs: /* @__PURE__ */ new Set(["php"]), re: /['"]debug['"]\s*=>\s*true/ }
 ];
 function scanCors(rel2, content, out2) {
   const credentials = /Access-Control-Allow-Credentials['"]?\s*[:,]\s*['"]?\s*true/i.test(content) || /\bcredentials\s*:\s*true/.test(content);
@@ -33650,35 +33830,6 @@ function scanCors(rel2, content, out2) {
     out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES[credentials ? "cors-wildcard-credentials" : "cors-wildcard"], m[0]));
   }
 }
-var COOKIE_CALL = /\b(?:res(?:ponse)?\.cookie|reply\.setCookie|ctx\.cookies\.set|cookies\.set|setcookie)\s*\(/gi;
-function dynamicFlag(args2, flag) {
-  const m = new RegExp(`\\b${flag}\\s*:\\s*([^,}\\s][^,}]*)`, "i").exec(args2);
-  if (!m) return false;
-  const v = m[1].trim();
-  return !/^(?:false|0|null|undefined|true|1)\b/i.test(v) && /^[!A-Za-z_$(]/.test(v);
-}
-function scanCookies(rel2, content, out2) {
-  for (const m of content.matchAll(COOKIE_CALL)) {
-    if (/clearCookie/i.test(m[0])) continue;
-    const open = (m.index ?? 0) + m[0].length - 1;
-    const args2 = balanced(content, open);
-    if (args2 === null) continue;
-    const ln = lineOf(content, m.index ?? 0);
-    const hasOptions = /\{/.test(args2) || /setcookie/i.test(m[0]);
-    if (!hasOptions) {
-      out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-httponly"], `${m[0]}\u2026`));
-      out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-secure"], `${m[0]}\u2026`));
-      continue;
-    }
-    const hasHttpOnly = /httponly\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]httponly['"]\s*=>\s*true/i.test(args2) || dynamicFlag(args2, "httponly");
-    const hasSecure = /\bsecure\s*[:=]?\s*(?:true|1)/i.test(args2) || /['"]secure['"]\s*=>\s*true/i.test(args2) || dynamicFlag(args2, "secure");
-    const sameSite = /samesite\s*[:=]?\s*['"]?(strict|lax|none)/i.exec(args2) || /['"]samesite['"]\s*=>\s*['"]?(strict|lax|none)/i.exec(args2);
-    if (!hasHttpOnly) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-httponly"], m[0]));
-    if (!hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-secure"], m[0]));
-    if (!sameSite) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-samesite"], m[0]));
-    else if (sameSite[1]?.toLowerCase() === "none" && !hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-samesite-none-insecure"], m[0]));
-  }
-}
 function auditWebConfig(repo, prune, tree) {
   const out2 = [];
   const read = tree?.read ?? readText2;
@@ -33693,22 +33844,14 @@ function auditWebConfig(repo, prune, tree) {
     for (const l of ls) {
       for (const r of TLS_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["tls-verify"], l.text));
       if (/NODE_TLS_REJECT_UNAUTHORIZED\s*[:=]\s*['"]?0\b/.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["tls-verify"], l.text));
-      for (const r of DEBUG_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES.debug, l.text));
       if (/Content-Security-Policy/i.test(l.text) && /unsafe-inline|unsafe-eval|(?:default|script|object)-src[^;'"]*\*/i.test(l.text))
         out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["header-csp"], l.text));
       if (/X-Frame-Options['"]?\s*[:,]\s*['"]?\s*(?:ALLOWALL|ALLOW-FROM)/i.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["header-xfo"], l.text));
       if (/Strict-Transport-Security[^\n]*max-age\s*=\s*0\b/i.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["header-hsts"], l.text));
       if (/Referrer-Policy['"]?\s*[:,]\s*['"]?\s*unsafe-url/i.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["header-referrer"], l.text));
       if (/^\s*autoindex\s+on\b/i.test(l.text) || /\bserve-index\s*\(/.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["dir-listing"], l.text));
-      if (/\b(?:introspection|graphiql|playground)\s*:\s*true\b/.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["graphql-introspection"], l.text));
-      for (const r of CSRF_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["csrf-disabled"], l.text));
-      if (TRUST_PROXY.test(l.text)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["trust-proxy"], l.text));
-      for (const m of l.text.matchAll(BODY_PARSER)) {
-        if (!/\blimit\s*:/.test(m[1] ?? "")) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["body-limit-missing"], m[0]));
-      }
     }
     scanCors(rel2, content, out2);
-    scanCookies(rel2, content, out2);
   }
   return out2;
 }
@@ -33874,7 +34017,7 @@ Evidence: \`${evidence.trim().slice(0, 160)}\``,
     cwe: shape.cwe
   });
 }
-function balanced2(hay, open) {
+function balanced(hay, open) {
   let depth = 0;
   for (let i2 = open; i2 < hay.length; i2++) {
     const c2 = hay[i2];
@@ -33930,7 +34073,7 @@ function scanJwtCalls(rel2, content, ext, out2) {
   if (JS2.has(ext)) {
     for (const m of content.matchAll(/\bjwt\.verify\s*\(/g)) {
       const open = (m.index ?? 0) + m[0].length - 1;
-      const args2 = balanced2(content, open);
+      const args2 = balanced(content, open);
       if (args2 === null) continue;
       if (!/algorithms/.test(args2)) out2.push(hit3(rel2, lineOf2(content, m.index ?? 0), AUTH_SHAPES["jwt-no-verify-alg"], m[0]));
     }
@@ -33975,6 +34118,26 @@ function auditAuthTokens(repo, prune, tree) {
   }
   return out2;
 }
+
+// src/classes/types.ts
+var CLASS_IDS = [
+  "timing-unsafe-secret-compare",
+  "csv-formula-injection",
+  "client-ip-first-xff",
+  "unbounded-public-export",
+  "security-headers-absent",
+  "session-cookie-chunks-on-logout",
+  "env-bool-coercion",
+  "insecure-session-cookie",
+  "proxy-headers-trusted",
+  "request-body-unbounded",
+  "graphql-introspection-enabled",
+  "csrf-protection-disabled",
+  "debug-mode-enabled"
+];
+var CATALOG_ROW = "taint-catalog";
+var MATRIX_ROW_IDS = [...CLASS_IDS, CATALOG_ROW];
+var CONFIG_FORMATS = { yaml: "yaml", yml: "yaml", properties: "properties", conf: "conf", nginx: "conf" };
 
 // src/classes/registry.ts
 var CLASSES = {
@@ -34155,9 +34318,162 @@ writer.writerow([cell(u.name), cell(u.email)])`
       },
       { language: "php", vulnerable: "$debug = (bool) getenv('APP_DEBUG');", fixed: "$debug = filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN);" }
     ]
+  },
+  "insecure-session-cookie": {
+    id: "insecure-session-cookie",
+    title: "Session cookie written without its protective flags",
+    cwe: "CWE-614",
+    severity: "medium",
+    category: "config",
+    invariant: "A cookie that carries a session or an auth token is written with HttpOnly (no script can read it), Secure (never sent over plain HTTP) and a SameSite policy \u2014 by the call that writes it, or by a framework default the code leaves on.",
+    guard: 'The flags set on the write itself (`httpOnly: true, secure: true, sameSite: "lax"`, `set_cookie(..., httponly=True, secure=True, samesite="Lax")`, `HttpOnly: true, Secure: true`, `ResponseCookie\u2026httpOnly(true).secure(true)`, a Rails cookie hash with `httponly: true, secure: true`), or a session middleware configured with them. A flag bound to an expression (`secure: isProd`) is set \u2014 to whatever the deployment decides.',
+    rubric: "medium for a session or auth cookie; low for a preference cookie with no authority; high when the missing flag is Secure on a cookie sent to an HTTP origin, or SameSite=None without Secure.",
+    note: "A cookie is written without HttpOnly or Secure. A session cookie readable from script is stolen by any XSS; one without Secure travels over plain HTTP. Set both on the write, and a SameSite policy.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: 'res.cookie("sid", token);',
+        fixed: 'res.cookie("sid", token, { httpOnly: true, secure: true, sameSite: "lax" });'
+      },
+      {
+        language: "python",
+        vulnerable: 'response.set_cookie("sid", token)',
+        fixed: 'response.set_cookie("sid", token, httponly=True, secure=True, samesite="Lax")'
+      },
+      {
+        language: "go",
+        vulnerable: 'http.SetCookie(w, &http.Cookie{Name: "sid", Value: token})',
+        fixed: 'http.SetCookie(w, &http.Cookie{Name: "sid", Value: token, HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode})'
+      },
+      { language: "ruby", vulnerable: "cookies[:sid] = token", fixed: "cookies[:sid] = { value: token, httponly: true, secure: true, same_site: :lax }" }
+    ]
+  },
+  "proxy-headers-trusted": {
+    id: "proxy-headers-trusted",
+    title: "Forwarded headers trusted without a proxy allow-list",
+    cwe: "CWE-290",
+    severity: "low",
+    category: "config",
+    invariant: "The framework takes the client address, scheme and host from X-Forwarded-* (or Forwarded) only from the proxies the deployment actually runs \u2014 a hop count or an address list \u2014 never from any caller.",
+    guard: "Trust configured with a hop count or the proxy's addresses (Express `trust proxy` = 1 or a subnet, Gin `SetTrustedProxies([proxy])`, Werkzeug `ProxyFix(x_for=1)`, uvicorn `--forwarded-allow-ips=<proxy>`, Laravel `trustProxies(at: [proxy])`), on an app that is not reachable except through that proxy.",
+    rubric: "low as a posture note when the app is only reachable through a proxy that rewrites the headers; medium when the address keys a rate limit, lockout or audit log and the app is reachable directly; high when it keys an allow-list that grants access.",
+    note: "The framework is told to trust X-Forwarded-* from every caller, so the client IP, scheme and host it reports are whatever the request says \u2014 for rate limits, allow-lists, audit logs and absolute URLs alike. Trust only your own proxy (a hop count or its address), and confirm the app is not reachable around it.",
+    examples: [
+      { language: "javascript", vulnerable: 'app.set("trust proxy", true);', fixed: 'app.set("trust proxy", 1); // exactly one proxy in front' },
+      {
+        language: "python",
+        vulnerable: "USE_X_FORWARDED_HOST = True",
+        fixed: "# Host comes from the request line; the proxy rewrites it if it must\nUSE_X_FORWARDED_HOST = False"
+      },
+      { language: "php", vulnerable: "$middleware->trustProxies(at: '*');", fixed: "$middleware->trustProxies(at: ['10.0.0.0/8']);" }
+    ]
+  },
+  "request-body-unbounded": {
+    id: "request-body-unbounded",
+    title: "Request body read with no size limit",
+    cwe: "CWE-770",
+    severity: "low",
+    category: "config",
+    invariant: "Every request body the application buffers \u2014 JSON, form, multipart, raw \u2014 is bounded by a size limit the code (or the server in front) sets explicitly, below what one request may cost in memory.",
+    guard: 'An explicit limit where the body is read (`express.json({ limit: "100kb" })`, Go `http.MaxBytesReader`, Flask `MAX_CONTENT_LENGTH`, Django `DATA_UPLOAD_MAX_MEMORY_SIZE`, Spring `spring.servlet.multipart.max-request-size`), or a proxy limit (`client_max_body_size`) the app cannot be reached around.',
+    rubric: "low as a hardening note when a default limit exists; medium when the body is read whole into memory with no limit anywhere and the route is anonymous.",
+    note: "A request body is read with no size limit \u2014 or with the framework's limit switched off \u2014 so one request can make the process buffer as much as the client sends. Set an explicit limit where the body is read, or confirm the proxy in front enforces one.",
+    examples: [
+      { language: "javascript", vulnerable: "app.use(express.json());", fixed: 'app.use(express.json({ limit: "100kb" }));' },
+      { language: "go", vulnerable: "body, _ := io.ReadAll(r.Body)", fixed: "r.Body = http.MaxBytesReader(w, r.Body, 1<<20)\nbody, err := io.ReadAll(r.Body)" },
+      { language: "python", vulnerable: "DATA_UPLOAD_MAX_MEMORY_SIZE = None", fixed: "DATA_UPLOAD_MAX_MEMORY_SIZE = 2_621_440  # Django's default, 2.5 MB" }
+    ]
+  },
+  "graphql-introspection-enabled": {
+    id: "graphql-introspection-enabled",
+    title: "GraphQL introspection or IDE served in production",
+    cwe: "CWE-200",
+    severity: "medium",
+    category: "config",
+    invariant: "A production GraphQL endpoint does not answer introspection queries nor serve an IDE (GraphiQL, Playground, Sandbox) unless the schema is meant to be public.",
+    guard: 'Introspection and the IDE turned off outside development (`introspection: process.env.NODE_ENV !== "production"`, graphene `graphiql=settings.DEBUG`, a `DisableIntrospection` validation rule, `spring.graphql.graphiql.enabled=false`), or a schema that is public by design.',
+    rubric: "medium when the schema exposes internal or administrative operations; low when the API is public and documented anyway; high when introspection reveals operations that lack authorization.",
+    note: "GraphQL introspection or an IDE is switched on, which hands anyone the whole schema \u2014 every type, field and mutation, including the ones the UI never calls. Turn both off in production unless the schema is public by design.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: "new ApolloServer({ schema, introspection: true });",
+        fixed: 'new ApolloServer({ schema, introspection: process.env.NODE_ENV !== "production" });'
+      },
+      {
+        language: "python",
+        vulnerable: 'path("graphql", GraphQLView.as_view(graphiql=True))',
+        fixed: 'path("graphql", GraphQLView.as_view(graphiql=settings.DEBUG))'
+      },
+      {
+        language: "go",
+        vulnerable: 'http.Handle("/", playground.Handler("GraphQL", "/query"))',
+        fixed: 'if os.Getenv("ENV") == "dev" {\n    http.Handle("/", playground.Handler("GraphQL", "/query"))\n}'
+      }
+    ]
+  },
+  "csrf-protection-disabled": {
+    id: "csrf-protection-disabled",
+    title: "CSRF protection switched off",
+    cwe: "CWE-352",
+    severity: "high",
+    category: "config",
+    invariant: "Every state-changing route an authenticated browser can reach with ambient credentials (cookies, HTTP auth) is protected against cross-site requests \u2014 the framework's CSRF guard left on, an Origin check, or credentials that are never ambient.",
+    guard: "The framework's guard left enabled (Django CsrfViewMiddleware, Rails `protect_from_forgery`, Spring Security's CSRF filter, Laravel's token middleware, Next.js Server Actions' origin check), or an API authenticated only by a header the browser does not attach on its own (a bearer token) \u2014 which is the thing to verify before calling an exemption a bug.",
+    rubric: "high when the exempted routes change state under cookie authentication; medium when they are only reachable with a non-ambient credential; nothing when every exempted route is read-only or authenticated by a bearer header.",
+    note: "The framework's CSRF guard is switched off (commented out, skipped, exempted or disabled). Any state-changing route it covered can now be driven from an attacker's page using the victim's cookies. Turn it back on, or prove the routes are authenticated by a credential the browser does not attach on its own.",
+    examples: [
+      { language: "ruby", vulnerable: "skip_before_action :verify_authenticity_token", fixed: "protect_from_forgery with: :exception" },
+      { language: "java", vulnerable: "http.csrf(AbstractHttpConfigurer::disable);", fixed: "http.csrf(withDefaults());" },
+      { language: "python", vulnerable: "@csrf_exempt\ndef transfer(request):", fixed: "def transfer(request):  # CsrfViewMiddleware checks the token" }
+    ]
+  },
+  "debug-mode-enabled": {
+    id: "debug-mode-enabled",
+    title: "Framework debug mode or verbose errors enabled",
+    cwe: "CWE-489",
+    severity: "medium",
+    category: "config",
+    invariant: "The deployed application runs with the framework's debug mode off: no interactive debugger, no stack traces, configuration or source in error responses.",
+    guard: 'Debug tied to an environment that is false in production (`DEBUG = env.bool("DEBUG", False)`, `app.run(debug=os.getenv("FLASK_DEBUG") == "1")`, `gin.SetMode(gin.ReleaseMode)`, `server.error.include-stacktrace=never`), and the setting checked in the deployed configuration, not the development one.',
+    rubric: "medium when stack traces or settings reach a remote caller; high when the debugger is interactive (Werkzeug console, Rails web-console) and reachable; low when the file is development-only configuration \u2014 say why.",
+    note: "Framework debug mode is on: error responses carry stack traces, settings or source, and some debuggers (Werkzeug, web-console) give a remote console. Turn it off in production, driven by the environment rather than hard-coded.",
+    examples: [
+      { language: "python", vulnerable: "DEBUG = True", fixed: 'DEBUG = os.environ.get("DJANGO_DEBUG", "false") == "true"' },
+      { language: "go", vulnerable: "gin.SetMode(gin.DebugMode)", fixed: "gin.SetMode(gin.ReleaseMode)" },
+      { language: "ruby", vulnerable: "config.consider_all_requests_local = true", fixed: "config.consider_all_requests_local = false" }
+    ]
   }
 };
 var CLASS_LIST = Object.values(CLASSES);
+var CATALOG_SUBJECT = {
+  id: CATALOG_ROW,
+  title: "Framework request inputs and routes known to the taint catalog",
+  cwe: "CWE-20",
+  invariant: "Every way the framework hands request data to application code (parameters, bodies, headers, cookies, path segments, procedure inputs) is a taint SOURCE the engine knows, and every way it exposes code to the network (routes, actions, controllers) is an ENTRY POINT \u2014 for the version the repository runs.",
+  guard: "Not a guard: recognition. The framework's input accessors and route declarations, as THIS repository writes them, matched by catalog rows labelled for the framework at a version range that includes the one detected.",
+  rubric: "An unrecognized input API is not a vulnerability; it is a blind spot for every taint class at once. Report what the code reads and where it is routed, then hunt the classes the walk could not reach from it.",
+  examples: [
+    {
+      language: "javascript",
+      vulnerable: 'app.get("/export", (c) => db.query(c.req.query("q")));',
+      fixed: "// Hono: `c.req.query(...)` is the request input; the route is `app.get(path, handler)`."
+    },
+    {
+      language: "elixir",
+      vulnerable: `def index(conn, params) do
+  Repo.query("SELECT * FROM t WHERE q = '#{params["q"]}'")`,
+      fixed: "# Phoenix: `params` (and `conn.params`) is the request input; the router line is the route."
+    },
+    {
+      language: "python",
+      vulnerable: '@app.get("/export")\nasync def export(request):\n    q = request.args.get("q")',
+      fixed: "# Sanic: `request.args` / `request.json` are the inputs; `@app.get` declares the route."
+    }
+  ]
+};
+var MATRIX_ROWS = [...CLASS_LIST, CATALOG_SUBJECT];
+var HUNT_SUBJECTS = { ...CLASSES, [CATALOG_ROW]: CATALOG_SUBJECT };
 
 // src/classes/packs/shared.ts
 var MENTIONS_CSV = /text\/csv|\.csv\b|\bcsv\b/i;
@@ -34172,6 +34488,24 @@ var EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|x
 var HEADERS_MIDDLEWARE = /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
 var SETS_SECURITY_HEADER = /Content-Security-Policy|X-Frame-Options|Strict-Transport-Security/i;
 var FLAG_NAME = String.raw`\w*(?:enabled|disabled|enable|disable|flag|debug|mock|fake|skip|bypass|allow|insecure|feature|dry_?run|test_?mode)\w*`;
+var COOKIE_CALL = /\b(?:res(?:ponse)?\.cookie|reply\.setCookie|ctx\.cookies\.set|cookies\.set|setcookie)\s*\(/gi;
+var boundFlag = (flag) => String.raw`\b${flag}\s*:\s*(?!(?:false|0|null|undefined|true|1)\b)[!A-Za-z_$(]`;
+var COOKIE_HTTPONLY_SET = new RegExp(String.raw`httponly\s*[:=]?\s*(?:true|1)|['"]httponly['"]\s*=>\s*true|${boundFlag("httponly")}`, "i");
+var COOKIE_SECURE_SET = new RegExp(String.raw`\bsecure\s*[:=]?\s*(?:true|1)|['"]secure['"]\s*=>\s*true|${boundFlag("secure")}`, "i");
+var COOKIE_SAMESITE_SET = /samesite\s*[:=]?\s*['"]?(?:strict|lax|none)|['"]samesite['"]\s*=>\s*['"]?(?:strict|lax|none)/i;
+var COOKIE_SAMESITE_NONE = /samesite\s*[:=]?\s*['"]?none|['"]samesite['"]\s*=>\s*['"]?none/i;
+var LEGACY_COOKIE_FLAGS = {
+  options: { args: /\{/, head: /setcookie/i },
+  bare: ["webconfig/cookie-httponly", "webconfig/cookie-secure"],
+  flags: [
+    { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+    { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET },
+    { emit: "webconfig/cookie-samesite", present: COOKIE_SAMESITE_SET },
+    { emit: "webconfig/cookie-samesite-none-insecure", when: COOKIE_SAMESITE_NONE, present: COOKIE_SECURE_SET }
+  ]
+};
+var EXPRESS_TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
+var GRAPHQL_INTROSPECTION_ON = /\b(?:introspection|graphiql|playground)\s*:\s*true\b/;
 
 // src/classes/packs/common.ts
 var FIRST_HOP = /\.split\(\s*(["'])\s*,\s*\1\s*\)\s*(?:\[\s*0\s*\]|\.shift\(\s*\)|\.at\(\s*0\s*\))/;
@@ -34189,6 +34523,13 @@ var COMMON_PACK = {
           context: { re: XFF, before: XFF_LOOKBACK },
           emit: "webconfig/xff-first-hop"
         }
+      ]
+    },
+    // A gateway/router config file (Apollo Router, Hive, a server YAML) that
+    // switches introspection or an IDE on — the original detector read these.
+    "graphql-introspection-enabled": {
+      rules: [
+        { id: "config-true", kind: "line", languages: ["yaml", "conf"], text: "raw", match: GRAPHQL_INTROSPECTION_ON, emit: "webconfig/graphql-introspection" }
       ]
     }
   }
@@ -34286,6 +34627,48 @@ var NODE_PACK = {
         }
       ]
     },
+    // The original web-config detector's rules (src/webconfig.ts ≤ v1.58.0),
+    // moved here with their shapes so their findings keep their ids.
+    "insecure-session-cookie": {
+      rules: [{ id: "cookie-call", kind: "call", languages: JS3, call: COOKIE_CALL, scope: "args", ...LEGACY_COOKIE_FLAGS }]
+    },
+    "graphql-introspection-enabled": {
+      rules: [{ id: "options-true", kind: "line", languages: JS3, text: "raw", match: GRAPHQL_INTROSPECTION_ON, emit: "webconfig/graphql-introspection" }]
+    },
+    "csrf-protection-disabled": {
+      rules: [{ id: "csrf-false", kind: "line", languages: JS3, text: "raw", match: /\bcsrf(?:Prevention)?\s*:\s*false\b/, emit: "webconfig/csrf-disabled" }]
+    },
+    "debug-mode-enabled": {
+      rules: [
+        // The `errorhandler` middleware renders stack traces to the client; its
+        // own README says development only. Registered with no environment check.
+        {
+          id: "errorhandler-unconditional",
+          kind: "file",
+          languages: JS3,
+          gate: [/require\(\s*["']errorhandler["']\s*\)|from\s+["']errorhandler["']/],
+          anchor: /\.use\s*\(\s*\w*[eE]rror[hH]andler\s*\(/,
+          pick: "first",
+          unless: /NODE_ENV|\.get\(\s*["']env["']\s*\)|isDev\w*|isProd\w*|development/,
+          emit: "webconfig/debug"
+        }
+      ]
+    }
+  }
+};
+var NEXT_AUTH_PACK = {
+  id: "next-auth",
+  ecosystem: "node",
+  library: "next-auth",
+  testedWith: ">=4 <6",
+  sources: ["https://github.com/nextauthjs/next-auth"],
+  // `getServerSession` (v4) is NextAuth's alone; v5's `auth()` and `getToken`
+  // are names any codebase might use, so they count only where NextAuth is declared.
+  markers: {
+    global: { auth: { words: ["getServerSession"] } },
+    detected: { auth: { patterns: [/\bawait\s+auth\s*\(\s*\)/, /\bgetToken\s*\(/] } }
+  },
+  classes: {
     "session-cookie-chunks-on-logout": {
       rules: [
         {
@@ -34342,6 +34725,30 @@ var NEXTJS_PACK = {
           emit: "webconfig/unbounded-export"
         }
       ]
+    },
+    // Server Actions check that the Origin matches the host; `allowedOrigins`
+    // widens that list, and a `*` entry turns the check off.
+    // Source: https://nextjs.org/docs/app/api-reference/config/next-config-js/serverActions
+    "csrf-protection-disabled": {
+      rules: [
+        {
+          id: "server-actions-any-origin",
+          kind: "line",
+          languages: JS3,
+          files: NEXT_CONFIG,
+          match: /\ballowedOrigins\s*:\s*\[[^\]]*["'`]\*["'`]/,
+          note: "`serverActions.allowedOrigins` lists `*`, which turns off the Origin check Next.js applies to every Server Action \u2014 its CSRF protection. Any site can invoke the app's actions with the visitor's cookies. List the exact origins a proxy forwards from."
+        }
+      ]
+    },
+    "proxy-headers-trusted": {
+      hunt: "Next.js derives the request host and protocol from X-Forwarded-Host/-Proto and exposes no trust setting of its own; whether a caller can forge them depends on the proxy in front \u2014 check how the app reads them and what the deployment strips."
+    },
+    "request-body-unbounded": {
+      hunt: "App-Router route handlers read `await req.json()` with no size limit of their own (Server Actions default to 1 MB, `api.bodyParser.sizeLimit` bounds Pages-Router routes); check what bounds the bodies this app reads."
+    },
+    "debug-mode-enabled": {
+      hunt: "Next.js has no debug switch in code \u2014 `next dev` vs `next start` and `productionBrowserSourceMaps` decide what an error exposes; check the deployed start command and config."
     }
   }
 };
@@ -34351,6 +34758,7 @@ var EXPRESS_PACK = {
   framework: "express",
   testedWith: ">=4 <6",
   sources: ["https://expressjs.com/en/advanced/best-practice-security.html"],
+  markers: { global: { auth: { words: ["passport\\.authenticate"] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -34369,6 +34777,22 @@ var EXPRESS_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    "proxy-headers-trusted": {
+      rules: [{ id: "trust-proxy", kind: "line", languages: JS3, text: "raw", match: EXPRESS_TRUST_PROXY, emit: "webconfig/trust-proxy" }]
+    },
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "body-parser-no-limit",
+          kind: "line",
+          languages: JS3,
+          text: "raw",
+          evidence: "match",
+          match: /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\((?![^)]*\blimit\s*:)[^)]*\)/,
+          emit: "webconfig/body-limit-missing"
+        }
+      ]
     }
   }
 };
@@ -34378,6 +34802,7 @@ var NESTJS_PACK = {
   framework: "nestjs",
   testedWith: ">=9 <13",
   sources: ["https://docs.nestjs.com/security/helmet"],
+  markers: { global: { auth: { annotations: ["UseGuards"] } }, detected: { auth: { words: ["AuthGuard"] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -34403,6 +34828,14 @@ var NESTJS_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // On the Express adapter Nest forwards `app.set` to Express.
+    // Source: https://docs.nestjs.com/faq/http-adapter
+    "proxy-headers-trusted": {
+      rules: [{ id: "trust-proxy", kind: "line", languages: JS3, text: "raw", match: EXPRESS_TRUST_PROXY, emit: "webconfig/trust-proxy" }]
+    },
+    "request-body-unbounded": {
+      hunt: "Nest registers the adapter's body parser itself (`NestFactory.create(\u2026, { bodyParser })`, `app.useBodyParser('json', { limit })`); check which limit the app sets."
     }
   }
 };
@@ -34447,6 +34880,21 @@ var FASTIFY_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // `trustProxy: true` trusts every hop. Source: https://fastify.dev/docs/latest/Reference/Server/#trustproxy
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "trust-proxy-true",
+          kind: "line",
+          languages: JS3,
+          match: /\btrustProxy\s*:\s*true\b/,
+          note: "`trustProxy: true` makes Fastify take `request.ip`, `request.protocol` and `request.host` from X-Forwarded-* sent by ANY caller. Give it the proxy's address or a hop count instead, and confirm the app is not reachable around the proxy."
+        }
+      ]
+    },
+    "request-body-unbounded": {
+      hunt: "Fastify bounds bodies with `bodyLimit` (1 MiB by default); check whether the app raises it or reads `request.raw` itself."
     }
   }
 };
@@ -34463,10 +34911,44 @@ var ctorPack = (id, ctor, testedWith) => ({
     }
   }
 });
-var KOA_PACK = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
+var KOA_PACK = (() => {
+  const pack = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
+  pack.classes["proxy-headers-trusted"] = {
+    rules: [
+      {
+        id: "app-proxy-true",
+        kind: "line",
+        languages: JS3,
+        match: /\b(?:app|server)\s*\.\s*proxy\s*=\s*true\b/,
+        note: "`app.proxy = true` makes Koa take `ctx.ip`, `ctx.protocol` and `ctx.host` from X-Forwarded-* sent by ANY caller. Set `proxyIpHeader`/`maxIpsCount` to your proxy's hop count, and confirm the app is not reachable around the proxy."
+      }
+    ]
+  };
+  return pack;
+})();
 var HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
 var ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
-var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];
+var TRPC_PACK = {
+  id: "trpc",
+  ecosystem: "node",
+  library: "trpc",
+  testedWith: ">=10 <12",
+  sources: ["https://trpc.io/docs/server/authorization"],
+  markers: { detected: { auth: { words: ["protectedProcedure", "authedProcedure", "adminProcedure", "privateProcedure"] } } },
+  classes: {}
+};
+var NODE_PACKS = [
+  NODE_PACK,
+  NEXTJS_PACK,
+  EXPRESS_PACK,
+  NESTJS_PACK,
+  FASTIFY_PACK,
+  KOA_PACK,
+  HONO_PACK,
+  ELYSIA_PACK,
+  NEXT_AUTH_PACK,
+  TRPC_PACK
+];
 
 // src/classes/packs/python.ts
 var PY3 = ["python"];
@@ -34568,6 +35050,28 @@ var PYTHON_PACK = {
     },
     "session-cookie-chunks-on-logout": {
       notApplicable: "Python web frameworks keep the session server-side (Django, Flask-Session) or in one signed cookie (Flask's default); none splits it into numbered chunks that a logout could leave behind."
+    },
+    // `set_cookie` is Django's HttpResponse, Werkzeug/Flask's Response and
+    // Starlette's Response alike, and all three default HttpOnly and Secure off.
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "set-cookie",
+          kind: "call",
+          languages: PY3,
+          call: /\.set_cookie\s*\(/,
+          scope: "args",
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+            { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET },
+            { emit: "webconfig/cookie-samesite-none-insecure", when: COOKIE_SAMESITE_NONE, present: COOKIE_SECURE_SET }
+          ]
+        }
+      ]
+    },
+    // graphene-django / Flask-GraphQL `GraphQLView.as_view(graphiql=True)`.
+    "graphql-introspection-enabled": {
+      rules: [{ id: "graphiql-true", kind: "line", languages: PY3, match: /\bgraphiql\s*=\s*True\b/, emit: "webconfig/graphql-introspection" }]
     }
   }
 };
@@ -34584,6 +35088,10 @@ var DJANGO_PACK = {
   framework: "django",
   testedWith: ">=3.2 <7",
   sources: ["https://docs.djangoproject.com/en/stable/ref/middleware/", "https://docs.djangoproject.com/en/stable/ref/settings/"],
+  markers: {
+    global: { auth: { words: ["login_required", "permission_required"] } },
+    detected: { auth: { words: ["LoginRequiredMixin", "PermissionRequiredMixin", "user_passes_test", "permission_classes"] } }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -34617,6 +35125,50 @@ var DJANGO_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // The original web-config detector's Django rules (raw lines: a
+    // commented-out middleware IS the finding).
+    "csrf-protection-disabled": {
+      rules: [
+        { id: "csrf-exempt", kind: "line", languages: PY3, text: "raw", match: /^\s*@csrf_exempt\b/, emit: "webconfig/csrf-disabled" },
+        {
+          id: "middleware-commented",
+          kind: "line",
+          languages: PY3,
+          text: "raw",
+          match: /^\s*#\s*['"]django\.middleware\.csrf\.CsrfViewMiddleware['"]/,
+          emit: "webconfig/csrf-disabled"
+        }
+      ]
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "debug-true", kind: "line", languages: PY3, text: "raw", match: /^\s*DEBUG\s*=\s*True\b/, emit: "webconfig/debug" }]
+    },
+    // USE_X_FORWARDED_HOST trusts X-Forwarded-Host for `get_host()` and every
+    // absolute URL (password-reset links). Source: https://docs.djangoproject.com/en/stable/ref/settings/#use-x-forwarded-host
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "use-x-forwarded-host",
+          kind: "line",
+          languages: PY3,
+          match: /^\s*USE_X_FORWARDED_HOST\s*=\s*True\b/,
+          note: "`USE_X_FORWARDED_HOST = True` makes `request.get_host()` \u2014 and every absolute URL Django builds, password-reset links included \u2014 come from X-Forwarded-Host, which any caller can send unless the proxy in front overwrites it. Confirm the proxy sets it on every request, or leave it off."
+        }
+      ]
+    },
+    // DATA_UPLOAD_MAX_MEMORY_SIZE = None removes Django's 2.5 MB body cap.
+    // Source: https://docs.djangoproject.com/en/stable/ref/settings/#data-upload-max-memory-size
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "upload-max-none",
+          kind: "line",
+          languages: PY3,
+          match: /^\s*DATA_UPLOAD_MAX_(?:MEMORY_SIZE|NUMBER_FIELDS|NUMBER_FILES)\s*=\s*None\b/,
+          note: "A Django request-size guard is set to `None`, which removes it: a single request can make the process buffer an arbitrarily large body (or field count). Keep a bound \u2014 the 2.5 MB default, or the largest body the app really accepts."
+        }
+      ]
     }
   }
 };
@@ -34626,6 +35178,7 @@ var FLASK_PACK = {
   framework: "flask",
   testedWith: ">=2 <4",
   sources: ["https://flask.palletsprojects.com/en/stable/web-security/"],
+  markers: { detected: { auth: { words: ["jwt_required", "roles_required", "fresh_login_required"] }, throttle: { patterns: [/\bLimiter\s*\(/] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -34664,6 +35217,33 @@ var FLASK_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "run-debug", kind: "line", languages: PY3, text: "raw", match: /\.run\([^)]*\bdebug\s*=\s*True/, emit: "webconfig/debug" }]
+    },
+    // Flask-WTF's CSRF protection, switched off.
+    // Source: https://flask-wtf.readthedocs.io/en/stable/config/
+    "csrf-protection-disabled": {
+      rules: [{ id: "wtf-csrf-off", kind: "line", languages: PY3, match: /\bWTF_CSRF_ENABLED["']?\s*\]?\s*=\s*False\b/, emit: "webconfig/csrf-disabled" }]
+    },
+    // Flask reads JSON and raw bodies whole and sets no MAX_CONTENT_LENGTH.
+    // Source: https://flask.palletsprojects.com/en/stable/config/#MAX_CONTENT_LENGTH
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "no-max-content-length",
+          kind: "absent",
+          languages: PY3,
+          requiresFramework: "flask",
+          anchor: /\bFlask\s*\(\s*__name__/,
+          presentInFile: /MAX_CONTENT_LENGTH/,
+          presentInTree: { re: /MAX_CONTENT_LENGTH/, scope: "package", languages: PY3 },
+          note: "The Flask app is built and nothing in the package sets `MAX_CONTENT_LENGTH`, so Flask reads request bodies of any size (`request.get_json()`, `request.data`). Set it to the largest body the app accepts \u2014 unless the proxy in front enforces a limit."
+        }
+      ]
+    },
+    "proxy-headers-trusted": {
+      hunt: "Flask trusts no forwarded header unless the app wraps itself in Werkzeug's `ProxyFix`; check whether it does, and with how many hops (`x_for`, `x_host`, `x_proto`)."
     }
   }
 };
@@ -34673,6 +35253,13 @@ var FASTAPI_PACK = {
   framework: "fastapi",
   testedWith: ">=0.100 <1",
   sources: ["https://fastapi.tiangolo.com/advanced/middleware/"],
+  // A dependency that resolves the caller IS FastAPI's guard.
+  markers: {
+    detected: {
+      auth: { patterns: [/\bDepends\s*\(\s*\w*(?:current_user|auth|token|verify|security)\w*/i, /\bSecurity\s*\(/] },
+      throttle: { patterns: [/\bLimiter\s*\(/] }
+    }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -34698,6 +35285,30 @@ var FASTAPI_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // Starlette's debug mode renders tracebacks to the client.
+    // Source: https://www.starlette.io/applications/
+    "debug-mode-enabled": {
+      rules: [{ id: "app-debug", kind: "line", languages: PY3, match: /\bFastAPI\s*\([^)]*\bdebug\s*=\s*True\b/, emit: "webconfig/debug" }]
+    },
+    // uvicorn trusts X-Forwarded-For/-Proto only from `forwarded_allow_ips`; `*` is everyone.
+    // Source: https://www.uvicorn.org/settings/#http
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "forwarded-allow-any",
+          kind: "line",
+          languages: PY3,
+          match: /\bforwarded_allow_ips\s*=\s*["']\*["']/,
+          note: '`forwarded_allow_ips="*"` makes uvicorn take the client address and scheme from X-Forwarded-* sent by ANY caller. List the proxy\'s address instead, and confirm the app is not reachable around it.'
+        }
+      ]
+    },
+    "request-body-unbounded": {
+      hunt: "FastAPI/Starlette read `await request.json()` and `request.body()` whole with no size limit of their own; check what bounds the bodies (a middleware, the ASGI server, the proxy)."
+    },
+    "csrf-protection-disabled": {
+      hunt: "FastAPI ships no CSRF protection to switch off; check whether any state-changing route is authenticated by a cookie the browser attaches on its own."
     }
   }
 };
@@ -34705,6 +35316,8 @@ var PYTHON_PACKS = [PYTHON_PACK, DJANGO_PACK, FLASK_PACK, FASTAPI_PACK];
 
 // src/classes/packs/java.ts
 var JVM2 = ["java", "kotlin"];
+var BOOT_CONFIG = /(?:^|\/)(?:application|bootstrap)(?:-[\w-]+)?\.(?:properties|ya?ml)$/;
+var BOOT_CONFIG_LANGS = ["properties", "yaml"];
 var SECRET2 = String.raw`"[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
 var SECRET_FIELD = String.raw`\w*(?:apiKey|ApiKey|API_KEY|sharedSecret|SharedSecret|webhookSecret|WebhookSecret|clientSecret|ClientSecret|apiToken|ApiToken)\w*`;
 var JAVA_PACK = {
@@ -34767,6 +35380,10 @@ var SPRING_PACK = {
   framework: "spring",
   testedWith: ">=2.7 <5",
   sources: ["https://docs.spring.io/spring-security/reference/servlet/exploits/headers.html"],
+  markers: {
+    global: { auth: { annotations: ["PreAuthorize", "Secured", "RolesAllowed"] } },
+    detected: { auth: { patterns: [/\.authenticated\s*\(\s*\)/, /\.hasAuthority\s*\(/] }, throttle: { patterns: [/\bBucket4j\b|\bBandwidth\s*\./] } }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -34807,6 +35424,84 @@ var SPRING_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // `ResponseCookie` builds with HttpOnly and Secure off unless the chain sets them.
+    // Source: https://docs.spring.io/spring-framework/docs/current/javadoc-api/org/springframework/http/ResponseCookie.html
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "response-cookie",
+          kind: "call",
+          languages: JVM2,
+          call: /\bResponseCookie\s*\.\s*(?:from|fromClientResponse)\s*\(/,
+          scope: "statement",
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: /\.httpOnly\s*\(\s*(?!false\b)[^)\s]/ },
+            { emit: "webconfig/cookie-secure", present: /\.secure\s*\(\s*(?!false\b)[^)\s]/ }
+          ]
+        }
+      ]
+    },
+    "csrf-protection-disabled": {
+      rules: [
+        {
+          id: "csrf-disabled",
+          kind: "line",
+          languages: JVM2,
+          match: /\.csrf\s*\(\s*(?:AbstractHttpConfigurer\s*::\s*disable|\(?\s*\w+\s*\)?\s*->\s*\w+\s*\.\s*disable\s*\(\s*\))\s*\)|\.csrf\s*\(\s*\)\s*\.\s*disable\s*\(|\bcsrf\s*\{\s*disable\s*\(\s*\)/,
+          emit: "webconfig/csrf-disabled"
+        }
+      ]
+    },
+    // Settings that live in application.properties / application.yml.
+    // Sources: https://docs.spring.io/spring-boot/appendix/application-properties/
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "forward-headers-strategy",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\bforward-headers-strategy\s*[:=]\s*["']?(?:native|framework)\b/i,
+          note: "`server.forward-headers-strategy` makes Spring take the client address, scheme and host from X-Forwarded-*/Forwarded. Right behind a proxy that overwrites them; when the app is reachable directly, any caller sets its own IP and scheme. Pair it with `server.tomcat.remoteip.internal-proxies` (or the proxy's network) and confirm the topology."
+        }
+      ]
+    },
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "multipart-unlimited",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\bmax-(?:file|request)-size\s*[:=]\s*["']?-1\b/,
+          note: "A multipart size limit is set to `-1`, which removes it: one upload can be as large as the client sends. Keep a bound (Spring Boot's defaults are 1 MB per file and 10 MB per request)."
+        }
+      ]
+    },
+    "graphql-introspection-enabled": {
+      rules: [
+        {
+          id: "graphiql-enabled",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\bgraphiql\.enabled\s*[:=]\s*true\b/,
+          emit: "webconfig/graphql-introspection"
+        }
+      ]
+    },
+    "debug-mode-enabled": {
+      rules: [
+        {
+          id: "stacktrace-always",
+          kind: "line",
+          languages: BOOT_CONFIG_LANGS,
+          files: BOOT_CONFIG,
+          match: /\binclude-stacktrace\s*[:=]\s*["']?always\b/,
+          emit: "webconfig/debug"
+        }
+      ]
     }
   }
 };
@@ -34826,6 +35521,8 @@ var GO_SETS_HEADERS = new RegExp(`secure\\.New\\s*\\(|unrolled/secure|${SETS_SEC
 var GO_PACK = {
   id: "go",
   ecosystem: "go",
+  // The usual Go limiters: golang.org/x/time/rate, tollbooth, go-chi/httprate.
+  markers: { global: { throttle: { patterns: [/\brate\.NewLimiter\s*\(|\btollbooth\.|\bhttprate\./] } } },
   classes: {
     "timing-unsafe-secret-compare": {
       rules: [
@@ -34881,6 +35578,54 @@ var GO_PACK = {
     },
     "session-cookie-chunks-on-logout": {
       notApplicable: "Go session libraries (gorilla/sessions, scs) keep one cookie per session and refuse an oversized value; none splits it into numbered chunks."
+    },
+    // `http.Cookie` defaults HttpOnly and Secure to false; the literal is where they are set.
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "cookie-literal",
+          kind: "call",
+          languages: GO,
+          call: /\bhttp\.Cookie\s*\{/,
+          scope: "args",
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+            { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET }
+          ]
+        }
+      ]
+    },
+    // A body read whole with no `http.MaxBytesReader` anywhere in the file.
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "readall-body",
+          kind: "file",
+          languages: GO,
+          gate: [/\.Body\b/],
+          anchor: /\b(?:io|ioutil)\.ReadAll\s*\(\s*(?:\w+\.)?(?:r|req|request|Request)\.Body\s*\)|json\.NewDecoder\s*\(\s*(?:\w+\.)?(?:r|req|request|Request)\.Body\s*\)/,
+          pick: "first",
+          unless: /\bMaxBytesReader\b|\bLimitReader\b|MaxMultipartMemory/,
+          note: "A request body is read whole (`io.ReadAll`, `json.NewDecoder`) and nothing in the file bounds it \u2014 net/http sets no body limit, and neither does Gin outside multipart. Wrap it first: `r.Body = http.MaxBytesReader(w, r.Body, limit)`."
+        }
+      ]
+    },
+    // gqlgen's playground/sandbox handlers serve a GraphQL IDE.
+    "graphql-introspection-enabled": {
+      rules: [
+        {
+          id: "playground-handler",
+          kind: "line",
+          languages: GO,
+          match: /\bplayground\.(?:Handler|ApolloSandboxHandler|AltairHandler)\s*\(/,
+          emit: "webconfig/graphql-introspection"
+        }
+      ]
+    },
+    // Go 1.25's CrossOriginProtection, with a pattern exempted from it.
+    // Source: https://pkg.go.dev/net/http#CrossOriginProtection
+    "csrf-protection-disabled": {
+      rules: [{ id: "cop-bypass", kind: "line", languages: GO, match: /\.AddInsecureBypassPattern\s*\(/, emit: "webconfig/csrf-disabled" }]
     }
   }
 };
@@ -34917,6 +35662,9 @@ var NET_HTTP_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    "proxy-headers-trusted": {
+      notApplicable: "net/http never rewrites RemoteAddr, Host or the scheme from forwarded headers; code that reads X-Forwarded-For itself is the client-ip-first-xff class."
     }
   }
 };
@@ -34963,6 +35711,22 @@ var GIN_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "trust-everyone",
+          kind: "line",
+          languages: GO,
+          match: /\.SetTrustedProxies\s*\(\s*\[\]string\s*\{[^}]*"(?:0\.0\.0\.0\/0|::\/0)"/,
+          note: "`SetTrustedProxies` is given the whole address space, so Gin trusts X-Forwarded-For from ANY caller and `c.ClientIP()` returns what the client wrote. List your proxy's address, or pass `nil` when there is none."
+        }
+      ]
+    },
+    // Debug mode logs every route and request and is meant for development.
+    // Source: https://gin-gonic.com/en/docs/deployment/
+    "debug-mode-enabled": {
+      rules: [{ id: "set-debug-mode", kind: "line", languages: GO, match: /\bgin\.SetMode\s*\(\s*gin\.DebugMode\s*\)/, emit: "webconfig/debug" }]
     }
   }
 };
@@ -35029,6 +35793,12 @@ var RUBY_PACK = {
     },
     "session-cookie-chunks-on-logout": {
       notApplicable: "Rails' cookie store keeps the session in one cookie and raises CookieOverflow past 4 KB rather than splitting it; there are no chunks for a logout to miss."
+    },
+    "request-body-unbounded": {
+      hunt: "Rack and Puma set no request-body limit and Rails parses JSON bodies whole; check what bounds them \u2014 a Rack middleware, the app server, or the proxy's client_max_body_size."
+    },
+    "graphql-introspection-enabled": {
+      hunt: "graphql-ruby answers introspection unless the schema calls `disable_introspection_entry_points`, and GraphiQL is a mounted engine (`GraphiQL::Rails::Engine`); check both against the production environment."
     }
   }
 };
@@ -35044,6 +35814,13 @@ var RAILS_PACK = {
   framework: "rails",
   testedWith: ">=6 <9",
   sources: ["https://guides.rubyonrails.org/security.html"],
+  markers: {
+    global: { auth: { words: ["before_action", "authenticate_user!", "current_user"] } },
+    detected: {
+      auth: { words: ["authenticate_or_request_with_http_token", "authenticate_or_request_with_http_basic", "require_login"] },
+      throttle: { patterns: [/\bRack::Attack\b/] }
+    }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -35076,6 +35853,66 @@ var RAILS_PACK = {
           routeDecl: /^\s*def\s+(\w+)/,
           queries: RAILS_QUERIES,
           statement: "balanced"
+        }
+      ]
+    },
+    // The original web-config detector's Rails rules (raw lines: a
+    // commented-out `protect_from_forgery` IS the finding).
+    "csrf-protection-disabled": {
+      rules: [
+        { id: "protect-commented", kind: "line", languages: RB, text: "raw", match: /^\s*#\s*protect_from_forgery\b/, emit: "webconfig/csrf-disabled" },
+        {
+          id: "skip-verify",
+          kind: "line",
+          languages: RB,
+          text: "raw",
+          match: /\bskip_before_action\s+:verify_authenticity_token\b/,
+          emit: "webconfig/csrf-disabled"
+        },
+        {
+          id: "null-session",
+          kind: "line",
+          languages: RB,
+          text: "raw",
+          match: /\bprotect_from_forgery\s+with:\s*:null_session\b/,
+          emit: "webconfig/csrf-disabled"
+        }
+      ]
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "all-requests-local", kind: "line", languages: RB, text: "raw", match: /consider_all_requests_local\s*=\s*true/, emit: "webconfig/debug" }]
+    },
+    // A cookie written through the jar with a bare value gets neither flag;
+    // the hash form is where `httponly:`/`secure:` go.
+    // Source: https://api.rubyonrails.org/classes/ActionDispatch/Cookies.html
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "cookie-jar-assign",
+          kind: "call",
+          languages: RB,
+          call: /\bcookies(?:\.(?:signed|encrypted|permanent))*\s*\[[^\]\n]+\]\s*=(?!=)/,
+          scope: "statement",
+          options: { args: /\{/ },
+          bare: ["webconfig/cookie-httponly", "webconfig/cookie-secure"],
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+            { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET }
+          ]
+        }
+      ]
+    },
+    // Rails rejects a request whose Client-IP and X-Forwarded-For disagree;
+    // switched off, `request.remote_ip` follows whichever the caller sent.
+    // Source: https://guides.rubyonrails.org/configuring.html#config-action-dispatch-ip-spoofing-check
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "ip-spoofing-check-off",
+          kind: "line",
+          languages: RB,
+          match: /\bip_spoofing_check\s*=\s*false\b/,
+          note: "`ip_spoofing_check = false` turns off the check that makes Rails refuse a request whose Client-IP and X-Forwarded-For disagree, so `request.remote_ip` follows whatever the caller sent. Leave it on and configure `trusted_proxies` instead."
         }
       ]
     }
@@ -35147,6 +35984,25 @@ var PHP_PACK = {
     },
     "session-cookie-chunks-on-logout": {
       notApplicable: "PHP sessions (native and Laravel's drivers) keep one session cookie; none splits it into numbered chunks for a logout to miss."
+    },
+    // The original web-config detector's rules (src/webconfig.ts ≤ v1.58.0),
+    // moved here with their shapes so their findings keep their ids.
+    "insecure-session-cookie": {
+      rules: [{ id: "setcookie", kind: "call", languages: PHP, call: COOKIE_CALL, scope: "args", ...LEGACY_COOKIE_FLAGS }]
+    },
+    "csrf-protection-disabled": {
+      rules: [
+        { id: "csrf-false", kind: "line", languages: PHP, text: "raw", match: /['"]csrf(?:_protection)?['"]\s*=>\s*false/i, emit: "webconfig/csrf-disabled" }
+      ]
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "debug-true", kind: "line", languages: PHP, text: "raw", match: /['"]debug['"]\s*=>\s*true/, emit: "webconfig/debug" }]
+    },
+    "request-body-unbounded": {
+      notApplicable: "PHP enforces `post_max_size` (8 MB by default) before application code runs; a body limit is an ini/web-server setting, not an application idiom."
+    },
+    "graphql-introspection-enabled": {
+      hunt: "webonyx/graphql-php and Lighthouse answer introspection unless a `DisableIntrospection` validation rule is added (Lighthouse: `security.disable_introspection`); check the production config."
     }
   }
 };
@@ -35165,6 +36021,18 @@ var LARAVEL_PACK = {
   framework: "laravel",
   testedWith: ">=9 <14",
   sources: ["https://laravel.com/docs/12.x/requests"],
+  // Route middleware is Laravel's guard, named in a string.
+  markers: {
+    detected: {
+      auth: {
+        patterns: [
+          /->middleware\(\s*\[?[^)\]]*['"](?:auth(?::[\w,]+)?|can:[^'"]+|verified)['"]/,
+          /\bAuth::(?:check|user|guard)\s*\(/,
+          /\bauth\(\)\s*->\s*(?:check|user)\s*\(/
+        ]
+      }
+    }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -35191,6 +36059,32 @@ var LARAVEL_PACK = {
           statement: "balanced"
         }
       ]
+    },
+    // Trusting every proxy (`*`) lets any caller set the IP and scheme.
+    // Source: https://laravel.com/docs/12.x/requests#configuring-trusted-proxies
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "trust-all-proxies",
+          kind: "line",
+          languages: PHP,
+          match: /\btrustProxies\s*\(\s*at\s*:\s*['"]\*\*?['"]|\$proxies\s*=\s*['"]\*\*?['"]/,
+          note: "Every proxy is trusted (`*`), so `$request->ip()`, the scheme and the host come from X-Forwarded-* sent by ANY caller that reaches the app directly. List the proxy's addresses, and confirm the app is not reachable around them."
+        }
+      ]
+    },
+    // Every route exempted from the CSRF token check.
+    // Source: https://laravel.com/docs/12.x/csrf#csrf-excluding-uris
+    "csrf-protection-disabled": {
+      rules: [
+        {
+          id: "except-everything",
+          kind: "line",
+          languages: PHP,
+          match: /\bvalidateCsrfTokens\s*\(\s*except\s*:\s*\[\s*['"]\*['"]|\$except\s*=\s*\[\s*['"]\*['"]/,
+          emit: "webconfig/csrf-disabled"
+        }
+      ]
     }
   }
 };
@@ -35211,9 +36105,9 @@ function boundRules(packs = PACKS) {
     }
   return out2;
 }
-function shapeFor(classId, rule2) {
-  if (rule2.emit) {
-    const [family, id] = rule2.emit.split("/");
+function shapeFor(classId, rule2, emit2 = rule2.emit) {
+  if (emit2) {
+    const [family, id] = emit2.split("/");
     if (family === "webconfig") {
       const s = WEBCONFIG_SHAPES[id];
       if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: "config", note: s.note };
@@ -35222,7 +36116,7 @@ function shapeFor(classId, rule2) {
       const s = AUTH_SHAPES[id];
       if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: s.category, note: s.note };
     }
-    throw new Error(`classes: rule ${rule2.id} emits unknown shape ${rule2.emit}`);
+    throw new Error(`classes: rule ${rule2.id} emits unknown shape ${emit2}`);
   }
   const c2 = CLASSES[classId];
   return { family: "class", id: c2.id, title: c2.title, severity: c2.severity, cwe: c2.cwe, category: c2.category, note: rule2.note ?? c2.note };
@@ -35261,16 +36155,49 @@ function view(rel2, lang, content) {
 }
 function runLine(v, r, emit2) {
   if (r.fileGate && !r.fileGate.test(v.content)) return;
+  const raw = r.text === "raw";
   for (let i2 = 0; i2 < v.raw.length; i2++) {
-    if (v.comment[i2]) continue;
-    const c2 = v.code[i2];
-    if (!r.match.test(c2) || r.unless?.test(c2)) continue;
+    if (!raw && v.comment[i2]) continue;
+    const c2 = raw ? v.raw[i2] : v.code[i2];
+    const m = r.match.exec(c2);
+    if (!m || r.unless?.test(c2)) continue;
     if (r.context) {
       let seen = false;
       for (let j = Math.max(0, i2 - r.context.before); j <= i2 && !seen; j++) seen = !v.comment[j] && r.context.re.test(v.code[j]);
       if (!seen) continue;
     }
-    emit2(i2 + 1, v.raw[i2]);
+    emit2(i2 + 1, r.evidence === "match" ? m[0] : v.raw[i2]);
+  }
+}
+function balancedArgs(content, open) {
+  const o = content[open];
+  const c2 = o === "{" ? "}" : ")";
+  let depth = 0;
+  for (let i2 = open; i2 < content.length; i2++) {
+    const ch = content[i2];
+    if (ch === o) depth++;
+    else if (ch === c2) {
+      depth--;
+      if (depth === 0) return content.slice(open + 1, i2);
+    }
+  }
+  return null;
+}
+function runCall(v, r, emit2) {
+  const re = new RegExp(r.call.source, r.call.flags.includes("g") ? r.call.flags : `${r.call.flags}g`);
+  for (const m of v.content.matchAll(re)) {
+    const at = m.index ?? 0;
+    const head = m[0];
+    const open = at + head.length - 1;
+    const text = r.scope === "args" ? balancedArgs(v.content, open) : statementAt2(v.content, at, "balanced").slice(head.length);
+    if (text === null) continue;
+    const ln = lineOf3(v.content, at);
+    const hasOptions = !r.options || !!r.options.args?.test(text) || !!r.options.head?.test(head);
+    if (!hasOptions) {
+      for (const shape of r.bare ?? []) emit2(ln, `${head}\u2026`, shape);
+      continue;
+    }
+    for (const f of r.flags ?? []) if ((!f.when || f.when.test(text)) && !f.present.test(text)) emit2(ln, head, f.emit);
   }
 }
 function runFile(v, r, emit2) {
@@ -35354,18 +36281,19 @@ function auditWeaknessClasses(repo, prune, tree, frameworks = [], packs = PACKS)
   const seen = /* @__PURE__ */ new Set();
   const pending2 = [];
   const presentDirs = /* @__PURE__ */ new Map();
-  const record2 = (b, rel2, line2, evidence) => {
+  const record2 = (b, rel2, line2, evidence, emit2) => {
     hits.push({ classId: b.classId, packId: b.pack.id, ruleId: b.rule.id, file: rel2, line: line2 });
-    const key = `${b.classId}\0${rel2}\0${line2}`;
+    const shape = shapeFor(b.classId, b.rule, emit2 ?? b.rule.emit);
+    const key = `${b.classId}\0${shape.family}:${shape.id}\0${rel2}\0${line2}`;
     if (seen.has(key)) return;
     seen.add(key);
-    findings.push(hit4(rel2, line2, shapeFor(b.classId, b.rule), evidence));
+    findings.push(hit4(rel2, line2, shape, evidence));
   };
   for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf5(wf.rel);
     if (SKIPPED_EXTS.has(ext)) continue;
-    const lang = langForFile(wf.rel)?.id;
+    const lang = langForFile(wf.rel)?.id ?? CONFIG_FORMATS[ext];
     const forFile = lang ? rules.filter((b) => b.rule.languages.includes(lang) && (!b.rule.files || b.rule.files.test(wf.rel))) : [];
     const treeChecks = rules.filter((b) => {
       const t = b.rule.kind === "absent" ? b.rule.presentInTree : void 0;
@@ -35385,8 +36313,9 @@ function auditWeaknessClasses(repo, prune, tree, frameworks = [], packs = PACKS)
     for (const b of forFile) {
       const r = b.rule;
       if (r.requiresFramework && !frameworkAt(v.rel, r.requiresFramework, frameworks)) continue;
-      const emit2 = (line2, evidence) => record2(b, v.rel, line2, evidence);
+      const emit2 = (line2, evidence, shape) => record2(b, v.rel, line2, evidence, shape);
       if (r.kind === "line") runLine(v, r, emit2);
+      else if (r.kind === "call") runCall(v, r, emit2);
       else if (r.kind === "file") runFile(v, r, emit2);
       else if (r.kind === "route-query") runRouteQuery(v, r, emit2);
       else {
@@ -35608,42 +36537,151 @@ function groupAdvisoriesByPackage(findings) {
   );
 }
 
-// src/frameworks.ts
-var FRAMEWORKS = [
-  { id: "nextjs", title: "Next.js", ecosystem: "node", packages: ["next"] },
-  { id: "express", title: "Express", ecosystem: "node", packages: ["express"] },
-  { id: "nestjs", title: "NestJS", ecosystem: "node", packages: ["@nestjs/core"] },
-  { id: "fastify", title: "Fastify", ecosystem: "node", packages: ["fastify"] },
-  { id: "koa", title: "Koa", ecosystem: "node", packages: ["koa"] },
-  { id: "hono", title: "Hono", ecosystem: "node", packages: ["hono"] },
-  { id: "elysia", title: "Elysia", ecosystem: "node", packages: ["elysia"] },
-  { id: "nuxt", title: "Nuxt", ecosystem: "node", packages: ["nuxt"] },
-  { id: "sveltekit", title: "SvelteKit", ecosystem: "node", packages: ["@sveltejs/kit"] },
-  { id: "django", title: "Django", ecosystem: "python", packages: ["django"] },
-  { id: "flask", title: "Flask", ecosystem: "python", packages: ["flask"] },
-  { id: "fastapi", title: "FastAPI", ecosystem: "python", packages: ["fastapi"] },
-  { id: "tornado", title: "Tornado", ecosystem: "python", packages: ["tornado"] },
-  { id: "aiohttp", title: "aiohttp", ecosystem: "python", packages: ["aiohttp"] },
-  {
-    id: "spring",
-    title: "Spring Boot",
-    ecosystem: "java",
-    packages: ["spring-boot-starter-web", "spring-boot-starter-webflux", "spring-webmvc", "spring-webflux"]
-  },
-  { id: "quarkus", title: "Quarkus", ecosystem: "java", packages: ["quarkus-rest", "quarkus-resteasy", "quarkus-resteasy-reactive"] },
-  { id: "micronaut", title: "Micronaut", ecosystem: "java", packages: ["micronaut-http-server-netty"] },
-  { id: "gin", title: "Gin", ecosystem: "go", packages: ["github.com/gin-gonic/gin"] },
-  { id: "echo", title: "Echo", ecosystem: "go", packages: ["github.com/labstack/echo/v4", "github.com/labstack/echo"] },
-  { id: "fiber", title: "Fiber", ecosystem: "go", packages: ["github.com/gofiber/fiber/v2", "github.com/gofiber/fiber/v3"] },
-  { id: "chi", title: "chi", ecosystem: "go", packages: ["github.com/go-chi/chi/v5", "github.com/go-chi/chi"] },
-  { id: "rails", title: "Ruby on Rails", ecosystem: "ruby", packages: ["rails"] },
-  { id: "sinatra", title: "Sinatra", ecosystem: "ruby", packages: ["sinatra"] },
-  { id: "laravel", title: "Laravel", ecosystem: "php", packages: ["laravel/framework"] },
-  { id: "symfony", title: "Symfony", ecosystem: "php", packages: ["symfony/framework-bundle"] },
-  { id: "slim", title: "Slim", ecosystem: "php", packages: ["slim/slim"] }
+// src/stack.ts
+var ECOSYSTEM_LANGUAGES = {
+  node: ["javascript"],
+  deno: ["javascript"],
+  python: ["python"],
+  java: ["java", "kotlin", "scala"],
+  go: ["go"],
+  ruby: ["ruby"],
+  php: ["php"],
+  elixir: ["elixir"],
+  rust: ["rust"],
+  dotnet: ["csharp"]
+};
+var web = (id, title, ecosystem, deps, extra = {}) => ({
+  id,
+  title,
+  ecosystem,
+  kind: "web",
+  deps,
+  ...extra
+});
+var lib = (id, title, ecosystem, deps, extra = {}) => ({
+  id,
+  title,
+  ecosystem,
+  kind: "library",
+  deps,
+  ...extra
+});
+var STACK = [
+  // ── Node / Deno ───────────────────────────────────────────────────────────
+  web("nextjs", "Next.js", "node", { npm: ["next"] }, { label: "next.js" }),
+  web("express", "Express", "node", { npm: ["express"] }),
+  web("nestjs", "NestJS", "node", { npm: ["@nestjs/core"] }),
+  web("fastify", "Fastify", "node", { npm: ["fastify"] }),
+  web("koa", "Koa", "node", { npm: ["koa"] }),
+  web("hono", "Hono", "node", { npm: ["hono"], deno: ["hono", "@hono/hono"] }),
+  web("elysia", "Elysia", "node", { npm: ["elysia"] }),
+  web("hapi", "hapi", "node", { npm: ["@hapi/hapi", "hapi"] }),
+  web("restify", "restify", "node", { npm: ["restify"] }),
+  web("sails", "Sails", "node", { npm: ["sails"] }),
+  web("nuxt", "Nuxt", "node", { npm: ["nuxt"] }),
+  web("sveltekit", "SvelteKit", "node", { npm: ["@sveltejs/kit"] }),
+  web("fresh", "Fresh", "deno", { deno: ["fresh", "@fresh/core"] }),
+  web("oak", "Oak", "deno", { deno: ["oak", "@oak/oak"] }),
+  lib("next-auth", "NextAuth.js", "node", { npm: ["next-auth"] }),
+  lib("trpc", "tRPC", "node", { npm: ["@trpc/server"] }),
+  lib("drizzle", "Drizzle ORM", "node", { npm: ["drizzle-orm"] }),
+  lib("react", "React", "node", { npm: ["react"] }),
+  lib("vue", "Vue", "node", { npm: ["vue"] }),
+  lib("angular", "Angular", "node", { npm: ["@angular/core"] }),
+  lib("svelte", "Svelte", "node", { npm: ["svelte"] }),
+  lib("apollo", "Apollo Server", "node", { npm: ["apollo-server", "@apollo/server"] }),
+  lib("graphql", "GraphQL.js", "node", { npm: ["graphql"] }),
+  lib("socket.io", "Socket.IO", "node", { npm: ["socket.io"] }),
+  lib("mongoose", "Mongoose", "node", { npm: ["mongoose"] }),
+  lib("sequelize", "Sequelize", "node", { npm: ["sequelize"] }),
+  lib("prisma", "Prisma", "node", { npm: ["prisma", "@prisma/client"] }),
+  lib("knex", "Knex", "node", { npm: ["knex"] }),
+  lib("typeorm", "TypeORM", "node", { npm: ["typeorm"] }),
+  lib("passport", "Passport", "node", { npm: ["passport"] }),
+  lib("jwt", "jsonwebtoken", "node", { npm: ["jsonwebtoken"] }),
+  // ── Python ────────────────────────────────────────────────────────────────
+  web("django", "Django", "python", { pypi: ["django"] }),
+  web("flask", "Flask", "python", { pypi: ["flask"] }),
+  web("fastapi", "FastAPI", "python", { pypi: ["fastapi"] }),
+  web("starlette", "Starlette", "python", { pypi: ["starlette"] }),
+  web("sanic", "Sanic", "python", { pypi: ["sanic"] }),
+  web("tornado", "Tornado", "python", { pypi: ["tornado"] }),
+  web("aiohttp", "aiohttp", "python", { pypi: ["aiohttp"] }),
+  web("bottle", "Bottle", "python", { pypi: ["bottle"] }),
+  web("pyramid", "Pyramid", "python", { pypi: ["pyramid"] }),
+  web("quart", "Quart", "python", { pypi: ["quart"] }),
+  lib("sqlalchemy", "SQLAlchemy", "python", { pypi: ["sqlalchemy"] }),
+  // ── JVM ───────────────────────────────────────────────────────────────────
+  web("spring", "Spring Boot", "java", {
+    maven: ["spring-boot-starter-web", "spring-boot-starter-webflux", "spring-webmvc", "spring-webflux"]
+  }),
+  web("quarkus", "Quarkus", "java", { maven: ["quarkus-rest", "quarkus-resteasy", "quarkus-resteasy-reactive"] }),
+  web("micronaut", "Micronaut", "java", { maven: ["micronaut-http-server-netty"] }),
+  web("jersey", "Jersey", "java", { maven: ["jersey-server", "jersey-container-*"] }),
+  web("ktor", "Ktor", "java", { maven: ["ktor-server-core", "ktor-server-core-jvm", "ktor-server-netty", "ktor-server-netty-jvm"] }, { languages: ["kotlin"] }),
+  // ── Go ────────────────────────────────────────────────────────────────────
+  web("gin", "Gin", "go", { go: ["github.com/gin-gonic/gin"] }),
+  web("echo", "Echo", "go", { go: ["github.com/labstack/echo/v4", "github.com/labstack/echo"] }),
+  web("fiber", "Fiber", "go", { go: ["github.com/gofiber/fiber/v2", "github.com/gofiber/fiber/v3"] }),
+  web("chi", "chi", "go", { go: ["github.com/go-chi/chi/v5", "github.com/go-chi/chi"] }),
+  web("gorilla-mux", "gorilla/mux", "go", { go: ["github.com/gorilla/mux"] }, { label: "gorilla/mux" }),
+  web("net-http", "Go net/http", "go", {}, { codeImport: { registry: "go", extension: ".go", re: /^\s*(?:import\s+)?(?:\w+\s+)?"net\/http"\s*$/ } }),
+  lib("gorm", "GORM", "go", { go: ["gorm.io/gorm"] }),
+  // ── Ruby ──────────────────────────────────────────────────────────────────
+  web("rails", "Ruby on Rails", "ruby", { gem: ["rails"] }),
+  web("sinatra", "Sinatra", "ruby", { gem: ["sinatra"] }),
+  web("hanami", "Hanami", "ruby", { gem: ["hanami"] }),
+  lib("sequel", "Sequel", "ruby", { gem: ["sequel"] }),
+  // ── PHP ───────────────────────────────────────────────────────────────────
+  web("laravel", "Laravel", "php", { composer: ["laravel/framework"] }),
+  web("symfony", "Symfony", "php", { composer: ["symfony/framework-bundle"] }),
+  web("slim", "Slim", "php", { composer: ["slim/slim"] }),
+  // ── Elixir ────────────────────────────────────────────────────────────────
+  web("phoenix", "Phoenix", "elixir", { hex: ["phoenix"] }),
+  lib("plug", "Plug", "elixir", { hex: ["plug", "plug_cowboy"] }),
+  lib("ecto", "Ecto", "elixir", { hex: ["ecto", "ecto_sql"] }),
+  // ── Rust ──────────────────────────────────────────────────────────────────
+  web("actix-web", "actix-web", "rust", { cargo: ["actix-web"] }),
+  web("axum", "axum", "rust", { cargo: ["axum"] }),
+  web("rocket", "Rocket", "rust", { cargo: ["rocket"] }),
+  web("warp", "warp", "rust", { cargo: ["warp"] }),
+  web("tide", "tide", "rust", { cargo: ["tide"] }),
+  lib("diesel", "Diesel", "rust", { cargo: ["diesel"] }),
+  lib("sqlx", "SQLx", "rust", { cargo: ["sqlx"] }),
+  // ── .NET ──────────────────────────────────────────────────────────────────
+  // `Microsoft.NET.Sdk.Web` is the project SDK every ASP.NET Core app declares;
+  // the reader surfaces it as a dependency so it matches like any other.
+  web("aspnetcore", "ASP.NET Core", "dotnet", { nuget: ["microsoft.net.sdk.web", "microsoft.aspnetcore.*"] })
 ];
-var GO_STDLIB = { id: "net-http", title: "Go net/http", ecosystem: "go", packages: [] };
-var FRAMEWORK_IDS = [...FRAMEWORKS.map((f) => f.id), GO_STDLIB.id];
+function languagesOf(entry2) {
+  return entry2.languages ?? ECOSYSTEM_LANGUAGES[entry2.ecosystem];
+}
+function ecosystemOfLanguage(lang) {
+  return Object.entries(ECOSYSTEM_LANGUAGES).find(([eco, langs]) => eco !== "deno" && langs.includes(lang))?.[0];
+}
+var ROUTE_EVIDENCE = {
+  javascript: [
+    /\b(?!(?:axios|fetch|http|https|client|request|got|ky|superagent|instance|\$http)\b)[A-Za-z_$][\w$]*\s*\.\s*(?:get|post|put|patch|delete|all|route)\s*\(\s*["'`]\/[^"'`]*["'`]\s*,\s*(?:async\b|function\b|\([^)]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>)/,
+    /\bmethod\s*:\s*["'](?:GET|POST|PUT|PATCH|DELETE)["']\s*,\s*path\s*:\s*["']\//i
+  ],
+  python: [/^\s*@\w+(?:\.\w+)*\.(?:get|post|put|patch|delete|route|api_route|websocket)\s*\(\s*["']\//],
+  ruby: [/^\s*(?:get|post|put|patch|delete)\s+["']\/[^"']*["']\s*(?:,|do\b|\{)/],
+  // A router line, or a controller action — `def index(conn, params)` IS an endpoint.
+  elixir: [/^\s*(?:get|post|put|patch|delete)\s+"\/[^"]*"\s*,\s*[A-Z]\w*/, /^\s*def\s+\w+\s*\(\s*conn\s*,\s*(?:_?\w*params\b|%\{)/],
+  php: [/(?:->|::)\s*(?:get|post|put|patch|delete|any|map)\s*\(\s*["']\/[^"']*["']\s*,\s*(?:function\b|fn\b|\[|[A-Z]\w*::class)/],
+  go: [/\.\s*(?:HandleFunc|Handle|GET|POST|PUT|PATCH|DELETE|Get|Post|Put|Patch|Delete)\s*\(\s*"\/[^"]*"\s*,/],
+  rust: [/#\[\s*(?:get|post|put|patch|delete)\s*\(\s*"\//, /\.route\s*\(\s*"\/[^"]*"\s*,/],
+  csharp: [/\.Map(?:Get|Post|Put|Patch|Delete)\s*\(\s*"\//, /\[Http(?:Get|Post|Put|Patch|Delete)\s*\(\s*"/],
+  java: [/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/, /@(?:GET|POST|PUT|DELETE|PATCH)\b/, /@Path\s*\(\s*"\//],
+  kotlin: [/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/, /^\s*(?:get|post|put|patch|delete)\s*\(\s*"\/[^"]*"\s*\)\s*\{/],
+  scala: [/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/, /@Path\s*\(\s*"\//]
+};
+var HTTP_DEPENDENCY = /(?:^|[/@._-])(?:http|https|web|rest|router|routing|server|mvc)(?:[/._-]|$)/i;
+var NOT_A_SERVER = /^@types\/|(?:^|[/@._-])(?:client|fetch|axios|proxy|errors?|status(?:es)?|vitals|tests?|testing|mocks?|types?|parser|cache|cookies?|signature|socket|websockets?|webpack|devserver|dev-server)(?:[/._-]|$)/i;
+
+// src/frameworks.ts
+var FRAMEWORKS = STACK.filter((e) => e.kind === "web");
+var FRAMEWORK_IDS = FRAMEWORKS.map((f) => f.id);
 var normPy = (n) => n.toLowerCase().replace(/[-_.]+/g, "-");
 function floorOf2(spec) {
   const m = /(\d+(?:\.\d+){0,3}(?:-[\w.]+)?)/.exec(spec ?? "");
@@ -35704,18 +36742,25 @@ function readPom(text) {
     const m = /<artifactId>\s*([^<\s]+)\s*<\/artifactId>/.exec(l);
     if (!m) return;
     const own2 = lines5.slice(i2, i2 + 4).join("\n").match(/<version>\s*([^<\s$]+)\s*<\/version>/)?.[1];
-    const boot = m[1].startsWith("spring-boot");
-    out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: (boot ? own2 : void 0) ?? parent ?? bootProp });
+    out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: jvmVersion(m[1], own2, parent ?? bootProp) });
   });
   return out2;
 }
-function readGradle(text) {
+function jvmVersion(artifact, own2, boot) {
+  if (artifact.startsWith("spring-boot")) return own2 ?? boot;
+  if (artifact.startsWith("spring-")) return boot;
+  return own2;
+}
+function readGradle(text, props = {}) {
   const lines5 = text.split(/\r?\n/);
   const plugin = /id\s*\(?\s*["']org\.springframework\.boot["']\s*\)?\s*version\s*["']([^"']+)["']/.exec(text)?.[1];
   const out2 = [];
   lines5.forEach((l, i2) => {
-    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([\w.-]+))?["']/g))
-      out2.push({ name: m[2].toLowerCase(), line: i2 + 1, spec: (m[2].startsWith("spring-boot") ? m[3] : void 0) ?? plugin });
+    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([^"'\s]+))?["']/g)) {
+      const raw = m[3];
+      const own2 = raw?.startsWith("$") ? props[raw.replace(/^\$\{?|\}$/g, "")] : raw;
+      out2.push({ name: m[2].toLowerCase(), line: i2 + 1, spec: jvmVersion(m[2], own2, plugin) });
+    }
   });
   return out2;
 }
@@ -35759,15 +36804,69 @@ function readComposer(text) {
   }
   return out2;
 }
+function readMix(text) {
+  const out2 = [];
+  text.split(/\r?\n/).forEach((l, i2) => {
+    for (const m of l.matchAll(/\{\s*:([a-z0-9_]+)\s*,\s*"([^"]+)"/g)) out2.push({ name: m[1], line: i2 + 1, spec: m[2] });
+  });
+  return out2;
+}
+function readCargo(text) {
+  const out2 = [];
+  let inDeps = false;
+  text.split(/\r?\n/).forEach((raw, i2) => {
+    const l = raw.replace(/#.*$/, "");
+    const table = /^\s*\[([^\]]+)\]/.exec(l);
+    if (table) {
+      inDeps = /(?:^|\.)(?:dev-|build-)?dependencies$/.test(table[1].trim());
+      return;
+    }
+    if (!inDeps) return;
+    const kv = /^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|\{[^}]*?version\s*=\s*"([^"]*)")?/.exec(l);
+    if (kv) out2.push({ name: kv[1].toLowerCase(), line: i2 + 1, spec: kv[2] ?? kv[3] });
+  });
+  return out2;
+}
+function readCsproj(text) {
+  const lines5 = text.split(/\r?\n/);
+  const out2 = [];
+  const target = /<TargetFrameworks?>\s*net(\d+\.\d+)/.exec(text)?.[1];
+  lines5.forEach((l, i2) => {
+    const sdk = /<Project\s+Sdk\s*=\s*"([^"]+)"/.exec(l);
+    if (sdk) out2.push({ name: sdk[1].toLowerCase(), line: i2 + 1, spec: target, toolchain: true });
+    for (const m of l.matchAll(/<PackageReference\s+Include\s*=\s*"([^"]+)"(?:\s+Version\s*=\s*"([^"]+)")?/g))
+      out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: m[2] });
+  });
+  return out2;
+}
+function readDeno(text) {
+  const lines5 = text.split(/\r?\n/);
+  const out2 = [];
+  lines5.forEach((l, i2) => {
+    for (const m of l.matchAll(/"(?:https?:\/\/deno\.land\/x\/([\w-]+)@([^/"]+)|(?:jsr|npm):(@?[\w.-]+(?:\/[\w.-]+)?)@([^/"]+))/g))
+      out2.push({ name: (m[1] ?? m[3]).toLowerCase(), line: i2 + 1, spec: m[2] ?? m[4] });
+  });
+  return out2;
+}
+function gradleProps(buildAbs) {
+  const text = readIfExists(join42(buildAbs, "..", "gradle.properties"));
+  const out2 = {};
+  for (const m of (text ?? "").matchAll(/^\s*([\w.-]+)\s*=\s*(\S+)\s*$/gm)) out2[m[1]] = m[2];
+  return out2;
+}
 var MANIFESTS = [
-  { ecosystem: "node", match: /(?:^|\/)package\.json$/, read: readPackageJson },
-  { ecosystem: "python", match: /(?:^|\/)requirements[\w.-]*\.(?:txt|in)$/, read: readRequirements },
-  { ecosystem: "python", match: /(?:^|\/)(?:pyproject\.toml|Pipfile)$/, read: readPyToml },
-  { ecosystem: "java", match: /(?:^|\/)pom\.xml$/, read: readPom },
-  { ecosystem: "java", match: /(?:^|\/)build\.gradle(?:\.kts)?$/, read: readGradle },
-  { ecosystem: "go", match: /(?:^|\/)go\.mod$/, read: readGoMod },
-  { ecosystem: "ruby", match: /(?:^|\/)Gemfile$/, read: readGemfile },
-  { ecosystem: "php", match: /(?:^|\/)composer\.json$/, read: readComposer }
+  { registry: "npm", match: /(?:^|\/)package\.json$/, read: readPackageJson },
+  { registry: "pypi", match: /(?:^|\/)requirements[\w.-]*\.(?:txt|in)$/, read: readRequirements },
+  { registry: "pypi", match: /(?:^|\/)(?:pyproject\.toml|Pipfile|setup\.py)$/, read: readPyToml },
+  { registry: "maven", match: /(?:^|\/)pom\.xml$/, read: readPom },
+  { registry: "maven", match: /(?:^|\/)build\.gradle(?:\.kts)?$/, read: (text, abs) => readGradle(text, gradleProps(abs)) },
+  { registry: "go", match: /(?:^|\/)go\.mod$/, read: readGoMod },
+  { registry: "gem", match: /(?:^|\/)Gemfile$/, read: readGemfile },
+  { registry: "composer", match: /(?:^|\/)composer\.json$/, read: readComposer },
+  { registry: "hex", match: /(?:^|\/)mix\.exs$/, read: readMix },
+  { registry: "cargo", match: /(?:^|\/)Cargo\.toml$/, read: readCargo },
+  { registry: "nuget", match: /\.csproj$/, read: readCsproj },
+  { registry: "deno", match: /(?:^|\/)deno\.jsonc?$/, read: readDeno }
 ];
 function readIfExists(abs) {
   try {
@@ -35795,6 +36894,14 @@ function pythonLocked(absDir, name2) {
   }
   return void 0;
 }
+function hexLocked(absDir, name2) {
+  const text = readIfExists(join42(absDir, "mix.lock"));
+  return text ? new RegExp(`"${esc(name2)}"\\s*:\\s*\\{\\s*:hex\\s*,\\s*:${esc(name2)}\\s*,\\s*"([^"]+)"`).exec(text)?.[1] : void 0;
+}
+function cargoLocked(absDir, name2) {
+  const text = readIfExists(join42(absDir, "Cargo.lock"));
+  return text ? new RegExp(`^name\\s*=\\s*"${esc(name2)}"\\s*\\r?\\nversion\\s*=\\s*"([^"]+)"`, "m").exec(text)?.[1] : void 0;
+}
 function rubyLocked(absDir, name2) {
   const text = readIfExists(join42(absDir, "Gemfile.lock"));
   return text ? new RegExp(`^ {4}${esc(name2)} \\(([^)]+)\\)`, "m").exec(text)?.[1] : void 0;
@@ -35812,21 +36919,44 @@ function composerLocked(absDir, name2) {
 function resolveVersion(repo, kind, manifestRel, dir, d) {
   const absDir = join42(repo, dir);
   let locked;
-  if (kind.ecosystem === "node") {
-    const inst = installedVersions(repo, manifestRel, d.name);
-    if (inst?.versions.length) locked = [...inst.versions].sort(compareVersions).at(-1);
-    if (!locked) {
-      const range = declaredRange(repo, manifestRel, d.name) ?? d.spec;
-      const floor2 = floorOf2(range);
-      return floor2 ? { version: floor2, versionSource: "declared" } : {};
+  switch (kind.registry) {
+    case "npm": {
+      const inst = installedVersions(repo, manifestRel, d.name);
+      if (inst?.versions.length) locked = [...inst.versions].sort(compareVersions).at(-1);
+      if (!locked) {
+        const floor2 = floorOf2(declaredRange(repo, manifestRel, d.name) ?? d.spec);
+        return floor2 ? { version: floor2, versionSource: "declared" } : {};
+      }
+      break;
     }
-  } else if (kind.ecosystem === "python") locked = pythonLocked(absDir, d.name);
-  else if (kind.ecosystem === "ruby") locked = rubyLocked(absDir, d.name);
-  else if (kind.ecosystem === "php") locked = composerLocked(absDir, d.name);
-  else if (kind.ecosystem === "go" && d.spec) locked = d.spec;
+    case "pypi":
+      locked = pythonLocked(absDir, d.name);
+      break;
+    case "gem":
+      locked = rubyLocked(absDir, d.name);
+      break;
+    case "composer":
+      locked = composerLocked(absDir, d.name);
+      break;
+    case "hex":
+      locked = hexLocked(absDir, d.name);
+      break;
+    case "cargo":
+      locked = cargoLocked(absDir, d.name);
+      break;
+    // go.mod pins an exact minimum version: it is what the build selects.
+    case "go":
+      locked = d.spec;
+      break;
+    default:
+      break;
+  }
   if (locked) return { version: locked, versionSource: "lockfile" };
   const floor = floorOf2(d.spec);
-  return floor ? { version: floor, versionSource: "declared" } : {};
+  return floor ? { version: floor, versionSource: d.toolchain ? "toolchain" : "declared" } : {};
+}
+function nameMatches(declared, names) {
+  return names.some((n) => n.endsWith("*") ? declared.startsWith(n.slice(0, -1)) : declared === n);
 }
 var dirOf8 = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/")) : "";
 function detectFrameworks(repo, prune, tree) {
@@ -35843,34 +36973,118 @@ function detectFrameworks(repo, prune, tree) {
     const text = read(wf.abs);
     if (!text) continue;
     const dir = dirOf8(wf.rel);
-    const declared = kind.read(text);
-    for (const def of FRAMEWORKS) {
-      if (def.ecosystem !== kind.ecosystem) continue;
-      const d = declared.find((x) => def.packages.includes(kind.ecosystem === "python" ? normPy(x.name) : x.name));
-      if (!d) continue;
-      add3({ id: def.id, title: def.title, ecosystem: def.ecosystem, dir, ...resolveVersion(repo, kind, wf.rel, dir, d), evidence: `${wf.rel}:${d.line}` });
-    }
-    if (kind.ecosystem === "go") {
-      const prefix = dir ? `${dir}/` : "";
-      for (const g of files) {
-        if (!g.rel.endsWith(".go") || !g.rel.startsWith(prefix) || g.rel.endsWith("_test.go")) continue;
-        const lines5 = read(g.abs).split(/\r?\n/);
-        const at = lines5.findIndex((l) => /^\s*(?:import\s+)?(?:\w+\s+)?"net\/http"\s*$/.test(l));
-        if (at < 0) continue;
-        const goLine = /^go\s+(\d+(?:\.\d+)*)/m.exec(text);
-        add3({
-          id: GO_STDLIB.id,
-          title: GO_STDLIB.title,
-          ecosystem: "go",
-          dir,
-          ...goLine ? { version: goLine[1], versionSource: "toolchain" } : {},
-          evidence: `${g.rel}:${at + 1}`
-        });
-        break;
+    const declared = kind.read(text, wf.abs);
+    for (const entry2 of STACK) {
+      const names = entry2.deps[kind.registry];
+      if (names?.length) {
+        const d = declared.find((x) => nameMatches(kind.registry === "pypi" ? normPy(x.name) : x.name, names));
+        if (d) add3(detected(entry2, dir, resolveVersion(repo, kind, wf.rel, dir, d), `${wf.rel}:${d.line}`));
+      }
+      if (entry2.codeImport?.registry === kind.registry) {
+        const prefix = dir ? `${dir}/` : "";
+        for (const g of files) {
+          if (!g.rel.endsWith(entry2.codeImport.extension) || !g.rel.startsWith(prefix) || isTestPath(g.rel)) continue;
+          const lines5 = read(g.abs).split(/\r?\n/);
+          const at = lines5.findIndex((l) => entry2.codeImport.re.test(l));
+          if (at < 0) continue;
+          const goLine = /^go\s+(\d+(?:\.\d+)*)/m.exec(text);
+          add3(detected(entry2, dir, goLine ? { version: goLine[1], versionSource: "toolchain" } : {}, `${g.rel}:${at + 1}`));
+          break;
+        }
       }
     }
   }
   return [...byPackage.values()].sort((a, b) => byStr(a.dir, b.dir) || byStr(a.id, b.id));
+}
+function detected(entry2, dir, version, evidence) {
+  return {
+    id: entry2.id,
+    title: entry2.title,
+    ecosystem: entry2.ecosystem,
+    ...entry2.kind === "library" ? { kind: "library" } : {},
+    dir,
+    ...version,
+    evidence,
+    ...entry2.languages ? { languages: entry2.languages } : {}
+  };
+}
+function webFrameworks(stack) {
+  return stack.filter((f) => f.kind !== "library");
+}
+function stackLabels(stack) {
+  const label = new Map(STACK.map((e) => [e.id, e.label ?? e.id]));
+  return [...new Set(stack.map((f) => label.get(f.id) ?? f.id))].sort(byStr);
+}
+var REGISTRY_ECOSYSTEM = {
+  npm: "node",
+  pypi: "python",
+  maven: "java",
+  go: "go",
+  gem: "ruby",
+  composer: "php",
+  hex: "elixir",
+  cargo: "rust",
+  nuget: "dotnet",
+  deno: "deno"
+};
+var COMMENT_LINE = /^\s*(?:\/\/|#(?!\[)|\*|\/\*|--)/;
+function inferUnknownFrameworks(repo, stack, prune, tree) {
+  const read = tree?.read ?? readText2;
+  const files = (tree?.files ?? walk2(repo)).filter((f) => !prune?.(f.rel));
+  const known = new Set(STACK.flatMap((e) => Object.values(e.deps).flat()));
+  const webDirs = stack.filter((f) => f.kind !== "library").map((f) => f.dir);
+  const covered = (dir) => webDirs.some((w) => w === "" || w === dir || dir.startsWith(`${w}/`));
+  const packages = /* @__PURE__ */ new Map();
+  for (const wf of files) {
+    const kind = MANIFESTS.find((k) => k.match.test(wf.rel));
+    if (!kind) continue;
+    const dir = dirOf8(wf.rel);
+    const pkg = packages.get(dir) ?? { ecosystem: REGISTRY_ECOSYSTEM[kind.registry] };
+    if (!pkg.httpDep) {
+      const text = read(wf.abs);
+      const dep = text ? kind.read(text, wf.abs).map((d) => d.name).find((n) => HTTP_DEPENDENCY.test(n) && !NOT_A_SERVER.test(n) && !nameMatches(n, [...known])) : void 0;
+      if (dep) pkg.httpDep = dep;
+    }
+    packages.set(dir, pkg);
+  }
+  const dirs = [...packages.keys()].sort((a, b) => b.length - a.length);
+  const packageOf = (rel2) => dirs.find((d) => d === "" || rel2.startsWith(`${d}/`)) ?? "";
+  const evidence = /* @__PURE__ */ new Map();
+  for (const wf of files) {
+    const spec = langForFile(wf.rel);
+    if (!spec || isTestPath(wf.rel)) continue;
+    const dir = packageOf(wf.rel);
+    if (covered(dir)) continue;
+    const content = read(wf.abs);
+    if (!content) continue;
+    const lines5 = content.split(/\r?\n/);
+    const shapes = ROUTE_EVIDENCE[spec.id] ?? [];
+    const hits = /* @__PURE__ */ new Set();
+    lines5.forEach((l, i2) => {
+      if (!COMMENT_LINE.test(l) && shapes.some((re) => re.test(l))) hits.add(i2 + 1);
+    });
+    for (const h of findSources(spec, content, wf.rel)) if (h.kind === "http" && !COMMENT_LINE.test(lines5[h.line - 1] ?? "")) hits.add(h.line);
+    if (!hits.size) continue;
+    const first = Math.min(...hits);
+    const e = evidence.get(dir);
+    if (!e) evidence.set(dir, { count: hits.size, at: `${wf.rel}:${first}`, line: first, lang: spec.id });
+    else e.count += hits.size;
+  }
+  const out2 = [];
+  for (const [dir, e] of evidence) {
+    const pkg = packages.get(dir);
+    if (e.count < 2 && !pkg?.httpDep) continue;
+    out2.push({
+      id: "unknown",
+      title: pkg?.httpDep ? `unknown web framework (\`${pkg.httpDep}\`?)` : "unknown web framework",
+      ecosystem: pkg?.ecosystem ?? ecosystemOfLanguage(e.lang) ?? "node",
+      kind: "inferred",
+      dir,
+      evidence: e.at,
+      languages: [e.lang]
+    });
+  }
+  return out2.sort((a, b) => byStr(a.dir, b.dir));
 }
 function satisfies(version, range) {
   const v = version.replace(/^v/, "");
@@ -35905,33 +37119,86 @@ function huntId(cell) {
 function needsHunt(cell) {
   return cell.state !== "not-applicable" && (cell.state !== "deterministic" || cell.degraded !== void 0);
 }
-function classCoverage(frameworks, packs = PACKS) {
+function rulesFor(p, c2, languages) {
+  const cov = p.classes[c2];
+  return !!cov && "rules" in cov && cov.rules.some((r) => r.languages.some((l) => languages.includes(l)));
+}
+function readsAny(p, languages) {
+  return Object.keys(p.classes).some((c2) => rulesFor(p, c2, languages));
+}
+var nests = (a, b) => a === b || a === "" || b === "" || b.startsWith(`${a}/`) || a.startsWith(`${b}/`);
+var outside = (f, p) => p.testedWith && f.version && !satisfies(f.version, p.testedWith) ? `${f.title} ${f.version} is outside ${p.id} testedWith ${p.testedWith}` : void 0;
+function attachedLibraries(f, libraries) {
+  const languages = languagesOf(f);
+  return libraries.filter((l) => nests(l.dir, f.dir) && languages.some((x) => languagesOf(l).includes(x)));
+}
+function catalogCell(f, libs, idioms) {
+  const base = { class: CATALOG_ROW, framework: f.id, ecosystem: f.ecosystem, dir: f.dir, ...f.version ? { version: f.version } : {} };
+  const languages = languagesOf(f);
+  const owners = f.kind === "inferred" ? libs : [f, ...libs];
+  const mine = idioms.filter((i2) => owners.some((o) => o.id === i2.framework));
+  if (!mine.length) {
+    const generic = languages.filter((l) => genericRequestSources(l).length);
+    const noLabel = f.kind === "inferred" ? `${f.title} \u2014 no catalog row can know it` : `no ${f.title} input or route idiom in the taint catalog`;
+    return generic.length ? { ...base, state: "deterministic", packs: ["catalog"], degraded: `${noLabel} \u2014 only the generic ${generic.join("/")} request shapes` } : { ...base, state: "not-covered", packs: [], degraded: `${noLabel}, and no generic ${languages.join("/")} request shape either` };
+  }
+  const why = [];
+  for (const o of owners) {
+    if (!o.version) continue;
+    const off = [...new Set(mine.filter((i2) => i2.framework === o.id && !satisfies(o.version, i2.testedWith)).map((i2) => `${i2.title} (${i2.testedWith})`))];
+    if (off.length) why.push(`${o.title} ${o.version} is outside the catalog's testedWith for ${off.join(", ")}`);
+  }
+  return { ...base, state: "deterministic", packs: ["catalog"], ...why.length ? { degraded: why.join("; ") } : {} };
+}
+function classCoverage(stack, packs = PACKS, idioms = catalogIdioms()) {
   const cells = [];
-  for (const f of frameworks) {
-    const fwPack = packs.find((p) => p.framework === f.id);
-    const ecoPacks = packs.filter((p) => !p.framework && (p.ecosystem === f.ecosystem || p.ecosystem === "*"));
-    const outOfRange = fwPack?.testedWith && f.version && !satisfies(f.version, fwPack.testedWith) ? fwPack.testedWith : void 0;
+  const libraries = stack.filter((f) => f.kind === "library");
+  for (const f of stack) {
+    if (f.kind === "library") continue;
+    const languages = languagesOf(f);
+    const fwPack = f.kind === "inferred" ? void 0 : packs.find((p) => p.framework === f.id);
+    const libs = attachedLibraries(f, libraries);
+    const libPacks = libs.flatMap((l) => packs.filter((p) => p.library === l.id).map((p) => ({ lib: l, pack: p })));
+    const langPacks = packs.filter((p) => !p.framework && !p.library && readsAny(p, languages));
+    const columnOutOfRange = fwPack ? outside(f, fwPack) : void 0;
+    const noPack = f.kind === "inferred" ? `${f.title} \u2014 no pack can know it` : `no ${f.title} pack`;
     for (const c2 of CLASS_LIST) {
       const base = { class: c2.id, framework: f.id, ecosystem: f.ecosystem, dir: f.dir, ...f.version ? { version: f.version } : {} };
-      const considered = [...fwPack ? [fwPack] : [], ...ecoPacks];
-      const ruled = considered.filter((p) => {
-        const cov = p.classes[c2.id];
-        return cov && "rules" in cov && cov.rules.length > 0;
-      });
-      const na = considered.map((p) => p.classes[c2.id]).find((cov) => cov && "notApplicable" in cov);
+      const considered = [...fwPack ? [fwPack] : [], ...libPacks.map((x) => x.pack), ...langPacks];
+      const ruled = considered.filter((p) => rulesFor(p, c2.id, languages));
+      const declared = considered.map((p) => p.classes[c2.id]).filter((cov) => cov && !("rules" in cov));
+      const na = declared.find((cov) => cov && "notApplicable" in cov);
       if (!ruled.length && na && "notApplicable" in na) {
         cells.push({ ...base, state: "not-applicable", packs: [], reason: na.notApplicable });
         continue;
       }
+      const why = [];
+      const fwWord = fwPack?.classes[c2.id];
+      if (ruled.length && fwWord && "hunt" in fwWord) why.push(fwWord.hunt);
+      if (columnOutOfRange) why.push(columnOutOfRange);
+      for (const { lib: lib2, pack } of libPacks) {
+        const off = ruled.includes(pack) ? outside(lib2, pack) : void 0;
+        if (off) why.push(off);
+      }
       if (!ruled.length) {
-        cells.push({ ...base, state: "not-covered", packs: [], degraded: fwPack ? `pack ${fwPack.id} has no idiom for this class` : `no ${f.title} pack` });
+        const hunt = declared.find((cov) => cov && "hunt" in cov);
+        const reason = hunt && "hunt" in hunt ? hunt.hunt : fwPack ? `pack ${fwPack.id} has no idiom for this class` : noPack;
+        cells.push({ ...base, state: "not-covered", packs: [], degraded: [reason, ...why].join("; ") });
         continue;
       }
-      const degraded = !fwPack ? `no ${f.title} pack \u2014 only the ${f.ecosystem} language idioms ran` : outOfRange && ruled.includes(fwPack) ? `${f.title} ${f.version} is outside ${fwPack.id} testedWith ${outOfRange}` : void 0;
-      cells.push({ ...base, state: "deterministic", packs: ruled.map((p) => p.id), ...degraded ? { degraded } : {} });
+      if (!fwPack)
+        why.unshift(
+          `${noPack} \u2014 only the ${[...new Set(ruled.map((p) => p.ecosystem === "*" ? "language-agnostic" : p.ecosystem))].join("/")} language idioms ran`
+        );
+      cells.push({ ...base, state: "deterministic", packs: ruled.map((p) => p.id), ...why.length ? { degraded: why.join("; ") } : {} });
     }
+    cells.push(catalogCell(f, libs, idioms));
   }
   return cells;
+}
+function matrixStack(stack, inferred = [], packs = PACKS) {
+  const libraryIds = /* @__PURE__ */ new Set([...packs.flatMap((p) => p.library ? [p.library] : []), ...catalogIdioms().map((i2) => i2.framework)]);
+  return [...stack.filter((f) => f.kind !== "library"), ...inferred, ...stack.filter((f) => f.kind === "library" && libraryIds.has(f.id))];
 }
 function huntProgress(run2) {
   const emitted = /* @__PURE__ */ new Set();
@@ -35978,7 +37245,7 @@ function renderClassCoverageMd(cells) {
   L.push("");
   L.push(`| class | ${columns.map((c2) => `${c2.framework}${c2.version ? ` ${c2.version}` : ""}${c2.dir ? ` (\`${c2.dir}\`)` : ""}`).join(" | ")} |`);
   L.push(`|---|${columns.map(() => "---").join("|")}|`);
-  for (const cls of CLASS_LIST) {
+  for (const cls of MATRIX_ROWS) {
     const row = columns.map((col) => {
       const cell = cells.find((c2) => c2.class === cls.id && c2.framework === col.framework && c2.dir === col.dir);
       return cell ? `${MARK[cell.state]}${cell.degraded ? " \u26A0" : ""}` : "\u2014";
@@ -38060,174 +39327,72 @@ var ADAPTERS = [
 
 // src/context.ts
 import { existsSync as existsSync27, readFileSync as readFileSync31 } from "fs";
-import { join as join55, resolve as resolve16 } from "path";
+import { join as join55 } from "path";
+
+// src/classes/markers.ts
+var AUTH_FLOOR = {
+  words: [
+    "requireAuth",
+    "requiresAuth",
+    "isAuthenticated",
+    "ensureAuthenticated",
+    "ensureLoggedIn",
+    "ensureLogin",
+    "requireLogin",
+    "checkAuth",
+    "verifyToken",
+    "verifyJwt",
+    "jwtVerify",
+    "authenticateToken",
+    "authMiddleware",
+    "requireRole",
+    "requireAdmin",
+    "hasRole",
+    "hasPermission",
+    "checkPermission",
+    "authorize",
+    "authorization"
+  ]
+};
+var THROTTLE_FLOOR = {
+  patterns: [
+    /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/
+  ]
+};
+var FLOOR = { auth: AUTH_FLOOR, throttle: THROTTLE_FLOOR };
+var packActive = (p, detected2) => !p.framework && !p.library || detected2.has(p.framework ?? "") || detected2.has(p.library ?? "");
+function markerFor(lens, detected2 = [], packs = PACKS) {
+  const on = new Set(detected2);
+  const parts2 = [FLOOR[lens]];
+  for (const p of packs) {
+    const g = p.markers?.global?.[lens];
+    if (g) parts2.push(g);
+  }
+  for (const p of packs) {
+    const d = p.markers?.detected?.[lens];
+    if (d && packActive(p, on)) parts2.push(d);
+  }
+  const words = parts2.flatMap((v) => v.words ?? []);
+  const annotations = parts2.flatMap((v) => v.annotations ?? []);
+  const patterns = parts2.flatMap((v) => v.patterns ?? []);
+  const alts = [];
+  if (words.length) alts.push(`\\b(${words.join("|")})\\b`);
+  if (annotations.length) alts.push(`(?<![\\w@])@(?:${annotations.join("|")})\\b`);
+  for (const re of patterns) alts.push(re.source);
+  return new RegExp(alts.join("|"));
+}
+function detectedIds(stack) {
+  return (stack ?? []).map((f) => f.id);
+}
+
+// src/context.ts
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
-var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|getServerSession|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
-var THROTTLE_MARKER = /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
-var JS_FRAMEWORKS = {
-  express: "express",
-  koa: "koa",
-  fastify: "fastify",
-  "@nestjs/core": "nestjs",
-  next: "next.js",
-  nuxt: "nuxt",
-  "@hapi/hapi": "hapi",
-  hapi: "hapi",
-  sails: "sails",
-  restify: "restify",
-  react: "react",
-  vue: "vue",
-  "@angular/core": "angular",
-  svelte: "svelte",
-  "apollo-server": "apollo",
-  graphql: "graphql",
-  "socket.io": "socket.io",
-  mongoose: "mongoose",
-  sequelize: "sequelize",
-  prisma: "prisma",
-  knex: "knex",
-  typeorm: "typeorm",
-  passport: "passport",
-  jsonwebtoken: "jwt"
-};
-var PY_RULES = [
-  [/\bflask\b/i, "flask"],
-  [/\bdjango\b/i, "django"],
-  [/\bfastapi\b/i, "fastapi"],
-  [/\btornado\b/i, "tornado"],
-  [/\bbottle\b/i, "bottle"],
-  [/\bpyramid\b/i, "pyramid"],
-  [/\bsanic\b/i, "sanic"],
-  [/\baiohttp\b/i, "aiohttp"],
-  [/\bsqlalchemy\b/i, "sqlalchemy"]
-];
-var TEXT_MANIFESTS = [
-  {
-    file: "requirements.txt",
-    rules: PY_RULES
-  },
-  // Same rules, the manifests modern Python actually uses. requirements.txt alone
-  // reported "none detected" on any Poetry/PDM/uv or setuptools project.
-  {
-    file: "pyproject.toml",
-    rules: PY_RULES
-  },
-  {
-    file: "Pipfile",
-    rules: PY_RULES
-  },
-  {
-    file: "setup.py",
-    rules: PY_RULES
-  },
-  {
-    file: "Cargo.toml",
-    rules: [
-      [/^\s*actix-web\s*=/m, "actix-web"],
-      [/^\s*axum\s*=/m, "axum"],
-      [/^\s*rocket\s*=/m, "rocket"],
-      [/^\s*warp\s*=/m, "warp"],
-      [/^\s*tide\s*=/m, "tide"],
-      [/^\s*diesel\s*=/m, "diesel"],
-      [/^\s*sqlx\s*=/m, "sqlx"]
-    ]
-  },
-  {
-    file: "build.gradle.kts",
-    rules: [[/org\.springframework/, "spring"]]
-  },
-  {
-    file: "mix.exs",
-    rules: [
-      [/:phoenix\b/, "phoenix"],
-      [/:plug\b/, "plug"],
-      [/:ecto\b/, "ecto"]
-    ]
-  },
-  {
-    file: "deno.json",
-    rules: [
-      [/\boak\b/, "oak"],
-      [/\bfresh\b/, "fresh"]
-    ]
-  },
-  {
-    file: "go.mod",
-    rules: [
-      [/gin-gonic\/gin/, "gin"],
-      [/labstack\/echo/, "echo"],
-      [/gofiber\/fiber/, "fiber"],
-      [/go-chi\/chi/, "chi"],
-      [/gorilla\/mux/, "gorilla/mux"],
-      [/gorm\.io\/gorm/, "gorm"]
-    ]
-  },
-  {
-    file: "Gemfile",
-    rules: [
-      [/\brails\b/i, "rails"],
-      [/\bsinatra\b/i, "sinatra"],
-      [/\bsequel\b/i, "sequel"],
-      [/\bhanami\b/i, "hanami"]
-    ]
-  },
-  {
-    file: "composer.json",
-    rules: [
-      [/laravel\/framework/, "laravel"],
-      [/symfony\//, "symfony"],
-      [/slim\/slim/, "slim"]
-    ]
-  },
-  {
-    file: "build.gradle",
-    rules: [[/springframework|org\.springframework|spring-boot/i, "spring"]]
-  },
-  {
-    file: "pom.xml",
-    rules: [
-      [/springframework/i, "spring"],
-      [/jersey/i, "jersey"]
-    ]
-  }
-];
-function manifestDirs(repo, names) {
-  const dirs = new Set(findManifestDirs(repo, names));
-  try {
-    for (const w of detectWorkspaces(repo).packages) {
-      const dir = resolve16(repo, w.dir);
-      for (const name2 of names) if (existsSync27(join55(dir, name2))) dirs.add(dir);
-    }
-  } catch {
-  }
-  return [...dirs].sort(byStr);
-}
-function detectFrameworks2(repo) {
-  const found = /* @__PURE__ */ new Set();
-  for (const dir of manifestDirs(repo, ["package.json"])) {
-    try {
-      const pkg = JSON.parse(readFileSync31(join55(dir, "package.json"), "utf8"));
-      const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {}, ...pkg.peerDependencies ?? {} };
-      for (const name2 of Object.keys(deps)) {
-        const label = Object.hasOwn(JS_FRAMEWORKS, name2) ? JS_FRAMEWORKS[name2] : void 0;
-        if (label) found.add(label);
-      }
-    } catch {
-    }
-  }
-  for (const m of TEXT_MANIFESTS) {
-    for (const dir of manifestDirs(repo, [m.file])) {
-      let raw;
-      try {
-        raw = readFileSync31(join55(dir, m.file), "utf8");
-      } catch {
-        continue;
-      }
-      for (const [re, name2] of m.rules) if (re.test(raw)) found.add(name2);
-    }
-  }
-  return [...found].sort(byStr);
+var AUTH_MARKER = markerFor("auth");
+var THROTTLE_MARKER = markerFor("throttle");
+function detectStack(repo) {
+  const stack = detectFrameworks(repo);
+  return { labels: stackLabels(stack), ids: stack.map((f) => f.id) };
 }
 function appliesTo2(languages, langId) {
   return languages.includes("*") || languages.includes(langId);
@@ -38285,7 +39450,9 @@ function capBySite(items, weight, bySite) {
   return spread.slice(0, MAX_SCAFFOLD).sort(bySite);
 }
 function buildContextScaffold(repo, scan2, surface) {
-  const frameworks = detectFrameworks2(repo);
+  const stack = detectStack(repo);
+  const frameworks = stack.labels;
+  const authMarker = markerFor("auth", stack.ids);
   const rank2 = new Map(surface.byFile.map((f) => [f.file, f.score]));
   const perFile = /* @__PURE__ */ new Map();
   for (const g of surface.entryPoints) {
@@ -38320,7 +39487,7 @@ function buildContextScaffold(repo, scan2, surface) {
     const lines5 = readText2(join55(repo, fileScan.rel)).split(/\r?\n/);
     for (let i2 = 0; i2 < lines5.length; i2++) {
       const line2 = lines5[i2];
-      const am = AUTH_MARKER.exec(line2);
+      const am = authMarker.exec(line2);
       if (am) authMiddleware.push({ file: fileScan.rel, line: i2 + 1, hint: am[0] });
       for (const rule2 of SANITIZERS) {
         if (!appliesTo2(rule2.languages, spec.id)) continue;
@@ -38559,9 +39726,9 @@ function devOnlyPackages(repo) {
       }
     }
   }
-  const manifestDirs2 = findManifestDirs(repo, ["package.json"]);
-  if (manifestDirs2.length) sources.push("package.json");
-  for (const dir of manifestDirs2) {
+  const manifestDirs = findManifestDirs(repo, ["package.json"]);
+  if (manifestDirs.length) sources.push("package.json");
+  for (const dir of manifestDirs) {
     let pkg;
     try {
       pkg = JSON.parse(readFileSync32(join56(dir, "package.json"), "utf8"));
@@ -38602,8 +39769,8 @@ var BUDGETS = {
 };
 var REVDEP_DEPTH = 2;
 async function runScan2(args2) {
-  const repo = resolve17(flagStr(args2, "repo") ?? ".");
-  const out2 = resolve17(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve16(flagStr(args2, "repo") ?? ".");
+  const out2 = resolve16(flagStr(args2, "out") ?? ".ultrasec");
   resetDetectCache();
   if (!isScannableDir(repo)) {
     eprintln(`ultrasec: --repo '${repo}' is not a directory. Aborting \u2014 an unscannable path must not report a clean audit.`);
@@ -38681,7 +39848,8 @@ async function runScan2(args2) {
   const tree = snapshotTree(repo);
   const facts = createFileFacts(scan2);
   stage("graph", `${scan2.files.length} file(s) scanned \xB7 building the link-graph\u2026`);
-  const graph = buildGraph2(scan2, { tree: tree.files });
+  const resolutionGaps = [];
+  const graph = buildGraph2(scan2, { tree: tree.files, resolutionGaps });
   const logHygieneOn = flagBool(args2, "log-hygiene");
   const excludeEnvSources = flagBool(args2, "no-env-sources");
   const strictScope = flagBool(args2, "strict-scope");
@@ -38712,8 +39880,9 @@ async function runScan2(args2) {
   const agenticFindings = auditAgenticWorkflows(repo, prune, tree);
   const webConfigFindings = auditWebConfig(repo, prune, tree);
   const authTokenFindings = auditAuthTokens(repo, prune, tree);
-  const frameworks = detectFrameworks(repo, prune, tree);
-  const classAudit = auditWeaknessClasses(repo, prune, tree, frameworks);
+  const stack = detectFrameworks(repo, prune, tree);
+  const classAudit = auditWeaknessClasses(repo, prune, tree, webFrameworks(stack));
+  const frameworks = matrixStack(stack, inferUnknownFrameworks(repo, stack, prune, tree));
   const classCells = classCoverage(frameworks);
   const cloudFindings = auditCloud(repo, prune, tree);
   const credentialFindings = auditSecrets(repo, prune, tree);
@@ -38820,6 +39989,7 @@ async function runScan2(args2) {
     ...truncation ? { truncation } : {},
     ...recordedScopes.length ? { scopes: recordedScopes } : {},
     ...sbomResult?.path ? { sbom: "sbom.cdx.json" } : {},
+    ...resolutionGaps.length ? { resolutionGaps } : {},
     ...frameworks.length ? { frameworks } : {},
     ...classCells.length ? { weaknessClasses: classCells } : {}
   };
@@ -38895,8 +40065,15 @@ async function runScan2(args2) {
     );
     if (nb.note) println(`  \u26A0\uFE0F  ${nb.note}`);
   }
-  if (fm.frameworks?.length)
-    println(`  frameworks: ${fm.frameworks.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ")}`);
+  for (const g of fm.resolutionGaps ?? [])
+    println(
+      `  \u26A0\uFE0F  import resolution degraded: ${g.files} \`${g.ext}\` file(s) left out of the resolve context (${g.reason}) \u2014 imports into them are not followed`
+    );
+  const stackLine = (list) => list.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ");
+  const webCols = (fm.frameworks ?? []).filter((f) => f.kind !== "library");
+  const libs = (fm.frameworks ?? []).filter((f) => f.kind === "library");
+  if (webCols.length) println(`  frameworks: ${stackLine(webCols)}`);
+  if (libs.length) println(`  libraries: ${stackLine(libs)}`);
   if (fm.weaknessClasses?.length) {
     const cells = fm.weaknessClasses;
     const hunt = cells.filter(needsHunt).length;
@@ -38942,10 +40119,10 @@ async function runScan2(args2) {
 
 // src/commands/context.ts
 import { mkdirSync as mkdirSync14, writeFileSync as writeFileSync15 } from "fs";
-import { join as join58, resolve as resolve18 } from "path";
+import { join as join58, resolve as resolve17 } from "path";
 function runContext(args2) {
-  const repo = resolve18(flagStr(args2, "repo") ?? ".");
-  const out2 = resolve18(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve17(flagStr(args2, "repo") ?? ".");
+  const out2 = resolve17(flagStr(args2, "out") ?? ".ultrasec");
   if (!isScannableDir(repo)) {
     eprintln(`ultrasec context: --repo '${repo}' is not a directory.`);
     return 2;
@@ -38987,7 +40164,7 @@ function runContext(args2) {
 }
 
 // src/commands/import.ts
-import { resolve as resolve19, join as join59 } from "path";
+import { resolve as resolve18, join as join59 } from "path";
 import { existsSync as existsSync30, readFileSync as readFileSync33 } from "fs";
 
 // src/tools/deepsec.ts
@@ -39059,7 +40236,7 @@ async function runImport(args2) {
     eprintln("ultrasec import: need a findings file \u2014 `ultrasec import <findings.json> --run <dir>`.");
     return 2;
   }
-  const run2 = resolve19(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve18(flagStr(args2, "run") ?? ".ultrasec");
   const format = flagStr(args2, "format") ?? "deepsec-json";
   if (format !== "deepsec-json") {
     eprintln(`ultrasec import: unknown --format '${format}' (supported: deepsec-json).`);
@@ -39067,7 +40244,7 @@ async function runImport(args2) {
   }
   let raw;
   try {
-    raw = readFileSync33(resolve19(file), "utf8");
+    raw = readFileSync33(resolve18(file), "utf8");
   } catch (e) {
     eprintln(`ultrasec import: cannot read ${file} (${e instanceof Error ? e.message : String(e)}).`);
     return 2;
@@ -39088,7 +40265,7 @@ async function runImport(args2) {
   }
   const prevFindings = prev?.findings ?? [];
   const correlated = correlate([...prevFindings, ...imported]);
-  const repo = prev?.manifest.repo ?? resolve19(flagStr(args2, "repo") ?? ".");
+  const repo = prev?.manifest.repo ?? resolve18(flagStr(args2, "repo") ?? ".");
   const enrichOn = !(flagBool(args2, "no-enrich") || flagBool(args2, "offline"));
   const { findings: enriched, note: riskNote } = await enrichFindings(correlated, { enabled: enrichOn, context: loadContextDoc(run2) });
   const blameOn = flagBool(args2, "blame") || flagBool(args2, "provenance");
@@ -39126,7 +40303,7 @@ async function runImport(args2) {
 }
 
 // src/commands/logs.ts
-import { resolve as resolve20, join as join60, dirname as dirname13, extname as extname5, sep as sep10 } from "path";
+import { resolve as resolve19, join as join60, dirname as dirname13, extname as extname5, sep as sep10 } from "path";
 import { existsSync as existsSync31, statSync as statSync16, readdirSync as readdirSync5, mkdirSync as mkdirSync15, writeFileSync as writeFileSync16, openSync, readSync, closeSync } from "fs";
 
 // src/logs/analyze.ts
@@ -40048,7 +41225,7 @@ async function runLogs(args2) {
     eprintln(`ultrasec logs: ${e instanceof Error ? e.message : String(e)}`);
     return 2;
   }
-  const out2 = resolve20(flagStr(args2, "out") ?? ".ultrasec-logs");
+  const out2 = resolve19(flagStr(args2, "out") ?? ".ultrasec-logs");
   const budget = flagStr(args2, "budget") ?? "standard";
   if (!["quick", "standard", "thorough"].includes(budget)) {
     eprintln(`ultrasec logs: unknown --budget '${budget}' (expected quick|standard|thorough).`);
@@ -40167,7 +41344,7 @@ function looksLikeText(path) {
 function expandInputs(inputs) {
   const out2 = /* @__PURE__ */ new Set();
   for (const raw of inputs) {
-    const p = resolve20(raw);
+    const p = resolve19(raw);
     if (!existsSync31(p)) throw new Error(`path not found: ${raw}`);
     const st = statSync16(p);
     if (st.isDirectory()) {
@@ -40205,7 +41382,7 @@ function strictCommonAncestor(dirs) {
   return joined === "" ? sep10 : joined;
 }
 function computeBase(absFiles) {
-  const cwd = resolve20(process.cwd());
+  const cwd = resolve19(process.cwd());
   if (absFiles.every((f) => f.startsWith(cwd + sep10))) return cwd;
   const common = strictCommonAncestor(absFiles.map((f) => dirname13(f)));
   if (!common) throw new Error("input log paths share no common ancestor directory \u2014 pass paths under one common root.");
@@ -40213,7 +41390,7 @@ function computeBase(absFiles) {
 }
 
 // src/commands/dossier.ts
-import { resolve as resolve21 } from "path";
+import { resolve as resolve20 } from "path";
 
 // src/dossier.ts
 import { extname as extname6, join as join61 } from "path";
@@ -40315,11 +41492,11 @@ function reachability(repo, graph, f) {
     const sym = f.path?.[0]?.symbol ?? void 0;
     const callers = sym ? graph.callersBySymbol?.[sym] ?? [] : [];
     if (sym) {
-      const outside = callers.filter((c2) => c2.file !== entry2.file);
+      const outside2 = callers.filter((c2) => c2.file !== entry2.file);
       if (callers.length) {
         const shown = callers.slice(0, 8).map((c2) => `\`${c2.file}:${c2.line}\`${c2.symbol ? ` in ${c2.symbol}()` : ""}`);
         L.push(`- **callers of \`${sym}()\`**: ${shown.join(" \xB7 ")}${callers.length > shown.length ? ` (+${callers.length - shown.length} more)` : ""}`);
-        if (outside.length) L.push(`  - ${outside.length} from OTHER files \u2014 the entry point has more than one way in.`);
+        if (outside2.length) L.push(`  - ${outside2.length} from OTHER files \u2014 the entry point has more than one way in.`);
       } else {
         L.push(
           `- **callers of \`${sym}()\`**: none in the call index \u2014 either it is the outermost entry point, or it is invoked dynamically (a router table, a decorator, reflection).`
@@ -40444,7 +41621,7 @@ function renderFindingDossier(repo, graph, f, options = {}) {
 
 // src/commands/dossier.ts
 function runDossier(args2) {
-  const run2 = resolve21(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve20(flagStr(args2, "run") ?? ".ultrasec");
   const id = args2._[1];
   if (!id) {
     eprintln("ultrasec dossier: need a <finding-id>. List them in DOSSIER.md or with `paths`.");
@@ -40470,11 +41647,11 @@ function runDossier(args2) {
 }
 
 // src/commands/triage.ts
-import { resolve as resolve24 } from "path";
+import { resolve as resolve23 } from "path";
 
 // src/stage.ts
 import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync17, readFileSync as readFileSync34, readdirSync as readdirSync6, statSync as statSync17 } from "fs";
-import { join as join62, resolve as resolve22 } from "path";
+import { join as join62, resolve as resolve21 } from "path";
 function stageFiles(stem2) {
   return { todo: `${stem2}.todo.json`, md: `${stem2}.md` };
 }
@@ -40486,8 +41663,8 @@ function emitWorklist(run2, files, items, md) {
   return todoPath;
 }
 function collectApplyFiles(applyPath, dirRegex) {
-  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve22(s.trim()));
-  const abs = resolve22(applyPath);
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve21(s.trim()));
+  const abs = resolve21(applyPath);
   let isDir = false;
   try {
     isDir = statSync17(abs).isDirectory();
@@ -40964,7 +42141,7 @@ function parseTriage(raw) {
 
 // src/orchestrate.ts
 import { existsSync as existsSync32, mkdirSync as mkdirSync17, readFileSync as readFileSync35, writeFileSync as writeFileSync18 } from "fs";
-import { join as join64, resolve as resolve23 } from "path";
+import { join as join64, resolve as resolve22 } from "path";
 
 // src/orchestrate-templates.ts
 import { join as join63 } from "path";
@@ -41466,7 +42643,7 @@ function readIds(path, id) {
 }
 var SURFACE_FILTERS = [...SURFACES, "all"];
 function listPhases(runDir, engineAbs, surface = "all") {
-  const run2 = resolve23(runDir);
+  const run2 = resolve22(runDir);
   const findingsPath = join64(run2, "findings.json");
   const allIds = readIds(findingsPath, (f) => f.id);
   let adjIds = [];
@@ -41528,7 +42705,7 @@ function repoOf(run2) {
   return "<repo>";
 }
 function orchestrateRun(runDir, engineAbs, opts = {}) {
-  const run2 = resolve23(runDir);
+  const run2 = resolve22(runDir);
   if (!existsSync32(run2)) {
     return { exitCode: 2, written: [], notices: [], errors: [`run dir not found: ${run2}`], phases: [] };
   }
@@ -41590,7 +42767,7 @@ function orchestrateRun(runDir, engineAbs, opts = {}) {
 
 // src/commands/triage.ts
 function runTriage(args2) {
-  const run2 = resolve24(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve23(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -41647,14 +42824,14 @@ function runTriage(args2) {
 
 // src/commands/investigate.ts
 import { readFileSync as readFileSync37 } from "fs";
-import { join as join68, resolve as resolve26 } from "path";
+import { join as join68, resolve as resolve25 } from "path";
 
 // src/check.ts
 import { existsSync as existsSync33, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
-import { join as join65, resolve as resolve25, sep as sep11 } from "path";
+import { join as join65, resolve as resolve24, sep as sep11 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve25(repo);
-  const abs = resolve25(base, file);
+  const base = resolve24(repo);
+  const abs = resolve24(base, file);
   return abs === base || abs.startsWith(base + sep11);
 }
 var LINE_COUNT_CHUNK_BYTES = 1 << 20;
@@ -41958,32 +43135,20 @@ function leadsForRegion(leads, region, files) {
 // src/classes/hunt.ts
 import { existsSync as existsSync34, readFileSync as readFileSync36, writeFileSync as writeFileSync19 } from "fs";
 import { join as join67 } from "path";
-
-// src/classes/types.ts
-var CLASS_IDS = [
-  "timing-unsafe-secret-compare",
-  "csv-formula-injection",
-  "client-ip-first-xff",
-  "unbounded-public-export",
-  "security-headers-absent",
-  "session-cookie-chunks-on-logout",
-  "env-bool-coercion"
-];
-
-// src/classes/hunt.ts
-var ECOSYSTEM_LANGUAGE = { node: "javascript", python: "python", java: "java", go: "go", ruby: "ruby", php: "php" };
 var MAX_HUNT_FILES = 8;
 var MAX_EXAMPLES = 3;
 function huntPrompt(h) {
-  return `Weakness class \`${h.class}\` (${h.cwe}) on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""} \u2014 ${h.reason}. INVARIANT: ${CLASSES[h.class].invariant} A VALID GUARD: ${CLASSES[h.class].guard} Find how THIS repository writes the class with ${h.framework} \u2014 its own helpers, middlewares, config and wrappers \u2014 and check every place the invariant can break. Each break is a Discovery (cite a resolvable [file:line], set "hunt": "${h.id}"). Each idiom you recognize \u2014 the unsafe call AND the guard the code relies on \u2014 goes to \`idioms[]\` ({hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}) so a maintainer can turn it into pack data. Looked and found nothing? Put "${h.id}" in \`hunted[]\` \u2014 an empty result is a result.`;
+  const subject = HUNT_SUBJECTS[h.class];
+  const what = h.class === CATALOG_ROW ? "Taint-catalog coverage" : `Weakness class \`${h.class}\` (${h.cwe})`;
+  return `${what} on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""} \u2014 ${h.reason}. INVARIANT: ${subject.invariant} A VALID GUARD: ${subject.guard} Find how THIS repository writes the class with ${h.framework} \u2014 its own helpers, middlewares, config and wrappers \u2014 and check every place the invariant can break. Each break is a Discovery (cite a resolvable [file:line], set "hunt": "${h.id}"). Each idiom you recognize \u2014 the unsafe call AND the guard the code relies on \u2014 goes to \`idioms[]\` ({hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}) so a maintainer can turn it into pack data. Looked and found nothing? Put "${h.id}" in \`hunted[]\` \u2014 an empty result is a result.`;
 }
 function buildClassHunts(manifest, surface) {
   const cells = (manifest.weaknessClasses ?? []).filter(needsHunt);
   const out2 = [];
   for (const cell of cells) {
-    const cls = CLASSES[cell.class];
+    const cls = HUNT_SUBJECTS[cell.class];
     const fw = manifest.frameworks?.find((f) => f.id === cell.framework && f.dir === cell.dir);
-    const lang = ECOSYSTEM_LANGUAGE[cell.ecosystem];
+    const lang = ECOSYSTEM_LANGUAGES[cell.ecosystem]?.[0];
     const examples = [...cls.examples].sort((a, b) => Number(b.language === lang) - Number(a.language === lang)).slice(0, MAX_EXAMPLES);
     const prefix = cell.dir ? `${cell.dir}/` : "";
     const files = [...fw ? [fw.evidence.replace(/:\d+$/, "")] : [], ...(surface?.byFile ?? []).map((f) => f.file).filter((f) => f.startsWith(prefix))];
@@ -42022,7 +43187,7 @@ function parseIdiom(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { reason: badField("idiom", raw, "an object") };
   const d = raw;
   const bad = [];
-  if (!CLASS_IDS.includes(d.class)) bad.push(notInVocabulary("class", d.class, CLASS_IDS));
+  if (!MATRIX_ROW_IDS.includes(d.class)) bad.push(notInVocabulary("class", d.class, MATRIX_ROW_IDS));
   if (!IDIOM_KINDS.includes(d.kind)) bad.push(notInVocabulary("kind", d.kind, IDIOM_KINDS));
   for (const field of ["framework", "pattern", "file"]) {
     if (typeof d[field] !== "string" || !d[field].trim()) bad.push(badField(field, d[field], "a non-empty string"));
@@ -42336,7 +43501,7 @@ function parseDiscoveries(raw) {
 
 // src/commands/investigate.ts
 function runInvestigate(args2) {
-  const run2 = resolve26(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve25(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -42344,7 +43509,7 @@ function runInvestigate(args2) {
     eprintln(`ultrasec investigate: ${e.message}`);
     return 2;
   }
-  const repo = resolve26(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve25(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -42464,11 +43629,11 @@ function runInvestigate(args2) {
 }
 
 // src/commands/paths.ts
-import { resolve as resolve27 } from "path";
+import { resolve as resolve26 } from "path";
 var isSeverity = (s) => SEVERITIES2.includes(s);
 var rank = (s) => SEVERITIES2.indexOf(s);
 function runPaths(args2) {
-  const run2 = resolve27(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve26(flagStr(args2, "run") ?? ".ultrasec");
   const kind = flagStr(args2, "kind");
   const sev = flagStr(args2, "severity");
   const floor = flagStr(args2, "min-severity");
@@ -42539,9 +43704,9 @@ function runPaths(args2) {
 }
 
 // src/commands/verify.ts
-import { join as join69, resolve as resolve28 } from "path";
+import { join as join69, resolve as resolve27 } from "path";
 function runVerify(args2) {
-  const run2 = resolve28(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve27(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -42630,9 +43795,9 @@ function applyMode(run2, dossier, applyPath, args2) {
 }
 
 // src/commands/revalidate.ts
-import { resolve as resolve29 } from "path";
+import { resolve as resolve28 } from "path";
 function runRevalidate(args2) {
-  const run2 = resolve29(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve28(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -42640,7 +43805,7 @@ function runRevalidate(args2) {
     eprintln(`ultrasec revalidate: ${e.message}`);
     return 2;
   }
-  const repo = resolve29(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve28(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -42705,7 +43870,7 @@ function runRevalidate(args2) {
 
 // src/commands/variants.ts
 import { writeFileSync as writeFileSync20 } from "fs";
-import { join as join70, resolve as resolve30 } from "path";
+import { join as join70, resolve as resolve29 } from "path";
 
 // src/variants.ts
 function sinkOf(f) {
@@ -42862,7 +44027,7 @@ function renderRegressionRules(results) {
 
 // src/commands/variants.ts
 function runVariants(args2) {
-  const run2 = resolve30(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve29(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -42870,7 +44035,7 @@ function runVariants(args2) {
     eprintln(`ultrasec variants: ${e.message}`);
     return 2;
   }
-  const repo = resolve30(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve29(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -42932,7 +44097,7 @@ function runVariants(args2) {
 }
 
 // src/commands/guards.ts
-import { resolve as resolve31 } from "path";
+import { resolve as resolve30 } from "path";
 
 // src/guards.ts
 import { join as join71 } from "path";
@@ -43050,7 +44215,7 @@ function withProjectMarkers(base, names) {
 }
 function buildGuardMatrix(scan2, lens = "auth", extraMarkers = [], opts = {}) {
   const spec = LENSES2[lens];
-  const marker = withProjectMarkers(spec.marker, extraMarkers);
+  const marker = withProjectMarkers(opts.detected ? markerFor(lens, opts.detected) : spec.marker, extraMarkers);
   const rows = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
@@ -43302,7 +44467,7 @@ function markerFlags(args2) {
 }
 var isLens = (s) => GUARD_LENSES.includes(s);
 function runGuards(args2) {
-  const run2 = resolve31(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve30(flagStr(args2, "run") ?? ".ultrasec");
   const strict = flagBool(args2, "strict");
   const lensName = flagStr(args2, "lens");
   if (lensName !== void 0 && !isLens(lensName)) {
@@ -43320,9 +44485,9 @@ function runGuards(args2) {
     eprintln(`ultrasec guards: ${e.message}`);
     return 2;
   }
-  const repo = resolve31(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve30(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const markers = [.../* @__PURE__ */ new Set([...contextMarkers(loadContextDoc(run2), lens), ...markerFlags(args2)])];
-  const matrixOpts = { includeTests: dossier.manifest.passes?.includeTests === true };
+  const matrixOpts = { includeTests: dossier.manifest.passes?.includeTests === true, detected: detectedIds(dossier.manifest.frameworks) };
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -43394,9 +44559,9 @@ function runGuards(args2) {
 
 // src/commands/assumptions.ts
 import { writeFileSync as writeFileSync21 } from "fs";
-import { join as join72, resolve as resolve32 } from "path";
+import { join as join72, resolve as resolve31 } from "path";
 function runAssumptions(args2) {
-  const run2 = resolve32(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve31(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -43404,7 +44569,7 @@ function runAssumptions(args2) {
     eprintln(`ultrasec assumptions: ${e.message}`);
     return 2;
   }
-  const repo = resolve32(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve31(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -43460,7 +44625,7 @@ function runAssumptions(args2) {
 
 // src/commands/coverage.ts
 import { writeFileSync as writeFileSync22 } from "fs";
-import { join as join73, resolve as resolve33 } from "path";
+import { join as join73, resolve as resolve32 } from "path";
 
 // src/coverage.ts
 var ASVS_CATEGORIES = [
@@ -43912,7 +45077,7 @@ function renderCoverageMd(rows, standardTitle = "OWASP ASVS", dossier, classCell
 
 // src/commands/coverage.ts
 function runCoverage(args2) {
-  const run2 = resolve33(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve32(flagStr(args2, "run") ?? ".ultrasec");
   const standardId = flagStr(args2, "standard") ?? DEFAULT_STANDARD;
   if (!own(STANDARDS, standardId)) {
     eprintln(`ultrasec coverage: unknown --standard '${standardId}' (expected ${Object.keys(STANDARDS).join("|")}).`);
@@ -43946,7 +45111,7 @@ function runCoverage(args2) {
 }
 
 // src/commands/narrative.ts
-import { resolve as resolve34 } from "path";
+import { resolve as resolve33 } from "path";
 
 // src/narrative.ts
 var AI_DISCLAIMER = "AI-authored \u2014 verify against the cited findings before acting.";
@@ -44123,7 +45288,7 @@ function hardeningNotesMd(n) {
 
 // src/commands/narrative.ts
 function runNarrative(args2) {
-  const run2 = resolve34(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve33(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -44148,7 +45313,7 @@ function runNarrative(args2) {
 }
 
 // src/commands/implement.ts
-import { resolve as resolve35 } from "path";
+import { resolve as resolve34 } from "path";
 
 // src/implement.ts
 import { existsSync as existsSync35, readFileSync as readFileSync38 } from "fs";
@@ -44309,7 +45474,7 @@ function renderImplementMd(wl, context) {
 
 // src/commands/implement.ts
 function runImplement(args2) {
-  const run2 = resolve35(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve34(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -44318,7 +45483,7 @@ function runImplement(args2) {
     return 2;
   }
   const narrFile = flagStr(args2, "narrative");
-  const narrative = loadNarrative(run2, dossier, narrFile ? resolve35(narrFile) : void 0);
+  const narrative = loadNarrative(run2, dossier, narrFile ? resolve34(narrFile) : void 0);
   const wl = buildImplementWorklist(dossier, narrative);
   const todoPath = emitWorklist(run2, stageFiles("IMPLEMENT"), wl, renderImplementMd(wl, loadContextDoc(run2)));
   if (flagBool(args2, "json")) {
@@ -44337,9 +45502,9 @@ function runImplement(args2) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve36 } from "path";
+import { resolve as resolve35 } from "path";
 function runCheck(args2) {
-  const run2 = resolve36(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve35(flagStr(args2, "run") ?? ".ultrasec");
   const repo = flagStr(args2, "repo");
   const semantic = flagBool(args2, "semantic");
   const minSevRaw = flagStr(args2, "min-severity");
@@ -44380,7 +45545,7 @@ function runCheck(args2) {
 
 // src/commands/render.ts
 import { readFileSync as readFileSync39, writeFileSync as writeFileSync23 } from "fs";
-import { join as join75, resolve as resolve37 } from "path";
+import { join as join75, resolve as resolve36 } from "path";
 
 // src/render/mermaid.ts
 function esc2(s) {
@@ -45296,7 +46461,7 @@ function renderHtml(d, narrative) {
 
 // src/commands/render.ts
 function runRender(args2) {
-  const run2 = resolve37(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve36(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -45310,7 +46475,7 @@ function runRender(args2) {
   if (narrativePath) {
     let parsed2;
     try {
-      parsed2 = parseNarrative(readFileSync39(resolve37(narrativePath), "utf8"));
+      parsed2 = parseNarrative(readFileSync39(resolve36(narrativePath), "utf8"));
     } catch (e) {
       eprintln(`ultrasec render: cannot read narrative at ${narrativePath}: ${e.message}`);
       return 2;
@@ -45352,7 +46517,7 @@ function runRender(args2) {
 // src/commands/clean.ts
 import { execFileSync as execFileSync9 } from "child_process";
 import { existsSync as existsSync36, rmSync as rmSync10, readdirSync as readdirSync7 } from "fs";
-import { join as join76, resolve as resolve38 } from "path";
+import { join as join76, resolve as resolve37 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 var DELIVERABLES = /* @__PURE__ */ new Set(["SUMMARY.md", "REPORT.md", "index.html", "findings.json", JOURNAL_FILE]);
@@ -45376,7 +46541,7 @@ function docker(args2) {
   }
 }
 function runClean(args2) {
-  const run2 = resolve38(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve37(flagStr(args2, "run") ?? ".ultrasec");
   const dry = flagBool(args2, "dry-run");
   const withDocker = flagBool(args2, "docker");
   const keepOutput = flagBool(args2, "keep-output");
@@ -45439,7 +46604,7 @@ function runClean(args2) {
 
 // src/commands/run.ts
 import { existsSync as existsSync38 } from "fs";
-import { join as join78, resolve as resolve39 } from "path";
+import { join as join78, resolve as resolve38 } from "path";
 
 // src/powered/agent.ts
 import { spawnSync as spawnSync3 } from "child_process";
@@ -45493,6 +46658,13 @@ var CliAgentRunner = class {
 // src/powered/pipeline.ts
 import { readFileSync as readFileSync40, writeFileSync as writeFileSync24 } from "fs";
 import { join as join77 } from "path";
+function runStack(run2) {
+  try {
+    return detectedIds(loadDossier(run2).manifest.frameworks);
+  } catch {
+    return [];
+  }
+}
 var ALL_STAGES = [
   "context",
   "assumptions",
@@ -45562,13 +46734,13 @@ var STAGES = {
   guards: {
     crossCheckable: false,
     emit(repo, run2) {
-      const rows = buildGuardMatrix(scanRepo2(repo));
+      const rows = buildGuardMatrix(scanRepo2(repo), "auth", [], { detected: runStack(run2) });
       const f = stageFiles("GUARDS");
       emitWorklist(run2, f, rows, renderGuardsMd(rows, loadContextDoc(run2)));
       return { worklist: join77(run2, f.md), outName: "GUARDS.json" };
     },
     applyPure: (repo, run2, dossier, raw) => {
-      const byId = new Map(buildGuardMatrix(scanRepo2(repo)).map((r) => [r.id, r]));
+      const byId = new Map(buildGuardMatrix(scanRepo2(repo), "auth", [], { detected: detectedIds(dossier.manifest.frameworks) }).map((r) => [r.id, r]));
       const discoveries = rowsOf("guards", parseGuardVerdicts(raw)).filter((r) => r.verdict === "unguarded").map((r) => {
         const at = byId.get(r.id);
         return at ? guardDiscovery(at, r.note) : void 0;
@@ -45583,13 +46755,13 @@ var STAGES = {
   throttle: {
     crossCheckable: false,
     emit(repo, run2) {
-      const rows = buildGuardMatrix(scanRepo2(repo), "throttle");
+      const rows = buildGuardMatrix(scanRepo2(repo), "throttle", [], { detected: runStack(run2) });
       const f = stageFiles(LENSES2.throttle.stem);
       emitWorklist(run2, f, rows, renderGuardsMd(rows, loadContextDoc(run2), "throttle"));
       return { worklist: join77(run2, f.md), outName: "THROTTLE.json" };
     },
     applyPure: (repo, run2, dossier, raw) => {
-      const byId = new Map(buildGuardMatrix(scanRepo2(repo), "throttle").map((r) => [r.id, r]));
+      const byId = new Map(buildGuardMatrix(scanRepo2(repo), "throttle", [], { detected: detectedIds(dossier.manifest.frameworks) }).map((r) => [r.id, r]));
       const discoveries = rowsOf("throttle", parseGuardVerdicts(raw, "throttle")).filter((r) => r.verdict === "unthrottled").map((r) => {
         const at = byId.get(r.id);
         return at ? guardDiscovery(at, r.note, "throttle") : void 0;
@@ -45800,8 +46972,8 @@ function runPipeline(opts) {
 
 // src/commands/run.ts
 function runRun(args2) {
-  const repo = resolve39(flagStr(args2, "repo") ?? ".");
-  const run2 = resolve39(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve38(flagStr(args2, "repo") ?? ".");
+  const run2 = resolve38(flagStr(args2, "out") ?? ".ultrasec");
   const powered = flagBool(args2, "powered");
   const noScan = flagBool(args2, "no-scan");
   const requested = listFlag(args2, "stages");
@@ -45926,7 +47098,7 @@ function runOrchestrate(args2) {
 
 // src/commands/probe.ts
 import { mkdirSync as mkdirSync18, writeFileSync as writeFileSync25 } from "fs";
-import { join as join80, resolve as resolve40 } from "path";
+import { join as join80, resolve as resolve39 } from "path";
 import { request as httpsRequest } from "https";
 import { request as httpRequest } from "http";
 import { lookup } from "dns/promises";
@@ -46307,7 +47479,7 @@ async function runProbe(args2, deps = {}) {
   const deep = flagBool(args2, "deep");
   const graphql = flagBool(args2, "graphql");
   const timeout = numFlag(args2, "timeout") ?? 1e4;
-  const out2 = resolve40(flagStr(args2, "out") ?? ".ultrasec");
+  const out2 = resolve39(flagStr(args2, "out") ?? ".ultrasec");
   const ctx = { cap: deep ? 24 : 12, made: 0, timeout, findings: [], truncated: false, pinned };
   const main2 = await fetchWithin(ctx, url, { method: "GET" });
   if (!main2) {
@@ -46358,7 +47530,7 @@ async function runProbe(args2, deps = {}) {
 
 // src/commands/route.ts
 import { mkdirSync as mkdirSync19, writeFileSync as writeFileSync26 } from "fs";
-import { join as join81, resolve as resolve41 } from "path";
+import { join as join81, resolve as resolve40 } from "path";
 var ROUTE_TABLE = [
   {
     id: "android-apk",
@@ -46619,7 +47791,7 @@ function runRoute(args2) {
   const c2 = classifyTarget(target);
   const result = buildResult(target, c2);
   if (flagStr(args2, "out") !== void 0 || flagBool(args2, "write")) {
-    const out2 = resolve41(flagStr(args2, "out") ?? ".");
+    const out2 = resolve40(flagStr(args2, "out") ?? ".");
     mkdirSync19(out2, { recursive: true });
     const p = join81(out2, "ROUTE.md");
     writeFileSync26(p, renderMd(result));
@@ -46682,7 +47854,7 @@ import { createInterface as createInterface3 } from "readline";
 
 // src/mcp/handlers.ts
 import { existsSync as existsSync40, readFileSync as readFileSync41, realpathSync as realpathSync9, statSync as statSync19 } from "fs";
-import { isAbsolute as isAbsolute12, join as join82, resolve as resolve42, sep as sep12 } from "path";
+import { isAbsolute as isAbsolute12, join as join82, resolve as resolve41, sep as sep12 } from "path";
 
 // src/run-lock.ts
 var chains = /* @__PURE__ */ new Map();
@@ -46745,7 +47917,7 @@ function positive(v, key) {
 function requiredRepo(args2, defaults) {
   const repo = str2(args2.repo) ?? defaults.defaultRun;
   if (!repo) throw new ToolError("`repo` is required: an absolute path to the repository root.");
-  const abs = resolve42(repo);
+  const abs = resolve41(repo);
   if (!isScannableDir(abs)) {
     throw new ToolError(`\`repo\` is not a directory: ${abs}. Refusing to continue \u2014 an unscannable path must not report a clean audit.`);
   }
@@ -46755,7 +47927,7 @@ function resolveRun(args2, repo) {
   const explicit = str2(args2.run) ?? str2(args2.out);
   if (explicit) {
     if (!isAbsolute12(explicit)) throw new ToolError("`run` must be an absolute path.");
-    return resolve42(explicit);
+    return resolve41(explicit);
   }
   return join82(repo, ".ultrasec");
 }
@@ -46925,7 +48097,7 @@ function handleRead(args2, repo, run2) {
     try {
       return realpathSync9(d);
     } catch {
-      return resolve42(d);
+      return resolve41(d);
     }
   });
   if (!allowed.some((root) => real === root || real.startsWith(root + sep12))) {
@@ -47423,13 +48595,13 @@ var DECLARED = new Set([...TOOLS3, ...WRITE_TOOLS].map((t) => t.name));
 
 // src/mcp/resources.ts
 import { existsSync as existsSync41, readdirSync as readdirSync8, readFileSync as readFileSync42, realpathSync as realpathSync10, statSync as statSync20 } from "fs";
-import { basename as basename6, dirname as dirname14, join as join83, resolve as resolve43, sep as sep13 } from "path";
+import { basename as basename6, dirname as dirname14, join as join83, resolve as resolve42, sep as sep13 } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 var SKILL_NAME = "ultrasec";
 var URI_SCHEME = "skill://";
 function resolveSkillRoot(moduleDir) {
   const here = moduleDir ?? dirname14(fileURLToPath4(import.meta.url));
-  const candidates = [resolve43(here, ".."), resolve43(here, "..", "skills", SKILL_NAME), resolve43(here, "..", "..", "skills", SKILL_NAME)];
+  const candidates = [resolve42(here, ".."), resolve42(here, "..", "skills", SKILL_NAME), resolve42(here, "..", "..", "skills", SKILL_NAME)];
   return candidates.find((dir) => existsSync41(join83(dir, "SKILL.md")));
 }
 function listResources(moduleDir) {
@@ -47452,7 +48624,7 @@ function readResource(uri, moduleDir) {
   if (!root) throw new ResourceError("no skill payload found next to this build \u2014 nothing to read");
   const rel2 = uri.slice(URI_SCHEME.length);
   if (!rel2) throw new ResourceError("empty resource path");
-  const target = resolve43(root, rel2);
+  const target = resolve42(root, rel2);
   const rootReal = realpathSync10(root);
   let targetReal;
   try {
@@ -47656,10 +48828,10 @@ async function runStdioServer(opts = {}) {
   let pendingWrite = Promise.resolve();
   const queueWrite = (frame) => {
     pendingWrite = pendingWrite.then(
-      () => new Promise((resolve44, reject) => {
+      () => new Promise((resolve43, reject) => {
         emit2(frame, (error) => {
           if (error) reject(error);
-          else resolve44();
+          else resolve43();
         });
       })
     );
@@ -47745,14 +48917,14 @@ function startHttpServer(opts = {}) {
   server.requestTimeout = 0;
   server.headersTimeout = 6e4;
   server.keepAliveTimeout = 12e4;
-  return new Promise((resolve44, reject) => {
+  return new Promise((resolve43, reject) => {
     server.once("error", reject);
     server.listen(opts.port ?? 0, bind, () => {
       server.removeListener("error", reject);
       const addr2 = server.address();
       const port = typeof addr2 === "object" && addr2 ? addr2.port : opts.port ?? 0;
       const host = bind.includes(":") ? `[${bind}]` : bind;
-      resolve44({
+      resolve43({
         server,
         port,
         url: `http://${host}:${port}${MCP_PATH}`,
@@ -47861,7 +49033,7 @@ function sendJson(res, status, body2, origin, extra = {}) {
 }
 var DRAIN_LIMIT = MAX_BODY_BYTES * 8;
 function readBody(req) {
-  return new Promise((resolve44, reject) => {
+  return new Promise((resolve43, reject) => {
     const chunks = [];
     let size = 0;
     let over = false;
@@ -47885,7 +49057,7 @@ function readBody(req) {
     });
     req.on("end", () => {
       if (over) reject(new Error("too large"));
-      else resolve44(Buffer.concat(chunks).toString("utf8"));
+      else resolve43(Buffer.concat(chunks).toString("utf8"));
     });
     req.on("error", reject);
     req.on("aborted", () => reject(new Error("client aborted the request")));

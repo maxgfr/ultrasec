@@ -1,5 +1,16 @@
 import type { Pack, QueryIdiom } from "../types.js";
-import { EXPORT_PATH, HEADERS_MIDDLEWARE, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, SETS_SECURITY_HEADER, XFF, XFF_LOOKBACK } from "./shared.js";
+import {
+  COOKIE_HTTPONLY_SET,
+  COOKIE_SAMESITE_NONE,
+  COOKIE_SECURE_SET,
+  EXPORT_PATH,
+  HEADERS_MIDDLEWARE,
+  MENTIONS_CSV,
+  NEUTRALIZES_FORMULA_ANY,
+  SETS_SECURITY_HEADER,
+  XFF,
+  XFF_LOOKBACK,
+} from "./shared.js";
 
 // Python: the language idioms, then Django, Flask and FastAPI.
 
@@ -111,6 +122,28 @@ export const PYTHON_PACK: Pack = {
       notApplicable:
         "Python web frameworks keep the session server-side (Django, Flask-Session) or in one signed cookie (Flask's default); none splits it into numbered chunks that a logout could leave behind.",
     },
+    // `set_cookie` is Django's HttpResponse, Werkzeug/Flask's Response and
+    // Starlette's Response alike, and all three default HttpOnly and Secure off.
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "set-cookie",
+          kind: "call",
+          languages: PY,
+          call: /\.set_cookie\s*\(/,
+          scope: "args",
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+            { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET },
+            { emit: "webconfig/cookie-samesite-none-insecure", when: COOKIE_SAMESITE_NONE, present: COOKIE_SECURE_SET },
+          ],
+        },
+      ],
+    },
+    // graphene-django / Flask-GraphQL `GraphQLView.as_view(graphiql=True)`.
+    "graphql-introspection-enabled": {
+      rules: [{ id: "graphiql-true", kind: "line", languages: PY, match: /\bgraphiql\s*=\s*True\b/, emit: "webconfig/graphql-introspection" }],
+    },
   },
 };
 
@@ -139,6 +172,10 @@ export const DJANGO_PACK: Pack = {
   framework: "django",
   testedWith: ">=3.2 <7",
   sources: ["https://docs.djangoproject.com/en/stable/ref/middleware/", "https://docs.djangoproject.com/en/stable/ref/settings/"],
+  markers: {
+    global: { auth: { words: ["login_required", "permission_required"] } },
+    detected: { auth: { words: ["LoginRequiredMixin", "PermissionRequiredMixin", "user_passes_test", "permission_classes"] } },
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -174,6 +211,50 @@ export const DJANGO_PACK: Pack = {
         },
       ],
     },
+    // The original web-config detector's Django rules (raw lines: a
+    // commented-out middleware IS the finding).
+    "csrf-protection-disabled": {
+      rules: [
+        { id: "csrf-exempt", kind: "line", languages: PY, text: "raw", match: /^\s*@csrf_exempt\b/, emit: "webconfig/csrf-disabled" },
+        {
+          id: "middleware-commented",
+          kind: "line",
+          languages: PY,
+          text: "raw",
+          match: /^\s*#\s*['"]django\.middleware\.csrf\.CsrfViewMiddleware['"]/,
+          emit: "webconfig/csrf-disabled",
+        },
+      ],
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "debug-true", kind: "line", languages: PY, text: "raw", match: /^\s*DEBUG\s*=\s*True\b/, emit: "webconfig/debug" }],
+    },
+    // USE_X_FORWARDED_HOST trusts X-Forwarded-Host for `get_host()` and every
+    // absolute URL (password-reset links). Source: https://docs.djangoproject.com/en/stable/ref/settings/#use-x-forwarded-host
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "use-x-forwarded-host",
+          kind: "line",
+          languages: PY,
+          match: /^\s*USE_X_FORWARDED_HOST\s*=\s*True\b/,
+          note: "`USE_X_FORWARDED_HOST = True` makes `request.get_host()` — and every absolute URL Django builds, password-reset links included — come from X-Forwarded-Host, which any caller can send unless the proxy in front overwrites it. Confirm the proxy sets it on every request, or leave it off.",
+        },
+      ],
+    },
+    // DATA_UPLOAD_MAX_MEMORY_SIZE = None removes Django's 2.5 MB body cap.
+    // Source: https://docs.djangoproject.com/en/stable/ref/settings/#data-upload-max-memory-size
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "upload-max-none",
+          kind: "line",
+          languages: PY,
+          match: /^\s*DATA_UPLOAD_MAX_(?:MEMORY_SIZE|NUMBER_FIELDS|NUMBER_FILES)\s*=\s*None\b/,
+          note: "A Django request-size guard is set to `None`, which removes it: a single request can make the process buffer an arbitrarily large body (or field count). Keep a bound — the 2.5 MB default, or the largest body the app really accepts.",
+        },
+      ],
+    },
   },
 };
 
@@ -188,6 +269,7 @@ export const FLASK_PACK: Pack = {
   framework: "flask",
   testedWith: ">=2 <4",
   sources: ["https://flask.palletsprojects.com/en/stable/web-security/"],
+  markers: { detected: { auth: { words: ["jwt_required", "roles_required", "fresh_login_required"] }, throttle: { patterns: [/\bLimiter\s*\(/] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -227,6 +309,33 @@ export const FLASK_PACK: Pack = {
         },
       ],
     },
+    "debug-mode-enabled": {
+      rules: [{ id: "run-debug", kind: "line", languages: PY, text: "raw", match: /\.run\([^)]*\bdebug\s*=\s*True/, emit: "webconfig/debug" }],
+    },
+    // Flask-WTF's CSRF protection, switched off.
+    // Source: https://flask-wtf.readthedocs.io/en/stable/config/
+    "csrf-protection-disabled": {
+      rules: [{ id: "wtf-csrf-off", kind: "line", languages: PY, match: /\bWTF_CSRF_ENABLED["']?\s*\]?\s*=\s*False\b/, emit: "webconfig/csrf-disabled" }],
+    },
+    // Flask reads JSON and raw bodies whole and sets no MAX_CONTENT_LENGTH.
+    // Source: https://flask.palletsprojects.com/en/stable/config/#MAX_CONTENT_LENGTH
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "no-max-content-length",
+          kind: "absent",
+          languages: PY,
+          requiresFramework: "flask",
+          anchor: /\bFlask\s*\(\s*__name__/,
+          presentInFile: /MAX_CONTENT_LENGTH/,
+          presentInTree: { re: /MAX_CONTENT_LENGTH/, scope: "package", languages: PY },
+          note: "The Flask app is built and nothing in the package sets `MAX_CONTENT_LENGTH`, so Flask reads request bodies of any size (`request.get_json()`, `request.data`). Set it to the largest body the app accepts — unless the proxy in front enforces a limit.",
+        },
+      ],
+    },
+    "proxy-headers-trusted": {
+      hunt: "Flask trusts no forwarded header unless the app wraps itself in Werkzeug's `ProxyFix`; check whether it does, and with how many hops (`x_for`, `x_host`, `x_proto`).",
+    },
   },
 };
 
@@ -240,6 +349,13 @@ export const FASTAPI_PACK: Pack = {
   framework: "fastapi",
   testedWith: ">=0.100 <1",
   sources: ["https://fastapi.tiangolo.com/advanced/middleware/"],
+  // A dependency that resolves the caller IS FastAPI's guard.
+  markers: {
+    detected: {
+      auth: { patterns: [/\bDepends\s*\(\s*\w*(?:current_user|auth|token|verify|security)\w*/i, /\bSecurity\s*\(/] },
+      throttle: { patterns: [/\bLimiter\s*\(/] },
+    },
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -265,6 +381,30 @@ export const FASTAPI_PACK: Pack = {
           statement: "balanced",
         },
       ],
+    },
+    // Starlette's debug mode renders tracebacks to the client.
+    // Source: https://www.starlette.io/applications/
+    "debug-mode-enabled": {
+      rules: [{ id: "app-debug", kind: "line", languages: PY, match: /\bFastAPI\s*\([^)]*\bdebug\s*=\s*True\b/, emit: "webconfig/debug" }],
+    },
+    // uvicorn trusts X-Forwarded-For/-Proto only from `forwarded_allow_ips`; `*` is everyone.
+    // Source: https://www.uvicorn.org/settings/#http
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "forwarded-allow-any",
+          kind: "line",
+          languages: PY,
+          match: /\bforwarded_allow_ips\s*=\s*["']\*["']/,
+          note: '`forwarded_allow_ips="*"` makes uvicorn take the client address and scheme from X-Forwarded-* sent by ANY caller. List the proxy\'s address instead, and confirm the app is not reachable around it.',
+        },
+      ],
+    },
+    "request-body-unbounded": {
+      hunt: "FastAPI/Starlette read `await request.json()` and `request.body()` whole with no size limit of their own; check what bounds the bodies (a middleware, the ASGI server, the proxy).",
+    },
+    "csrf-protection-disabled": {
+      hunt: "FastAPI ships no CSRF protection to switch off; check whether any state-changing route is authenticated by a cookie the browser attaches on its own.",
     },
   },
 };

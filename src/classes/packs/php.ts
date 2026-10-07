@@ -1,5 +1,5 @@
 import type { Pack, QueryIdiom } from "../types.js";
-import { EXPORT_PATH, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, SETS_SECURITY_HEADER, XFF, XFF_LOOKBACK } from "./shared.js";
+import { COOKIE_CALL, EXPORT_PATH, LEGACY_COOKIE_FLAGS, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, SETS_SECURITY_HEADER, XFF, XFF_LOOKBACK } from "./shared.js";
 
 // PHP: the language idioms, then Laravel.
 
@@ -70,6 +70,26 @@ export const PHP_PACK: Pack = {
     "session-cookie-chunks-on-logout": {
       notApplicable: "PHP sessions (native and Laravel's drivers) keep one session cookie; none splits it into numbered chunks for a logout to miss.",
     },
+    // The original web-config detector's rules (src/webconfig.ts ≤ v1.58.0),
+    // moved here with their shapes so their findings keep their ids.
+    "insecure-session-cookie": {
+      rules: [{ id: "setcookie", kind: "call", languages: PHP, call: COOKIE_CALL, scope: "args", ...LEGACY_COOKIE_FLAGS }],
+    },
+    "csrf-protection-disabled": {
+      rules: [
+        { id: "csrf-false", kind: "line", languages: PHP, text: "raw", match: /['"]csrf(?:_protection)?['"]\s*=>\s*false/i, emit: "webconfig/csrf-disabled" },
+      ],
+    },
+    "debug-mode-enabled": {
+      rules: [{ id: "debug-true", kind: "line", languages: PHP, text: "raw", match: /['"]debug['"]\s*=>\s*true/, emit: "webconfig/debug" }],
+    },
+    "request-body-unbounded": {
+      notApplicable:
+        "PHP enforces `post_max_size` (8 MB by default) before application code runs; a body limit is an ini/web-server setting, not an application idiom.",
+    },
+    "graphql-introspection-enabled": {
+      hunt: "webonyx/graphql-php and Lighthouse answer introspection unless a `DisableIntrospection` validation rule is added (Lighthouse: `security.disable_introspection`); check the production config.",
+    },
   },
 };
 
@@ -95,6 +115,18 @@ export const LARAVEL_PACK: Pack = {
   framework: "laravel",
   testedWith: ">=9 <14",
   sources: ["https://laravel.com/docs/12.x/requests"],
+  // Route middleware is Laravel's guard, named in a string.
+  markers: {
+    detected: {
+      auth: {
+        patterns: [
+          /->middleware\(\s*\[?[^)\]]*['"](?:auth(?::[\w,]+)?|can:[^'"]+|verified)['"]/,
+          /\bAuth::(?:check|user|guard)\s*\(/,
+          /\bauth\(\)\s*->\s*(?:check|user)\s*\(/,
+        ],
+      },
+    },
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -119,6 +151,32 @@ export const LARAVEL_PACK: Pack = {
           routeDecl: /Route::(?:get|post|any|match)\s*\(\s*['"]([^'"]+)['"]|public\s+function\s+(\w+)\s*\(/,
           queries: LARAVEL_QUERIES,
           statement: "balanced",
+        },
+      ],
+    },
+    // Trusting every proxy (`*`) lets any caller set the IP and scheme.
+    // Source: https://laravel.com/docs/12.x/requests#configuring-trusted-proxies
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "trust-all-proxies",
+          kind: "line",
+          languages: PHP,
+          match: /\btrustProxies\s*\(\s*at\s*:\s*['"]\*\*?['"]|\$proxies\s*=\s*['"]\*\*?['"]/,
+          note: "Every proxy is trusted (`*`), so `$request->ip()`, the scheme and the host come from X-Forwarded-* sent by ANY caller that reaches the app directly. List the proxy's addresses, and confirm the app is not reachable around them.",
+        },
+      ],
+    },
+    // Every route exempted from the CSRF token check.
+    // Source: https://laravel.com/docs/12.x/csrf#csrf-excluding-uris
+    "csrf-protection-disabled": {
+      rules: [
+        {
+          id: "except-everything",
+          kind: "line",
+          languages: PHP,
+          match: /\bvalidateCsrfTokens\s*\(\s*except\s*:\s*\[\s*['"]\*['"]|\$except\s*=\s*\[\s*['"]\*['"]/,
+          emit: "webconfig/csrf-disabled",
         },
       ],
     },

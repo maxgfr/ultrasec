@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { auditWeaknessClasses } from "../src/classes/engine.js";
 import { PACKS } from "../src/classes/packs/index.js";
-import { CLASS_IDS, ECOSYSTEMS, type ClassId } from "../src/classes/types.js";
-import { FRAMEWORKS, detectFrameworks, satisfies } from "../src/frameworks.js";
+import { CLASS_IDS, type ClassId, type Pack } from "../src/classes/types.js";
+import { FRAMEWORKS, detectFrameworks, satisfies, webFrameworks } from "../src/frameworks.js";
 
 // The recall matrix: weakness class × ecosystem (and × framework where the
 // idiom is the framework's). Every cell is a SYNTHETIC vulnerable/fixed pair
@@ -19,9 +19,12 @@ const expectations = JSON.parse(readFileSync(join(FIXTURE, "expectations.json"),
 
 /** The first lot: the frameworks every class must be decided for. */
 const FIRST_LOT = ["nextjs", "express", "nestjs", "fastify", "django", "flask", "fastapi", "spring", "net-http", "gin", "rails", "laravel"];
-const ecosystemOf = (cell: string): string => FRAMEWORKS.find((f) => f.id === cell)?.ecosystem ?? (cell === "net-http" ? "go" : cell);
+const ecosystemOf = (cell: string): string => FRAMEWORKS.find((f) => f.id === cell)?.ecosystem ?? cell;
+/** Ecosystems with a language pack: the ones a class must be decided for. An
+ *  ecosystem with none (Elixir, Rust, .NET, Deno) is detected and hunted. */
+const PACKED_ECOSYSTEMS = [...new Set(PACKS.filter((p) => !p.framework && p.ecosystem !== "*").map((p) => p.ecosystem))];
 
-const frameworks = detectFrameworks(FIXTURE);
+const frameworks = webFrameworks(detectFrameworks(FIXTURE));
 const { hits } = auditWeaknessClasses(FIXTURE, undefined, undefined, frameworks);
 const filesOf = (c: ClassId): Set<string> => new Set(hits.filter((h) => h.classId === c).map((h) => h.file));
 
@@ -50,16 +53,31 @@ describe("weakness classes — recall matrix (synthetic vulnerable/fixed pairs)"
 describe("weakness classes — the matrix is complete for the first lot", () => {
   const frameworkLevel = (c: ClassId) => !PACKS.some((p) => !p.framework && p.classes[c] && "rules" in p.classes[c]!);
 
+  /** A pack's explicit word on a class that holds no rule: not applicable, or applicable and hunted. */
+  const declared = (p: Pack | undefined, c: ClassId): "notApplicable" | "hunt" | undefined => {
+    const cov = p?.classes[c];
+    return cov && "notApplicable" in cov ? "notApplicable" : cov && "hunt" in cov ? "hunt" : undefined;
+  };
+
   for (const c of CLASS_IDS) {
-    it(`${c}: every ecosystem is either covered by a fixture cell or declared not applicable`, () => {
+    it(`${c}: every ecosystem is covered by a fixture cell, declared not applicable, or declared hunted`, () => {
       const cells = Object.keys(expectations[c] ?? {});
-      for (const eco of ECOSYSTEMS) {
+      for (const eco of PACKED_ECOSYSTEMS) {
         const covered = cells.some((cell) => ecosystemOf(cell) === eco);
-        const declaredNa = PACKS.some((p) => p.ecosystem === eco && p.classes[c] && "notApplicable" in p.classes[c]!);
-        expect(covered || declaredNa, `${c} × ${eco}: no fixture cell and no notApplicable declaration`).toBe(true);
-        if (declaredNa) expect(covered, `${c} × ${eco}: declared not applicable AND has a cell`).toBe(false);
+        const langPack = PACKS.find((p) => p.ecosystem === eco && !p.framework && !p.library);
+        const word = declared(langPack, c);
+        expect(covered || word !== undefined, `${c} × ${eco}: no fixture cell and no notApplicable/hunt declaration`).toBe(true);
+        if (word === "notApplicable") expect(covered, `${c} × ${eco}: declared not applicable AND has a cell`).toBe(false);
       }
-      if (frameworkLevel(c)) for (const fw of FIRST_LOT) expect(cells, `${c} is framework-level: ${fw} needs its own cell`).toContain(fw);
+      if (frameworkLevel(c))
+        for (const fw of FIRST_LOT) {
+          const word = declared(
+            PACKS.find((p) => p.framework === fw),
+            c,
+          );
+          expect(cells.includes(fw) || word !== undefined, `${c} is framework-level: ${fw} needs its own cell or a declaration`).toBe(true);
+          if (word) expect(cells, `${c} × ${fw}: declared ${word} AND has a cell`).not.toContain(fw);
+        }
     });
   }
 

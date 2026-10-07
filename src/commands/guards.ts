@@ -16,6 +16,7 @@ import {
   type GuardRow,
 } from "../guards.js";
 import { ingestDiscoveries } from "../investigate.js";
+import { detectedIds } from "../classes/markers.js";
 import { loadContextDoc } from "../context.js";
 import { emitWorklist, stageFiles, readApply, persistFindings } from "../stage.js";
 import { surfaceDropped, type ParseResult } from "../apply-parse.js";
@@ -71,7 +72,8 @@ export function runGuards(args: ParsedArgs): number {
   // / `Throttle markers:`) so every run inherits them, or ad hoc with --marker.
   const markers = [...new Set([...contextMarkers(loadContextDoc(run), lens), ...markerFlags(args)])];
   // Test files are left out unless the scan kept them (`scan --include-tests`).
-  const matrixOpts = { includeTests: dossier.manifest.passes?.includeTests === true };
+  // The stack the scan detected: its packs add the guard names only it uses.
+  const matrixOpts = { includeTests: dossier.manifest.passes?.includeTests === true, detected: detectedIds(dossier.manifest.frameworks) };
 
   const applyPath = flagStr(args, "apply");
   if (applyPath) {

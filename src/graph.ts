@@ -1,6 +1,6 @@
 import type { RepoScan } from "./scan.js";
 import { enclosingSymbolName } from "./scan.js";
-import { buildFileResolver } from "./resolve.js";
+import { buildFileResolver, type ResolutionGap } from "./resolve.js";
 import type { WalkedFile } from "./walk.js";
 import { langForFile } from "./lang.js";
 import { buildRawCallerIndex } from "./vendor/codeindex-engine.mjs";
@@ -70,6 +70,8 @@ export interface GraphOptions {
    *  every pass). The resolver's manifest discovery reads it instead of walking
    *  the tree again. Omitted ⇒ the resolver walks, as before. */
   tree?: readonly WalkedFile[];
+  /** Collects what the import resolver had to leave out (see `ResolutionGap`). */
+  resolutionGaps?: ResolutionGap[];
 }
 
 /** Build the cross-file link-graph (import + resolved call edges). Deterministic. */
@@ -90,7 +92,7 @@ export function buildGraph(scan: RepoScan, opts: GraphOptions = {}): Graph {
   for (const [name, files] of defs) symbolDefs[name] = [...files].sort(byStr);
 
   const edgeMap = new Map<string, Edge>();
-  const resolve = buildFileResolver(scan, opts.tree);
+  const resolve = buildFileResolver(scan, opts.tree, opts.resolutionGaps);
 
   // Pass 1: import edges only. Call edges need the whole import graph to be
   // known before any of them can be judged (see importReaches), so they wait.

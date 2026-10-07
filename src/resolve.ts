@@ -42,11 +42,70 @@ function engineScan(scan: RepoScan, tree?: readonly WalkedFile[]): Parameters<ty
   return { root: scan.repo, files } as unknown as Parameters<typeof buildResolveContext>[0];
 }
 
+/**
+ * Files the resolve context had to leave out, and why. A context the vendored
+ * engine cannot build is not a reason to lose the whole scan: on a Phoenix repo
+ * its Elixir module index read `symbols` off every `.ex` record this adapter
+ * hands it — records that carry only `rel`/`ext` — and the TypeError took the
+ * scan down before a single finding was written. The guard below keeps the
+ * scan, drops the extension whose records the engine choked on, and says so in
+ * the manifest: imports INTO those files are not resolved, which is degraded
+ * coverage a reader has to be told about, not a silent gap.
+ */
+export interface ResolutionGap {
+  /** File extension left out of the resolve context (`.ex`), or `*` when nothing could be kept. */
+  ext: string;
+  /** How many files that was. */
+  files: number;
+  /** The engine's error, as thrown. */
+  reason: string;
+}
+
+/** Build the engine's resolve context, leaving out the one extension it cannot
+ *  build from rather than failing — and recording what was left out. */
+function guardedContext(scan: RepoScan, tree: readonly WalkedFile[] | undefined, gaps: ResolutionGap[]): ResolveContext {
+  const es = engineScan(scan, tree);
+  let reason: string;
+  try {
+    return buildResolveContext(es);
+  } catch (e) {
+    reason = e instanceof Error ? e.message : String(e);
+  }
+  const files = es.files as { rel: string; ext: string }[];
+  // Find the extensions the engine cannot index on their own, leave them all
+  // out, and build from the rest.
+  const bad = [...new Set(files.map((f) => f.ext))].sort().filter((ext) => {
+    try {
+      buildResolveContext({ ...es, files: files.filter((f) => f.ext === ext) } as typeof es);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (bad.length) {
+    const kept = files.filter((f) => !bad.includes(f.ext));
+    try {
+      const ctx = buildResolveContext({ ...es, files: kept } as typeof es);
+      for (const ext of bad) gaps.push({ ext: ext || "(none)", files: files.filter((f) => f.ext === ext).length, reason });
+      return ctx;
+    } catch {
+      /* the failure is in how the groups combine — fall through to the bare file set */
+    }
+  }
+  gaps.push({ ext: "*", files: files.length, reason });
+  return ctxFromFileSet(new Set(files.map((f) => f.rel)));
+}
+
 /** A repo-file import resolver bound to a scan's full resolve context (tsconfig
  *  paths, workspace exports, module roots). Returns the resolved repo-relative
- *  target, or undefined for external/dangling specifiers. */
-export function buildFileResolver(scan: RepoScan, tree?: readonly WalkedFile[]): (fromRel: string, spec: string) => string | undefined {
-  const ctx = buildResolveContext(engineScan(scan, tree));
+ *  target, or undefined for external/dangling specifiers. `gaps` collects what
+ *  the context had to leave out (see `ResolutionGap`). */
+export function buildFileResolver(
+  scan: RepoScan,
+  tree?: readonly WalkedFile[],
+  gaps: ResolutionGap[] = [],
+): (fromRel: string, spec: string) => string | undefined {
+  const ctx = guardedContext(scan, tree, gaps);
   return (fromRel, spec) => {
     const r = engineResolveImport(fromRel, extOf(fromRel), spec, ctx);
     return r.kind === "resolved" && r.target !== fromRel ? r.target : undefined;

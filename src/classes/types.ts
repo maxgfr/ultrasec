@@ -18,8 +18,13 @@ import type { Category, Severity } from "../types.js";
 // coverage. Adding a framework is adding data and fixtures — the engine
 // (engine.ts) never learns a framework's name.
 
-/** The ecosystems a pack can target. `*` is the language-agnostic pack. */
-export const ECOSYSTEMS = ["node", "python", "java", "go", "ruby", "php"] as const;
+/**
+ * The ecosystems a detected stack belongs to (`src/stack.ts`), and a pack can
+ * target. `java` is the JVM (Java, Kotlin, Scala); `deno` is JavaScript on
+ * Deno's registries. An ecosystem with no pack is still detected: its classes
+ * are hunted, not matched. `*` is the language-agnostic pack.
+ */
+export const ECOSYSTEMS = ["node", "python", "java", "go", "ruby", "php", "elixir", "rust", "dotnet", "deno"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
 export const CLASS_IDS = [
@@ -30,8 +35,24 @@ export const CLASS_IDS = [
   "security-headers-absent",
   "session-cookie-chunks-on-logout",
   "env-bool-coercion",
+  "insecure-session-cookie",
+  "proxy-headers-trusted",
+  "request-body-unbounded",
+  "graphql-introspection-enabled",
+  "csrf-protection-disabled",
+  "debug-mode-enabled",
 ] as const;
 export type ClassId = (typeof CLASS_IDS)[number];
+
+/**
+ * The matrix row that is not a weakness class: the taint catalog's framework
+ * idioms (request inputs, route conventions, sink refutations) for a column.
+ * Recognition coverage — a framework whose input APIs the catalog does not
+ * know leaves every taint class blind on it, so it is hunted like a class.
+ */
+export const CATALOG_ROW = "taint-catalog" as const;
+export type MatrixRowId = ClassId | typeof CATALOG_ROW;
+export const MATRIX_ROW_IDS: readonly MatrixRowId[] = [...CLASS_IDS, CATALOG_ROW];
 
 export interface ClassExample {
   /** An ultrasec language id (`javascript`, `python`, …). */
@@ -40,22 +61,27 @@ export interface ClassExample {
   fixed: string;
 }
 
-/** One weakness class — the part that does not age with a framework release. */
-export interface WeaknessClass {
-  id: ClassId;
+/** What a hunt hands the auditor for one matrix row. */
+export interface HuntSubject {
+  id: MatrixRowId;
   title: string;
   cwe: string;
-  severity: Severity;
-  category: Category;
   /** What must hold for the code to be safe, stated as source → sink → guard. */
   invariant: string;
   /** What a guard that actually establishes the invariant looks like. */
   guard: string;
   /** How to move the base severity up or down for a concrete instance. */
   rubric: string;
+  examples: ClassExample[];
+}
+
+/** One weakness class — the part that does not age with a framework release. */
+export interface WeaknessClass extends HuntSubject {
+  id: ClassId;
+  severity: Severity;
+  category: Category;
   /** Default finding text when a pack rule carries no note of its own. */
   note: string;
-  examples: ClassExample[];
 }
 
 /**
@@ -96,8 +122,16 @@ interface RuleBase {
 /** A code line that is unsafe on its own. */
 export interface LineRule extends RuleBase {
   kind: "line";
-  /** Tested on the line's CODE (comment stripped, strings kept). */
+  /**
+   * Tested on the line's CODE (comment stripped, strings kept) — or, with
+   * `text: "raw"`, on the raw line, comment lines included: a commented-out
+   * guard (`# protect_from_forgery`) is the finding, and the detectors these
+   * rules replaced read raw lines.
+   */
   match: RegExp;
+  text?: "code" | "raw";
+  /** Cite the matched text rather than the whole line as evidence. */
+  evidence?: "line" | "match";
   /** A guard on the same line clears it (tested on the code). */
   unless?: RegExp;
   /** Another code line within `before` lines above (or the line itself) must match. */
@@ -171,6 +205,30 @@ export interface AbsentRule extends RuleBase {
   presentInTree?: { re: RegExp; scope: "anchor-dir" | "package"; files?: RegExp; languages?: string[] };
 }
 
+/**
+ * A call whose options decide whether it is safe — a cookie written without
+ * its flags. The engine finds every call head, reads its argument text (or the
+ * whole statement, for a builder chained after the call), and reports one
+ * finding per protective flag the options lack, each under its own shape.
+ */
+export interface CallRule extends RuleBase {
+  kind: "call";
+  /** The call head, ending at its opening `(` or `{`. Matched on the raw content. */
+  call: RegExp;
+  /** What the flags are read from: the balanced argument text, or the statement the call starts. */
+  scope: "args" | "statement";
+  /** The call carries options when its argument text (or its head) matches. Absent: always. */
+  options?: { args?: RegExp; head?: RegExp };
+  /** Shapes reported for a call with no options at all; evidence is the head and an ellipsis. */
+  bare?: string[];
+  /** With options: a finding under `emit` when `present` is absent (and `when`, if given, holds). */
+  flags?: { emit: string; present: RegExp; when?: RegExp }[];
+}
+
+/** Configuration formats a rule can read, by file extension: no code language
+ *  claims them, and a framework's settings live in them as often as in code. */
+export const CONFIG_FORMATS: Readonly<Record<string, string>> = { yaml: "yaml", yml: "yaml", properties: "properties", conf: "conf", nginx: "conf" };
+
 /** Where a framework was detected — all the engine needs to gate and scope rules. */
 export interface FrameworkScope {
   id: string;
@@ -178,20 +236,55 @@ export interface FrameworkScope {
   dir: string;
 }
 
-export type Rule = LineRule | FileRule | RouteQueryRule | AbsentRule;
+export type Rule = LineRule | FileRule | RouteQueryRule | AbsentRule | CallRule;
 
-/** What a pack says about one class: its idioms, or why the class does not apply. */
-export type ClassCoverage = { rules: Rule[] } | { notApplicable: string };
+/**
+ * What a pack says about one class: its idioms; why the class does not apply;
+ * or that it applies and no idiom is encoded yet — the cell is then hunted by
+ * the AI, with this reason as the brief, and that is a declared state rather
+ * than an oversight.
+ */
+export type ClassCoverage = { rules: Rule[] } | { notApplicable: string } | { hunt: string };
+
+/** Names that mark an authentication or rate-limiting check in code. */
+export interface MarkerVocabulary {
+  /** Whole-word names, as regex source (`passport\\.authenticate`). */
+  words?: string[];
+  /** Annotation / decorator names, matched after `@`. */
+  annotations?: string[];
+  /** Anything a name cannot say (`await auth()`, `->middleware('auth')`). */
+  patterns?: RegExp[];
+}
+
+/**
+ * The guard vocabulary a pack contributes to the guard matrix and the context
+ * brief, on top of the generic floor (`src/classes/markers.ts`). `global` names
+ * no other stack uses and are matched in every repository — that is how the
+ * vocabulary behaved before packs carried it. `detected` names are too generic
+ * to trust anywhere else (`auth()`, `Depends(get_current_user)`) and are only
+ * matched when the pack's framework or library is detected.
+ */
+export interface PackMarkers {
+  global?: { auth?: MarkerVocabulary; throttle?: MarkerVocabulary };
+  detected?: { auth?: MarkerVocabulary; throttle?: MarkerVocabulary };
+}
 
 export interface Pack {
   /** Unique pack id (`node`, `express`, `django`, …). */
   id: string;
   /** `*` for the language-agnostic pack. */
   ecosystem: Ecosystem | "*";
-  /** Framework id from `src/frameworks.ts`; absent for an ecosystem-wide pack. */
+  /** Framework id from the stack table (`src/stack.ts`); absent for an ecosystem-wide pack. */
   framework?: string;
   /**
-   * Framework versions the rules were validated against by fixtures, as
+   * Library id from the stack table, for the idioms of a library rather than a
+   * framework (NextAuth's session cookie). The pack's cells count for every
+   * framework column of the package the library is declared in, and its
+   * `testedWith` is checked against the LIBRARY's version.
+   */
+  library?: string;
+  /**
+   * Framework (or library) versions the rules were validated against by fixtures, as
    * space-separated comparators with `||` alternatives (`>=4 <6`). A detected
    * version outside it is DEGRADED coverage — reported and hunted, never
    * silently trusted.
@@ -200,4 +293,6 @@ export interface Pack {
   /** Documentation the defaults encoded here were checked against. */
   sources?: string[];
   classes: Partial<Record<ClassId, ClassCoverage>>;
+  /** Auth / throttle marker names this stack writes its guards with. */
+  markers?: PackMarkers;
 }

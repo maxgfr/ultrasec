@@ -1,0 +1,7 @@
+{
+  "name": "hapi-api",
+  "private": true,
+  "dependencies": {
+    "@hapi/hapi": "^21.3.0"
+  }
+}

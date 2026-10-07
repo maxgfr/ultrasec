@@ -27,13 +27,22 @@ const fw = (id: string, ecosystem: DetectedFramework["ecosystem"], version: stri
 const manifestFor = (...frameworks: DetectedFramework[]) => ({ frameworks, weaknessClasses: classCoverage(frameworks) });
 
 describe("buildClassHunts", () => {
-  it("emits nothing when every class is covered deterministically (a Next.js app inside testedWith)", () => {
-    expect(buildClassHunts(manifestFor(fw("nextjs", "node", "16.3.3", "packages/app")))).toEqual([]);
+  it("hunts only what the packs leave to the hunt for a Next.js app inside testedWith", () => {
+    const nextAuth: DetectedFramework = { ...fw("next-auth", "node", "4.24.13", "packages/app"), kind: "library" };
+    const hunts = buildClassHunts(manifestFor(fw("nextjs", "node", "16.3.3", "packages/app"), nextAuth));
+    // Exactly the classes the Next.js pack declares hunted, each with its declared reason.
+    expect(hunts.map((h) => h.hunt!.class)).toEqual(["proxy-headers-trusted", "request-body-unbounded", "debug-mode-enabled"]);
+    expect(hunts[0]!.hunt!.reason).toMatch(/X-Forwarded-Host/);
   });
 
   it("hunts only the cells a partial pack leaves uncovered", () => {
     const hunts = buildClassHunts(manifestFor(fw("koa", "node", "2.15.0")));
-    expect(hunts.map((h) => h.region)).toEqual(["hunt:unbounded-public-export:koa"]);
+    // The session-chunk idiom is NextAuth's: with no NextAuth declared, that cell is hunted too.
+    expect(hunts.map((h) => h.region)).toEqual([
+      "hunt:unbounded-public-export:koa",
+      "hunt:session-cookie-chunks-on-logout:koa",
+      "hunt:request-body-unbounded:koa",
+    ]);
     const h = hunts[0]!;
     expect(h.files).toEqual(["package.json"]);
     expect(h.hunt).toMatchObject({ class: "unbounded-public-export", framework: "koa", version: "2.15.0", reason: "pack koa has no idiom for this class" });
@@ -42,14 +51,18 @@ describe("buildClassHunts", () => {
     expect(h.prompt).toContain('"hunt": "hunt:unbounded-public-export:koa"');
   });
 
-  it("hunts the framework-pack cells of a version outside testedWith, naming the floor that already ran", () => {
+  it("hunts every cell of a version outside testedWith, naming the floor that already ran", () => {
     const hunts = buildClassHunts(manifestFor(fw("nextjs", "node", "17.0.0", "web")));
-    expect(hunts.map((h) => h.region).sort()).toEqual(["hunt:security-headers-absent:nextjs@web", "hunt:unbounded-public-export:nextjs@web"]);
-    expect(hunts[0]!.hunt!.packsApplied).toEqual(["nextjs"]);
+    expect(hunts).toHaveLength(14);
+    expect(hunts.find((h) => h.hunt!.class === "taint-catalog")!.prompt).toMatch(/^Taint-catalog coverage on nextjs 17\.0\.0/);
+    const headers = hunts.find((h) => h.region === "hunt:security-headers-absent:nextjs@web")!;
+    expect(headers.hunt!.packsApplied).toEqual(["nextjs"]);
+    expect(headers.hunt!.reason).toBe("nextjs 17.0.0 is outside nextjs testedWith >=12 <17");
+    expect(hunts.find((h) => h.region === "hunt:timing-unsafe-secret-compare:nextjs@web")!.hunt!.packsApplied).toEqual(["node"]);
   });
 
   it("never hunts a class declared not applicable", () => {
-    expect(buildClassHunts(manifestFor(fw("sinatra", "ruby", "4.0.0"))).some((h) => h.region.includes("session-cookie"))).toBe(false);
+    expect(buildClassHunts(manifestFor(fw("sinatra", "ruby", "4.0.0"))).some((h) => h.region.includes("session-cookie-chunks"))).toBe(false);
   });
 });
 
@@ -164,10 +177,14 @@ describe("investigate — weakness-class hunts end to end", () => {
 
     const emit = capture(() => runInvestigate(parseArgs(["--run", run, "--repo", repo])));
     expect(emit.code).toBe(0);
-    expect(emit.out).toContain("1 weakness-class hunt");
+    expect(emit.out).toContain("3 weakness-class hunt");
     const todo = JSON.parse(readFileSync(join(run, "INVESTIGATE.todo.json"), "utf8")) as { region: string; hunt?: { id: string } }[];
     const id = huntId({ class: "unbounded-public-export", framework: "koa", dir: "" });
-    expect(todo.filter((r) => r.hunt).map((r) => r.region)).toEqual([id]);
+    expect(todo.filter((r) => r.hunt).map((r) => r.region)).toEqual([
+      id,
+      huntId({ class: "session-cookie-chunks-on-logout", framework: "koa", dir: "" }),
+      huntId({ class: "request-body-unbounded", framework: "koa", dir: "" }),
+    ]);
     expect(readFileSync(join(run, "INVESTIGATE.md"), "utf8")).toContain("## Weakness-class hunts");
     expect(withHuntProgress(classCoverage([koa]), run).find((c) => c.class === "unbounded-public-export")!.state).toBe("ai-hunt");
 

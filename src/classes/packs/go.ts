@@ -1,5 +1,15 @@
 import type { Pack, QueryIdiom } from "../types.js";
-import { EXPORT_PATH, FLAG_NAME, MENTIONS_CSV, NEUTRALIZES_FORMULA_ANY, SETS_SECURITY_HEADER, XFF, XFF_LOOKBACK } from "./shared.js";
+import {
+  COOKIE_HTTPONLY_SET,
+  COOKIE_SECURE_SET,
+  EXPORT_PATH,
+  FLAG_NAME,
+  MENTIONS_CSV,
+  NEUTRALIZES_FORMULA_ANY,
+  SETS_SECURITY_HEADER,
+  XFF,
+  XFF_LOOKBACK,
+} from "./shared.js";
 
 // Go: the language idioms, then net/http (the standard library) and Gin.
 
@@ -21,6 +31,8 @@ const GO_SETS_HEADERS = new RegExp(`secure\\.New\\s*\\(|unrolled/secure|${SETS_S
 export const GO_PACK: Pack = {
   id: "go",
   ecosystem: "go",
+  // The usual Go limiters: golang.org/x/time/rate, tollbooth, go-chi/httprate.
+  markers: { global: { throttle: { patterns: [/\brate\.NewLimiter\s*\(|\btollbooth\.|\bhttprate\./] } } },
   classes: {
     "timing-unsafe-secret-compare": {
       rules: [
@@ -79,6 +91,55 @@ export const GO_PACK: Pack = {
       notApplicable:
         "Go session libraries (gorilla/sessions, scs) keep one cookie per session and refuse an oversized value; none splits it into numbered chunks.",
     },
+    // `http.Cookie` defaults HttpOnly and Secure to false; the literal is where they are set.
+    "insecure-session-cookie": {
+      rules: [
+        {
+          id: "cookie-literal",
+          kind: "call",
+          languages: GO,
+          call: /\bhttp\.Cookie\s*\{/,
+          scope: "args",
+          flags: [
+            { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+            { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET },
+          ],
+        },
+      ],
+    },
+    // A body read whole with no `http.MaxBytesReader` anywhere in the file.
+    "request-body-unbounded": {
+      rules: [
+        {
+          id: "readall-body",
+          kind: "file",
+          languages: GO,
+          gate: [/\.Body\b/],
+          anchor:
+            /\b(?:io|ioutil)\.ReadAll\s*\(\s*(?:\w+\.)?(?:r|req|request|Request)\.Body\s*\)|json\.NewDecoder\s*\(\s*(?:\w+\.)?(?:r|req|request|Request)\.Body\s*\)/,
+          pick: "first",
+          unless: /\bMaxBytesReader\b|\bLimitReader\b|MaxMultipartMemory/,
+          note: "A request body is read whole (`io.ReadAll`, `json.NewDecoder`) and nothing in the file bounds it — net/http sets no body limit, and neither does Gin outside multipart. Wrap it first: `r.Body = http.MaxBytesReader(w, r.Body, limit)`.",
+        },
+      ],
+    },
+    // gqlgen's playground/sandbox handlers serve a GraphQL IDE.
+    "graphql-introspection-enabled": {
+      rules: [
+        {
+          id: "playground-handler",
+          kind: "line",
+          languages: GO,
+          match: /\bplayground\.(?:Handler|ApolloSandboxHandler|AltairHandler)\s*\(/,
+          emit: "webconfig/graphql-introspection",
+        },
+      ],
+    },
+    // Go 1.25's CrossOriginProtection, with a pattern exempted from it.
+    // Source: https://pkg.go.dev/net/http#CrossOriginProtection
+    "csrf-protection-disabled": {
+      rules: [{ id: "cop-bypass", kind: "line", languages: GO, match: /\.AddInsecureBypassPattern\s*\(/, emit: "webconfig/csrf-disabled" }],
+    },
   },
 };
 
@@ -119,6 +180,10 @@ export const NET_HTTP_PACK: Pack = {
           statement: "balanced",
         },
       ],
+    },
+    "proxy-headers-trusted": {
+      notApplicable:
+        "net/http never rewrites RemoteAddr, Host or the scheme from forwarded headers; code that reads X-Forwarded-For itself is the client-ip-first-xff class.",
     },
   },
 };
@@ -173,6 +238,22 @@ export const GIN_PACK: Pack = {
           statement: "balanced",
         },
       ],
+    },
+    "proxy-headers-trusted": {
+      rules: [
+        {
+          id: "trust-everyone",
+          kind: "line",
+          languages: GO,
+          match: /\.SetTrustedProxies\s*\(\s*\[\]string\s*\{[^}]*"(?:0\.0\.0\.0\/0|::\/0)"/,
+          note: "`SetTrustedProxies` is given the whole address space, so Gin trusts X-Forwarded-For from ANY caller and `c.ClientIP()` returns what the client wrote. List your proxy's address, or pass `nil` when there is none.",
+        },
+      ],
+    },
+    // Debug mode logs every route and request and is meant for development.
+    // Source: https://gin-gonic.com/en/docs/deployment/
+    "debug-mode-enabled": {
+      rules: [{ id: "set-debug-mode", kind: "line", languages: GO, match: /\bgin\.SetMode\s*\(\s*gin\.DebugMode\s*\)/, emit: "webconfig/debug" }],
     },
   },
 };

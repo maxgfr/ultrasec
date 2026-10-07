@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { flagStr, flagBool, listFlag, numFlag, own, println, eprintln, byStr, isScannableDir, type ParsedArgs } from "../util.js";
 import { scanRepo, scanRepoCached, extractionTier } from "../scan.js";
 import { buildGraph, reverseDependents } from "../graph.js";
+import type { ResolutionGap } from "../resolve.js";
 import { enumerateTaint } from "../taint.js";
 import { enumerateSinkCandidates } from "../sinks.js";
 import { SOURCELESS_SINK_KINDS } from "../catalog.js";
@@ -11,8 +12,8 @@ import { auditAgenticWorkflows } from "../actions.js";
 import { auditWebConfig } from "../webconfig.js";
 import { auditAuthTokens } from "../authtokens.js";
 import { auditWeaknessClasses } from "../classes/engine.js";
-import { detectFrameworks } from "../frameworks.js";
-import { classCoverage, needsHunt } from "../classes/coverage.js";
+import { detectFrameworks, inferUnknownFrameworks, webFrameworks } from "../frameworks.js";
+import { classCoverage, matrixStack, needsHunt } from "../classes/coverage.js";
 import { auditCloud } from "../cloud.js";
 import { buildPruneMatcher, snapshotTree } from "../walk.js";
 import { createFileFacts } from "../facts.js";
@@ -200,7 +201,8 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // passes that match calls against the sink catalog.
   const facts = createFileFacts(scan);
   stage("graph", `${scan.files.length} file(s) scanned · building the link-graph…`);
-  const graph = buildGraph(scan, { tree: tree.files });
+  const resolutionGaps: ResolutionGap[] = [];
+  const graph = buildGraph(scan, { tree: tree.files, resolutionGaps });
   // Logging hygiene (opt-in `--log-hygiene`, CWE-117 + CWE-532): unions LOG_SINKS
   // into the taint sink catalog for this run only — default false keeps the
   // sink-matching step (and therefore every golden/snapshot) byte-identical.
@@ -297,8 +299,11 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // Frameworks and versions per package, read from the dependency manifests:
   // they gate the framework-specific idioms and say which packs ran inside the
   // version range they were validated against.
-  const frameworks = detectFrameworks(repo, prune, tree);
-  const classAudit = auditWeaknessClasses(repo, prune, tree, frameworks);
+  // A package whose code declares routes but whose framework the stack table
+  // does not know still gets a column — hunted class by class, not skipped.
+  const stack = detectFrameworks(repo, prune, tree);
+  const classAudit = auditWeaknessClasses(repo, prune, tree, webFrameworks(stack));
+  const frameworks = matrixStack(stack, inferUnknownFrameworks(repo, stack, prune, tree));
   const classCells = classCoverage(frameworks);
 
   // Cloud / K8s / IaC misconfiguration (privileged containers, host namespaces,
@@ -474,6 +479,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
     ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),
+    ...(resolutionGaps.length ? { resolutionGaps } : {}),
     ...(frameworks.length ? { frameworks } : {}),
     ...(classCells.length ? { weaknessClasses: classCells } : {}),
   };
@@ -569,8 +575,16 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     );
     if (nb.note) println(`  ⚠️  ${nb.note}`);
   }
-  if (fm.frameworks?.length)
-    println(`  frameworks: ${fm.frameworks.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ")}`);
+  for (const g of fm.resolutionGaps ?? [])
+    println(
+      `  ⚠️  import resolution degraded: ${g.files} \`${g.ext}\` file(s) left out of the resolve context (${g.reason}) — imports into them are not followed`,
+    );
+  const stackLine = (list: NonNullable<typeof fm.frameworks>): string =>
+    list.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ");
+  const webCols = (fm.frameworks ?? []).filter((f) => f.kind !== "library");
+  const libs = (fm.frameworks ?? []).filter((f) => f.kind === "library");
+  if (webCols.length) println(`  frameworks: ${stackLine(webCols)}`);
+  if (libs.length) println(`  libraries: ${stackLine(libs)}`);
   if (fm.weaknessClasses?.length) {
     const cells = fm.weaknessClasses;
     const hunt = cells.filter(needsHunt).length;

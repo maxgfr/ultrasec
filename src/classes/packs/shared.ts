@@ -37,3 +37,37 @@ export const SETS_SECURITY_HEADER = /Content-Security-Policy|X-Frame-Options|Str
 
 /** A name that says "this boolean is a feature/security switch". */
 export const FLAG_NAME = String.raw`\w*(?:enabled|disabled|enable|disable|flag|debug|mock|fake|skip|bypass|allow|insecure|feature|dry_?run|test_?mode)\w*`;
+
+// ── Cookie flags, read the way the original detector read them ──────────────
+// (src/webconfig.ts up to v1.58.0): one call head, its balanced argument text,
+// one finding per flag the options lack. Shared by the Node and PHP packs so
+// both keep that detector's findings exactly.
+
+/** The cookie-writing calls of Express, Fastify, Koa, Next.js and PHP. */
+export const COOKIE_CALL = /\b(?:res(?:ponse)?\.cookie|reply\.setCookie|ctx\.cookies\.set|cookies\.set|setcookie)\s*\(/gi;
+
+/** `flag: <expression>` — bound to something other than a literal: SET, to whatever the deployment decides. */
+const boundFlag = (flag: string): string => String.raw`\b${flag}\s*:\s*(?!(?:false|0|null|undefined|true|1)\b)[!A-Za-z_$(]`;
+
+export const COOKIE_HTTPONLY_SET = new RegExp(String.raw`httponly\s*[:=]?\s*(?:true|1)|['"]httponly['"]\s*=>\s*true|${boundFlag("httponly")}`, "i");
+export const COOKIE_SECURE_SET = new RegExp(String.raw`\bsecure\s*[:=]?\s*(?:true|1)|['"]secure['"]\s*=>\s*true|${boundFlag("secure")}`, "i");
+export const COOKIE_SAMESITE_SET = /samesite\s*[:=]?\s*['"]?(?:strict|lax|none)|['"]samesite['"]\s*=>\s*['"]?(?:strict|lax|none)/i;
+export const COOKIE_SAMESITE_NONE = /samesite\s*[:=]?\s*['"]?none|['"]samesite['"]\s*=>\s*['"]?none/i;
+
+/** The original detector's cookie flags: no options → HttpOnly + Secure; options → each flag it lacks. */
+export const LEGACY_COOKIE_FLAGS = {
+  options: { args: /\{/, head: /setcookie/i },
+  bare: ["webconfig/cookie-httponly", "webconfig/cookie-secure"],
+  flags: [
+    { emit: "webconfig/cookie-httponly", present: COOKIE_HTTPONLY_SET },
+    { emit: "webconfig/cookie-secure", present: COOKIE_SECURE_SET },
+    { emit: "webconfig/cookie-samesite", present: COOKIE_SAMESITE_SET },
+    { emit: "webconfig/cookie-samesite-none-insecure", when: COOKIE_SAMESITE_NONE, present: COOKIE_SECURE_SET },
+  ],
+};
+
+/** Express `app.set("trust proxy", …)` with anything but `false` (the original detector's rule). */
+export const EXPRESS_TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
+
+/** GraphQL introspection / IDE switched on in an options object or a config file (the original detector's rule). */
+export const GRAPHQL_INTROSPECTION_ON = /\b(?:introspection|graphiql|playground)\s*:\s*true\b/;

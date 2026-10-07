@@ -5,6 +5,7 @@ import { enclosingSymbolName } from "./scan.js";
 import { langForFile, type Sym } from "./lang.js";
 import { findSources } from "./catalog.js";
 import { AUTH_MARKER, THROTTLE_MARKER } from "./context.js";
+import { markerFor } from "./classes/markers.js";
 import { shortHash, byStr } from "./util.js";
 import type { Discovery } from "./investigate.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
@@ -388,10 +389,12 @@ export function buildGuardMatrix(
   scan: RepoScan,
   lens: GuardLens = "auth",
   extraMarkers: readonly string[] = [],
-  opts: { includeTests?: boolean } = {},
+  opts: { includeTests?: boolean; detected?: Iterable<string> } = {},
 ): GuardRow[] {
   const spec = LENSES[lens];
-  const marker = withProjectMarkers(spec.marker, extraMarkers);
+  // The detected stack adds the names that only mean something for it
+  // (src/classes/markers.ts); without it, the vocabulary every repo gets.
+  const marker = withProjectMarkers(opts.detected ? markerFor(lens, opts.detected) : spec.marker, extraMarkers);
   const rows: GuardRow[] = [];
 
   for (const file of scan.files) {

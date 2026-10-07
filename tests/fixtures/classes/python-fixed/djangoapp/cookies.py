@@ -1,0 +1,7 @@
+from django.http import JsonResponse
+
+
+def login_done(request, token):
+    response = JsonResponse({"ok": True})
+    response.set_cookie("sid", token, httponly=True, secure=True, samesite="Lax")
+    return response

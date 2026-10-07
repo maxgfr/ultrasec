@@ -7,7 +7,19 @@ import { WEBCONFIG_SHAPES } from "../webconfig.js";
 import { AUTH_SHAPES } from "../authtokens.js";
 import { CLASSES } from "./registry.js";
 import { PACKS } from "./packs/index.js";
-import type { AbsentRule, ClassId, EmitShape, FileRule, FrameworkScope, LineRule, Pack, RouteQueryRule, Rule } from "./types.js";
+import {
+  CONFIG_FORMATS,
+  type AbsentRule,
+  type CallRule,
+  type ClassId,
+  type EmitShape,
+  type FileRule,
+  type FrameworkScope,
+  type LineRule,
+  type Pack,
+  type RouteQueryRule,
+  type Rule,
+} from "./types.js";
 
 // The one engine every pack runs on.
 //
@@ -57,10 +69,11 @@ export function boundRules(packs: readonly Pack[] = PACKS): BoundRule[] {
   return out;
 }
 
-/** The shape a rule reports under: its legacy shape when it names one, else the class's. */
-export function shapeFor(classId: ClassId, rule: Rule): EmitShape {
-  if (rule.emit) {
-    const [family, id] = rule.emit.split("/") as [string, string];
+/** The shape a rule reports under: its legacy shape when it names one (or the
+ *  one a call rule's flag names), else the class's. */
+export function shapeFor(classId: ClassId, rule: Rule, emit: string | undefined = rule.emit): EmitShape {
+  if (emit) {
+    const [family, id] = emit.split("/") as [string, string];
     if (family === "webconfig") {
       const s = WEBCONFIG_SHAPES[id];
       if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: "config", note: s.note };
@@ -69,7 +82,7 @@ export function shapeFor(classId: ClassId, rule: Rule): EmitShape {
       const s = AUTH_SHAPES[id];
       if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: s.category, note: s.note };
     }
-    throw new Error(`classes: rule ${rule.id} emits unknown shape ${rule.emit}`);
+    throw new Error(`classes: rule ${rule.id} emits unknown shape ${emit}`);
   }
   const c = CLASSES[classId];
   return { family: "class", id: c.id, title: c.title, severity: c.severity, cwe: c.cwe, category: c.category, note: rule.note ?? c.note };
@@ -124,16 +137,53 @@ function view(rel: string, lang: string, content: string): FileView {
 
 function runLine(v: FileView, r: LineRule, emit: (line: number, evidence: string) => void): void {
   if (r.fileGate && !r.fileGate.test(v.content)) return;
+  const raw = r.text === "raw";
   for (let i = 0; i < v.raw.length; i++) {
-    if (v.comment[i]) continue;
-    const c = v.code[i]!;
-    if (!r.match.test(c) || r.unless?.test(c)) continue;
+    if (!raw && v.comment[i]) continue;
+    const c = raw ? v.raw[i]! : v.code[i]!;
+    const m = r.match.exec(c);
+    if (!m || r.unless?.test(c)) continue;
     if (r.context) {
       let seen = false;
       for (let j = Math.max(0, i - r.context.before); j <= i && !seen; j++) seen = !v.comment[j] && r.context.re.test(v.code[j]!);
       if (!seen) continue;
     }
-    emit(i + 1, v.raw[i]!);
+    emit(i + 1, r.evidence === "match" ? m[0] : v.raw[i]!);
+  }
+}
+
+/** The argument text of the call whose opening bracket is at `open` — parens
+ *  or braces counted, strings not (the original cookie detector's reading). */
+function balancedArgs(content: string, open: number): string | null {
+  const o = content[open];
+  const c = o === "{" ? "}" : ")";
+  let depth = 0;
+  for (let i = open; i < content.length; i++) {
+    const ch = content[i];
+    if (ch === o) depth++;
+    else if (ch === c) {
+      depth--;
+      if (depth === 0) return content.slice(open + 1, i);
+    }
+  }
+  return null;
+}
+
+function runCall(v: FileView, r: CallRule, emit: (line: number, evidence: string, shape?: string) => void): void {
+  const re = new RegExp(r.call.source, r.call.flags.includes("g") ? r.call.flags : `${r.call.flags}g`);
+  for (const m of v.content.matchAll(re)) {
+    const at = m.index ?? 0;
+    const head = m[0];
+    const open = at + head.length - 1;
+    const text = r.scope === "args" ? balancedArgs(v.content, open) : statementAt(v.content, at, "balanced").slice(head.length);
+    if (text === null) continue;
+    const ln = lineOf(v.content, at);
+    const hasOptions = !r.options || !!r.options.args?.test(text) || !!r.options.head?.test(head);
+    if (!hasOptions) {
+      for (const shape of r.bare ?? []) emit(ln, `${head}…`, shape);
+      continue;
+    }
+    for (const f of r.flags ?? []) if ((!f.when || f.when.test(text)) && !f.present.test(text)) emit(ln, head, f.emit);
   }
 }
 
@@ -255,21 +305,23 @@ export function auditWeaknessClasses(
   // the files where the protection was seen.
   const presentDirs = new Map<BoundRule, string[]>();
 
-  const record = (b: BoundRule, rel: string, line: number, evidence: string): void => {
+  const record = (b: BoundRule, rel: string, line: number, evidence: string, emit?: string): void => {
     hits.push({ classId: b.classId, packId: b.pack.id, ruleId: b.rule.id, file: rel, line });
-    // One finding per class per line, whichever idiom saw it first — two packs
-    // recognizing the same comparison are one weakness, not two.
-    const key = `${b.classId}\0${rel}\0${line}`;
+    // One finding per class and shape per line, whichever idiom saw it first —
+    // two packs recognizing the same comparison are one weakness, not two; a
+    // cookie missing both HttpOnly and Secure is two.
+    const shape = shapeFor(b.classId, b.rule, emit ?? b.rule.emit);
+    const key = `${b.classId}\0${shape.family}:${shape.id}\0${rel}\0${line}`;
     if (seen.has(key)) return;
     seen.add(key);
-    findings.push(hit(rel, line, shapeFor(b.classId, b.rule), evidence));
+    findings.push(hit(rel, line, shape, evidence));
   };
 
   for (const wf of tree?.files ?? walk(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
     if (SKIPPED_EXTS.has(ext)) continue;
-    const lang = langForFile(wf.rel)?.id;
+    const lang = langForFile(wf.rel)?.id ?? CONFIG_FORMATS[ext];
     const forFile = lang ? rules.filter((b) => b.rule.languages.includes(lang) && (!b.rule.files || b.rule.files.test(wf.rel))) : [];
     // A presence test reads code by language, or a named non-code file (a
     // build manifest that declares the protection's dependency).
@@ -295,8 +347,9 @@ export function auditWeaknessClasses(
     for (const b of forFile) {
       const r = b.rule;
       if (r.requiresFramework && !frameworkAt(v.rel, r.requiresFramework, frameworks)) continue;
-      const emit = (line: number, evidence: string) => record(b, v.rel, line, evidence);
+      const emit = (line: number, evidence: string, shape?: string) => record(b, v.rel, line, evidence, shape);
       if (r.kind === "line") runLine(v, r, emit);
+      else if (r.kind === "call") runCall(v, r, emit);
       else if (r.kind === "file") runFile(v, r, emit);
       else if (r.kind === "route-query") runRouteQuery(v, r, emit);
       else {

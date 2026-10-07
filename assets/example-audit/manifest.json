@@ -1,6 +1,6 @@
 {
   "version": "0.0.0-development",
-  "schemaVersion": 10,
+  "schemaVersion": 11,
   "repo": "examples/vuln-express",
   "generatedNote": "Taint candidates are deterministic; external-tool results depend on installed scanners.",
   "languages": [
@@ -106,10 +106,9 @@
       "ecosystem": "node",
       "dir": "",
       "version": "4.17.1",
-      "state": "deterministic",
-      "packs": [
-        "node"
-      ]
+      "state": "not-covered",
+      "packs": [],
+      "degraded": "pack express has no idiom for this class"
     },
     {
       "class": "env-bool-coercion",
@@ -120,6 +119,83 @@
       "state": "deterministic",
       "packs": [
         "node"
+      ]
+    },
+    {
+      "class": "insecure-session-cookie",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "proxy-headers-trusted",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "express"
+      ]
+    },
+    {
+      "class": "request-body-unbounded",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "express"
+      ]
+    },
+    {
+      "class": "graphql-introspection-enabled",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "csrf-protection-disabled",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "debug-mode-enabled",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "taint-catalog",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "catalog"
       ]
     }
   ]
