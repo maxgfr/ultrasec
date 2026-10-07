@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { flagStr, flagBool, listFlag, numFlag, own, println, eprintln, byStr, isScannableDir, type ParsedArgs } from "../util.js";
 import { scanRepo, scanRepoCached, extractionTier } from "../scan.js";
 import { buildGraph, reverseDependents } from "../graph.js";
+import type { ResolutionGap } from "../resolve.js";
 import { enumerateTaint } from "../taint.js";
 import { enumerateSinkCandidates } from "../sinks.js";
 import { SOURCELESS_SINK_KINDS } from "../catalog.js";
@@ -200,7 +201,8 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // passes that match calls against the sink catalog.
   const facts = createFileFacts(scan);
   stage("graph", `${scan.files.length} file(s) scanned · building the link-graph…`);
-  const graph = buildGraph(scan, { tree: tree.files });
+  const resolutionGaps: ResolutionGap[] = [];
+  const graph = buildGraph(scan, { tree: tree.files, resolutionGaps });
   // Logging hygiene (opt-in `--log-hygiene`, CWE-117 + CWE-532): unions LOG_SINKS
   // into the taint sink catalog for this run only — default false keeps the
   // sink-matching step (and therefore every golden/snapshot) byte-identical.
@@ -474,6 +476,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...(truncation ? { truncation } : {}),
     ...(recordedScopes.length ? { scopes: recordedScopes } : {}),
     ...(sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}),
+    ...(resolutionGaps.length ? { resolutionGaps } : {}),
     ...(frameworks.length ? { frameworks } : {}),
     ...(classCells.length ? { weaknessClasses: classCells } : {}),
   };
@@ -569,6 +572,10 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     );
     if (nb.note) println(`  ⚠️  ${nb.note}`);
   }
+  for (const g of fm.resolutionGaps ?? [])
+    println(
+      `  ⚠️  import resolution degraded: ${g.files} \`${g.ext}\` file(s) left out of the resolve context (${g.reason}) — imports into them are not followed`,
+    );
   if (fm.frameworks?.length)
     println(`  frameworks: ${fm.frameworks.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ")}`);
   if (fm.weaknessClasses?.length) {

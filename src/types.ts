@@ -1,4 +1,5 @@
 import type { DetectedFramework } from "./frameworks.js";
+import type { ResolutionGap } from "./resolve.js";
 import type { ClassCoverageCell } from "./classes/coverage.js";
 
 // Single source of truth for the version the bundle reports. `sync-version.mjs`
@@ -40,7 +41,10 @@ export const VERSION = "1.58.0";
 // version and the manifest line that declares them) and `weaknessClasses`
 // (the weakness-class × framework coverage matrix). Additive + optional —
 // older dossiers omit both and every reader treats that as "not recorded".
-export const SCHEMA_VERSION = 10;
+// 11: manifest gained optional `resolutionGaps` (files the import resolver
+// left out because the vendored engine could not index them). Additive +
+// optional — absent on a clean run.
+export const SCHEMA_VERSION = 11;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -713,6 +717,13 @@ export interface Manifest {
    * optional — absent when no known framework is declared.
    */
   frameworks?: DetectedFramework[];
+  /**
+   * Files the import resolver had to leave out because the vendored engine
+   * could not build its resolve context from them (`src/resolve.ts`). Imports
+   * into those files are not followed: degraded coverage, reported rather than
+   * a crash. Additive/optional — absent on a clean run.
+   */
+  resolutionGaps?: ResolutionGap[];
   /**
    * The weakness-class × framework matrix as the scan left it: matched by a
    * pack (`deterministic`, `degraded` when the framework has no pack or its

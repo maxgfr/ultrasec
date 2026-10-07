@@ -27098,7 +27098,7 @@ init_text();
 
 // src/types.ts
 var VERSION = "1.58.0";
-var SCHEMA_VERSION2 = 10;
+var SCHEMA_VERSION2 = 11;
 var SEVERITIES2 = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
 var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "privacy", "other"];
@@ -28983,11 +28983,75 @@ function engineScan(scan2, tree) {
   }
   return { root: scan2.repo, files };
 }
-function buildFileResolver(scan2, tree) {
-  const ctx = buildResolveContext(engineScan(scan2, tree));
+function guardedContext(scan2, tree, gaps) {
+  const es = engineScan(scan2, tree);
+  let reason;
+  try {
+    return buildResolveContext(es);
+  } catch (e) {
+    reason = e instanceof Error ? e.message : String(e);
+  }
+  const files = es.files;
+  const bad = [...new Set(files.map((f) => f.ext))].sort().filter((ext) => {
+    try {
+      buildResolveContext({ ...es, files: files.filter((f) => f.ext === ext) });
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  if (bad.length) {
+    const kept = files.filter((f) => !bad.includes(f.ext));
+    try {
+      const ctx = buildResolveContext({ ...es, files: kept });
+      for (const ext of bad) gaps.push({ ext: ext || "(none)", files: files.filter((f) => f.ext === ext).length, reason });
+      return ctx;
+    } catch {
+    }
+  }
+  gaps.push({ ext: "*", files: files.length, reason });
+  return ctxFromFileSet(new Set(files.map((f) => f.rel)));
+}
+function buildFileResolver(scan2, tree, gaps = []) {
+  const ctx = guardedContext(scan2, tree, gaps);
   return (fromRel, spec) => {
     const r = resolveImport(fromRel, extOf(fromRel), spec, ctx);
     return r.kind === "resolved" && r.target !== fromRel ? r.target : void 0;
+  };
+}
+function ctxFromFileSet(fileSet) {
+  const filesByDir = /* @__PURE__ */ new Map();
+  const dirSet = /* @__PURE__ */ new Set();
+  for (const rel2 of fileSet) {
+    const slash = rel2.lastIndexOf("/");
+    const dir = slash < 0 ? "" : rel2.slice(0, slash);
+    let list = filesByDir.get(dir);
+    if (!list) filesByDir.set(dir, list = []);
+    list.push(rel2);
+    let d = dir;
+    while (d) {
+      if (dirSet.has(d)) break;
+      dirSet.add(d);
+      const s = d.lastIndexOf("/");
+      d = s < 0 ? "" : d.slice(0, s);
+    }
+  }
+  return {
+    fileSet,
+    dirSet,
+    filesByDir,
+    tsConfigs: [],
+    goModules: [],
+    rustCrates: [],
+    javaRoots: [],
+    pyRoots: [""],
+    workspacePackages: [],
+    packageScopes: [],
+    cIncludeRoots: [],
+    rubyLibRoots: [],
+    phpPsr4: [],
+    csharpNamespaces: /* @__PURE__ */ new Map(),
+    warnings: []
   };
 }
 
@@ -29018,7 +29082,7 @@ function buildGraph2(scan2, opts = {}) {
   const symbolDefs = {};
   for (const [name2, files] of defs) symbolDefs[name2] = [...files].sort(byStr);
   const edgeMap = /* @__PURE__ */ new Map();
-  const resolve44 = buildFileResolver(scan2, opts.tree);
+  const resolve44 = buildFileResolver(scan2, opts.tree, opts.resolutionGaps);
   const importsOf = /* @__PURE__ */ new Map();
   for (const f of scan2.files) {
     for (const imp of f.imports) {
@@ -38681,7 +38745,8 @@ async function runScan2(args2) {
   const tree = snapshotTree(repo);
   const facts = createFileFacts(scan2);
   stage("graph", `${scan2.files.length} file(s) scanned \xB7 building the link-graph\u2026`);
-  const graph = buildGraph2(scan2, { tree: tree.files });
+  const resolutionGaps = [];
+  const graph = buildGraph2(scan2, { tree: tree.files, resolutionGaps });
   const logHygieneOn = flagBool(args2, "log-hygiene");
   const excludeEnvSources = flagBool(args2, "no-env-sources");
   const strictScope = flagBool(args2, "strict-scope");
@@ -38820,6 +38885,7 @@ async function runScan2(args2) {
     ...truncation ? { truncation } : {},
     ...recordedScopes.length ? { scopes: recordedScopes } : {},
     ...sbomResult?.path ? { sbom: "sbom.cdx.json" } : {},
+    ...resolutionGaps.length ? { resolutionGaps } : {},
     ...frameworks.length ? { frameworks } : {},
     ...classCells.length ? { weaknessClasses: classCells } : {}
   };
@@ -38895,6 +38961,10 @@ async function runScan2(args2) {
     );
     if (nb.note) println(`  \u26A0\uFE0F  ${nb.note}`);
   }
+  for (const g of fm.resolutionGaps ?? [])
+    println(
+      `  \u26A0\uFE0F  import resolution degraded: ${g.files} \`${g.ext}\` file(s) left out of the resolve context (${g.reason}) \u2014 imports into them are not followed`
+    );
   if (fm.frameworks?.length)
     println(`  frameworks: ${fm.frameworks.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ")}`);
   if (fm.weaknessClasses?.length) {
