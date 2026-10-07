@@ -261,41 +261,9 @@ const LINE_RULES: { langs: Set<string> | null; re: RegExp; shape: string }[] = [
   { langs: null, re: /(?:redirect_uri|redirecturi|redirect_url|redirecturl)[^\n]*\.(?:startsWith|indexOf|includes|search)\s*\(/i, shape: "oauth-redirect-uri" },
 ];
 
-// ── Non-constant-time secret comparison (CWE-208) ──────────────────────────
-// Only the operands that ARE a secret by construction: a bearer header rebuilt
-// from config, or an environment variable named like a credential. A variable
-// called `token` compared with `===` is far more often a CSRF/nonce equality
-// or a type check than an authentication decision, so it is not matched.
-const SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
-const EQ = "(?:===|!==|==|!=)";
-const COMPARE_RULES: { langs: Set<string>; re: RegExp }[] = [
-  { langs: JS, re: new RegExp(`${EQ}\\s*\`Bearer \\$\\{|\`Bearer \\$\\{[^\`]*\`\\s*${EQ}`) },
-  { langs: JS, re: new RegExp(`${EQ}\\s*${SECRET_ENV}|${SECRET_ENV}\\s*${EQ}(?!\\s*(?:undefined|null|""|''|\`\`)\\b)`) },
-  // A credential looked up in a Set/Map: `allowedKeys.has(bearer)`.
-  // The receiver has to be named for credentials: `allowedKeys.has(key)` is as
-  // often an object-key allow-list as an API-key one.
-  { langs: JS, re: /\b\w*(?:tokens|secrets|api_?keys|bearers)\w*\s*\.\s*has\s*\(\s*(?:bearer|token|apiKey|api_key|key|secret|provided)\w*\s*\)/i },
-  { langs: new Set(["py"]), re: /(?:==|!=)\s*os\.(?:environ\[|getenv\()\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']/ },
-];
-const CONSTANT_TIME = /timingSafeEqual|safeCompare|secureCompare|constantTime|compare_digest|tsscmp|safe-compare/i;
-/** A comparison against "unset" is a presence check, not a secret comparison. */
-const PRESENCE_CHECK = new RegExp(`${SECRET_ENV}\\s*${EQ}\\s*(?:undefined|null|""|''|\`\`)(?![\\w$])|(?:undefined|null|""|'')\\s*${EQ}\\s*${SECRET_ENV}`);
-
-/** True when this line is code (not a comment line). */
-const isCommentLine = (t: string): boolean => /^\s*(?:\/\/|\*|\/\*|#)/.test(t);
-
-// ── Session cookie chunks left behind (CWE-613) ─────────────────────────────
-const SESSION_COOKIE = /(?:__Secure-)?(?:next-auth|authjs)\.session-token/;
-const EXPIRES_COOKIE = /maxAge\s*:\s*0\b|expires\s*:\s*new\s+Date\(\s*0\s*\)|Max-Age=0|\.delete\s*\(|expires=Thu, 01 Jan 1970/i;
-/** Any sign the code knows about `<name>.N`: a prefix match, a `.N` suffix, a loop over the jar. */
-const HANDLES_CHUNKS =
-  /session-token\.\d|session-token\.\$\{|session-token\.["'`]|\.startsWith\s*\([^)]*(?:session|token|name|cookie)|\\\.\\d|\.\$\{\s*i\s*\}|getAll\s*\(/i;
-
-function scanSessionChunks(rel: string, content: string, out: Finding[]): void {
-  if (!SESSION_COOKIE.test(content) || !EXPIRES_COOKIE.test(content) || HANDLES_CHUNKS.test(content)) return;
-  const at = lines(content).find((l) => SESSION_COOKIE.test(l.text) && !isCommentLine(l.text));
-  if (at) out.push(hit(rel, at.n, AUTH_SHAPES["session-chunks-not-cleared"]!, at.text));
-}
+// The non-constant-time secret comparison and the NextAuth session-chunk
+// logout are weakness classes now (src/classes): their idioms live in the
+// packs and run on the class engine, reported under the shapes above.
 
 // Weak password hashing — the call and a password-ish operand on the same line.
 const PWHASH_RULES: { langs: Set<string>; re: RegExp }[] = [
@@ -366,9 +334,6 @@ export function auditAuthTokens(repo: string, prune?: (rel: string) => boolean, 
     for (const l of lines(content)) {
       for (const r of LINE_RULES) if ((r.langs === null || r.langs.has(ext)) && r.re.test(l.text)) out.push(hit(rel, l.n, AUTH_SHAPES[r.shape]!, l.text));
       for (const r of PWHASH_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out.push(hit(rel, l.n, AUTH_SHAPES["password-hash"]!, l.text));
-      if (!isCommentLine(l.text) && !CONSTANT_TIME.test(l.text) && !PRESENCE_CHECK.test(l.text)) {
-        if (COMPARE_RULES.some((r) => r.langs.has(ext) && r.re.test(l.text))) out.push(hit(rel, l.n, AUTH_SHAPES["secret-compare-timing"]!, l.text));
-      }
       // bcrypt work factor below 10.
       const cost = /(?:genSalt(?:Sync)?|bcrypt\.hash(?:Sync)?)\s*\([^)]*?(?:^|,)\s*(\d{1,2})\s*[,)]/.exec(l.text);
       if (cost && Number(cost[1]) < 10) out.push(hit(rel, l.n, AUTH_SHAPES["password-hash"]!, l.text));
@@ -376,7 +341,6 @@ export function auditAuthTokens(repo: string, prune?: (rel: string) => boolean, 
 
     scanJwtCalls(rel, content, ext, out);
     scanOAuthStatePkce(rel, content, out);
-    if (JS.has(ext)) scanSessionChunks(rel, content, out);
   }
   return out;
 }

@@ -1116,11 +1116,11 @@ function readHistory(dir, since) {
   const boundary = shallowBoundary(resolve2(dir, shallowFile));
   const revs = [head, ...window2.exclude, ...boundary.map((sha2) => `^${sha2}`)];
   const key = JSON.stringify([resolve2(dir), revs, window2.args]);
-  const hit5 = LOG_MEMO.get(key);
-  if (hit5) {
+  const hit6 = LOG_MEMO.get(key);
+  if (hit6) {
     LOG_MEMO.delete(key);
-    LOG_MEMO.set(key, hit5);
-    return { ok: true, log: hit5 };
+    LOG_MEMO.set(key, hit6);
+    return { ok: true, log: hit6 };
   }
   const args2 = [...gitArgs(dir), "log", "--no-color", "--no-renames", ...window2.args, "--pretty=format:%x1e", "--name-only", "-z", "--stdin"];
   if (prefix) args2.push("--full-history", "--full-diff", "--", ".");
@@ -9977,8 +9977,8 @@ function nameStart(node, name2) {
       if (c2.namedChildren.length === 0) {
         if (c2.text === name2) return c2.startIndex;
       } else if (depth < 3 && !NAME_SEARCH_SKIP.test(c2.type)) {
-        const hit5 = visit(c2, depth + 1);
-        if (hit5 !== void 0) return hit5;
+        const hit6 = visit(c2, depth + 1);
+        if (hit6 !== void 0) return hit6;
       }
     }
     return void 0;
@@ -12410,7 +12410,7 @@ function resolveDocLink(fromRel, spec, ctx) {
   let p = norm(posix2.join(base, rooted ? target.slice(1) : target));
   if (p === ".") p = "";
   if (p.startsWith("..")) return { kind: "dangling", reason: "escapes-repo-root" };
-  const hit5 = firstExisting(ctx, [
+  const hit6 = firstExisting(ctx, [
     p,
     p + ".md",
     p + ".mdx",
@@ -12419,22 +12419,22 @@ function resolveDocLink(fromRel, spec, ctx) {
     posix2.join(p, "index.md"),
     posix2.join(p, "index.mdx")
   ]);
-  if (hit5) return { kind: "resolved", target: hit5 };
+  if (hit6) return { kind: "resolved", target: hit6 };
   if (!p || ctx.dirSet.has(p)) return { kind: "external" };
   return { kind: "dangling", reason: "missing-target" };
 }
 function resolveJs(fromRel, rawSpec, ctx) {
   const probe2 = (p) => firstExisting(ctx, [...JS_EXT_PROBES.map((e) => p + e), ...JS_INDEX.map((i2) => posix2.join(p, i2))]);
   const tryResolve = (p) => {
-    const hit5 = probe2(p);
-    if (hit5) return hit5;
+    const hit6 = probe2(p);
+    if (hit6) return hit6;
     const noJs = p.replace(/\.(js|jsx|mjs|cjs)$/, "");
     return noJs !== p ? probe2(noJs) : void 0;
   };
   const probeEntry = (pkgDir, entry2) => {
     for (const cand of [entry2, ...distToSrcCandidates(entry2)]) {
-      const hit5 = tryResolve(norm(posix2.join(pkgDir, cand)));
-      if (hit5) return hit5;
+      const hit6 = tryResolve(norm(posix2.join(pkgDir, cand)));
+      if (hit6) return hit6;
     }
     return void 0;
   };
@@ -12445,8 +12445,8 @@ function resolveJs(fromRel, rawSpec, ctx) {
     const base = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
     const p = norm(posix2.join(base, spec));
     if (p.startsWith("..")) return { kind: "dangling", reason: "escapes-repo-root" };
-    const hit5 = tryResolve(p);
-    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
+    const hit6 = tryResolve(p);
+    return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-module" };
   }
   let aliasFallback;
   let bareBase;
@@ -12462,8 +12462,8 @@ function resolveJs(fromRel, rawSpec, ctx) {
       for (const t of tp.targets) {
         const resolved = tp.star ? t.replace(/\*/, suffix) : t;
         const p = norm(posix2.join(cfg.baseUrl, resolved));
-        const hit5 = tryResolve(p);
-        if (hit5) return { kind: "resolved", target: hit5 };
+        const hit6 = tryResolve(p);
+        if (hit6) return { kind: "resolved", target: hit6 };
         const tdir = p.includes("/") ? posix2.dirname(p) : "";
         if (ctx.dirSet.has(tdir) || ctx.fileSet.has(p)) targetTreeExists = true;
       }
@@ -12473,15 +12473,15 @@ function resolveJs(fromRel, rawSpec, ctx) {
     if (matched) break;
   }
   if (bareBase !== void 0 && !spec.startsWith("/")) {
-    const hit5 = tryResolve(norm(posix2.join(bareBase, spec)));
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = tryResolve(norm(posix2.join(bareBase, spec)));
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   if (spec.startsWith("#")) {
     const scope = ctx.packageScopes.find((s) => !s.dir || fromRel.startsWith(s.dir + "/"));
     const targets = scope ? matchEntryTargets(scope.importEntries, spec) : void 0;
     for (const t of targets ?? []) {
-      const hit5 = scope && t.startsWith("./") ? probeEntry(scope.dir, t) : void 0;
-      if (hit5) return { kind: "resolved", target: hit5 };
+      const hit6 = scope && t.startsWith("./") ? probeEntry(scope.dir, t) : void 0;
+      if (hit6) return { kind: "resolved", target: hit6 };
     }
     return aliasFallback ?? { kind: "external" };
   }
@@ -12489,19 +12489,19 @@ function resolveJs(fromRel, rawSpec, ctx) {
     if (spec !== pkg.name && !spec.startsWith(pkg.name + "/")) continue;
     const sub = spec.slice(pkg.name.length).replace(/^\//, "");
     for (const t of matchEntryTargets(pkg.exportEntries, sub ? "./" + sub : ".") ?? []) {
-      const hit5 = probeEntry(pkg.dir, t);
-      if (hit5) return { kind: "resolved", target: hit5 };
+      const hit6 = probeEntry(pkg.dir, t);
+      if (hit6) return { kind: "resolved", target: hit6 };
     }
     if (!sub) {
       for (const m of pkg.mainCandidates) {
-        const hit5 = probeEntry(pkg.dir, m);
-        if (hit5) return { kind: "resolved", target: hit5 };
+        const hit6 = probeEntry(pkg.dir, m);
+        if (hit6) return { kind: "resolved", target: hit6 };
       }
     }
     const bases = sub ? [posix2.join(pkg.dir, "src", sub), posix2.join(pkg.dir, sub)] : [posix2.join(pkg.dir, "src", "index"), posix2.join(pkg.dir, "index"), posix2.join(pkg.dir, "src")];
     for (const b of bases) {
-      const hit5 = tryResolve(norm(b));
-      if (hit5) return { kind: "resolved", target: hit5 };
+      const hit6 = tryResolve(norm(b));
+      if (hit6) return { kind: "resolved", target: hit6 };
     }
     return { kind: "external" };
   }
@@ -12519,8 +12519,8 @@ function resolvePython(fromRel, spec, ctx) {
     const base = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
     let dir = base;
     for (let i2 = 1; i2 < dots; i2++) dir = dir.includes("/") ? posix2.dirname(dir) : "";
-    const hit5 = rest ? probeModule(dir, rest) : firstExisting(ctx, [posix2.join(norm(dir), "__init__.py")]);
-    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
+    const hit6 = rest ? probeModule(dir, rest) : firstExisting(ctx, [posix2.join(norm(dir), "__init__.py")]);
+    return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-module" };
   }
   const enclosing = [];
   const others = [];
@@ -12528,8 +12528,8 @@ function resolvePython(fromRel, spec, ctx) {
     (!root || fromRel.startsWith(root + "/") ? enclosing : others).push(root);
   }
   for (const root of [...enclosing.reverse(), ...others]) {
-    const hit5 = probeModule(root, spec);
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = probeModule(root, spec);
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   return { kind: "external" };
 }
@@ -12616,8 +12616,8 @@ function resolveRust(fromRel, spec, ctx) {
     return { kind: "external" };
   }
   if (!rest.length) return { kind: "external" };
-  const hit5 = walkPath(baseDir, rest);
-  if (hit5) return { kind: "resolved", target: hit5 };
+  const hit6 = walkPath(baseDir, rest);
+  if (hit6) return { kind: "resolved", target: hit6 };
   if (home && baseDir === home.srcDir && home.rootFile) return { kind: "resolved", target: home.rootFile };
   const ownerDir = baseDir.includes("/") ? posix2.dirname(baseDir) : "";
   const ownerName = baseDir.slice(baseDir.lastIndexOf("/") + 1);
@@ -12689,35 +12689,35 @@ function lookupJvm(jvm, spec) {
     if (pkg) return pkg;
   }
   for (let n = segs.length; n >= Math.min(2, segs.length); n--) {
-    const hit5 = jvm.types.get(n === segs.length ? segs.join(".") : segs.slice(0, n).join("."));
-    if (hit5) return hit5;
+    const hit6 = jvm.types.get(n === segs.length ? segs.join(".") : segs.slice(0, n).join("."));
+    if (hit6) return hit6;
   }
   return void 0;
 }
 function resolveJvm(fromRel, spec, ctx) {
   const jvm = ctx.jvm ??= buildJvmIndex(ctx);
-  let hit5 = lookupJvm(jvm, spec);
-  const pkg = hit5 ? void 0 : jvm.scalaPkg.get(fromRel);
-  for (let p = pkg; p && !hit5; p = p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : void 0) {
-    hit5 = lookupJvm(jvm, p + "." + spec);
+  let hit6 = lookupJvm(jvm, spec);
+  const pkg = hit6 ? void 0 : jvm.scalaPkg.get(fromRel);
+  for (let p = pkg; p && !hit6; p = p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : void 0) {
+    hit6 = lookupJvm(jvm, p + "." + spec);
   }
-  return hit5 ? { kind: "resolved", target: hit5 } : { kind: "external" };
+  return hit6 ? { kind: "resolved", target: hit6 } : { kind: "external" };
 }
 function resolveC(fromRel, spec, ctx) {
   const fromDir = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
-  const hit5 = firstExisting(ctx, [posix2.join(fromDir, spec), ...ctx.cIncludeRoots.map((r) => posix2.join(r, spec))]);
-  return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-include" };
+  const hit6 = firstExisting(ctx, [posix2.join(fromDir, spec), ...ctx.cIncludeRoots.map((r) => posix2.join(r, spec))]);
+  return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-include" };
 }
 function resolveRuby(fromRel, spec, ctx) {
   if (spec.startsWith(".")) {
     const fromDir = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
     const base = norm(posix2.join(fromDir, spec));
-    const hit5 = firstExisting(ctx, [base + ".rb", posix2.join(base, "index.rb")]);
-    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
+    const hit6 = firstExisting(ctx, [base + ".rb", posix2.join(base, "index.rb")]);
+    return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-module" };
   }
   for (const root of ctx.rubyLibRoots) {
-    const hit5 = firstExisting(ctx, [posix2.join(root, spec + ".rb")]);
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = firstExisting(ctx, [posix2.join(root, spec + ".rb")]);
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   return { kind: "external" };
 }
@@ -12725,15 +12725,15 @@ function resolvePhp(fromRel, spec, ctx) {
   if (spec.startsWith(".")) {
     const fromDir = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
     const base = norm(posix2.join(fromDir, spec));
-    const hit5 = firstExisting(ctx, [base, base + ".php"]);
-    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
+    const hit6 = firstExisting(ctx, [base, base + ".php"]);
+    return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-module" };
   }
   const ns = spec.replace(/^\\+/, "");
   for (const { prefix, dir } of ctx.phpPsr4) {
     if (prefix && ns !== prefix && !ns.startsWith(prefix + "\\")) continue;
     const rest = prefix ? ns.slice(prefix.length).replace(/^\\+/, "") : ns;
-    const hit5 = firstExisting(ctx, [posix2.join(dir, rest.replace(/\\/g, "/")) + ".php"]);
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = firstExisting(ctx, [posix2.join(dir, rest.replace(/\\/g, "/")) + ".php"]);
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   return { kind: "external" };
 }
@@ -12779,15 +12779,15 @@ function resolveLua(fromRel, spec, ctx) {
   const enclosing = roots.filter((r) => !r || fromDir === r || fromDir.startsWith(r + "/")).reverse();
   const order = [...enclosing, fromDir, ...roots.filter((r) => !enclosing.includes(r))];
   for (const root of order) {
-    const hit5 = firstExisting(ctx, [posix2.join(root, name2 + ".lua"), posix2.join(root, name2, "init.lua")]);
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = firstExisting(ctx, [posix2.join(root, name2 + ".lua"), posix2.join(root, name2, "init.lua")]);
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   return { kind: "external" };
 }
 function resolveShell(fromRel, spec, ctx) {
   const fromDir = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
-  const hit5 = firstExisting(ctx, [posix2.join(fromDir, spec), spec]);
-  return hit5 ? { kind: "resolved", target: hit5 } : { kind: "external" };
+  const hit6 = firstExisting(ctx, [posix2.join(fromDir, spec), spec]);
+  return hit6 ? { kind: "resolved", target: hit6 } : { kind: "external" };
 }
 function hasImportResolver(ext) {
   return JS_TS2.has(ext) || SFC_HTML.has(ext) || PY2.has(ext) || C_CPP2.has(ext) || JVM_OTHER.has(ext) || SHELL2.has(ext) || RESOLVER_EXTS.has(ext);
@@ -13469,8 +13469,8 @@ function shortestPaths(sources, targets, next, maxHops, maxPaths) {
     if (!level.length) break;
     level.sort(byStr);
     levels.push(level);
-    const hit5 = level.filter((n) => targets.has(n));
-    if (hit5.length) found = hit5;
+    const hit6 = level.filter((n) => targets.has(n));
+    if (hit6.length) found = hit6;
   }
   if (!found) return { hops: null, paths: [], pathCount: 0 };
   const hops = levels.length - 1;
@@ -13568,8 +13568,8 @@ function buildSymbolGraph(scan2, importPairs) {
     for (const c2 of f.calls) {
       const caller = enclosingAmong(own2, c2.line);
       if (!caller) continue;
-      const hit5 = bind(c2, caller);
-      if (hit5) add3(symbolId(caller), symbolId(hit5.def), "calls");
+      const hit6 = bind(c2, caller);
+      if (hit6) add3(symbolId(caller), symbolId(hit6.def), "calls");
     }
   }
   const typeIdByNameFile = /* @__PURE__ */ new Map();
@@ -14850,14 +14850,14 @@ function indexCallers(scan2, pairs, recall, only) {
     const bind = binder.forFile(f);
     if (!bind) continue;
     for (const c2 of f.calls) {
-      const hit5 = bind(c2);
-      if (!hit5) continue;
-      const key = hit5.def.name + "\0" + hit5.def.file;
+      const hit6 = bind(c2);
+      if (!hit6) continue;
+      const key = hit6.def.name + "\0" + hit6.def.file;
       let entry2 = sites.get(key);
-      if (!entry2) sites.set(key, entry2 = { def: hit5.def, callers: [] });
-      else if (hit5.def.line < entry2.def.line) entry2.def = hit5.def;
+      if (!entry2) sites.set(key, entry2 = { def: hit6.def, callers: [] });
+      else if (hit6.def.line < entry2.def.line) entry2.def = hit6.def;
       entry2.callers.push(
-        recall ? { file: f.rel, line: c2.line, confidence: hit5.corroborated ? "corroborated" : "unique-name" } : { file: f.rel, line: c2.line }
+        recall ? { file: f.rel, line: c2.line, confidence: hit6.corroborated ? "corroborated" : "unique-name" } : { file: f.rel, line: c2.line }
       );
     }
   }
@@ -15533,16 +15533,16 @@ function resolveCallEdges(scan2, importPairs, ctx) {
     const bind = binder.forFile(f);
     if (!bind) continue;
     for (const c2 of f.calls) {
-      const hit5 = bind(c2);
-      if (!hit5 || hit5.def.file === f.rel) continue;
-      const confidence = hit5.corroborated ? "extracted" : "inferred";
-      const key = `${f.rel}|${hit5.def.file}`;
+      const hit6 = bind(c2);
+      if (!hit6 || hit6.def.file === f.rel) continue;
+      const confidence = hit6.corroborated ? "extracted" : "inferred";
+      const key = `${f.rel}|${hit6.def.file}`;
       const prev = agg.get(key);
       if (prev) {
         prev.weight += 1;
         if (confidence === "extracted") prev.confidence = "extracted";
       } else {
-        agg.set(key, { from: f.rel, to: hit5.def.file, weight: 1, confidence });
+        agg.set(key, { from: f.rel, to: hit6.def.file, weight: 1, confidence });
       }
     }
   }
@@ -21099,10 +21099,10 @@ function brokenImports(scan2, graph, removed) {
     for (let d = dir; d && !ctx.dirSet.has(d); d = d.includes("/") ? posix7.dirname(d) : "") ctx.dirSet.add(d);
   }
   if (!renamedTo.size) return [];
-  const extOf7 = new Map(scan2.files.map((f) => [f.rel, f.ext]));
+  const extOf8 = new Map(scan2.files.map((f) => [f.rel, f.ext]));
   const out2 = [];
   for (const e of dangling) {
-    const ext = extOf7.get(e.from);
+    const ext = extOf8.get(e.from);
     if (ext === void 0) continue;
     const kind = e.kind === "doc-link" ? "doc-link" : "import";
     const r = kind === "doc-link" ? resolveDocLink(e.from, e.to, ctx) : resolveImport(e.from, ext, e.to, ctx);
@@ -21522,11 +21522,11 @@ function resolutionReport(scan2, opts = {}) {
         acc.row.dangling++;
         acc.reasons.set(r.reason, (acc.reasons.get(r.reason) ?? 0) + 1);
         const key = `${ref2.spec}\0${r.reason}`;
-        const hit5 = acc.dangling.get(key);
-        if (!hit5) acc.dangling.set(key, { reason: r.reason, count: 1, example: f.rel });
+        const hit6 = acc.dangling.get(key);
+        if (!hit6) acc.dangling.set(key, { reason: r.reason, count: 1, example: f.rel });
         else {
-          hit5.count++;
-          if (byStr(f.rel, hit5.example) < 0) hit5.example = f.rel;
+          hit6.count++;
+          if (byStr(f.rel, hit6.example) < 0) hit6.example = f.rel;
         }
       }
     }
@@ -21759,18 +21759,18 @@ function sessionKey(repo, opts) {
 }
 function getScan(repo, opts = {}, walked) {
   const key = sessionKey(repo, opts);
-  const hit5 = sessionGet(key);
-  if (hit5) {
-    if (walked && hit5.walked === walked) {
-      syncCommit(hit5, headCommit(repo));
-      return hit5.scan;
+  const hit6 = sessionGet(key);
+  if (hit6) {
+    if (walked && hit6.walked === walked) {
+      syncCommit(hit6, headCommit(repo));
+      return hit6.scan;
     }
-    const fresh22 = scanRepo(repo, { ...opts, cache: hit5.cacheMap, precomputedWalk: walked });
+    const fresh22 = scanRepo(repo, { ...opts, cache: hit6.cacheMap, precomputedWalk: walked });
     if (fresh22.contentUnchanged) {
-      if (fresh22.cacheDirty) hit5.cacheMap = toCacheMap(fresh22);
-      syncCommit(hit5, fresh22.commit);
-      hit5.walked = walked;
-      return hit5.scan;
+      if (fresh22.cacheDirty) hit6.cacheMap = toCacheMap(fresh22);
+      syncCommit(hit6, fresh22.commit);
+      hit6.walked = walked;
+      return hit6.scan;
     }
     sessionPut({ key, scan: fresh22, cacheMap: toCacheMap(fresh22), walked });
     return fresh22;
@@ -25453,13 +25453,13 @@ function renderScip(scan2, opts = {}) {
   const packageAt2 = /* @__PURE__ */ new Map();
   const packageOf = (dir, manifest) => {
     const key = `${dir}\0${manifest}`;
-    let hit5 = packageAt2.get(key);
-    if (hit5 === void 0) {
+    let hit6 = packageAt2.get(key);
+    if (hit6 === void 0) {
       const c2 = manifestCoordinates(scan2.root, dir, manifest);
-      hit5 = c2 ? `${packageField(c2.manager)} ${packageField(c2.name)} ${packageField(c2.version)}` : dir ? packageOf(dirOf4(dir), manifest) : NO_PACKAGE;
-      packageAt2.set(key, hit5);
+      hit6 = c2 ? `${packageField(c2.manager)} ${packageField(c2.name)} ${packageField(c2.version)}` : dir ? packageOf(dirOf4(dir), manifest) : NO_PACKAGE;
+      packageAt2.set(key, hit6);
     }
-    return hit5;
+    return hit6;
   };
   const prefixOf = (f) => {
     const manifest = PACKAGE_MANIFEST.get(f.lang);
@@ -25576,8 +25576,8 @@ function renderScip(scan2, opts = {}) {
     for (const c2 of f.calls ?? []) {
       const target = resolveRef(c2.name, callerFamily);
       if (!target) continue;
-      const hit5 = bind?.(c2);
-      if (!hit5 || symbolOfDecl.get(hit5.def) !== target) continue;
+      const hit6 = bind?.(c2);
+      if (!hit6 || symbolOfDecl.get(hit6.def) !== target) continue;
       occs.push({ range: locate(c2.line, c2.name), symbol: target, roles: 0 });
     }
     for (const s of f.symbols) {
@@ -27023,9 +27023,9 @@ async function runCli(rawArgv) {
     let rel2 = flags2.positional;
     if (rel2 !== void 0) {
       const known = new Set(scan2.files.map((f) => f.rel));
-      const hit5 = fileArgReadings(flags2.repo, rel2).find((r) => known.has(r));
-      if (hit5 === void 0) throw new Error(`no such file in the index: ${rel2}`);
-      rel2 = hit5;
+      const hit6 = fileArgReadings(flags2.repo, rel2).find((r) => known.has(r));
+      if (hit6 === void 0) throw new Error(`no such file in the index: ${rel2}`);
+      rel2 = hit6;
     }
     emit(JSON.stringify(symbolComplexity(scan2, rel2, flags2.limit), null, 2) + "\n", flags2.out);
   } else if (cmd === "risk") {
@@ -27744,9 +27744,9 @@ function resetDetectCache() {
   detectCache.clear();
 }
 function detect(name2) {
-  let hit5 = detectCache.get(name2);
-  if (!hit5) detectCache.set(name2, hit5 = probe(name2));
-  return hit5;
+  let hit6 = detectCache.get(name2);
+  if (!hit6) detectCache.set(name2, hit6 = probe(name2));
+  return hit6;
 }
 function probe(name2) {
   try {
@@ -28215,8 +28215,8 @@ async function runNative(adapter, repo, ctx) {
   const cache = adapter.cacheable ? ctx.cache : void 0;
   const key = cache ? cacheKey(adapter, cmd, argv, cache) : void 0;
   if (cache && key) {
-    const hit5 = cache.entries.get(adapter.name);
-    if (hit5 && hit5.key === key) return { ...hit5.result, findings: [...hit5.result.findings], note: `${hit5.result.note} \xB7 ${CACHED_NOTE}` };
+    const hit6 = cache.entries.get(adapter.name);
+    if (hit6 && hit6.key === key) return { ...hit6.result, findings: [...hit6.result.findings], note: `${hit6.result.note} \xB7 ${CACHED_NOTE}` };
   }
   const run2 = (c2) => staged(adapter, repo, c2, async (target) => {
     const args2 = target === repo ? argv : buildArgv(adapter, repo, target, c2) ?? argv;
@@ -28798,7 +28798,7 @@ function notebookShadow(raw) {
   let cursor = 0;
   let scanned = 0;
   let scannedLine = 1;
-  const lineOf4 = (index) => {
+  const lineOf5 = (index) => {
     for (; scanned < index; scanned++) if (raw.charCodeAt(scanned) === 10) scannedLine++;
     return scannedLine;
   };
@@ -28823,7 +28823,7 @@ function notebookShadow(raw) {
         continue;
       }
       cursor = at + 1;
-      const line2 = lineOf4(at);
+      const line2 = lineOf5(at);
       if (line2 > total) {
         unaligned++;
         continue;
@@ -30625,6 +30625,9 @@ function scanStatementLine(text, hash) {
     clean += ch;
   }
   return { clean, net };
+}
+function codeOfLine(text, langId) {
+  return scanStatementLine(text, HASH_COMMENT_LANGS.has(langId)).clean;
 }
 var MAX_CONTINUATION_LINES = 3;
 var EMPTY_STATEMENT = { text: "", quoted: new Uint8Array(0), partner: new Int32Array(0) };
@@ -33563,8 +33566,6 @@ var WEBCONFIG_SHAPES = {
     note: "This `next.config` defines no `headers()`, and nothing in the app sets a Content-Security-Policy (no middleware, no helper). Next.js sends no CSP, HSTS, X-Frame-Options, X-Content-Type-Options or Referrer-Policy by default. Add them in `headers()` or middleware \u2014 unless a reverse proxy or CDN in front sets them, which is the thing to check (`ultrasec probe` sees what is actually served)."
   }
 };
-var APP_CTOR = /\b(?:express|fastify|Fastify)\s*\(\s*\)|\bnew\s+(?:Hono|Koa|Elysia)\s*\(|\bFastAPI\s*\(/;
-var HEADERS_MIDDLEWARE = /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
 var TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
 var BODY_PARSER = /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\(([^)]*)\)/g;
 function lines2(content) {
@@ -33677,51 +33678,9 @@ function scanCookies(rel2, content, out2) {
     else if (sameSite[1]?.toLowerCase() === "none" && !hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-samesite-none-insecure"], m[0]));
   }
 }
-var COMMENT_LINE = /^\s*(?:\/\/|\*|\/\*)/;
-var MENTIONS_CSV = /text\/csv|\.csv\b|\bcsv\b/i;
-var CELL_JOIN = /\.join\(\s*(["'`])(?:;|,|\\t)\1\s*\)/;
-var NEUTRALIZES_FORMULA = /\[[^\]\n]*=[^\]\n]*\+[^\]\n]*\]|\[[^\]\n]*\+[^\]\n]*=[^\]\n]*\]|["']=["']\s*,\s*["']\+["']|formula|neutrali[sz]|csv-?injection|escapeCsv|sanitizeCsv/i;
-function scanCsvFormula(rel2, ls, content, out2) {
-  if (!MENTIONS_CSV.test(content)) return;
-  const code = ls.filter((l) => !COMMENT_LINE.test(l.text)).map((l) => l.text.replace(/\s\/\/.*$/, "")).join("\n");
-  if (NEUTRALIZES_FORMULA.test(code)) return;
-  const joins = ls.filter((l) => CELL_JOIN.test(l.text) && !COMMENT_LINE.test(l.text));
-  const at = joins[joins.length - 1];
-  if (at) out2.push(hit2(rel2, at.n, WEBCONFIG_SHAPES["csv-formula"], at.text));
-}
-var COERCE_BOOLEAN = /\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
-var ENV_KEY = /^\s*["']?[A-Z][A-Z0-9_]*["']?\s*:/;
-var READS_ENV = /\bprocess\.env\b|\bimport\.meta\.env\b|\bcreateEnv\s*\(|\bDeno\.env\b|\bBun\.env\b/;
-var FIRST_HOP = /\.split\(\s*(["'])\s*,\s*\1\s*\)\s*(?:\[\s*0\s*\]|\.shift\(\s*\)|\.at\(\s*0\s*\))/;
-var XFF = /x-forwarded-for|HTTP_X_FORWARDED_FOR|X_FORWARDED_FOR/i;
-var XFF_LOOKBACK = 5;
-var ROUTE_FILE = /(?:^|\/)app\/(?:.*\/)?route\.[cm]?[jt]s$|(?:^|\/)pages\/api\/.+\.[cm]?[jt]sx?$/;
-var EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|xlsx|feed|dump)(?:[/._-]|$)/i;
-var SELECT_START = /\.\s*select(?:Distinct)?\s*\(|\.\s*findMany\s*\(/g;
-var MAX_STATEMENT = 2e3;
-function scanUnboundedExport(rel2, content, out2) {
-  if (!ROUTE_FILE.test(rel2) || !EXPORT_PATH.test(rel2)) return;
-  for (const m of content.matchAll(SELECT_START)) {
-    const start2 = m.index ?? 0;
-    const rest = content.slice(start2, start2 + MAX_STATEMENT);
-    const end = rest.search(/;|\n\s*\n/);
-    const stmt = end === -1 ? rest : rest.slice(0, end);
-    const prisma = /findMany/.test(m[0]);
-    if (!prisma && !/\.\s*from\s*\(/.test(stmt)) continue;
-    if (prisma ? /\btake\s*:/.test(stmt) : /\.\s*(?:limit|paginate|\$paginate)\s*\(/.test(stmt)) continue;
-    out2.push(hit2(rel2, lineOf(content, start2), WEBCONFIG_SHAPES["unbounded-export"], stmt.split("\n")[0]));
-  }
-}
-var NEXT_CONFIG = /(?:^|\/)next\.config\.(?:js|mjs|cjs|ts|mts)$/;
-var NEXT_HEADERS = /\bheaders\s*(?:\(|:)/;
-var SETS_CSP = /Content-Security-Policy|\bhelmet\s*\(|next-secure-headers|@nosecone|\bnosecone\b|next-safe/i;
-var CONFIG_OBJECT = /(?:const|let|var)\s+\w*[cC]onfig\w*\s*(?::[^=]+)?=\s*\{|module\.exports\s*=|export\s+default\b/;
-var dirOfRel = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/") + 1) : "";
 function auditWebConfig(repo, prune, tree) {
   const out2 = [];
   const read = tree?.read ?? readText2;
-  const nextConfigs = [];
-  const cspDirs = [];
   for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf3(wf.rel);
@@ -33747,42 +33706,8 @@ function auditWebConfig(repo, prune, tree) {
         if (!/\blimit\s*:/.test(m[1] ?? "")) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["body-limit-missing"], m[0]));
       }
     }
-    if (!HEADERS_MIDDLEWARE.test(content)) {
-      const ctor = ls.find((l) => APP_CTOR.test(l.text));
-      if (ctor) out2.push(hit2(rel2, ctor.n, WEBCONFIG_SHAPES["helmet-missing"], ctor.text));
-    }
     scanCors(rel2, content, out2);
     scanCookies(rel2, content, out2);
-    if (JS.has(ext)) {
-      scanCsvFormula(rel2, ls, content, out2);
-      scanUnboundedExport(rel2, content, out2);
-      const readsEnv = READS_ENV.test(content);
-      for (let i2 = 0; i2 < ls.length; i2++) {
-        const l = ls[i2];
-        if (COMMENT_LINE.test(l.text)) continue;
-        const code = l.text.split("//")[0];
-        if (COERCE_BOOLEAN.test(code) && (ENV_KEY.test(code) || readsEnv)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["env-coerce-boolean"], l.text));
-      }
-      if (SETS_CSP.test(content) && !NEXT_CONFIG.test(rel2)) cspDirs.push(dirOfRel(rel2));
-      if (NEXT_CONFIG.test(rel2)) {
-        if (SETS_CSP.test(content)) cspDirs.push(dirOfRel(rel2));
-        if (!NEXT_HEADERS.test(content)) nextConfigs.push({ rel: rel2, ls });
-      }
-    }
-    if (CODE.has(ext)) {
-      for (let i2 = 0; i2 < ls.length; i2++) {
-        const l = ls[i2];
-        if (COMMENT_LINE.test(l.text) || !FIRST_HOP.test(l.text)) continue;
-        const window2 = ls.slice(Math.max(0, i2 - XFF_LOOKBACK), i2 + 1);
-        if (window2.some((w) => XFF.test(w.text))) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["xff-first-hop"], l.text));
-      }
-    }
-  }
-  for (const cfg of nextConfigs) {
-    const root = dirOfRel(cfg.rel);
-    if (cspDirs.some((d) => d.startsWith(root))) continue;
-    const at = cfg.ls.find((l) => CONFIG_OBJECT.test(l.text)) ?? cfg.ls[0];
-    if (at) out2.push(hit2(cfg.rel, at.n, WEBCONFIG_SHAPES["next-headers-missing"], at.text));
   }
   return out2;
 }
@@ -33987,28 +33912,6 @@ var LINE_RULES = [
   // loose redirect_uri validation.
   { langs: null, re: /(?:redirect_uri|redirecturi|redirect_url|redirecturl)[^\n]*\.(?:startsWith|indexOf|includes|search)\s*\(/i, shape: "oauth-redirect-uri" }
 ];
-var SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
-var EQ = "(?:===|!==|==|!=)";
-var COMPARE_RULES = [
-  { langs: JS2, re: new RegExp(`${EQ}\\s*\`Bearer \\$\\{|\`Bearer \\$\\{[^\`]*\`\\s*${EQ}`) },
-  { langs: JS2, re: new RegExp(`${EQ}\\s*${SECRET_ENV}|${SECRET_ENV}\\s*${EQ}(?!\\s*(?:undefined|null|""|''|\`\`)\\b)`) },
-  // A credential looked up in a Set/Map: `allowedKeys.has(bearer)`.
-  // The receiver has to be named for credentials: `allowedKeys.has(key)` is as
-  // often an object-key allow-list as an API-key one.
-  { langs: JS2, re: /\b\w*(?:tokens|secrets|api_?keys|bearers)\w*\s*\.\s*has\s*\(\s*(?:bearer|token|apiKey|api_key|key|secret|provided)\w*\s*\)/i },
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /(?:==|!=)\s*os\.(?:environ\[|getenv\()\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']/ }
-];
-var CONSTANT_TIME = /timingSafeEqual|safeCompare|secureCompare|constantTime|compare_digest|tsscmp|safe-compare/i;
-var PRESENCE_CHECK = new RegExp(`${SECRET_ENV}\\s*${EQ}\\s*(?:undefined|null|""|''|\`\`)(?![\\w$])|(?:undefined|null|""|'')\\s*${EQ}\\s*${SECRET_ENV}`);
-var isCommentLine = (t) => /^\s*(?:\/\/|\*|\/\*|#)/.test(t);
-var SESSION_COOKIE = /(?:__Secure-)?(?:next-auth|authjs)\.session-token/;
-var EXPIRES_COOKIE = /maxAge\s*:\s*0\b|expires\s*:\s*new\s+Date\(\s*0\s*\)|Max-Age=0|\.delete\s*\(|expires=Thu, 01 Jan 1970/i;
-var HANDLES_CHUNKS = /session-token\.\d|session-token\.\$\{|session-token\.["'`]|\.startsWith\s*\([^)]*(?:session|token|name|cookie)|\\\.\\d|\.\$\{\s*i\s*\}|getAll\s*\(/i;
-function scanSessionChunks(rel2, content, out2) {
-  if (!SESSION_COOKIE.test(content) || !EXPIRES_COOKIE.test(content) || HANDLES_CHUNKS.test(content)) return;
-  const at = lines3(content).find((l) => SESSION_COOKIE.test(l.text) && !isCommentLine(l.text));
-  if (at) out2.push(hit3(rel2, at.n, AUTH_SHAPES["session-chunks-not-cleared"], at.text));
-}
 var PWHASH_RULES = [
   { langs: JS2, re: /createHash\(\s*['"](?:md5|sha1)['"]\s*\)[^\n]*(?:pass|pwd)/i },
   { langs: /* @__PURE__ */ new Set(["py"]), re: /hashlib\.(?:md5|sha1)\(\s*[^)]*(?:pass|pwd)/i },
@@ -34063,17 +33966,658 @@ function auditAuthTokens(repo, prune, tree) {
     for (const l of lines3(content)) {
       for (const r of LINE_RULES) if ((r.langs === null || r.langs.has(ext)) && r.re.test(l.text)) out2.push(hit3(rel2, l.n, AUTH_SHAPES[r.shape], l.text));
       for (const r of PWHASH_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit3(rel2, l.n, AUTH_SHAPES["password-hash"], l.text));
-      if (!isCommentLine(l.text) && !CONSTANT_TIME.test(l.text) && !PRESENCE_CHECK.test(l.text)) {
-        if (COMPARE_RULES.some((r) => r.langs.has(ext) && r.re.test(l.text))) out2.push(hit3(rel2, l.n, AUTH_SHAPES["secret-compare-timing"], l.text));
-      }
       const cost = /(?:genSalt(?:Sync)?|bcrypt\.hash(?:Sync)?)\s*\([^)]*?(?:^|,)\s*(\d{1,2})\s*[,)]/.exec(l.text);
       if (cost && Number(cost[1]) < 10) out2.push(hit3(rel2, l.n, AUTH_SHAPES["password-hash"], l.text));
     }
     scanJwtCalls(rel2, content, ext, out2);
     scanOAuthStatePkce(rel2, content, out2);
-    if (JS2.has(ext)) scanSessionChunks(rel2, content, out2);
   }
   return out2;
+}
+
+// src/classes/registry.ts
+var CLASSES = {
+  "timing-unsafe-secret-compare": {
+    id: "timing-unsafe-secret-compare",
+    title: "Secret compared with a non-constant-time operator",
+    cwe: "CWE-208",
+    severity: "medium",
+    category: "crypto",
+    invariant: "A value the caller supplies (header, query, body) is compared to a shared secret (API key, bearer token, webhook secret, password) by an operation whose running time does not depend on how many leading bytes match.",
+    guard: "A constant-time comparison of equal-length inputs (ideally fixed-length digests of both): Node `crypto.timingSafeEqual`, Python `hmac.compare_digest`, Go `subtle.ConstantTimeCompare`/`hmac.Equal`, Java `MessageDigest.isEqual`, Ruby `ActiveSupport::SecurityUtils.secure_compare`, PHP `hash_equals`. A presence check (`=== undefined`) is not a comparison.",
+    rubric: "medium for a static shared secret that is the whole authentication of a route; low when the endpoint is rate-limited and the secret is long and random, or the comparison is on a hash; high only with a demonstrated remote timing oracle (local network, many samples).",
+    note: "A credential is compared with an operator that returns at the first differing byte, so response time leaks how much of a guess is right. Compare fixed-length digests with the platform's constant-time helper.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: "if (req.headers.authorization !== `Bearer ${process.env.API_TOKEN}`) return res.sendStatus(401);",
+        fixed: 'const a = createHash("sha256").update(req.headers.authorization ?? "").digest();\nconst b = createHash("sha256").update(`Bearer ${process.env.API_TOKEN}`).digest();\nif (!timingSafeEqual(a, b)) return res.sendStatus(401);'
+      },
+      {
+        language: "python",
+        vulnerable: 'if request.headers.get("X-Api-Key") != os.environ["API_KEY"]:\n    abort(401)',
+        fixed: 'if not hmac.compare_digest(request.headers.get("X-Api-Key", ""), os.environ["API_KEY"]):\n    abort(401)'
+      },
+      {
+        language: "go",
+        vulnerable: 'if r.Header.Get("X-Api-Key") != os.Getenv("API_KEY") {',
+        fixed: 'if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Api-Key")), []byte(os.Getenv("API_KEY"))) != 1 {'
+      },
+      {
+        language: "ruby",
+        vulnerable: 'head :unauthorized unless request.headers["X-Api-Key"] == ENV["API_KEY"]',
+        fixed: 'head :unauthorized unless ActiveSupport::SecurityUtils.secure_compare(request.headers["X-Api-Key"].to_s, ENV["API_KEY"])'
+      }
+    ]
+  },
+  "csv-formula-injection": {
+    id: "csv-formula-injection",
+    title: "CSV cells written without formula neutralization",
+    cwe: "CWE-1236",
+    severity: "medium",
+    category: "config",
+    invariant: "Every cell of a CSV a user may open in a spreadsheet, whose value is not a constant (request data, or database rows \u2014 second-order), is neutralized when it starts with `=`, `+`, `-`, `@`, a tab or a carriage return.",
+    guard: "A per-cell function that prefixes such a value with `'` (OWASP CSV injection), applied to every non-constant cell before the writer/join; or a writer configured to do it (Python `defusedcsv`). Quoting alone is not a guard.",
+    rubric: "medium for an export a privileged user opens (admins, analysts) whose cells carry data another user can write; low when every cell is server-generated (ids, dates, enums) \u2014 prove it; high when the export is mailed or auto-opened.",
+    note: "A CSV is produced from non-constant cells and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'`, including values that come from the database.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: 'const body = rows.map((r) => [r.name, r.email].join(";"));',
+        fixed: 'const cell = (v) => (/^[=+\\-@\\t\\r]/.test(String(v)) ? `\'${v}` : String(v));\nconst body = rows.map((r) => [r.name, r.email].map(cell).join(";"));'
+      },
+      {
+        language: "python",
+        vulnerable: "writer = csv.writer(out)\nfor u in users:\n    writer.writerow([u.name, u.email])",
+        fixed: `def cell(v):
+    s = str(v)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\\t", "\\r") else s
+writer.writerow([cell(u.name), cell(u.email)])`
+      },
+      {
+        language: "php",
+        vulnerable: "fputcsv($out, [$user->name, $user->email]);",
+        fixed: `fputcsv($out, array_map(fn ($v) => preg_match('/^[=+\\-@\\t\\r]/', (string) $v) ? "'".$v : $v, [$user->name, $user->email]));`
+      }
+    ]
+  },
+  "client-ip-first-xff": {
+    id: "client-ip-first-xff",
+    title: "Client IP taken from the first X-Forwarded-For entry",
+    cwe: "CWE-348",
+    severity: "medium",
+    category: "config",
+    invariant: "The client address used for a security decision (rate limit, allow-list, audit log, lockout) is the one written by a proxy the application trusts \u2014 counted from the RIGHT of X-Forwarded-For, or the socket address when no proxy is trusted.",
+    guard: "Taking the entry your own proxy appended (the last one, or the N-th from the right for N trusted hops), or a framework helper configured with the trusted proxy list (Express `trust proxy` with a hop count, Werkzeug `ProxyFix(x_for=1)`, Gin `SetTrustedProxies`, Rails `request.remote_ip`).",
+    rubric: "medium when the address keys a rate limit, lockout or audit log; high when it keys an allow-list that grants access; low when it is only displayed.",
+    note: "Proxies APPEND to X-Forwarded-For, so its first entry is whatever the client sent. Taking it lets any caller choose its own IP for rate limits, allow-lists and audit logs. Take the entry your own proxy wrote (count hops from the right), or a helper configured with the trusted proxies.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: 'const ip = req.headers["x-forwarded-for"].split(",")[0];',
+        fixed: 'const hops = String(req.headers["x-forwarded-for"] ?? "").split(",");\nconst ip = hops[hops.length - 1].trim(); // one trusted proxy'
+      },
+      {
+        language: "python",
+        vulnerable: 'ip = request.META["HTTP_X_FORWARDED_FOR"].split(",")[0]',
+        fixed: 'ip = request.META["HTTP_X_FORWARDED_FOR"].split(",")[-1].strip()  # one trusted proxy'
+      },
+      {
+        language: "go",
+        vulnerable: 'ip := strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]',
+        fixed: 'router.SetTrustedProxies([]string{"10.0.0.1"})\nip := c.ClientIP()'
+      }
+    ]
+  },
+  "unbounded-public-export": {
+    id: "unbounded-public-export",
+    title: "Public export/listing route queries without a row limit",
+    cwe: "CWE-770",
+    severity: "medium",
+    category: "config",
+    invariant: "A route reachable without privilege (public, export, download, feed) bounds the rows one request can materialize: a limit, a page size with a ceiling, or a stream with a hard cap.",
+    guard: "`limit`/`take`/`paginate`/a slice on the query itself, or a streaming/batched iterator with a ceiling. A rate limit in front reduces the rate, not the per-request cost.",
+    rubric: "medium when the table grows with user data and the route is anonymous; low when the table is small and bounded by construction (a list of countries) \u2014 say why; high when the response joins large tables or the route is unauthenticated and cache-less.",
+    note: "A route under a public/export path runs a query with no row limit. Every call materializes the whole table in memory and on the wire, and the cost grows with the data rather than the request \u2014 an amplification lever even behind a rate limit. Page it, cap it, or stream it with a hard ceiling.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: "const rows = await db.select().from(declarations);",
+        fixed: "const rows = await db.select().from(declarations).limit(PAGE_SIZE).offset(page * PAGE_SIZE);"
+      },
+      {
+        language: "python",
+        vulnerable: "def export_users(request):\n    rows = User.objects.all()",
+        fixed: "def export_users(request):\n    rows = Paginator(User.objects.order_by('id'), 500).page(request.GET.get('page', 1))"
+      },
+      { language: "ruby", vulnerable: "def export\n  @users = User.all", fixed: "def export\n  @users = User.order(:id).limit(500)" }
+    ]
+  },
+  "security-headers-absent": {
+    id: "security-headers-absent",
+    title: "Application serves no security headers",
+    cwe: "CWE-693",
+    severity: "low",
+    category: "config",
+    invariant: "Every HTML/API response carries the browser protections the deployment relies on \u2014 Content-Security-Policy, Strict-Transport-Security, X-Frame-Options or `frame-ancestors`, X-Content-Type-Options, Referrer-Policy \u2014 set by the framework's defaults, a middleware, or the proxy in front.",
+    guard: "The framework's own header defaults left on (Django SecurityMiddleware + XFrameOptionsMiddleware, Rails default_headers, Spring Security headers), a header middleware (helmet, Talisman, secure), or the headers set by the reverse proxy/CDN \u2014 which is the thing to check before reporting.",
+    rubric: "low as a posture note; medium when the app renders user content (CSP is then the XSS backstop) or has state-changing pages that can be framed; nothing when a proxy in front demonstrably sets them (`ultrasec probe`).",
+    note: "The application is built without the security headers its framework does not set by default (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy). Add them where the app is built \u2014 unless a reverse proxy in front sets them, which is the thing to check (`ultrasec probe` sees what is actually served).",
+    examples: [
+      { language: "javascript", vulnerable: "const app = express();\napp.use(router);", fixed: "const app = express();\napp.use(helmet());\napp.use(router);" },
+      {
+        language: "python",
+        vulnerable: 'MIDDLEWARE = [\n    "django.contrib.sessions.middleware.SessionMiddleware",\n]',
+        fixed: 'MIDDLEWARE = [\n    "django.middleware.security.SecurityMiddleware",\n    "django.contrib.sessions.middleware.SessionMiddleware",\n    "django.middleware.clickjacking.XFrameOptionsMiddleware",\n]'
+      },
+      { language: "java", vulnerable: "http.headers(headers -> headers.disable());", fixed: "http.headers(withDefaults());" }
+    ]
+  },
+  "session-cookie-chunks-on-logout": {
+    id: "session-cookie-chunks-on-logout",
+    title: "Logout clears the session cookie but not its chunks",
+    cwe: "CWE-613",
+    severity: "medium",
+    category: "authz",
+    invariant: "Logging out invalidates every cookie that carries the session: when a library splits a large session cookie into `<name>.0`, `<name>.1`, \u2026, all of them, on both the `__Secure-` and the plain name \u2014 or the session is revoked server-side.",
+    guard: "The library's own sign-out, or a loop over the cookie jar expiring every name that starts with the session cookie's name; or a server-side session store whose record is deleted.",
+    rubric: "medium: a stale chunk set keeps authenticating after logout on a shared device; low when sessions are short-lived and also revoked server-side.",
+    note: "A hand-written logout expires the session cookie by name, but the library splits a large session into `<name>.0`, `<name>.1`, \u2026 and those chunks still authenticate. Clear every cookie whose name starts with the session cookie's name, or call the library's own sign-out.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: 'response.cookies.set("next-auth.session-token", "", { maxAge: 0 });',
+        fixed: 'for (const c of (await cookies()).getAll()) if (c.name.startsWith("next-auth.session-token")) response.cookies.set(c.name, "", { maxAge: 0 });'
+      }
+    ]
+  },
+  "env-bool-coercion": {
+    id: "env-bool-coercion",
+    title: "Environment flag parsed by truthiness",
+    cwe: "CWE-704",
+    severity: "medium",
+    category: "config",
+    invariant: 'A boolean read from the environment is true only for an explicit true spelling (`true`, `1`, `yes`) \u2014 the string `"false"`, `"0"` or `"off"` an operator writes is false.',
+    guard: 'An explicit parse: Node `z.enum(["true","false"]).transform(v => v === "true")` or `z.stringbool()`, Python `strtobool`-style comparison / `env.bool()`, Go `strconv.ParseBool`, Java `Boolean.parseBoolean`, Ruby `ActiveModel::Type::Boolean.new.cast`, PHP `filter_var(\u2026, FILTER_VALIDATE_BOOLEAN)` or Laravel `env()`.',
+    rubric: "medium when the flag toggles a test seam, a mock, an auth bypass or a security control (FLAG=false turns it ON); low for cosmetic flags.",
+    note: 'An environment variable is turned into a boolean by truthiness: every non-empty string is true, including `"false"` and `"0"`. An operator writing FLAG=false turns the flag ON. Parse the string explicitly.',
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: "FAKE_CLOCK: z.coerce.boolean().default(false),",
+        fixed: 'FAKE_CLOCK: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),'
+      },
+      {
+        language: "python",
+        vulnerable: 'DEBUG = bool(os.environ.get("DEBUG"))',
+        fixed: 'DEBUG = os.environ.get("DEBUG", "false").lower() in ("1", "true", "yes")'
+      },
+      { language: "php", vulnerable: "$debug = (bool) getenv('APP_DEBUG');", fixed: "$debug = filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN);" }
+    ]
+  }
+};
+var CLASS_LIST = Object.values(CLASSES);
+
+// src/classes/packs/shared.ts
+var MENTIONS_CSV = /text\/csv|\.csv\b|\bcsv\b/i;
+var NEUTRALIZES_FORMULA = /\[[^\]\n]*=[^\]\n]*\+[^\]\n]*\]|\[[^\]\n]*\+[^\]\n]*=[^\]\n]*\]|["']=["']\s*,\s*["']\+["']|formula|neutrali[sz]|csv-?injection|escapeCsv|sanitizeCsv/i;
+var NEUTRALIZES_FORMULA_ANY = new RegExp(
+  `${NEUTRALIZES_FORMULA.source}|(?:startswith|start_with\\?|str_starts_with|HasPrefix|startsWith)\\s*\\(?[^)\\n]*["'][=+@-]|defusedcsv|escape_formula|sanitize_?csv`,
+  "i"
+);
+var XFF = /x-forwarded-for|HTTP_X_FORWARDED_FOR|X_FORWARDED_FOR/i;
+var XFF_LOOKBACK = 5;
+var EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|xlsx|feed|dump)(?:[/._-]|$)/i;
+var HEADERS_MIDDLEWARE = /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
+var FLAG_NAME = String.raw`\w*(?:enabled|disabled|enable|disable|flag|debug|mock|fake|skip|bypass|allow|insecure|feature|dry_?run|test_?mode)\w*`;
+
+// src/classes/packs/common.ts
+var FIRST_HOP = /\.split\(\s*(["'])\s*,\s*\1\s*\)\s*(?:\[\s*0\s*\]|\.shift\(\s*\)|\.at\(\s*0\s*\))/;
+var COMMON_PACK = {
+  id: "common",
+  ecosystem: "*",
+  classes: {
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "split-first",
+          kind: "line",
+          languages: ["javascript", "python", "go", "java", "kotlin", "scala", "php", "ruby", "csharp"],
+          match: FIRST_HOP,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    }
+  }
+};
+
+// src/classes/packs/node.ts
+var JS3 = ["javascript"];
+var SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
+var EQ = "(?:===|!==|==|!=)";
+var CONSTANT_TIME = /timingSafeEqual|safeCompare|secureCompare|constantTime|compare_digest|tsscmp|safe-compare/i;
+var PRESENCE_CHECK = new RegExp(`${SECRET_ENV}\\s*${EQ}\\s*(?:undefined|null|""|''|\`\`)(?![\\w$])|(?:undefined|null|""|'')\\s*${EQ}\\s*${SECRET_ENV}`);
+var COMPARE_GUARD = new RegExp(`${CONSTANT_TIME.source}|${PRESENCE_CHECK.source}`, "i");
+var COERCE_BOOLEAN = /\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
+var ENV_KEY_COERCE = /^\s*["']?[A-Z][A-Z0-9_]*["']?\s*:.*\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
+var READS_ENV = /\bprocess\.env\b|\bimport\.meta\.env\b|\bcreateEnv\s*\(|\bDeno\.env\b|\bBun\.env\b/;
+var SESSION_COOKIE = /(?:__Secure-)?(?:next-auth|authjs)\.session-token/;
+var EXPIRES_COOKIE = /maxAge\s*:\s*0\b|expires\s*:\s*new\s+Date\(\s*0\s*\)|Max-Age=0|\.delete\s*\(|expires=Thu, 01 Jan 1970/i;
+var HANDLES_CHUNKS = /session-token\.\d|session-token\.\$\{|session-token\.["'`]|\.startsWith\s*\([^)]*(?:session|token|name|cookie)|\\\.\\d|\.\$\{\s*i\s*\}|getAll\s*\(/i;
+var CELL_JOIN = /\.join\(\s*(["'`])(?:;|,|\\t)\1\s*\)/;
+var NODE_QUERIES = [
+  // Drizzle / Knex-style builders: a select that reads FROM a table.
+  { start: /\.\s*select(?:Distinct)?\s*\(/, requires: /\.\s*from\s*\(/, bounded: /\.\s*(?:limit|paginate|\$paginate)\s*\(/ },
+  // Prisma.
+  { start: /\.\s*findMany\s*\(/, bounded: /\btake\s*:/ }
+];
+var NODE_PACK = {
+  id: "node",
+  ecosystem: "node",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "bearer-template",
+          kind: "line",
+          languages: JS3,
+          match: new RegExp(`${EQ}\\s*\`Bearer \\$\\{|\`Bearer \\$\\{[^\`]*\`\\s*${EQ}`),
+          unless: COMPARE_GUARD,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          id: "env-secret",
+          kind: "line",
+          languages: JS3,
+          match: new RegExp(`${EQ}\\s*${SECRET_ENV}|${SECRET_ENV}\\s*${EQ}(?!\\s*(?:undefined|null|""|''|\`\`)\\b)`),
+          unless: COMPARE_GUARD,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          // The receiver has to be named for credentials: `allowedKeys.has(key)`
+          // is as often an object-key allow-list as an API-key one.
+          id: "credential-set",
+          kind: "line",
+          languages: JS3,
+          match: /\b\w*(?:tokens|secrets|api_?keys|bearers)\w*\s*\.\s*has\s*\(\s*(?:bearer|token|apiKey|api_key|key|secret|provided)\w*\s*\)/i,
+          unless: COMPARE_GUARD,
+          emit: "authtokens/secret-compare-timing"
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        // The catalog's `csv` sink knows CSV LIBRARIES; a CSV assembled with
+        // `.join(";")` was invisible. The data rows are joined after the
+        // header, so the last cell join is the line cited.
+        {
+          id: "hand-built",
+          kind: "file",
+          languages: JS3,
+          gate: [MENTIONS_CSV],
+          anchor: CELL_JOIN,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA,
+          emit: "webconfig/csv-formula"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        { id: "zod-coerce-env-key", kind: "line", languages: JS3, match: ENV_KEY_COERCE, emit: "webconfig/env-coerce-boolean" },
+        { id: "zod-coerce-env-file", kind: "line", languages: JS3, match: COERCE_BOOLEAN, fileGate: READS_ENV, emit: "webconfig/env-coerce-boolean" }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      rules: [
+        {
+          id: "nextauth-manual-logout",
+          kind: "file",
+          languages: JS3,
+          gate: [SESSION_COOKIE, EXPIRES_COOKIE],
+          anchor: SESSION_COOKIE,
+          pick: "first",
+          unless: HANDLES_CHUNKS,
+          emit: "authtokens/session-chunks-not-cleared"
+        }
+      ]
+    }
+  }
+};
+var NEXT_CONFIG = /(?:^|\/)next\.config\.(?:js|mjs|cjs|ts|mts)$/;
+var NEXT_HEADERS = /\bheaders\s*(?:\(|:)/;
+var SETS_CSP = /Content-Security-Policy|\bhelmet\s*\(|next-secure-headers|@nosecone|\bnosecone\b|next-safe/i;
+var CONFIG_OBJECT = /(?:const|let|var)\s+\w*[cC]onfig\w*\s*(?::[^=]+)?=\s*\{|module\.exports\s*=|export\s+default\b/;
+var NEXT_ROUTE_FILE = /(?:^|\/)app\/(?:.*\/)?route\.[cm]?[jt]s$|(?:^|\/)pages\/api\/.+\.[cm]?[jt]sx?$/;
+var NEXTJS_PACK = {
+  id: "nextjs",
+  ecosystem: "node",
+  framework: "nextjs",
+  testedWith: ">=12 <17",
+  sources: ["https://nextjs.org/docs/app/api-reference/config/next-config-js/headers"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-headers",
+          kind: "absent",
+          languages: JS3,
+          files: NEXT_CONFIG,
+          anchor: CONFIG_OBJECT,
+          fallbackLine1: true,
+          presentInFile: NEXT_HEADERS,
+          presentInTree: { re: SETS_CSP, scope: "anchor-dir", languages: JS3 },
+          emit: "webconfig/next-headers-missing"
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route-handler",
+          kind: "route-query",
+          languages: JS3,
+          routeFile: NEXT_ROUTE_FILE,
+          exportPath: EXPORT_PATH,
+          queries: NODE_QUERIES,
+          statement: "js-legacy",
+          emit: "webconfig/unbounded-export"
+        }
+      ]
+    }
+  }
+};
+var EXPRESS_PACK = {
+  id: "express",
+  ecosystem: "node",
+  framework: "express",
+  testedWith: ">=4 <6",
+  sources: ["https://expressjs.com/en/advanced/best-practice-security.html"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        { id: "no-helmet", kind: "absent", languages: JS3, anchor: /\bexpress\s*\(\s*\)/, presentInFile: HEADERS_MIDDLEWARE, emit: "webconfig/helmet-missing" }
+      ]
+    }
+  }
+};
+var FASTIFY_PACK = {
+  id: "fastify",
+  ecosystem: "node",
+  framework: "fastify",
+  testedWith: ">=4 <6",
+  sources: ["https://github.com/fastify/fastify-helmet"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-helmet",
+          kind: "absent",
+          languages: JS3,
+          anchor: /\b(?:fastify|Fastify)\s*\(\s*\)/,
+          presentInFile: HEADERS_MIDDLEWARE,
+          emit: "webconfig/helmet-missing"
+        }
+      ]
+    }
+  }
+};
+var ctorPack = (id, ctor, testedWith) => ({
+  id,
+  ecosystem: "node",
+  framework: id,
+  testedWith,
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        { id: "no-headers-middleware", kind: "absent", languages: JS3, anchor: ctor, presentInFile: HEADERS_MIDDLEWARE, emit: "webconfig/helmet-missing" }
+      ]
+    }
+  }
+});
+var KOA_PACK = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
+var HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
+var ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
+var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];
+
+// src/classes/packs/python.ts
+var PY3 = ["python"];
+var FASTAPI_PACK = {
+  id: "fastapi",
+  ecosystem: "python",
+  framework: "fastapi",
+  testedWith: ">=0.100 <1",
+  sources: ["https://fastapi.tiangolo.com/advanced/middleware/"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-headers-middleware",
+          kind: "absent",
+          languages: PY3,
+          anchor: /\bFastAPI\s*\(/,
+          presentInFile: HEADERS_MIDDLEWARE,
+          emit: "webconfig/helmet-missing"
+        }
+      ]
+    }
+  }
+};
+var PYTHON_PACKS = [FASTAPI_PACK];
+
+// src/classes/packs/index.ts
+var PACKS = [COMMON_PACK, ...NODE_PACKS, ...PYTHON_PACKS];
+
+// src/classes/engine.ts
+var SKIPPED_EXTS = /* @__PURE__ */ new Set(["ipynb", "pyi"]);
+var LEGACY_PREFIX = { webconfig: "Web misconfig \u2014 ", authtokens: "Auth token \u2014 ", class: "Weakness \u2014 " };
+function boundRules(packs = PACKS) {
+  const out2 = [];
+  for (const pack of packs)
+    for (const [classId, cov] of Object.entries(pack.classes)) {
+      if (!cov || !("rules" in cov)) continue;
+      for (const rule2 of cov.rules) out2.push({ pack, classId, rule: rule2 });
+    }
+  return out2;
+}
+function shapeFor(classId, rule2) {
+  if (rule2.emit) {
+    const [family, id] = rule2.emit.split("/");
+    if (family === "webconfig") {
+      const s = WEBCONFIG_SHAPES[id];
+      if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: "config", note: s.note };
+    }
+    if (family === "authtokens") {
+      const s = AUTH_SHAPES[id];
+      if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: s.category, note: s.note };
+    }
+    throw new Error(`classes: rule ${rule2.id} emits unknown shape ${rule2.emit}`);
+  }
+  const c2 = CLASSES[classId];
+  return { family: "class", id: c2.id, title: c2.title, severity: c2.severity, cwe: c2.cwe, category: c2.category, note: rule2.note ?? c2.note };
+}
+function hit4(rel2, line2, shape, evidence) {
+  return makeToolFinding({
+    tool: "ultrasec",
+    category: shape.category,
+    ident: `${shape.family}:${shape.id}:${rel2}:${line2}`,
+    title: `${LEGACY_PREFIX[shape.family]}${shape.title}`,
+    severity: shape.severity,
+    message: `${shape.note}
+
+Evidence: \`${evidence.trim().slice(0, 160)}\``,
+    file: rel2,
+    line: line2,
+    cwe: shape.cwe
+  });
+}
+function extOf5(rel2) {
+  const i2 = rel2.lastIndexOf(".");
+  return i2 === -1 ? "" : rel2.slice(i2 + 1).toLowerCase();
+}
+function lineOf3(content, index) {
+  let n = 1;
+  for (let i2 = 0; i2 < index && i2 < content.length; i2++) if (content[i2] === "\n") n++;
+  return n;
+}
+var dirOfRel = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/") + 1) : "";
+function view(rel2, lang, content) {
+  const raw = content.split(/\r?\n/);
+  const hash = lang === "python" || lang === "ruby" || lang === "shell" || lang === "elixir";
+  const code = raw.map((t) => codeOfLine(t, lang));
+  const comment = code.map((c2) => c2.trim() === "" || !hash && /^\s*\*/.test(c2));
+  return { rel: rel2, lang, content, raw, code, comment, codeText: code.map((c2, i2) => comment[i2] ? "" : c2).join("\n") };
+}
+function runLine(v, r, emit2) {
+  if (r.fileGate && !r.fileGate.test(v.content)) return;
+  for (let i2 = 0; i2 < v.raw.length; i2++) {
+    if (v.comment[i2]) continue;
+    const c2 = v.code[i2];
+    if (!r.match.test(c2) || r.unless?.test(c2)) continue;
+    if (r.context) {
+      let seen = false;
+      for (let j = Math.max(0, i2 - r.context.before); j <= i2 && !seen; j++) seen = !v.comment[j] && r.context.re.test(v.code[j]);
+      if (!seen) continue;
+    }
+    emit2(i2 + 1, v.raw[i2]);
+  }
+}
+function runFile(v, r, emit2) {
+  if (!r.gate.every((g) => g.test(v.content))) return;
+  if (r.unless?.test(v.codeText)) return;
+  let at = -1;
+  for (let i2 = 0; i2 < v.raw.length; i2++) {
+    if (v.comment[i2] || !r.anchor.test(v.code[i2])) continue;
+    at = i2;
+    if (r.pick === "first") break;
+  }
+  if (at >= 0) emit2(at + 1, v.raw[at]);
+}
+var MAX_STATEMENT = 2e3;
+function statementAt2(content, start2, mode) {
+  const rest = content.slice(start2, start2 + MAX_STATEMENT);
+  if (mode === "js-legacy") {
+    const end = rest.search(/;|\n\s*\n/);
+    return end === -1 ? rest : rest.slice(0, end);
+  }
+  let depth = 0;
+  let quote = null;
+  for (let i2 = 0; i2 < rest.length; i2++) {
+    const ch = rest[i2];
+    if (quote) {
+      if (ch === "\\") i2++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+    else if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+    else if (ch === ";" && depth === 0) return rest.slice(0, i2);
+    else if (ch === "\n" && depth === 0 && !/^\s*(?:\.|->)/.test(rest.slice(i2 + 1, i2 + 200))) return rest.slice(0, i2);
+  }
+  return rest;
+}
+function isExportRoute(v, r) {
+  if (r.routeFile?.test(v.rel) && r.exportPath.test(v.rel)) return true;
+  if (!r.routeDecl) return false;
+  for (let i2 = 0; i2 < v.code.length; i2++) {
+    if (v.comment[i2]) continue;
+    const m = r.routeDecl.exec(v.code[i2]);
+    if (m?.[1] && r.exportPath.test(m[1])) return true;
+  }
+  return false;
+}
+function runRouteQuery(v, r, emit2) {
+  if (!isExportRoute(v, r)) return;
+  for (const q of r.queries) {
+    const re = new RegExp(q.start.source, q.start.flags.includes("g") ? q.start.flags : `${q.start.flags}g`);
+    for (const m of v.content.matchAll(re)) {
+      const start2 = m.index ?? 0;
+      const ln = lineOf3(v.content, start2);
+      if (v.comment[ln - 1]) continue;
+      const stmt = statementAt2(v.content, start2, r.statement);
+      if (q.requires && !q.requires.test(stmt)) continue;
+      if (q.bounded.test(stmt)) continue;
+      emit2(ln, stmt.split("\n")[0]);
+    }
+  }
+}
+function packageRoot(rel2, frameworks) {
+  let best;
+  for (const f of frameworks) {
+    const d = f.dir ? `${f.dir}/` : "";
+    if (rel2.startsWith(d) && (best === void 0 || d.length > best.length)) best = d;
+  }
+  return best ?? dirOfRel(rel2);
+}
+function frameworkAt(rel2, id, frameworks) {
+  return frameworks.some((f) => f.id === id && (f.dir === "" || rel2.startsWith(`${f.dir}/`)));
+}
+function auditWeaknessClasses(repo, prune, tree, frameworks = [], packs = PACKS) {
+  const rules = boundRules(packs);
+  const read = tree?.read ?? readText2;
+  const findings = [];
+  const hits = [];
+  const seen = /* @__PURE__ */ new Set();
+  const pending2 = [];
+  const presentDirs = /* @__PURE__ */ new Map();
+  const record2 = (b, rel2, line2, evidence) => {
+    const shape = shapeFor(b.classId, b.rule);
+    const f = hit4(rel2, line2, shape, evidence);
+    hits.push({ classId: b.classId, packId: b.pack.id, ruleId: b.rule.id, file: rel2, line: line2 });
+    if (seen.has(f.id)) return;
+    seen.add(f.id);
+    findings.push(f);
+  };
+  for (const wf of tree?.files ?? walk2(repo)) {
+    if (prune?.(wf.rel)) continue;
+    const ext = extOf5(wf.rel);
+    if (SKIPPED_EXTS.has(ext)) continue;
+    const lang = langForFile(wf.rel)?.id;
+    if (!lang) continue;
+    const forFile = rules.filter((b) => b.rule.languages.includes(lang) && (!b.rule.files || b.rule.files.test(wf.rel)));
+    const treeChecks = rules.filter(
+      (b) => b.rule.kind === "absent" && b.rule.presentInTree && (!b.rule.presentInTree.languages || b.rule.presentInTree.languages.includes(lang)) && (!b.rule.presentInTree.files || b.rule.presentInTree.files.test(wf.rel))
+    );
+    if (!forFile.length && !treeChecks.length) continue;
+    const content = read(wf.abs);
+    if (!content) continue;
+    const v = view(wf.rel, lang, content);
+    for (const b of treeChecks) {
+      const r = b.rule;
+      if (r.presentInTree.re.test(v.codeText)) (presentDirs.get(b) ?? presentDirs.set(b, []).get(b)).push(dirOfRel(v.rel));
+    }
+    for (const b of forFile) {
+      const r = b.rule;
+      if (r.requiresFramework && !frameworkAt(v.rel, r.requiresFramework, frameworks)) continue;
+      const emit2 = (line2, evidence) => record2(b, v.rel, line2, evidence);
+      if (r.kind === "line") runLine(v, r, emit2);
+      else if (r.kind === "file") runFile(v, r, emit2);
+      else if (r.kind === "route-query") runRouteQuery(v, r, emit2);
+      else {
+        if (r.fileGate && !r.fileGate.test(v.content)) continue;
+        if (r.presentInFile?.test(v.codeText)) continue;
+        let at = v.code.findIndex((c2, i2) => !v.comment[i2] && r.anchor.test(c2));
+        if (at < 0 && r.fallbackLine1) at = 0;
+        if (at < 0) continue;
+        if (!r.presentInTree) emit2(at + 1, v.raw[at]);
+        else
+          pending2.push({
+            bound: b,
+            rel: v.rel,
+            line: at + 1,
+            evidence: v.raw[at],
+            root: r.presentInTree.scope === "package" ? packageRoot(v.rel, frameworks) : dirOfRel(v.rel)
+          });
+      }
+    }
+  }
+  for (const p of pending2) {
+    if ((presentDirs.get(p.bound) ?? []).some((d) => d.startsWith(p.root))) continue;
+    record2(p.bound, p.rel, p.line, p.evidence);
+  }
+  return { findings, hits };
 }
 
 // src/cloud.ts
@@ -34182,14 +34726,14 @@ var CLOUD_SHAPES = {
 function lines4(content) {
   return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
 }
-function extOf5(rel2) {
+function extOf6(rel2) {
   const i2 = rel2.lastIndexOf(".");
   return i2 === -1 ? "" : rel2.slice(i2 + 1).toLowerCase();
 }
 var CODE3 = /* @__PURE__ */ new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "py", "go", "java", "kt", "scala", "php", "rb", "cs"]);
 var IAC_EXTS = /* @__PURE__ */ new Set(["yaml", "yml", "json", "tf", "tfvars", "hcl", "template"]);
 var SCAN2 = /* @__PURE__ */ new Set([...IAC_EXTS, ...CODE3]);
-function hit4(rel2, line2, shape, evidence) {
+function hit5(rel2, line2, shape, evidence) {
   return makeToolFinding({
     tool: "ultrasec",
     category: "config",
@@ -34204,7 +34748,7 @@ Evidence: \`${evidence.trim().slice(0, 160)}\``,
     cwe: shape.cwe
   });
 }
-function lineOf3(content, index) {
+function lineOf4(content, index) {
   let n = 1;
   for (let i2 = 0; i2 < index && i2 < content.length; i2++) if (content[i2] === "\n") n++;
   return n;
@@ -34246,7 +34790,7 @@ function scanIngresses(rel2, ls, out2) {
     const routed = doc.map((l) => /^\s*(?:-\s+)?(?:name|serviceName|host):\s*["']?([^"'\s#]+)/.exec(l.text)?.[1]).filter((v) => !!v);
     if (!routed.some((v) => SENSITIVE_UI.test(v))) continue;
     if (doc.some((l) => INGRESS_AUTH.test(l.text))) continue;
-    out2.push(hit4(rel2, kind.n, CLOUD_SHAPES["k8s-ingress-unauthenticated"], kind.text));
+    out2.push(hit5(rel2, kind.n, CLOUD_SHAPES["k8s-ingress-unauthenticated"], kind.text));
   }
 }
 var COMPOSE_FILE = /(?:^|\/)(?:docker-)?compose(?:[.-][\w.-]+)?\.ya?ml$/;
@@ -34266,7 +34810,7 @@ function scanCompose(rel2, ls, out2) {
   let inPorts = false;
   let portsIndent = -1;
   const flush = () => {
-    if (DATA_IMAGE.test(image)) for (const l of pending2) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["compose-public-port"], l.text));
+    if (DATA_IMAGE.test(image)) for (const l of pending2) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["compose-public-port"], l.text));
     pending2 = [];
     image = "";
   };
@@ -34325,14 +34869,14 @@ function scanDockerfile(repo, rel2, ls, out2) {
     const abs = join41(repo, c2);
     if (existsSync16(abs) && dockerignoreExcludesEnv(readFileSync23(abs, "utf8"))) return;
   }
-  out2.push(hit4(rel2, copy.n, CLOUD_SHAPES["dockerignore-env"], copy.text));
+  out2.push(hit5(rel2, copy.n, CLOUD_SHAPES["dockerignore-env"], copy.text));
 }
 function auditCloud(repo, prune, tree) {
   const out2 = [];
   const read = tree?.read ?? readText2;
   for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
-    const ext = extOf5(wf.rel);
+    const ext = extOf6(wf.rel);
     if (DOCKERFILE.test(wf.rel)) {
       const content2 = read(wf.abs);
       if (content2) scanDockerfile(repo, wf.rel, lines4(content2), out2);
@@ -34343,40 +34887,40 @@ function auditCloud(repo, prune, tree) {
     if (!content) continue;
     const rel2 = wf.rel;
     const ls = lines4(content);
-    for (const l of ls) if (METADATA_RE.test(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["cloud-metadata"], l.text));
+    for (const l of ls) if (METADATA_RE.test(l.text)) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["cloud-metadata"], l.text));
     if (!IAC_EXTS.has(ext)) continue;
     const isK8s = /(^|\n)\s*apiVersion:/.test(content) && /(^|\n)\s*kind:/.test(content);
     if (isK8s) scanIngresses(rel2, ls, out2);
     if (COMPOSE_FILE.test(rel2)) scanCompose(rel2, ls, out2);
     if (isK8s) {
       for (const l of ls) {
-        if (/^\s*privileged:\s*true\b/i.test(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["k8s-privileged"], l.text));
+        if (/^\s*privileged:\s*true\b/i.test(l.text)) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["k8s-privileged"], l.text));
         if (/^\s*host(?:Network|PID|IPC):\s*true\b/i.test(l.text) || /^\s*hostPath:/i.test(l.text))
-          out2.push(hit4(rel2, l.n, CLOUD_SHAPES["k8s-host-namespace"], l.text));
+          out2.push(hit5(rel2, l.n, CLOUD_SHAPES["k8s-host-namespace"], l.text));
         if (/^\s*allowPrivilegeEscalation:\s*true\b/i.test(l.text) || /^\s*runAsNonRoot:\s*false\b/i.test(l.text))
-          out2.push(hit4(rel2, l.n, CLOUD_SHAPES["k8s-privesc"], l.text));
+          out2.push(hit5(rel2, l.n, CLOUD_SHAPES["k8s-privesc"], l.text));
       }
     }
     const hasActionStar = /"Action"\s*:\s*(?:"\*"|\[\s*"\*"\s*\])/.test(content);
     const hasResourceStar = /"Resource"\s*:\s*(?:"\*"|\[\s*"\*"\s*\])/.test(content);
     if (hasActionStar && hasResourceStar) {
       const m = /"Action"\s*:\s*(?:"\*"|\[\s*"\*"\s*\])/.exec(content);
-      if (m) out2.push(hit4(rel2, lineOf3(content, m.index), CLOUD_SHAPES["iam-wildcard"], m[0]));
+      if (m) out2.push(hit5(rel2, lineOf4(content, m.index), CLOUD_SHAPES["iam-wildcard"], m[0]));
     }
     const allowPublic = /"Effect"\s*:\s*"Allow"/.test(content) && /"Principal"\s*:\s*(?:"\*"|\{\s*"AWS"\s*:\s*"\*"\s*\})/.test(content);
     if (allowPublic) {
       const m = /"Principal"\s*:\s*(?:"\*"|\{\s*"AWS"\s*:\s*"\*"\s*\})/.exec(content);
-      if (m) out2.push(hit4(rel2, lineOf3(content, m.index), CLOUD_SHAPES["iam-public-principal"], m[0]));
+      if (m) out2.push(hit5(rel2, lineOf4(content, m.index), CLOUD_SHAPES["iam-public-principal"], m[0]));
     }
     for (const l of ls) {
       if ((/(?:cidr_blocks|cidr_ip|source_ranges|CidrIp)\b[^\n]*(?:0\.0\.0\.0\/0|::\/0)/i.test(l.text) || /^\s*-?\s*["']?(?:0\.0\.0\.0\/0|::\/0)["']?\s*$/.test(l.text)) && !isEgressRule(ls, l.n))
-        out2.push(hit4(rel2, l.n, CLOUD_SHAPES["open-ingress"], l.text));
+        out2.push(hit5(rel2, l.n, CLOUD_SHAPES["open-ingress"], l.text));
       if (/\bacl\b[^\n]*["']public-read(?:-write)?["']|["']public-read(?:-write)?["']/i.test(l.text) && /\bacl\b/i.test(l.text))
-        out2.push(hit4(rel2, l.n, CLOUD_SHAPES["public-storage"], l.text));
+        out2.push(hit5(rel2, l.n, CLOUD_SHAPES["public-storage"], l.text));
       if (/\b(?:storage_encrypted|encrypted|encryption_enabled|encrypt_at_rest)\s*=\s*false\b/i.test(l.text))
-        out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-unencrypted"], l.text));
-      if (/\bpublicly_accessible\s*=\s*true\b/i.test(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-public-instance"], l.text));
-      if (IAC_SECRET_RE.test(l.text) && isLiteralSecret2(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-hardcoded-secret"], l.text));
+        out2.push(hit5(rel2, l.n, CLOUD_SHAPES["iac-unencrypted"], l.text));
+      if (/\bpublicly_accessible\s*=\s*true\b/i.test(l.text)) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["iac-public-instance"], l.text));
+      if (IAC_SECRET_RE.test(l.text) && isLiteralSecret2(l.text)) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["iac-hardcoded-secret"], l.text));
     }
   }
   return out2;
@@ -36895,6 +37439,7 @@ async function runScan2(args2) {
   const agenticFindings = auditAgenticWorkflows(repo, prune, tree);
   const webConfigFindings = auditWebConfig(repo, prune, tree);
   const authTokenFindings = auditAuthTokens(repo, prune, tree);
+  const classAudit = auditWeaknessClasses(repo, prune, tree);
   const cloudFindings = auditCloud(repo, prune, tree);
   const credentialFindings = auditSecrets(repo, prune, tree);
   const scopedScan = !!(effectiveScope && effectiveScope.length || include2?.length || exclude2?.length || diffRef);
@@ -36945,6 +37490,7 @@ async function runScan2(args2) {
     ...agenticFindings,
     ...webConfigFindings,
     ...authTokenFindings,
+    ...classAudit.findings,
     ...cloudFindings,
     ...credentialFindings,
     ...tool.findings
@@ -38497,9 +39043,9 @@ function reachability(repo, graph, f) {
     }
     try {
       const text = readText2(join59(repo, entry2.file));
-      const hit5 = text.split(/\r?\n/).findIndex((l) => AUTH_MARKER.test(l));
+      const hit6 = text.split(/\r?\n/).findIndex((l) => AUTH_MARKER.test(l));
       L.push(
-        hit5 >= 0 ? `- **auth marker in this file**: \`${entry2.file}:${hit5 + 1}\` \u2014 a CANDIDATE guard; confirm it runs before the object is touched, on this path.` : `- **auth marker in this file**: NONE. Not proof the route is public \u2014 the guard may be middleware, a proxy or the platform \u2014 but nothing in this file authenticates the caller.`
+        hit6 >= 0 ? `- **auth marker in this file**: \`${entry2.file}:${hit6 + 1}\` \u2014 a CANDIDATE guard; confirm it runs before the object is touched, on this path.` : `- **auth marker in this file**: NONE. Not proof the route is public \u2014 the guard may be middleware, a proxy or the platform \u2014 but nothing in this file authenticates the caller.`
       );
       const thr = text.split(/\r?\n/).findIndex((l) => THROTTLE_MARKER.test(l));
       if (thr < 0) L.push(`- **rate limit in this file**: NONE \u2014 relevant if the sink is expensive or the flow is an oracle.`);
@@ -44502,7 +45048,7 @@ var SOURCE_EXTS = /* @__PURE__ */ new Set([
   "json"
 ]);
 var SOURCE_BASENAMES = /* @__PURE__ */ new Set(["dockerfile", "makefile", "jenkinsfile", "procfile"]);
-function extOf6(target) {
+function extOf7(target) {
   const base = target.split(/[\\/]/).pop() ?? target;
   const i2 = base.lastIndexOf(".");
   return i2 <= 0 ? "" : base.slice(i2 + 1).toLowerCase();
@@ -44512,7 +45058,7 @@ function baseNameOf(target) {
 }
 function classifyTarget(target) {
   if (/^https?:\/\//i.test(target)) return { kind: "probe", url: target };
-  const ext = extOf6(target);
+  const ext = extOf7(target);
   if (ext === "" || SOURCE_EXTS.has(ext) || SOURCE_BASENAMES.has(baseNameOf(target))) return { kind: "scan" };
   const entry2 = ROUTE_TABLE.find((e) => e.exts.includes(ext));
   if (entry2) return { kind: "external", entry: entry2 };

@@ -10,6 +10,7 @@ import { enumerateSensitiveLogCandidates } from "../logs/hygiene.js";
 import { auditAgenticWorkflows } from "../actions.js";
 import { auditWebConfig } from "../webconfig.js";
 import { auditAuthTokens } from "../authtokens.js";
+import { auditWeaknessClasses } from "../classes/engine.js";
 import { auditCloud } from "../cloud.js";
 import { buildPruneMatcher, snapshotTree } from "../walk.js";
 import { createFileFacts } from "../facts.js";
@@ -286,6 +287,13 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // Always on, grounded [file:line], category crypto/authz.
   const authTokenFindings = auditAuthTokens(repo, prune, tree);
 
+  // Weakness classes (src/classes): timing-unsafe secret comparison, CSV
+  // formula injection, first-hop X-Forwarded-For, unbounded public exports,
+  // absent security headers, session chunks left on logout, env booleans
+  // parsed by truthiness — each defined once, its idioms per ecosystem and
+  // framework kept as data in packs. Always on, grounded [file:line].
+  const classAudit = auditWeaknessClasses(repo, prune, tree);
+
   // Cloud / K8s / IaC misconfiguration (privileged containers, host namespaces,
   // wildcard IAM, public principals/storage, open ingress, instance-metadata
   // endpoints). Zero-dependency baseline that fires without checkov and folds
@@ -370,6 +378,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...agenticFindings,
     ...webConfigFindings,
     ...authTokenFindings,
+    ...classAudit.findings,
     ...cloudFindings,
     ...credentialFindings,
     ...tool.findings,

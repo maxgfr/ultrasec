@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { auditAuthTokens, AUTH_SHAPES } from "../src/authtokens.js";
+import { auditWeaknessClasses } from "../src/classes/engine.js";
 
 // The auth-token detector, measured the bench way: vuln/safe twins per shape and
 // per stack, with an expectations map. TPR=1 / FPR=0. Kept OUT of
@@ -12,7 +13,9 @@ const expectations = JSON.parse(readFileSync(join(FIXTURE, "expectations.json"),
 
 const idByTitle = new Map(Object.values(AUTH_SHAPES).map((s) => [`Auth token — ${s.title}`, s.id]));
 
-const findings = auditAuthTokens(FIXTURE);
+// The shapes that became weakness classes run on the class engine and keep
+// their shape ids, so this fixture's expectations hold unchanged across both.
+const findings = [...auditAuthTokens(FIXTURE), ...auditWeaknessClasses(FIXTURE).findings];
 const shapesByFile = new Map<string, Set<string>>();
 for (const f of findings) {
   const rel = f.sink!.file;
