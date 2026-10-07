@@ -18,6 +18,8 @@ import {
   type NormalizedRow,
   type ParseResult,
 } from "./apply-parse.js";
+import type { ClassHunt } from "./classes/hunt.js";
+import { isHuntOnlyPayload } from "./classes/hunt.js";
 
 // The agentic-discovery stage (Phase 5). The deterministic engine can't enumerate
 // authorization/IDOR, business-logic, or subtle multi-hop flows — so it emits a
@@ -51,6 +53,12 @@ export interface InvestigateRegion {
    * Absent unless that stage has run.
    */
   leads?: string[];
+  /**
+   * Present on a weakness-class HUNT rather than an attack-surface region: a
+   * class × framework cell no pack settles (src/classes/hunt.ts). Its `region`
+   * is the hunt id, its files are where the framework lives.
+   */
+  hunt?: ClassHunt;
 }
 
 /**
@@ -84,6 +92,7 @@ export function buildInvestigateWorklist(
   graph: Graph,
   assumptionLeads: { at: string; claim: string }[] = [],
   lens?: string,
+  classHunts: InvestigateRegion[] = [],
 ): InvestigateRegion[] {
   // `surface.byFile` is the FULL ranked set. The previous version read
   // `entryPoints[].samples` and `sinks[].samples` — each already capped at 8 per
@@ -124,12 +133,18 @@ export function buildInvestigateWorklist(
       ...(leads.length ? { leads } : {}),
     });
   }
-  return regions;
+  // Weakness-class hunts come after the regions: same worklist, same ingest,
+  // same orchestration ids — one more kind of item, not a second pipeline.
+  return [...regions, ...classHunts];
 }
 
-export function renderInvestigateMd(regions: InvestigateRegion[], context?: string): string {
+export function renderInvestigateMd(items: InvestigateRegion[], context?: string): string {
+  const regions = items.filter((r) => !r.hunt);
+  const hunts = items.filter((r) => r.hunt);
   const L: string[] = [];
-  L.push(`# ultrasec investigation worklist (${regions.length} region${regions.length === 1 ? "" : "s"})`);
+  L.push(
+    `# ultrasec investigation worklist (${regions.length} region${regions.length === 1 ? "" : "s"}${hunts.length ? ` · ${hunts.length} weakness-class hunt${hunts.length === 1 ? "" : "s"}` : ""})`,
+  );
   L.push("");
   L.push(`Investigate each region for issues the deterministic engine can't enumerate, and emit`);
   L.push(`grounded **Discovery[]** as INVESTIGATE.json (array of`);
@@ -158,7 +173,38 @@ export function renderInvestigateMd(regions: InvestigateRegion[], context?: stri
     }
     L.push("");
   }
+  if (hunts.length) L.push(...renderHuntsMd(hunts));
   return L.join("\n") + "\n";
+}
+
+/** The weakness-class hunts: what no pack covers, and how to hand back what you find. */
+function renderHuntsMd(hunts: InvestigateRegion[]): string[] {
+  const L: string[] = [];
+  L.push(`## Weakness-class hunts`);
+  L.push("");
+  L.push(`Each hunt is a weakness class on a framework no pack settles (no pack for it, or a version`);
+  L.push(`outside the range the pack was validated on). Find how THIS repository writes the class and`);
+  L.push(`return, in the same INVESTIGATE.json — \`{ "discoveries": [...], "idioms": [...], "hunted": [...] }\`:`);
+  L.push(`- **discoveries** — every place the invariant breaks, with \`"hunt": "<hunt id>"\` (ingested like any discovery);`);
+  L.push(`- **idioms** — each unsafe call and each guard you recognized: \`{hunt, class, framework, kind: "unsafe"|"guard", pattern,`);
+  L.push(`  regex?, file, line, note}\`, citation checked, written to \`PACK-SUGGESTIONS.json\` (proposals — never applied);`);
+  L.push(`- **hunted** — the hunt ids you worked, including those where you found nothing.`);
+  L.push("");
+  for (const r of hunts) {
+    const h = r.hunt!;
+    L.push(`### \`${h.id}\` — ${h.title} (${h.cwe}) on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""}`);
+    L.push(`- why: ${h.reason}${h.packsApplied.length ? ` (rules already run as a floor: ${h.packsApplied.join(", ")})` : ""}`);
+    L.push(`- invariant: ${h.invariant}`);
+    L.push(`- a valid guard: ${h.guard}`);
+    L.push(`- severity: ${h.rubric}`);
+    if (r.files.length) L.push(`- start in: ${r.files.map((f) => `\`${f}\``).join(", ")}`);
+    for (const e of h.examples) {
+      L.push(`- example (${e.language}) — vulnerable: \`${e.vulnerable.replace(/\n/g, " ⏎ ")}\``);
+      L.push(`  fixed: \`${e.fixed.replace(/\n/g, " ⏎ ")}\``);
+    }
+    L.push("");
+  }
+  return L;
 }
 
 /**
@@ -197,8 +243,9 @@ function dedupKey(category: string, ident: string | undefined, where: string): s
 }
 
 /** Reject a discovery whose primary or any path citation doesn't resolve in the
- *  repo — the SAME check the grounding gate applies, so `check` can't fail later. */
-function citationProblem(repo: string, d: Discovery): string | null {
+ *  repo — the SAME check the grounding gate applies, so `check` can't fail later.
+ *  Exported for the class hunt's idioms, which are held to the same bar. */
+export function citationProblem(repo: string, d: Pick<Discovery, "file" | "line" | "path">): string | null {
   const locs = [{ file: d.file, line: d.line }, ...(d.path ?? []).map((p) => ({ file: p.file, line: p.line }))];
   for (const loc of locs) {
     if (!insideRepo(repo, loc.file)) return `citation outside repo: ${loc.file}`;
@@ -285,7 +332,10 @@ export function ingestDiscoveries(dossier: Dossier, discoveries: Discovery[], re
  * {discoveries:[]} stays valid — a hunter finding nothing is a real outcome.
  */
 export function parseDiscoveries(raw: string): ParseResult<Discovery> {
-  const arr = coerceRows(JSON.parse(raw) as unknown, ["discoveries"], "discoveries");
+  const data = JSON.parse(raw) as unknown;
+  // A payload carrying only weakness-class hunt results (`idioms`/`hunted`)
+  // is a valid apply with no discovery in it.
+  const arr = isHuntOnlyPayload(data) ? [] : coerceRows(data, ["discoveries"], "discoveries");
   const rows: Discovery[] = [];
   const dropped: DroppedRow[] = [];
   const normalized: NormalizedRow[] = [];

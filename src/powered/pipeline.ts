@@ -15,6 +15,8 @@ import { renderHtml } from "../render/html.js";
 import { buildContextScaffold, renderContextScaffoldMd, loadContextDoc } from "../context.js";
 import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from "../triage.js";
 import { buildInvestigateWorklist, renderInvestigateMd, ingestDiscoveries, parseDiscoveries } from "../investigate.js";
+import { buildClassHunts, parseHuntResults, recordHuntResults } from "../classes/hunt.js";
+import { PACKS } from "../classes/packs/index.js";
 import { buildWorklist, renderWorklistMd, applyVerdicts, parseVerdicts } from "../verify.js";
 import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../revalidate.js";
 import { buildAssumptionWorklist, renderAssumptionsMd, parseAssumptionResults, renderAssumptionMap, unenforced, LEADS_FILE } from "../assumptions.js";
@@ -191,13 +193,25 @@ const STAGES: Record<StageName, StageDef> = {
   investigate: {
     crossCheckable: false,
     emit(repo, run, dossier) {
-      const regions = buildInvestigateWorklist(buildAttackSurface(scanRepo(repo)), dossier.graph);
+      const surface = buildAttackSurface(scanRepo(repo));
+      const regions = buildInvestigateWorklist(surface, dossier.graph, [], undefined, buildClassHunts(dossier.manifest, surface));
       const f = stageFiles("INVESTIGATE");
       emitWorklist(run, f, regions, renderInvestigateMd(regions, loadContextDoc(run)));
       return { worklist: join(run, f.md), outName: "INVESTIGATE.json" };
     },
     applyPure: (repo, run, dossier, raw) =>
       ingestDiscoveries(dossier, rowsOf("investigate", parseDiscoveries(raw)), repo, { context: loadContextDoc(run) }).findings,
+    // Idioms recognized by a weakness-class hunt are proposals, not findings.
+    afterApply(run, raw) {
+      const dossier = loadDossier(run);
+      recordHuntResults(
+        run,
+        dossier.manifest.repo,
+        dossier.manifest,
+        [parseHuntResults(raw)],
+        PACKS.flatMap((p) => (p.framework ? [p.framework] : [])),
+      );
+    },
     instruction: (repo, run, worklist, outPath) =>
       `Read the investigation worklist at ${worklist}. Find issues the deterministic engine can't (authz/IDOR, business logic, multi-hop) and write grounded Discovery[] {title,category,severity,cwe?,message,file,line,path?} to ${outPath}. Cite resolvable [file:line]. ${UNTRUSTED}`,
   },

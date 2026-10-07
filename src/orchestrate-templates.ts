@@ -90,9 +90,30 @@ const INVESTIGATE_SCHEMA = {
               properties: { file: { type: "string" }, line: { type: "integer" }, why: { type: "string" } },
             },
           },
+          hunt: { type: "string", description: "the weakness-class hunt id this discovery answers, when it came from one" },
         },
       },
     },
+    idioms: {
+      type: "array",
+      description: "weakness-class hunts only: each unsafe call and guard you recognized, as this repo writes it",
+      items: {
+        type: "object",
+        required: ["class", "framework", "kind", "pattern", "file", "line"],
+        properties: {
+          hunt: { type: "string" },
+          class: { type: "string" },
+          framework: { type: "string" },
+          kind: { enum: ["unsafe", "guard"] },
+          pattern: { type: "string", description: "the idiom as it reads in the code" },
+          regex: { type: "string", description: "optional proposed matcher (must compile)" },
+          file: { type: "string" },
+          line: { type: "integer" },
+          note: { type: "string" },
+        },
+      },
+    },
+    hunted: { type: "array", items: { type: "string" }, description: "weakness-class hunt ids you worked, including those with no finding" },
   },
 };
 
@@ -200,7 +221,7 @@ export function phaseWorkflowScript(ph: PhaseInfo, runAbs: string, engineAbs: st
     `  agent(contract('${spec.role}', 'ITEMS=' + batch.join(',')), { label: '${ph.name}:' + (i + 1), phase: ${JSON.stringify(spec.title)}, agentType: 'general-purpose', schema: SCHEMA }))`,
     ``,
     `// One-writer rule: this workflow only COLLECTS ${fragmentKey} fragments. The main agent merges`,
-    `// the returned \`${fragmentKey}\` arrays into ${oneLine(spec.fragmentFile(runAbs))}, then runs the conservative fold:`,
+    `// the returned \`${fragmentKey}\` arrays into ${oneLine(spec.fragmentFile(runAbs))}${ph.name === "investigate" ? " (and the `idioms`/`hunted` arrays of weakness-class hunts under the same keys)" : ""}, then runs the conservative fold:`,
     `//   ${oneLine(spec.applyHint(engineAbs, ph.worklist, runAbs))}`,
     `return { phase: ${JSON.stringify(ph.name)}, worklist: WORKLIST, results: results.filter(Boolean) }`,
     ``,
@@ -281,7 +302,9 @@ For EACH of your regions:
 3. Only report what you can exploit — a concrete attacker scenario (who · what they send · what they get), not "potentially". A defense-in-depth gap another layer already prevents is a hardening note, not a Discovery.
 4. Every citation must resolve: the ingest REJECTS a Discovery whose \`[file:line]\` doesn't exist, and a Discovery at an existing finding's location folds into its \`sources\` (no duplicate). Discoveries land as \`ultrasec-ai\` **open** candidates and are adjudicated like any other — an uncertain high-severity one stays needs-human downstream, never dropped — so ground every claim, then don't fear reporting it.
 
-Return (structured output): \`{ "discoveries": [{ "title", "category", "severity", "cwe", "message", "file", "line", "path" }] }\` — your ITEMS' regions only.
+5. An item whose \`region\` starts with \`hunt:\` is a **weakness-class hunt**, not a region: its \`hunt\` object carries the class invariant, a valid guard, examples, and the framework/version no pack covers. Find how THIS repo writes the class: every break is a Discovery with \`"hunt": "<id>"\`; every unsafe call and guard you recognize goes to \`idioms[]\` (\`{hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}\`, citation-checked); list the hunt id in \`hunted[]\` even when you found nothing.
+
+Return (structured output): \`{ "discoveries": [{ "title", "category", "severity", "cwe", "message", "file", "line", "path", "hunt"? }], "idioms": [...], "hunted": [...] }\` — your ITEMS only.
 
 > **Merge before you fold (orchestrator).** Regions overlap, so two hunters routinely report ONE bug from two angles — the same missing check cited at the guard and at the call it fails to protect. The mechanical dedup on ingest only collapses an EXACT \`category + cwe/title + file:line\` match, so a same-bug-different-line pair survives as two findings and the report reads as twice the problem. Merge near-duplicates into one Discovery (keep the most precise citation, put the others in \`path\`) BEFORE running \`--apply\`, and do it before any false-positive pass: a de-duplication that runs after adjudication has already inflated the count it was meant to fix.
 ${footer}`,
