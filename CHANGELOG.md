@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.58.0](https://github.com/maxgfr/ultrasec/compare/v1.57.0...v1.58.0) (2026-10-07)
+
+
+### Bug Fixes
+
+* **classes:** match a credential env var whose whole name is the suffix ([62f5f22](https://github.com/maxgfr/ultrasec/commit/62f5f22fb3d190903c1f11c84c8c43ab1422bd58))
+* **frameworks:** version `spring` as Spring Boot only ([7751693](https://github.com/maxgfr/ultrasec/commit/7751693e298c5a9895a7bea92adb6af662fc210c))
+
+
+### Features
+
+* **classes:** idiom packs for Node, Python, Java, Go, Ruby and PHP frameworks ([28930c9](https://github.com/maxgfr/ultrasec/commit/28930c9876e1ca2f44d49de40b6d62af3d14c758))
+* **coverage:** weakness-class × framework matrix with testedWith degradation ([010e4b6](https://github.com/maxgfr/ultrasec/commit/010e4b6c88360b30cb8cbee477873d462c64d53a))
+* **frameworks:** detect web frameworks and their versions per package ([f9a9211](https://github.com/maxgfr/ultrasec/commit/f9a9211a014564d09a3ebf1ae02f02a691b34047))
+* **investigate:** hunt uncovered class × framework cells, collect pack suggestions ([3efd737](https://github.com/maxgfr/ultrasec/commit/3efd737704ec67a3cb0dfecfef805cf5b9209ef5))
+
 # [1.57.0](https://github.com/maxgfr/ultrasec/compare/v1.56.0...v1.57.0) (2026-10-07)
 
 
