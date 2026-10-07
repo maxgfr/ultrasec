@@ -174,3 +174,49 @@ export function languagesOf(entry: { ecosystem: Ecosystem; languages?: readonly 
 export function ecosystemOfLanguage(lang: string): Ecosystem | undefined {
   return (Object.entries(ECOSYSTEM_LANGUAGES) as [Ecosystem, readonly string[]][]).find(([eco, langs]) => eco !== "deno" && langs.includes(lang))?.[0];
 }
+
+// ── A web framework the table does not know ─────────────────────────────────
+//
+// A package whose code declares HTTP routes is a web application whatever the
+// table says, and saying nothing about it is the worst way to be wrong: its
+// classes would not even be listed as unhunted. So a package with no known web
+// framework (in it or in a package above it) gets an `unknown` column — every
+// class hunted — when its own code carries route declarations.
+//
+// The heuristic is deliberately prudent, because every column costs one hunt
+// per class:
+//   • a route declaration is a verb + an ABSOLUTE path literal + a handler
+//     (a function literal, a controller reference), never a bare call — so an
+//     HTTP CLIENT (`axios.get("/api/users", config)`) is not a route; a
+//     request handler the walk already counts as an HTTP entry point (the
+//     catalog's request inputs and route conventions) is evidence too;
+//   • two such lines in the package, or one when the package also declares a
+//     dependency whose name says it serves HTTP (`@acme/http-server`) and that
+//     no table row explains;
+//   • test files never count.
+
+/** What declares an HTTP route, per language (`src/lang.ts` ids). */
+export const ROUTE_EVIDENCE: Record<string, readonly RegExp[]> = {
+  javascript: [
+    /\b(?!(?:axios|fetch|http|https|client|request|got|ky|superagent|instance|\$http)\b)[A-Za-z_$][\w$]*\s*\.\s*(?:get|post|put|patch|delete|all|route)\s*\(\s*["'`]\/[^"'`]*["'`]\s*,\s*(?:async\b|function\b|\([^)]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>)/,
+    /\bmethod\s*:\s*["'](?:GET|POST|PUT|PATCH|DELETE)["']\s*,\s*path\s*:\s*["']\//i,
+  ],
+  python: [/^\s*@\w+(?:\.\w+)*\.(?:get|post|put|patch|delete|route|api_route|websocket)\s*\(\s*["']\//],
+  ruby: [/^\s*(?:get|post|put|patch|delete)\s+["']\/[^"']*["']\s*(?:,|do\b|\{)/],
+  // A router line, or a controller action — `def index(conn, params)` IS an endpoint.
+  elixir: [/^\s*(?:get|post|put|patch|delete)\s+"\/[^"]*"\s*,\s*[A-Z]\w*/, /^\s*def\s+\w+\s*\(\s*conn\s*,\s*(?:_?\w*params\b|%\{)/],
+  php: [/(?:->|::)\s*(?:get|post|put|patch|delete|any|map)\s*\(\s*["']\/[^"']*["']\s*,\s*(?:function\b|fn\b|\[|[A-Z]\w*::class)/],
+  go: [/\.\s*(?:HandleFunc|Handle|GET|POST|PUT|PATCH|DELETE|Get|Post|Put|Patch|Delete)\s*\(\s*"\/[^"]*"\s*,/],
+  rust: [/#\[\s*(?:get|post|put|patch|delete)\s*\(\s*"\//, /\.route\s*\(\s*"\/[^"]*"\s*,/],
+  csharp: [/\.Map(?:Get|Post|Put|Patch|Delete)\s*\(\s*"\//, /\[Http(?:Get|Post|Put|Patch|Delete)\s*\(\s*"/],
+  java: [/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/, /@(?:GET|POST|PUT|DELETE|PATCH)\b/, /@Path\s*\(\s*"\//],
+  kotlin: [/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/, /^\s*(?:get|post|put|patch|delete)\s*\(\s*"\/[^"]*"\s*\)\s*\{/],
+  scala: [/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/, /@Path\s*\(\s*"\//],
+};
+
+/** A dependency whose name says it serves HTTP. */
+export const HTTP_DEPENDENCY = /(?:^|[/@._-])(?:http|https|web|rest|router|routing|server|mvc)(?:[/._-]|$)/i;
+
+/** …unless the name says it is a client, a type package, or tooling. */
+export const NOT_A_SERVER =
+  /^@types\/|(?:^|[/@._-])(?:client|fetch|axios|proxy|errors?|status(?:es)?|vitals|tests?|testing|mocks?|types?|parser|cache|cookies?|signature|socket|websockets?|webpack|devserver|dev-server)(?:[/._-]|$)/i;

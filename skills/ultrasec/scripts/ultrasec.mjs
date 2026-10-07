@@ -34349,7 +34349,16 @@ var NODE_PACK = {
           note: '`Boolean(process.env.X)` is true for every non-empty string, including "false" and "0" \u2014 an operator writing X=false turns the flag ON. Compare the string explicitly (`process.env.X === "true"`).'
         }
       ]
-    },
+    }
+  }
+};
+var NEXT_AUTH_PACK = {
+  id: "next-auth",
+  ecosystem: "node",
+  library: "next-auth",
+  testedWith: ">=4 <6",
+  sources: ["https://github.com/nextauthjs/next-auth"],
+  classes: {
     "session-cookie-chunks-on-logout": {
       rules: [
         {
@@ -34530,7 +34539,7 @@ var ctorPack = (id, ctor, testedWith) => ({
 var KOA_PACK = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
 var HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
 var ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
-var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];
+var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK, NEXT_AUTH_PACK];
 
 // src/classes/packs/python.ts
 var PY3 = ["python"];
@@ -35788,6 +35797,31 @@ var STACK = [
   // the reader surfaces it as a dependency so it matches like any other.
   web("aspnetcore", "ASP.NET Core", "dotnet", { nuget: ["microsoft.net.sdk.web", "microsoft.aspnetcore.*"] })
 ];
+function languagesOf(entry2) {
+  return entry2.languages ?? ECOSYSTEM_LANGUAGES[entry2.ecosystem];
+}
+function ecosystemOfLanguage(lang) {
+  return Object.entries(ECOSYSTEM_LANGUAGES).find(([eco, langs]) => eco !== "deno" && langs.includes(lang))?.[0];
+}
+var ROUTE_EVIDENCE = {
+  javascript: [
+    /\b(?!(?:axios|fetch|http|https|client|request|got|ky|superagent|instance|\$http)\b)[A-Za-z_$][\w$]*\s*\.\s*(?:get|post|put|patch|delete|all|route)\s*\(\s*["'`]\/[^"'`]*["'`]\s*,\s*(?:async\b|function\b|\([^)]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>)/,
+    /\bmethod\s*:\s*["'](?:GET|POST|PUT|PATCH|DELETE)["']\s*,\s*path\s*:\s*["']\//i
+  ],
+  python: [/^\s*@\w+(?:\.\w+)*\.(?:get|post|put|patch|delete|route|api_route|websocket)\s*\(\s*["']\//],
+  ruby: [/^\s*(?:get|post|put|patch|delete)\s+["']\/[^"']*["']\s*(?:,|do\b|\{)/],
+  // A router line, or a controller action — `def index(conn, params)` IS an endpoint.
+  elixir: [/^\s*(?:get|post|put|patch|delete)\s+"\/[^"]*"\s*,\s*[A-Z]\w*/, /^\s*def\s+\w+\s*\(\s*conn\s*,\s*(?:_?\w*params\b|%\{)/],
+  php: [/(?:->|::)\s*(?:get|post|put|patch|delete|any|map)\s*\(\s*["']\/[^"']*["']\s*,\s*(?:function\b|fn\b|\[|[A-Z]\w*::class)/],
+  go: [/\.\s*(?:HandleFunc|Handle|GET|POST|PUT|PATCH|DELETE|Get|Post|Put|Patch|Delete)\s*\(\s*"\/[^"]*"\s*,/],
+  rust: [/#\[\s*(?:get|post|put|patch|delete)\s*\(\s*"\//, /\.route\s*\(\s*"\/[^"]*"\s*,/],
+  csharp: [/\.Map(?:Get|Post|Put|Patch|Delete)\s*\(\s*"\//, /\[Http(?:Get|Post|Put|Patch|Delete)\s*\(\s*"/],
+  java: [/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/, /@(?:GET|POST|PUT|DELETE|PATCH)\b/, /@Path\s*\(\s*"\//],
+  kotlin: [/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/, /^\s*(?:get|post|put|patch|delete)\s*\(\s*"\/[^"]*"\s*\)\s*\{/],
+  scala: [/@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/, /@Path\s*\(\s*"\//]
+};
+var HTTP_DEPENDENCY = /(?:^|[/@._-])(?:http|https|web|rest|router|routing|server|mvc)(?:[/._-]|$)/i;
+var NOT_A_SERVER = /^@types\/|(?:^|[/@._-])(?:client|fetch|axios|proxy|errors?|status(?:es)?|vitals|tests?|testing|mocks?|types?|parser|cache|cookies?|signature|socket|websockets?|webpack|devserver|dev-server)(?:[/._-]|$)/i;
 
 // src/frameworks.ts
 var FRAMEWORKS = STACK.filter((e) => e.kind === "web");
@@ -36125,6 +36159,77 @@ function stackLabels(stack) {
   const label = new Map(STACK.map((e) => [e.id, e.label ?? e.id]));
   return [...new Set(stack.map((f) => label.get(f.id) ?? f.id))].sort(byStr);
 }
+var REGISTRY_ECOSYSTEM = {
+  npm: "node",
+  pypi: "python",
+  maven: "java",
+  go: "go",
+  gem: "ruby",
+  composer: "php",
+  hex: "elixir",
+  cargo: "rust",
+  nuget: "dotnet",
+  deno: "deno"
+};
+var COMMENT_LINE = /^\s*(?:\/\/|#(?!\[)|\*|\/\*|--)/;
+function inferUnknownFrameworks(repo, stack, prune, tree) {
+  const read = tree?.read ?? readText2;
+  const files = (tree?.files ?? walk2(repo)).filter((f) => !prune?.(f.rel));
+  const known = new Set(STACK.flatMap((e) => Object.values(e.deps).flat()));
+  const webDirs = stack.filter((f) => f.kind !== "library").map((f) => f.dir);
+  const covered = (dir) => webDirs.some((w) => w === "" || w === dir || dir.startsWith(`${w}/`));
+  const packages = /* @__PURE__ */ new Map();
+  for (const wf of files) {
+    const kind = MANIFESTS.find((k) => k.match.test(wf.rel));
+    if (!kind) continue;
+    const dir = dirOf8(wf.rel);
+    const pkg = packages.get(dir) ?? { ecosystem: REGISTRY_ECOSYSTEM[kind.registry] };
+    if (!pkg.httpDep) {
+      const text = read(wf.abs);
+      const dep = text ? kind.read(text, wf.abs).map((d) => d.name).find((n) => HTTP_DEPENDENCY.test(n) && !NOT_A_SERVER.test(n) && !nameMatches(n, [...known])) : void 0;
+      if (dep) pkg.httpDep = dep;
+    }
+    packages.set(dir, pkg);
+  }
+  const dirs = [...packages.keys()].sort((a, b) => b.length - a.length);
+  const packageOf = (rel2) => dirs.find((d) => d === "" || rel2.startsWith(`${d}/`)) ?? "";
+  const evidence = /* @__PURE__ */ new Map();
+  for (const wf of files) {
+    const spec = langForFile(wf.rel);
+    if (!spec || isTestPath(wf.rel)) continue;
+    const dir = packageOf(wf.rel);
+    if (covered(dir)) continue;
+    const content = read(wf.abs);
+    if (!content) continue;
+    const lines5 = content.split(/\r?\n/);
+    const shapes = ROUTE_EVIDENCE[spec.id] ?? [];
+    const hits = /* @__PURE__ */ new Set();
+    lines5.forEach((l, i2) => {
+      if (!COMMENT_LINE.test(l) && shapes.some((re) => re.test(l))) hits.add(i2 + 1);
+    });
+    for (const h of findSources(spec, content, wf.rel)) if (h.kind === "http" && !COMMENT_LINE.test(lines5[h.line - 1] ?? "")) hits.add(h.line);
+    if (!hits.size) continue;
+    const first = Math.min(...hits);
+    const e = evidence.get(dir);
+    if (!e) evidence.set(dir, { count: hits.size, at: `${wf.rel}:${first}`, line: first, lang: spec.id });
+    else e.count += hits.size;
+  }
+  const out2 = [];
+  for (const [dir, e] of evidence) {
+    const pkg = packages.get(dir);
+    if (e.count < 2 && !pkg?.httpDep) continue;
+    out2.push({
+      id: "unknown",
+      title: pkg?.httpDep ? `unknown web framework (\`${pkg.httpDep}\`?)` : "unknown web framework",
+      ecosystem: pkg?.ecosystem ?? ecosystemOfLanguage(e.lang) ?? "node",
+      kind: "inferred",
+      dir,
+      evidence: e.at,
+      languages: [e.lang]
+    });
+  }
+  return out2.sort((a, b) => byStr(a.dir, b.dir));
+}
 function satisfies(version, range) {
   const v = version.replace(/^v/, "");
   return range.split("||").some(
@@ -36158,33 +36263,60 @@ function huntId(cell) {
 function needsHunt(cell) {
   return cell.state !== "not-applicable" && (cell.state !== "deterministic" || cell.degraded !== void 0);
 }
-function classCoverage(frameworks, packs = PACKS) {
+function rulesFor(p, c2, languages) {
+  const cov = p.classes[c2];
+  return !!cov && "rules" in cov && cov.rules.some((r) => r.languages.some((l) => languages.includes(l)));
+}
+function readsAny(p, languages) {
+  return Object.keys(p.classes).some((c2) => rulesFor(p, c2, languages));
+}
+var nests = (a, b) => a === b || a === "" || b === "" || b.startsWith(`${a}/`) || a.startsWith(`${b}/`);
+var outside = (f, p) => p.testedWith && f.version && !satisfies(f.version, p.testedWith) ? `${f.title} ${f.version} is outside ${p.id} testedWith ${p.testedWith}` : void 0;
+function classCoverage(stack, packs = PACKS) {
   const cells = [];
-  for (const f of frameworks) {
-    const fwPack = packs.find((p) => p.framework === f.id);
-    const ecoPacks = packs.filter((p) => !p.framework && (p.ecosystem === f.ecosystem || p.ecosystem === "*"));
-    const outOfRange = fwPack?.testedWith && f.version && !satisfies(f.version, fwPack.testedWith) ? fwPack.testedWith : void 0;
+  const libraries = stack.filter((f) => f.kind === "library");
+  for (const f of stack) {
+    if (f.kind === "library") continue;
+    const languages = languagesOf(f);
+    const fwPack = f.kind === "inferred" ? void 0 : packs.find((p) => p.framework === f.id);
+    const libPacks = libraries.filter((l) => nests(l.dir, f.dir) && languages.some((x) => languagesOf(l).includes(x))).flatMap((l) => packs.filter((p) => p.library === l.id).map((p) => ({ lib: l, pack: p })));
+    const langPacks = packs.filter((p) => !p.framework && !p.library && readsAny(p, languages));
+    const columnOutOfRange = fwPack ? outside(f, fwPack) : void 0;
+    const noPack = f.kind === "inferred" ? `${f.title} \u2014 no pack can know it` : `no ${f.title} pack`;
     for (const c2 of CLASS_LIST) {
       const base = { class: c2.id, framework: f.id, ecosystem: f.ecosystem, dir: f.dir, ...f.version ? { version: f.version } : {} };
-      const considered = [...fwPack ? [fwPack] : [], ...ecoPacks];
-      const ruled = considered.filter((p) => {
-        const cov = p.classes[c2.id];
-        return cov && "rules" in cov && cov.rules.length > 0;
-      });
-      const na = considered.map((p) => p.classes[c2.id]).find((cov) => cov && "notApplicable" in cov);
+      const considered = [...fwPack ? [fwPack] : [], ...libPacks.map((x) => x.pack), ...langPacks];
+      const ruled = considered.filter((p) => rulesFor(p, c2.id, languages));
+      const declared = considered.map((p) => p.classes[c2.id]).filter((cov) => cov && !("rules" in cov));
+      const na = declared.find((cov) => cov && "notApplicable" in cov);
       if (!ruled.length && na && "notApplicable" in na) {
         cells.push({ ...base, state: "not-applicable", packs: [], reason: na.notApplicable });
         continue;
       }
+      const why = [];
+      if (columnOutOfRange) why.push(columnOutOfRange);
+      for (const { lib: lib2, pack } of libPacks) {
+        const off = ruled.includes(pack) ? outside(lib2, pack) : void 0;
+        if (off) why.push(off);
+      }
       if (!ruled.length) {
-        cells.push({ ...base, state: "not-covered", packs: [], degraded: fwPack ? `pack ${fwPack.id} has no idiom for this class` : `no ${f.title} pack` });
+        const hunt = declared.find((cov) => cov && "hunt" in cov);
+        const reason = hunt && "hunt" in hunt ? hunt.hunt : fwPack ? `pack ${fwPack.id} has no idiom for this class` : noPack;
+        cells.push({ ...base, state: "not-covered", packs: [], degraded: [reason, ...why].join("; ") });
         continue;
       }
-      const degraded = !fwPack ? `no ${f.title} pack \u2014 only the ${f.ecosystem} language idioms ran` : outOfRange && ruled.includes(fwPack) ? `${f.title} ${f.version} is outside ${fwPack.id} testedWith ${outOfRange}` : void 0;
-      cells.push({ ...base, state: "deterministic", packs: ruled.map((p) => p.id), ...degraded ? { degraded } : {} });
+      if (!fwPack)
+        why.unshift(
+          `${noPack} \u2014 only the ${[...new Set(ruled.map((p) => p.ecosystem === "*" ? "language-agnostic" : p.ecosystem))].join("/")} language idioms ran`
+        );
+      cells.push({ ...base, state: "deterministic", packs: ruled.map((p) => p.id), ...why.length ? { degraded: why.join("; ") } : {} });
     }
   }
   return cells;
+}
+function matrixStack(stack, inferred = [], packs = PACKS) {
+  const libraryIds = new Set(packs.flatMap((p) => p.library ? [p.library] : []));
+  return [...stack.filter((f) => f.kind !== "library"), ...inferred, ...stack.filter((f) => f.kind === "library" && libraryIds.has(f.id))];
 }
 function huntProgress(run2) {
   const emitted = /* @__PURE__ */ new Set();
@@ -38805,8 +38937,9 @@ async function runScan2(args2) {
   const agenticFindings = auditAgenticWorkflows(repo, prune, tree);
   const webConfigFindings = auditWebConfig(repo, prune, tree);
   const authTokenFindings = auditAuthTokens(repo, prune, tree);
-  const frameworks = webFrameworks(detectFrameworks(repo, prune, tree));
-  const classAudit = auditWeaknessClasses(repo, prune, tree, frameworks);
+  const stack = detectFrameworks(repo, prune, tree);
+  const classAudit = auditWeaknessClasses(repo, prune, tree, webFrameworks(stack));
+  const frameworks = matrixStack(stack, inferUnknownFrameworks(repo, stack, prune, tree));
   const classCells = classCoverage(frameworks);
   const cloudFindings = auditCloud(repo, prune, tree);
   const credentialFindings = auditSecrets(repo, prune, tree);
@@ -38993,8 +39126,11 @@ async function runScan2(args2) {
     println(
       `  \u26A0\uFE0F  import resolution degraded: ${g.files} \`${g.ext}\` file(s) left out of the resolve context (${g.reason}) \u2014 imports into them are not followed`
     );
-  if (fm.frameworks?.length)
-    println(`  frameworks: ${fm.frameworks.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ")}`);
+  const stackLine = (list) => list.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ");
+  const webCols = (fm.frameworks ?? []).filter((f) => f.kind !== "library");
+  const libs = (fm.frameworks ?? []).filter((f) => f.kind === "library");
+  if (webCols.length) println(`  frameworks: ${stackLine(webCols)}`);
+  if (libs.length) println(`  libraries: ${stackLine(libs)}`);
   if (fm.weaknessClasses?.length) {
     const cells = fm.weaknessClasses;
     const hunt = cells.filter(needsHunt).length;
@@ -40413,11 +40549,11 @@ function reachability(repo, graph, f) {
     const sym = f.path?.[0]?.symbol ?? void 0;
     const callers = sym ? graph.callersBySymbol?.[sym] ?? [] : [];
     if (sym) {
-      const outside = callers.filter((c2) => c2.file !== entry2.file);
+      const outside2 = callers.filter((c2) => c2.file !== entry2.file);
       if (callers.length) {
         const shown = callers.slice(0, 8).map((c2) => `\`${c2.file}:${c2.line}\`${c2.symbol ? ` in ${c2.symbol}()` : ""}`);
         L.push(`- **callers of \`${sym}()\`**: ${shown.join(" \xB7 ")}${callers.length > shown.length ? ` (+${callers.length - shown.length} more)` : ""}`);
-        if (outside.length) L.push(`  - ${outside.length} from OTHER files \u2014 the entry point has more than one way in.`);
+        if (outside2.length) L.push(`  - ${outside2.length} from OTHER files \u2014 the entry point has more than one way in.`);
       } else {
         L.push(
           `- **callers of \`${sym}()\`**: none in the call index \u2014 either it is the outermost entry point, or it is invoked dynamically (a router table, a decorator, reflection).`

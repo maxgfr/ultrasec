@@ -26,7 +26,7 @@ const COERCE_BOOLEAN = /\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
 const ENV_KEY_COERCE = /^\s*["']?[A-Z][A-Z0-9_]*["']?\s*:.*\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
 const READS_ENV = /\bprocess\.env\b|\bimport\.meta\.env\b|\bcreateEnv\s*\(|\bDeno\.env\b|\bBun\.env\b/;
 
-// ── NextAuth / Auth.js session chunks ───────────────────────────────────────
+// ── NextAuth / Auth.js session chunks (NEXT_AUTH_PACK below) ────────────────
 const SESSION_COOKIE = /(?:__Secure-)?(?:next-auth|authjs)\.session-token/;
 const EXPIRES_COOKIE = /maxAge\s*:\s*0\b|expires\s*:\s*new\s+Date\(\s*0\s*\)|Max-Age=0|\.delete\s*\(|expires=Thu, 01 Jan 1970/i;
 /** Any sign the code knows about `<name>.N`: a prefix match, a `.N` suffix, a loop over the jar. */
@@ -119,6 +119,22 @@ export const NODE_PACK: Pack = {
         },
       ],
     },
+  },
+};
+
+// ── NextAuth.js / Auth.js — a LIBRARY's idiom ──────────────────────────────
+// The session cookie is NextAuth's, not Next.js's nor Node's: its name and its
+// chunking (`<name>.0`, `<name>.1`, … once the JWT outgrows one cookie) are
+// what the library does, at the versions below. Kept in a library pack so the
+// matrix checks `testedWith` against NextAuth's own version, wherever the
+// library is declared. Source: https://github.com/nextauthjs/next-auth (cookie chunking, v4 and v5).
+export const NEXT_AUTH_PACK: Pack = {
+  id: "next-auth",
+  ecosystem: "node",
+  library: "next-auth",
+  testedWith: ">=4 <6",
+  sources: ["https://github.com/nextauthjs/next-auth"],
+  classes: {
     "session-cookie-chunks-on-logout": {
       rules: [
         {
@@ -306,7 +322,10 @@ export const FASTIFY_PACK: Pack = {
 
 // ── Koa / Hono / Elysia — header posture only (partial packs) ──────────────
 // Carried over from the original detector, which grounded the absence on the
-// constructor. Every other class is hunted for these frameworks.
+// constructor. For every other class these frameworks get what the Node
+// language idioms above match (the timing, CSV, first-hop and env-boolean
+// rules read any JavaScript) — and where no rule applies at all, the cell is
+// hunted. The framework's own idioms for those classes are not encoded.
 const ctorPack = (id: string, ctor: RegExp, testedWith: string): Pack => ({
   id,
   ecosystem: "node",
@@ -324,4 +343,4 @@ export const KOA_PACK = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
 export const HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
 export const ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
 
-export const NODE_PACKS: Pack[] = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];
+export const NODE_PACKS: Pack[] = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK, NEXT_AUTH_PACK];

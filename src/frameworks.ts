@@ -6,7 +6,9 @@ import { compareVersions } from "./deps.js";
 import { byStr } from "./util.js";
 import { isTestPath } from "./vendor/codeindex-engine.mjs";
 import type { Ecosystem } from "./classes/types.js";
-import { STACK, type Registry, type StackEntry } from "./stack.js";
+import { STACK, ROUTE_EVIDENCE, HTTP_DEPENDENCY, NOT_A_SERVER, ecosystemOfLanguage, type Registry, type StackEntry } from "./stack.js";
+import { langForFile } from "./lang.js";
+import { findSources } from "./catalog.js";
 
 // Which web frameworks a repository uses, at which version, and where it says
 // so — read from the dependency manifests, one package directory at a time.
@@ -472,6 +474,107 @@ export function webFrameworks(stack: readonly DetectedFramework[]): DetectedFram
 export function stackLabels(stack: readonly DetectedFramework[]): string[] {
   const label = new Map(STACK.map((e) => [e.id, e.label ?? e.id]));
   return [...new Set(stack.map((f) => label.get(f.id) ?? f.id))].sort(byStr);
+}
+
+/** The ecosystem a registry's manifests belong to. */
+const REGISTRY_ECOSYSTEM: Record<Registry, Ecosystem> = {
+  npm: "node",
+  pypi: "python",
+  maven: "java",
+  go: "go",
+  gem: "ruby",
+  composer: "php",
+  hex: "elixir",
+  cargo: "rust",
+  nuget: "dotnet",
+  deno: "deno",
+};
+
+/** Lines that are comments in every language the route evidence reads. */
+const COMMENT_LINE = /^\s*(?:\/\/|#(?!\[)|\*|\/\*|--)/;
+
+/**
+ * Web frameworks the stack table does not know, inferred from a package's own
+ * code — see `ROUTE_EVIDENCE` in src/stack.ts for the heuristic and why it is
+ * prudent. One `inferred` entry per package (id `unknown`), grounded on its
+ * first route declaration. `stack` is what `detectFrameworks` found: a package
+ * at or under a known web framework's package is never inferred.
+ */
+export function inferUnknownFrameworks(
+  repo: string,
+  stack: readonly DetectedFramework[],
+  prune?: (rel: string) => boolean,
+  tree?: RepoTree,
+): DetectedFramework[] {
+  const read = tree?.read ?? readText;
+  const files = (tree?.files ?? walk(repo)).filter((f) => !prune?.(f.rel));
+  const known = new Set(STACK.flatMap((e) => Object.values(e.deps).flat()));
+  const webDirs = stack.filter((f) => f.kind !== "library").map((f) => f.dir);
+  const covered = (dir: string): boolean => webDirs.some((w) => w === "" || w === dir || dir.startsWith(`${w}/`));
+
+  // Every package: its manifests' ecosystem, and whether one declares a
+  // dependency whose name says it serves HTTP that no table row explains.
+  const packages = new Map<string, { ecosystem: Ecosystem; httpDep?: string }>();
+  for (const wf of files) {
+    const kind = MANIFESTS.find((k) => k.match.test(wf.rel));
+    if (!kind) continue;
+    const dir = dirOf(wf.rel);
+    const pkg = packages.get(dir) ?? { ecosystem: REGISTRY_ECOSYSTEM[kind.registry] };
+    if (!pkg.httpDep) {
+      const text = read(wf.abs);
+      const dep = text
+        ? kind
+            .read(text, wf.abs)
+            .map((d) => d.name)
+            .find((n) => HTTP_DEPENDENCY.test(n) && !NOT_A_SERVER.test(n) && !nameMatches(n, [...known]))
+        : undefined;
+      if (dep) pkg.httpDep = dep;
+    }
+    packages.set(dir, pkg);
+  }
+  const dirs = [...packages.keys()].sort((a, b) => b.length - a.length);
+  const packageOf = (rel: string): string => dirs.find((d) => d === "" || rel.startsWith(`${d}/`)) ?? "";
+
+  // Evidence lines: route declarations, and the request handlers the walk
+  // already knows as HTTP entry points (the catalog's request inputs and route
+  // conventions — what `map` and `context` count as the attack surface).
+  const evidence = new Map<string, { count: number; at: string; line: number; lang: string }>();
+  for (const wf of files) {
+    const spec = langForFile(wf.rel);
+    if (!spec || isTestPath(wf.rel)) continue;
+    const dir = packageOf(wf.rel);
+    if (covered(dir)) continue;
+    const content = read(wf.abs);
+    if (!content) continue;
+    const lines = content.split(/\r?\n/);
+    const shapes = ROUTE_EVIDENCE[spec.id] ?? [];
+    const hits = new Set<number>();
+    lines.forEach((l, i) => {
+      if (!COMMENT_LINE.test(l) && shapes.some((re) => re.test(l))) hits.add(i + 1);
+    });
+    for (const h of findSources(spec, content, wf.rel)) if (h.kind === "http" && !COMMENT_LINE.test(lines[h.line - 1] ?? "")) hits.add(h.line);
+    if (!hits.size) continue;
+    const first = Math.min(...hits);
+    const e = evidence.get(dir);
+    if (!e) evidence.set(dir, { count: hits.size, at: `${wf.rel}:${first}`, line: first, lang: spec.id });
+    else e.count += hits.size;
+  }
+
+  const out: DetectedFramework[] = [];
+  for (const [dir, e] of evidence) {
+    const pkg = packages.get(dir);
+    if (e.count < 2 && !pkg?.httpDep) continue;
+    out.push({
+      id: "unknown",
+      title: pkg?.httpDep ? `unknown web framework (\`${pkg.httpDep}\`?)` : "unknown web framework",
+      ecosystem: pkg?.ecosystem ?? ecosystemOfLanguage(e.lang) ?? "node",
+      kind: "inferred",
+      dir,
+      evidence: e.at,
+      languages: [e.lang],
+    });
+  }
+  return out.sort((a, b) => byStr(a.dir, b.dir));
 }
 
 /**

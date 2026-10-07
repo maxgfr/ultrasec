@@ -106,10 +106,9 @@
       "ecosystem": "node",
       "dir": "",
       "version": "4.17.1",
-      "state": "deterministic",
-      "packs": [
-        "node"
-      ]
+      "state": "not-covered",
+      "packs": [],
+      "degraded": "pack express has no idiom for this class"
     },
     {
       "class": "env-bool-coercion",

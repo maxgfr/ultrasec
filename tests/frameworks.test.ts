@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { join } from "node:path";
-import { detectFrameworks, floorOf, satisfies, stackLabels, webFrameworks } from "../src/frameworks.js";
+import { dirname, join } from "node:path";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { detectFrameworks, floorOf, inferUnknownFrameworks, satisfies, stackLabels, webFrameworks } from "../src/frameworks.js";
 
 // Framework detection is what decides whether a weakness-class pack ran inside
 // the version range it was validated against. A wrong version there is a
@@ -109,5 +111,72 @@ describe("version ranges", () => {
     expect(floorOf(">=4.2,<5")).toBe("4.2");
     expect(floorOf("~> 7.1.0")).toBe("7.1.0");
     expect(floorOf("*")).toBeUndefined();
+  });
+});
+
+describe("inferUnknownFrameworks", () => {
+  const repoWith = (files: Record<string, string>): string => {
+    const repo = mkdtempSync(join(tmpdir(), "ultrasec-unknown-fw-"));
+    for (const [rel, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(repo, rel)), { recursive: true });
+      writeFileSync(join(repo, rel), text);
+    }
+    return repo;
+  };
+  const infer = (repo: string) => inferUnknownFrameworks(repo, detectFrameworks(repo));
+
+  it("gives a package whose code declares routes an `unknown` column, grounded on its first route", () => {
+    const repo = repoWith({
+      "package.json": JSON.stringify({ dependencies: { "@acme/http-kit": "^2.0.0" } }, null, 2),
+      "src/server.js": 'const app = require("@acme/http-kit")();\napp.get("/export", async (req, res) => res.send(await rows()));\n',
+    });
+    expect(infer(repo)).toEqual([
+      expect.objectContaining({ id: "unknown", kind: "inferred", ecosystem: "node", dir: "", evidence: "src/server.js:2", languages: ["javascript"] }),
+    ]);
+    expect(infer(repo)[0]!.title).toContain("@acme/http-kit");
+  });
+
+  it("needs two route lines when no dependency says it serves HTTP", () => {
+    const one = repoWith({ "main.py": '@app.get("/health")\ndef health():\n    return "ok"\n' });
+    expect(infer(one)).toEqual([]);
+    const two = repoWith({ "main.py": '@app.get("/health")\ndef health():\n    return "ok"\n\n@app.post("/export")\ndef export():\n    return rows()\n' });
+    expect(infer(two)).toEqual([expect.objectContaining({ id: "unknown", ecosystem: "python", evidence: "main.py:1" })]);
+  });
+
+  it("does not read an HTTP client, a comment or a test as a route", () => {
+    const repo = repoWith({
+      "package.json": JSON.stringify({ dependencies: { axios: "1.7.0", "web-vitals": "4.0.0" } }),
+      "src/api.js": 'axios.get("/api/users", config);\nhttp.post("/api/users", { name });\n// app.get("/x", (req, res) => res.end());\n',
+      "src/__tests__/server.test.js": 'app.get("/x", (req, res) => res.end());\napp.post("/y", (req, res) => res.end());\n',
+    });
+    expect(infer(repo)).toEqual([]);
+  });
+
+  it("never infers under a package that has a known web framework", () => {
+    const repo = repoWith({
+      "package.json": JSON.stringify({ dependencies: { express: "4.21.2" } }),
+      "routes/a.js": 'router.get("/a", (req, res) => res.end());\nrouter.post("/b", (req, res) => res.end());\n',
+      "packages/x/package.json": JSON.stringify({ name: "x" }),
+      "packages/x/r.js": 'router.get("/a", (req, res) => res.end());\nrouter.post("/b", (req, res) => res.end());\n',
+    });
+    expect(infer(repo)).toEqual([]);
+  });
+
+  it("counts the request handlers the walk already knows — a manifest-less Phoenix controller", () => {
+    const repo = repoWith({
+      "lib/export_controller.ex":
+        'defmodule AppWeb.ExportController do\n  def index(conn, params) do\n    ip = conn.req_headers |> List.keyfind("x-forwarded-for", 0)\n    json(conn, %{ip: ip, q: params["q"]})\n  end\nend\n',
+    });
+    expect(infer(repo)).toEqual([
+      expect.objectContaining({ id: "unknown", ecosystem: "elixir", dir: "", evidence: "lib/export_controller.ex:2", languages: ["elixir"] }),
+    ]);
+  });
+
+  it("finds a Sinatra-shaped route table in a package the table does not know", () => {
+    const repo = repoWith({
+      Gemfile: 'gem "roda-like", "1.0"\n',
+      "app.rb": 'get "/export" do\n  rows.to_json\nend\npost "/import" do\n  import!\nend\n',
+    });
+    expect(infer(repo)).toEqual([expect.objectContaining({ ecosystem: "ruby", evidence: "app.rb:1" })]);
   });
 });

@@ -5,16 +5,29 @@ import { satisfies } from "../frameworks.js";
 import { CLASS_LIST } from "./registry.js";
 import { PACKS } from "./packs/index.js";
 import type { ClassId, Pack } from "./types.js";
+import { languagesOf } from "../stack.js";
 
 // The weakness-class × framework matrix — which detected framework each class
 // was matched for by a pack, which it was hunted for by the AI, and which
 // nobody looked at.
 //
+// A column is a web framework of the stack table, or a web framework the
+// table does not know but the package's code shows (`inferred`). Every class
+// gets a cell in every column: a framework with no pack, in an ecosystem with
+// no pack, is not an empty column — it is a column of cells to hunt.
+//
 // A pack is only a claim inside the version range it was validated against.
-// So a cell is DEGRADED when the framework has no pack at all (only language
-// idioms applied) or its version is outside the pack's `testedWith`: the rules
-// still ran — a floor is better than nothing — but the cell says so, and the
-// `investigate` worklist hunts it.
+// So a cell is DEGRADED when the framework has no pack (only language idioms
+// applied), when the framework's version is outside its pack's `testedWith`
+// (the WHOLE column: a language idiom is no better tested on a framework
+// release nobody ran it against, and the framework may now hand the code its
+// input differently), or when a library pack's rules decided the cell and the
+// library's version is outside the library pack's range. The rules still ran —
+// a floor is better than nothing — but the cell says so, and the `investigate`
+// worklist hunts it.
+//
+// Nothing in this file names a framework: columns come from the stack table,
+// claims from pack data.
 
 export const CLASS_CELL_STATES = ["deterministic", "not-applicable", "not-covered", "ai-hunt", "ai-hunted"] as const;
 export type ClassCellState = (typeof CLASS_CELL_STATES)[number];
@@ -48,38 +61,85 @@ export function needsHunt(cell: ClassCoverageCell): boolean {
   return cell.state !== "not-applicable" && (cell.state !== "deterministic" || cell.degraded !== undefined);
 }
 
-/** The static matrix for the detected frameworks — what the scan itself can say. */
-export function classCoverage(frameworks: readonly DetectedFramework[], packs: readonly Pack[] = PACKS): ClassCoverageCell[] {
+/** A pack's coverage of one class, if it has any rule that reads one of `languages`. */
+function rulesFor(p: Pack, c: ClassId, languages: readonly string[]): boolean {
+  const cov = p.classes[c];
+  return !!cov && "rules" in cov && cov.rules.some((r) => r.languages.some((l) => languages.includes(l)));
+}
+
+/** Does a pack hold any rule reading one of `languages`? */
+function readsAny(p: Pack, languages: readonly string[]): boolean {
+  return Object.keys(p.classes).some((c) => rulesFor(p, c as ClassId, languages));
+}
+
+/** A library belongs to a column when one package holds the other (or they are the same). */
+const nests = (a: string, b: string): boolean => a === b || a === "" || b === "" || b.startsWith(`${a}/`) || a.startsWith(`${b}/`);
+
+const outside = (f: DetectedFramework, p: Pack): string | undefined =>
+  p.testedWith && f.version && !satisfies(f.version, p.testedWith) ? `${f.title} ${f.version} is outside ${p.id} testedWith ${p.testedWith}` : undefined;
+
+/** The static matrix for the detected stack — what the scan itself can say. */
+export function classCoverage(stack: readonly DetectedFramework[], packs: readonly Pack[] = PACKS): ClassCoverageCell[] {
   const cells: ClassCoverageCell[] = [];
-  for (const f of frameworks) {
-    const fwPack = packs.find((p) => p.framework === f.id);
-    const ecoPacks = packs.filter((p) => !p.framework && (p.ecosystem === f.ecosystem || p.ecosystem === "*"));
-    const outOfRange = fwPack?.testedWith && f.version && !satisfies(f.version, fwPack.testedWith) ? fwPack.testedWith : undefined;
+  const libraries = stack.filter((f) => f.kind === "library");
+  for (const f of stack) {
+    if (f.kind === "library") continue;
+    const languages = languagesOf(f);
+    const fwPack = f.kind === "inferred" ? undefined : packs.find((p) => p.framework === f.id);
+    // The libraries declared in this framework's package, with a pack of their own.
+    const libPacks = libraries
+      .filter((l) => nests(l.dir, f.dir) && languages.some((x) => languagesOf(l).includes(x)))
+      .flatMap((l) => packs.filter((p) => p.library === l.id).map((p) => ({ lib: l, pack: p })));
+    // Language idioms: the packs tied to no framework or library whose rules
+    // read a language this framework's code is written in.
+    const langPacks = packs.filter((p) => !p.framework && !p.library && readsAny(p, languages));
+    const columnOutOfRange = fwPack ? outside(f, fwPack) : undefined;
+    const noPack = f.kind === "inferred" ? `${f.title} — no pack can know it` : `no ${f.title} pack`;
+
     for (const c of CLASS_LIST) {
       const base = { class: c.id, framework: f.id, ecosystem: f.ecosystem, dir: f.dir, ...(f.version ? { version: f.version } : {}) };
-      const considered = [...(fwPack ? [fwPack] : []), ...ecoPacks];
-      const ruled = considered.filter((p) => {
-        const cov = p.classes[c.id];
-        return cov && "rules" in cov && cov.rules.length > 0;
-      });
-      const na = considered.map((p) => p.classes[c.id]).find((cov) => cov && "notApplicable" in cov);
+      const considered = [...(fwPack ? [fwPack] : []), ...libPacks.map((x) => x.pack), ...langPacks];
+      const ruled = considered.filter((p) => rulesFor(p, c.id, languages));
+      const declared = considered.map((p) => p.classes[c.id]).filter((cov) => cov && !("rules" in cov));
+      const na = declared.find((cov) => cov && "notApplicable" in cov);
       if (!ruled.length && na && "notApplicable" in na) {
         cells.push({ ...base, state: "not-applicable", packs: [], reason: na.notApplicable });
         continue;
       }
+      const why: string[] = [];
+      if (columnOutOfRange) why.push(columnOutOfRange);
+      for (const { lib, pack } of libPacks) {
+        const off = ruled.includes(pack) ? outside(lib, pack) : undefined;
+        if (off) why.push(off);
+      }
       if (!ruled.length) {
-        cells.push({ ...base, state: "not-covered", packs: [], degraded: fwPack ? `pack ${fwPack.id} has no idiom for this class` : `no ${f.title} pack` });
+        const hunt = declared.find((cov) => cov && "hunt" in cov);
+        const reason = hunt && "hunt" in hunt ? hunt.hunt : fwPack ? `pack ${fwPack.id} has no idiom for this class` : noPack;
+        cells.push({ ...base, state: "not-covered", packs: [], degraded: [reason, ...why].join("; ") });
         continue;
       }
-      const degraded = !fwPack
-        ? `no ${f.title} pack — only the ${f.ecosystem} language idioms ran`
-        : outOfRange && ruled.includes(fwPack)
-          ? `${f.title} ${f.version} is outside ${fwPack.id} testedWith ${outOfRange}`
-          : undefined;
-      cells.push({ ...base, state: "deterministic", packs: ruled.map((p) => p.id), ...(degraded ? { degraded } : {}) });
+      if (!fwPack)
+        why.unshift(
+          `${noPack} — only the ${[...new Set(ruled.map((p) => (p.ecosystem === "*" ? "language-agnostic" : p.ecosystem)))].join("/")} language idioms ran`,
+        );
+      cells.push({ ...base, state: "deterministic", packs: ruled.map((p) => p.id), ...(why.length ? { degraded: why.join("; ") } : {}) });
     }
   }
   return cells;
+}
+
+/**
+ * What the matrix (and the manifest's `frameworks`) is built from: the known
+ * web frameworks, the inferred ones, and the libraries some pack is written
+ * against — a library nothing is written against changes no cell.
+ */
+export function matrixStack(
+  stack: readonly DetectedFramework[],
+  inferred: readonly DetectedFramework[] = [],
+  packs: readonly Pack[] = PACKS,
+): DetectedFramework[] {
+  const libraryIds = new Set(packs.flatMap((p) => (p.library ? [p.library] : [])));
+  return [...stack.filter((f) => f.kind !== "library"), ...inferred, ...stack.filter((f) => f.kind === "library" && libraryIds.has(f.id))];
 }
 
 /** The hunt ids a run's investigate worklist emitted, and the ones its apply recorded as hunted. */

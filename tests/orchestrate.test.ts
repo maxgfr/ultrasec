@@ -9,6 +9,7 @@ import { phaseWorkflowScript } from "../src/orchestrate-templates.js";
 import type { Finding } from "../src/types.js";
 import type { VerifyItem } from "../src/verify.js";
 import { parseArgs } from "../src/util.js";
+import { needsHunt, type ClassCoverageCell } from "../src/classes/coverage.js";
 
 // The orchestrate suite builds its fixtures THROUGH THE REAL ENGINE (offline:
 // `--tools none --no-enrich`): scan the labelled vuln-express fixture → findings,
@@ -135,7 +136,9 @@ describe("orchestrate — listPhases", () => {
     expect(phases[0]).toMatchObject({ name: "adjudicate", ready: true, items: 1 });
     expect(phases[1]).toMatchObject({ name: "verify", ready: true, items: 1 }); // open only (delta)
     expect(phases[2]).toMatchObject({ name: "revalidate", ready: true, items: 2 }); // confirmed + needs-human
-    expect(phases[3]).toMatchObject({ name: "investigate", ready: true, items: 1 }); // one region: src
+    // One region (src) plus one hunt per class × framework cell no pack settles.
+    const cells = (JSON.parse(readFileSync(join(run, "manifest.json"), "utf8")) as { weaknessClasses?: ClassCoverageCell[] }).weaknessClasses ?? [];
+    expect(phases[3]).toMatchObject({ name: "investigate", ready: true, items: 1 + cells.filter(needsHunt).length });
     for (const p of phases) expect(isAbsolute(p.worklist)).toBe(true);
   });
 

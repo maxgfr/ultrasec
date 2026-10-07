@@ -185,18 +185,30 @@ export interface FrameworkScope {
 
 export type Rule = LineRule | FileRule | RouteQueryRule | AbsentRule;
 
-/** What a pack says about one class: its idioms, or why the class does not apply. */
-export type ClassCoverage = { rules: Rule[] } | { notApplicable: string };
+/**
+ * What a pack says about one class: its idioms; why the class does not apply;
+ * or that it applies and no idiom is encoded yet — the cell is then hunted by
+ * the AI, with this reason as the brief, and that is a declared state rather
+ * than an oversight.
+ */
+export type ClassCoverage = { rules: Rule[] } | { notApplicable: string } | { hunt: string };
 
 export interface Pack {
   /** Unique pack id (`node`, `express`, `django`, …). */
   id: string;
   /** `*` for the language-agnostic pack. */
   ecosystem: Ecosystem | "*";
-  /** Framework id from `src/frameworks.ts`; absent for an ecosystem-wide pack. */
+  /** Framework id from the stack table (`src/stack.ts`); absent for an ecosystem-wide pack. */
   framework?: string;
   /**
-   * Framework versions the rules were validated against by fixtures, as
+   * Library id from the stack table, for the idioms of a library rather than a
+   * framework (NextAuth's session cookie). The pack's cells count for every
+   * framework column of the package the library is declared in, and its
+   * `testedWith` is checked against the LIBRARY's version.
+   */
+  library?: string;
+  /**
+   * Framework (or library) versions the rules were validated against by fixtures, as
    * space-separated comparators with `||` alternatives (`>=4 <6`). A detected
    * version outside it is DEGRADED coverage — reported and hunted, never
    * silently trusted.
