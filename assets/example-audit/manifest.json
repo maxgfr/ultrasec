@@ -186,6 +186,17 @@
       "packs": [
         "node"
       ]
+    },
+    {
+      "class": "taint-catalog",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "catalog"
+      ]
     }
   ]
 }

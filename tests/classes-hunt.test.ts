@@ -53,7 +53,8 @@ describe("buildClassHunts", () => {
 
   it("hunts every cell of a version outside testedWith, naming the floor that already ran", () => {
     const hunts = buildClassHunts(manifestFor(fw("nextjs", "node", "17.0.0", "web")));
-    expect(hunts).toHaveLength(13);
+    expect(hunts).toHaveLength(14);
+    expect(hunts.find((h) => h.hunt!.class === "taint-catalog")!.prompt).toMatch(/^Taint-catalog coverage on nextjs 17\.0\.0/);
     const headers = hunts.find((h) => h.region === "hunt:security-headers-absent:nextjs@web")!;
     expect(headers.hunt!.packsApplied).toEqual(["nextjs"]);
     expect(headers.hunt!.reason).toBe("nextjs 17.0.0 is outside nextjs testedWith >=12 <17");

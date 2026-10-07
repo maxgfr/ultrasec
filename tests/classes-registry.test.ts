@@ -4,6 +4,8 @@ import { PACKS } from "../src/classes/packs/index.js";
 import { boundRules, shapeFor } from "../src/classes/engine.js";
 import { CLASS_IDS, CONFIG_FORMATS } from "../src/classes/types.js";
 import { LANGS } from "../src/lang.js";
+import { catalogIdioms } from "../src/catalog.js";
+import { STACK } from "../src/stack.js";
 
 // The class registry and the packs are DATA the engine trusts blindly. These
 // checks are what keep a typo in a pack from becoming a rule that never fires
@@ -48,5 +50,29 @@ describe("idiom packs", () => {
       const ids = boundRules([p]).map((b) => `${b.classId}/${b.rule.id}`);
       expect(new Set(ids).size, p.id).toBe(ids.length);
     }
+  });
+});
+
+describe("taint-catalog framework labels", () => {
+  const idioms = catalogIdioms();
+
+  it("name a stack row and a version range", () => {
+    const ids = new Set(STACK.map((e) => e.id));
+    for (const i of idioms) {
+      expect(ids.has(i.framework), `${i.title}: unknown stack id ${i.framework}`).toBe(true);
+      expect(i.testedWith, i.title).toMatch(/^[<>=]/);
+    }
+  });
+
+  it("cover the framework rows the catalog used to carry unlabelled", () => {
+    const has = (framework: string, title: RegExp, kind: string) => idioms.some((i) => i.framework === framework && i.kind === kind && title.test(i.title));
+    expect(has("trpc", /procedure input/, "source")).toBe(true);
+    expect(has("trpc", /callback/, "refutation")).toBe(true);
+    expect(has("nextjs", /Next\.js \/ fetch/, "source")).toBe(true);
+    expect(has("nextjs", /App-Router/, "route")).toBe(true);
+    expect(has("nextjs", /Server Action/, "route")).toBe(true);
+    expect(has("hono", /Hono/, "source")).toBe(true);
+    expect(has("spring", /Spring request/, "source")).toBe(true);
+    expect(has("phoenix", /Phoenix/, "source")).toBe(true);
   });
 });

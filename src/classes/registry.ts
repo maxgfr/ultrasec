@@ -1,4 +1,4 @@
-import type { ClassId, WeaknessClass } from "./types.js";
+import { CATALOG_ROW, type ClassId, type HuntSubject, type MatrixRowId, type WeaknessClass } from "./types.js";
 
 // The weakness classes, defined once and independently of any framework.
 //
@@ -354,3 +354,43 @@ export const CLASSES: Record<ClassId, WeaknessClass> = {
 
 /** Class ids in registry order. */
 export const CLASS_LIST = Object.values(CLASSES);
+
+/**
+ * The taint-catalog row of the matrix (see `CATALOG_ROW`). Its hunt asks for
+ * the framework's own input APIs and route conventions as this repository
+ * uses them — what the taint walk needs to see the framework at all.
+ */
+export const CATALOG_SUBJECT: HuntSubject = {
+  id: CATALOG_ROW,
+  title: "Framework request inputs and routes known to the taint catalog",
+  cwe: "CWE-20",
+  invariant:
+    "Every way the framework hands request data to application code (parameters, bodies, headers, cookies, path segments, procedure inputs) is a taint SOURCE the engine knows, and every way it exposes code to the network (routes, actions, controllers) is an ENTRY POINT — for the version the repository runs.",
+  guard:
+    "Not a guard: recognition. The framework's input accessors and route declarations, as THIS repository writes them, matched by catalog rows labelled for the framework at a version range that includes the one detected.",
+  rubric:
+    "An unrecognized input API is not a vulnerability; it is a blind spot for every taint class at once. Report what the code reads and where it is routed, then hunt the classes the walk could not reach from it.",
+  examples: [
+    {
+      language: "javascript",
+      vulnerable: 'app.get("/export", (c) => db.query(c.req.query("q")));',
+      fixed: "// Hono: `c.req.query(...)` is the request input; the route is `app.get(path, handler)`.",
+    },
+    {
+      language: "elixir",
+      vulnerable: 'def index(conn, params) do\n  Repo.query("SELECT * FROM t WHERE q = \'#{params["q"]}\'")',
+      fixed: "# Phoenix: `params` (and `conn.params`) is the request input; the router line is the route.",
+    },
+    {
+      language: "python",
+      vulnerable: '@app.get("/export")\nasync def export(request):\n    q = request.args.get("q")',
+      fixed: "# Sanic: `request.args` / `request.json` are the inputs; `@app.get` declares the route.",
+    },
+  ],
+};
+
+/** Every matrix row, in order: the classes, then the taint-catalog row. */
+export const MATRIX_ROWS: readonly HuntSubject[] = [...CLASS_LIST, CATALOG_SUBJECT];
+
+/** A matrix row's hunt subject, by id. */
+export const HUNT_SUBJECTS: Record<MatrixRowId, HuntSubject> = { ...CLASSES, [CATALOG_ROW]: CATALOG_SUBJECT };

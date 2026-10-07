@@ -44,6 +44,16 @@ export const CLASS_IDS = [
 ] as const;
 export type ClassId = (typeof CLASS_IDS)[number];
 
+/**
+ * The matrix row that is not a weakness class: the taint catalog's framework
+ * idioms (request inputs, route conventions, sink refutations) for a column.
+ * Recognition coverage — a framework whose input APIs the catalog does not
+ * know leaves every taint class blind on it, so it is hunted like a class.
+ */
+export const CATALOG_ROW = "taint-catalog" as const;
+export type MatrixRowId = ClassId | typeof CATALOG_ROW;
+export const MATRIX_ROW_IDS: readonly MatrixRowId[] = [...CLASS_IDS, CATALOG_ROW];
+
 export interface ClassExample {
   /** An ultrasec language id (`javascript`, `python`, …). */
   language: string;
@@ -51,22 +61,27 @@ export interface ClassExample {
   fixed: string;
 }
 
-/** One weakness class — the part that does not age with a framework release. */
-export interface WeaknessClass {
-  id: ClassId;
+/** What a hunt hands the auditor for one matrix row. */
+export interface HuntSubject {
+  id: MatrixRowId;
   title: string;
   cwe: string;
-  severity: Severity;
-  category: Category;
   /** What must hold for the code to be safe, stated as source → sink → guard. */
   invariant: string;
   /** What a guard that actually establishes the invariant looks like. */
   guard: string;
   /** How to move the base severity up or down for a concrete instance. */
   rubric: string;
+  examples: ClassExample[];
+}
+
+/** One weakness class — the part that does not age with a framework release. */
+export interface WeaknessClass extends HuntSubject {
+  id: ClassId;
+  severity: Severity;
+  category: Category;
   /** Default finding text when a pack rule carries no note of its own. */
   note: string;
-  examples: ClassExample[];
 }
 
 /**

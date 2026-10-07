@@ -29354,6 +29354,8 @@ var SINKS = [
     ],
     jsFirstArgument: {
       callback: true,
+      // The callback refutation is tRPC's procedure shape.
+      idioms: [{ framework: "trpc", testedWith: ">=10 <12" }],
       tags: [
         {
           tag: "sql",
@@ -31016,10 +31018,21 @@ var SOURCES = [
     kind: "http",
     languages: ["javascript"],
     re: /(?<![\w.])req(?:uest)?\s*\.\s*(?:query|body|rawBody|params|headers|cookies|method|url|originalUrl|hostname|ip|files|file)\b/,
-    title: "HTTP request input"
+    title: "HTTP request input",
+    idioms: [
+      { framework: "express", testedWith: ">=4 <6" },
+      { framework: "fastify", testedWith: ">=4 <6" }
+    ],
+    shared: true
   },
   { kind: "ws", languages: ["javascript"], re: /\.on\s*\(\s*['"](?:message|data)['"]/, title: "WebSocket/stream message" },
-  { kind: "http", languages: ["javascript"], re: /\bctx\s*\.\s*(?:request|query|params|body)\b/, title: "Koa/HTTP context input" },
+  {
+    kind: "http",
+    languages: ["javascript"],
+    re: /\bctx\s*\.\s*(?:request|query|params|body)\b/,
+    title: "Koa/HTTP context input",
+    idioms: [{ framework: "koa", testedWith: ">=2 <4" }]
+  },
   // ── Handler SIGNATURES ────────────────────────────────────────────────────
   // The request/response parameter pair is the one shape every HTTP framework
   // in a given language agrees on, so matching the signature covers Express,
@@ -31040,7 +31053,12 @@ var SOURCES = [
     // entry point, and treating it as one would tell the taint walk that a
     // constant-command handler shares a scope with untrusted input.
     re: /\(\s*(?:req|request)\w*\s*(?::[^,)]+)?\s*,\s*_?(?:res|response|reply)\w*\s*(?::[^,)]+)?\s*[,)]/,
-    title: "HTTP handler signature (request/response pair)"
+    title: "HTTP handler signature (request/response pair)",
+    idioms: [
+      { framework: "express", testedWith: ">=4 <6" },
+      { framework: "fastify", testedWith: ">=4 <6" }
+    ],
+    shared: true
   },
   {
     kind: "http",
@@ -31055,7 +31073,8 @@ var SOURCES = [
     kind: "http",
     languages: ["go"],
     re: /\(\s*\w+\s+http\.ResponseWriter\s*,\s*\w+\s+\*http\.Request\s*\)/,
-    title: "net/http handler signature"
+    title: "net/http handler signature",
+    idioms: [{ framework: "net-http", testedWith: ">=1.18 <2" }]
   },
   {
     kind: "http",
@@ -31070,13 +31089,19 @@ var SOURCES = [
     // where the request object is a positional parameter and the body may never
     // spell out `request.GET`.
     re: /\bdef\s+\w+\s*\(\s*(?:self\s*,\s*|cls\s*,\s*)?request\b/,
-    title: "Django/DRF view signature"
+    title: "Django/DRF view signature",
+    idioms: [{ framework: "django", testedWith: ">=3.2 <7" }]
   },
   {
     kind: "http",
     languages: ["python"],
     re: /(?<![\w.])request\s*\.\s*(?:args|form|values|json|data|files|cookies|headers|GET|POST)\b/,
-    title: "HTTP request input"
+    title: "HTTP request input",
+    idioms: [
+      { framework: "flask", testedWith: ">=2 <4" },
+      { framework: "django", testedWith: ">=3.2 <7" }
+    ],
+    shared: true
   },
   { kind: "http", languages: ["php"], re: /\$_(?:GET|POST|REQUEST|COOKIE|SERVER|FILES)\b/, title: "HTTP superglobal input" },
   {
@@ -31093,8 +31118,14 @@ var SOURCES = [
   // `theCookie.getValue()` — gated on a cookie-shaped receiver so a generic
   // `.getValue()` (a Map.Entry, an Optional) does not match.
   { kind: "http", languages: ["java", "kotlin", "scala"], re: /\b\w*[Cc]ookie\w*\s*\.\s*getValue\s*\(/, title: "Cookie value (attacker-controlled)" },
-  { kind: "http", languages: ["ruby"], re: /(?<![\w.])params\s*\[/, title: "Rails params input" },
-  { kind: "http", languages: ["go"], re: /\br\s*\.\s*(?:URL|FormValue|PostFormValue|Header)\b/, title: "net/http request input" },
+  { kind: "http", languages: ["ruby"], re: /(?<![\w.])params\s*\[/, title: "Rails params input", idioms: [{ framework: "rails", testedWith: ">=6 <9" }] },
+  {
+    kind: "http",
+    languages: ["go"],
+    re: /\br\s*\.\s*(?:URL|FormValue|PostFormValue|Header)\b/,
+    title: "net/http request input",
+    idioms: [{ framework: "net-http", testedWith: ">=1.18 <2" }]
+  },
   { kind: "cli", languages: ["javascript"], re: /\bprocess\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["python"], re: /\bsys\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["go"], re: /\bos\.Args\b/, title: "CLI argument" },
@@ -31130,44 +31161,102 @@ var SOURCES = [
     kind: "http",
     languages: ["java", "kotlin", "scala"],
     re: /@(?:RequestParam|PathVariable|RequestBody|RequestHeader|CookieValue|ModelAttribute|MatrixVariable)\b/,
-    title: "Spring request binding"
+    title: "Spring request binding",
+    idioms: [{ framework: "spring", testedWith: ">=2.7 <5" }]
   },
-  { kind: "http", languages: ["java", "kotlin"], re: /\bcall\s*\.\s*(?:receive|parameters|request)\b/, title: "Ktor request input" },
+  {
+    kind: "http",
+    languages: ["java", "kotlin"],
+    re: /\bcall\s*\.\s*(?:receive|parameters|request)\b/,
+    title: "Ktor request input",
+    idioms: [{ framework: "ktor", testedWith: ">=2 <4" }]
+  },
   {
     kind: "http",
     languages: ["csharp"],
     re: /\bRequest\s*\.\s*(?:Query|Form|Headers|Cookies|Body|QueryString|Params|RouteValues)\b|\[From(?:Body|Query|Route|Form|Header)\]/,
-    title: "ASP.NET request input"
+    title: "ASP.NET request input",
+    idioms: [{ framework: "aspnetcore", testedWith: ">=6 <10" }]
   },
-  { kind: "http", languages: ["rust"], re: /\b(?:Query|Path|Json|Form)\s*<|\bweb\s*::\s*(?:Query|Path|Json|Form)\b/, title: "axum/actix extractor" },
-  { kind: "http", languages: ["elixir"], re: /\bconn\s*\.\s*(?:params|body_params|query_params|path_params|req_headers)\b/, title: "Phoenix conn input" },
+  {
+    kind: "http",
+    languages: ["rust"],
+    re: /\b(?:Query|Path|Json|Form)\s*<|\bweb\s*::\s*(?:Query|Path|Json|Form)\b/,
+    title: "axum/actix extractor",
+    idioms: [
+      { framework: "axum", testedWith: ">=0.6 <0.9" },
+      { framework: "actix-web", testedWith: ">=4 <5" }
+    ]
+  },
+  {
+    kind: "http",
+    languages: ["elixir"],
+    re: /\bconn\s*\.\s*(?:params|body_params|query_params|path_params|req_headers)\b/,
+    title: "Phoenix conn input",
+    idioms: [{ framework: "phoenix", testedWith: ">=1.6 <2" }]
+  },
   {
     kind: "http",
     languages: ["go"],
     re: /\bc\s*\.\s*(?:Param|Query|PostForm|DefaultQuery|GetHeader|ShouldBind|ShouldBindJSON|BindJSON|FormValue)\s*\(/,
-    title: "gin/echo/fiber request input"
+    title: "gin/echo/fiber request input",
+    idioms: [
+      { framework: "gin", testedWith: ">=1.7 <2" },
+      { framework: "echo", testedWith: ">=4 <5" },
+      { framework: "fiber", testedWith: ">=2 <4" }
+    ]
   },
-  { kind: "http", languages: ["go"], re: /\bmux\s*\.\s*Vars\s*\(|\bchi\s*\.\s*URLParam\s*\(/, title: "gorilla/chi route parameter" },
+  {
+    kind: "http",
+    languages: ["go"],
+    re: /\bmux\s*\.\s*Vars\s*\(|\bchi\s*\.\s*URLParam\s*\(/,
+    title: "gorilla/chi route parameter",
+    idioms: [
+      { framework: "gorilla-mux", testedWith: ">=1.8 <2" },
+      { framework: "chi", testedWith: ">=5 <6" }
+    ]
+  },
   {
     kind: "http",
     languages: ["php"],
     re: /\$request\s*->\s*(?:input|query|get|post|all|json|header|cookie|file)\s*\(/,
-    title: "Laravel/Symfony request input"
+    title: "Laravel/Symfony request input",
+    idioms: [
+      { framework: "laravel", testedWith: ">=9 <14" },
+      { framework: "symfony", testedWith: ">=5 <8" }
+    ]
   },
   {
     kind: "http",
     languages: ["python"],
     re: /\b(?:Query|Body|Form|Path|Header|Cookie|File|UploadFile)\s*\(\s*(?:\.\.\.|None|default)/,
-    title: "FastAPI parameter binding"
+    title: "FastAPI parameter binding",
+    idioms: [{ framework: "fastapi", testedWith: ">=0.100 <1" }]
   },
-  { kind: "http", languages: ["python"], re: /\brequest\s*\.\s*(?:query_params|path_params|body|stream|form\b)/, title: "Starlette/FastAPI request input" },
-  { kind: "http", languages: ["javascript"], re: /@(?:Body|Query|Param|Headers|UploadedFile)\s*\(/, title: "NestJS parameter decorator" },
+  {
+    kind: "http",
+    languages: ["python"],
+    re: /\brequest\s*\.\s*(?:query_params|path_params|body|stream|form\b)/,
+    title: "Starlette/FastAPI request input",
+    idioms: [
+      { framework: "starlette", testedWith: ">=0.27 <1" },
+      { framework: "fastapi", testedWith: ">=0.100 <1" }
+    ]
+  },
+  {
+    kind: "http",
+    languages: ["javascript"],
+    re: /@(?:Body|Query|Param|Headers|UploadedFile)\s*\(/,
+    title: "NestJS parameter decorator",
+    idioms: [{ framework: "nestjs", testedWith: ">=9 <13" }]
+  },
   {
     // Hono: `c.req.query("q")`, `c.req.param("id")`, `await c.req.json()`.
     kind: "http",
     languages: ["javascript"],
     re: /\b(?:c|ctx|context)\s*\.\s*req\s*\.\s*(?:query|queries|param|header|json|text|valid|raw|parseBody|formData|arrayBuffer|url|path)\b/,
-    title: "Hono request input"
+    title: "Hono request input",
+    idioms: [{ framework: "hono", testedWith: ">=3 <5" }]
   },
   {
     // tRPC / oRPC procedures: everything after `.input(schema)` reads the
@@ -31175,7 +31264,8 @@ var SOURCES = [
     kind: "http",
     languages: ["javascript"],
     re: /\.\s*input\s*\(\s*(?:z\.|v\.|t\.|\w+Schema\b|\w+Input\b|\{)/,
-    title: "tRPC/oRPC procedure input"
+    title: "tRPC/oRPC procedure input",
+    idioms: [{ framework: "trpc", testedWith: ">=10 <12" }]
   },
   {
     // GraphQL resolvers: `(parent, args, ctx)` / `(_, { id })` — `args` is the
@@ -31192,20 +31282,23 @@ var SOURCES = [
     kind: "http",
     languages: ["java", "kotlin", "scala"],
     re: /@(?:Get|Post|Put|Delete|Patch|Request)Mapping\b/,
-    title: "Spring request mapping"
+    title: "Spring request mapping",
+    idioms: [{ framework: "spring", testedWith: ">=2.7 <5" }]
   },
   {
     // Django REST framework: the decorated function IS the endpoint.
     kind: "http",
     languages: ["python"],
     re: /@api_view\s*\(|@action\s*\(|\bAPIView\b|\bViewSet\b/,
-    title: "Django REST framework view"
+    title: "Django REST framework view",
+    idioms: [{ framework: "django", testedWith: ">=3.2 <7" }]
   },
   {
     kind: "http",
     languages: ["javascript"],
     re: /\b(?:searchParams|nextUrl)\s*\.\s*get\s*\(|\bawait\s+(?:req|request)\s*\.\s*(?:json|formData|text)\s*\(/,
-    title: "Next.js / fetch API request input"
+    title: "Next.js / fetch API request input",
+    idioms: [{ framework: "nextjs", testedWith: ">=13 <17" }]
   },
   {
     kind: "http",
@@ -31248,18 +31341,50 @@ var DEFAULT_HANDLER_DECL = /^\s*(?:export\s+default\s+|export\s+|module\.exports
 var VERB_EXPORT_DECL = /^\s*export\s+(?:async\s+)?(?:function\s+)?(?:const\s+)?(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|ALL|default)\b/;
 var ROUTE_FILES = [
   // ── File-system routers (JS/TS) ───────────────────────────────────────────
-  { kind: "http", files: ["**/pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}", "pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}"], title: "Pages-Router API route" },
-  { kind: "http", files: ["**/app/**/route.{js,ts,jsx,tsx}", "app/**/route.{js,ts,jsx,tsx}"], decl: VERB_EXPORT_DECL, title: "App-Router route handler" },
-  { kind: "http", files: ["**/server/api/**/*.{js,ts}", "**/server/routes/**/*.{js,ts}"], title: "Nitro/Nuxt server route" },
-  { kind: "http", files: ["**/routes/**/+server.{js,ts}"], decl: VERB_EXPORT_DECL, title: "SvelteKit endpoint" },
-  { kind: "http", files: ["**/routes/**/+page.server.{js,ts}", "**/routes/**/*.server.{js,ts}"], title: "Server-side route module" },
+  {
+    kind: "http",
+    files: ["**/pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}", "pages/api/**/*.{js,jsx,ts,tsx,mjs,cjs}"],
+    title: "Pages-Router API route",
+    idioms: [{ framework: "nextjs", testedWith: ">=12 <17" }]
+  },
+  {
+    kind: "http",
+    files: ["**/app/**/route.{js,ts,jsx,tsx}", "app/**/route.{js,ts,jsx,tsx}"],
+    decl: VERB_EXPORT_DECL,
+    title: "App-Router route handler",
+    idioms: [{ framework: "nextjs", testedWith: ">=13 <17" }]
+  },
+  {
+    kind: "http",
+    files: ["**/server/api/**/*.{js,ts}", "**/server/routes/**/*.{js,ts}"],
+    title: "Nitro/Nuxt server route",
+    idioms: [{ framework: "nuxt", testedWith: ">=3 <5" }]
+  },
+  {
+    kind: "http",
+    files: ["**/routes/**/+server.{js,ts}"],
+    decl: VERB_EXPORT_DECL,
+    title: "SvelteKit endpoint",
+    idioms: [{ framework: "sveltekit", testedWith: ">=1 <3" }]
+  },
+  {
+    kind: "http",
+    files: ["**/routes/**/+page.server.{js,ts}", "**/routes/**/*.server.{js,ts}"],
+    title: "Server-side route module",
+    idioms: [{ framework: "sveltekit", testedWith: ">=1 <3" }]
+  },
   // ── Serverless / edge ─────────────────────────────────────────────────────
   { kind: "http", files: ["api/**/*.{js,ts,py,go,rb}", "**/netlify/functions/**/*.{js,ts}", "**/functions/**/*.{js,ts}"], title: "Serverless function" },
   { kind: "http", files: ["**/handler.{js,ts,py,rb}", "**/lambda_function.py", "**/*_handler.py"], title: "Serverless handler module" },
   // ── Controller conventions ────────────────────────────────────────────────
   { kind: "http", files: ["**/app/controllers/**/*.rb", "**/controllers/**/*.{js,ts,php,py,rb}"], title: "Controller action" },
   { kind: "http", files: ["**/*Controller.{java,kt,cs,php,ts}", "**/*_controller.rb"], title: "Controller action" },
-  { kind: "http", files: ["**/views.py", "**/urls.py", "**/routes.py"], title: "Django view / URL module" },
+  {
+    kind: "http",
+    files: ["**/views.py", "**/urls.py", "**/routes.py"],
+    title: "Django view / URL module",
+    idioms: [{ framework: "django", testedWith: ">=3.2 <7" }]
+  },
   // ── PHP web roots: any reachable script is an entry point ──────────────────
   {
     kind: "http",
@@ -31276,19 +31401,28 @@ var ROUTE_FILES = [
     kind: "http",
     files: ["routes/{web,api,channels,console}.php", "**/routes/{web,api}.php"],
     decl: /^\s*Route\s*::\s*\w+\s*\(/,
-    title: "Laravel route declaration"
+    title: "Laravel route declaration",
+    idioms: [{ framework: "laravel", testedWith: ">=9 <14" }]
   },
   {
     kind: "http",
     files: ["config/routes.rb", "**/config/routes.rb", "**/config/routes/*.rb"],
     decl: /^\s*(?:get|post|put|patch|delete|match|resources?|root|mount|namespace|scope)\b/,
-    title: "Rails route declaration"
+    title: "Rails route declaration",
+    idioms: [{ framework: "rails", testedWith: ">=6 <9" }]
   }
 ];
 var routeMatchers = ROUTE_FILES.map((r) => ({ rule: r, res: r.files.flatMap(expandBraces).map(globToRe) }));
 var JS_MODULE = /\.(?:[cm]?[jt]sx?)$/;
 var DIRECTIVE2 = /^(["'])([^"'\\]*)\1\s*;?$/;
 var SERVER_ACTION_DECL = /^\s*export\s+(?:default\s+)?(?:async\s+)?function\b|^\s*export\s+(?:const|let|var)\s+\w+\s*(?::[^=]+)?=|^\s*export\s+default\s+async\b/;
+var SERVER_ACTION_RULE = {
+  kind: "http",
+  files: [],
+  decl: SERVER_ACTION_DECL,
+  title: "Next.js Server Action",
+  idioms: [{ framework: "nextjs", testedWith: ">=14 <17" }]
+};
 function hasUseServerDirective(content) {
   let inBlock = false;
   for (const raw of content.split(/\r?\n/, 200)) {
@@ -31315,10 +31449,21 @@ function hasUseServerDirective(content) {
   }
   return false;
 }
+function catalogIdioms() {
+  const out2 = [];
+  for (const r of SOURCES) for (const l of r.idioms ?? []) out2.push({ ...l, kind: "source", title: r.title });
+  for (const r of [...ROUTE_FILES, SERVER_ACTION_RULE]) for (const l of r.idioms ?? []) out2.push({ ...l, kind: "route", title: r.title });
+  for (const r of SINKS)
+    for (const l of r.jsFirstArgument?.idioms ?? []) out2.push({ ...l, kind: "refutation", title: `${r.title}: first argument a callback` });
+  return out2;
+}
+function genericRequestSources(language) {
+  return SOURCES.filter((r) => (!r.idioms || r.shared) && (r.kind === "http" || r.kind === "ws") && r.languages.includes(language));
+}
 function findRouteEntryPoints(rel2, content) {
   const matched = routeMatchers.filter((m) => m.res.some((re) => re.test(rel2)));
   if (JS_MODULE.test(rel2) && hasUseServerDirective(content)) {
-    matched.unshift({ rule: { kind: "http", files: [], decl: SERVER_ACTION_DECL, title: "Next.js Server Action" } });
+    matched.unshift({ rule: SERVER_ACTION_RULE });
   }
   if (!matched.length) return [];
   const out2 = [];
@@ -33974,6 +34119,26 @@ function auditAuthTokens(repo, prune, tree) {
   return out2;
 }
 
+// src/classes/types.ts
+var CLASS_IDS = [
+  "timing-unsafe-secret-compare",
+  "csv-formula-injection",
+  "client-ip-first-xff",
+  "unbounded-public-export",
+  "security-headers-absent",
+  "session-cookie-chunks-on-logout",
+  "env-bool-coercion",
+  "insecure-session-cookie",
+  "proxy-headers-trusted",
+  "request-body-unbounded",
+  "graphql-introspection-enabled",
+  "csrf-protection-disabled",
+  "debug-mode-enabled"
+];
+var CATALOG_ROW = "taint-catalog";
+var MATRIX_ROW_IDS = [...CLASS_IDS, CATALOG_ROW];
+var CONFIG_FORMATS = { yaml: "yaml", yml: "yaml", properties: "properties", conf: "conf", nginx: "conf" };
+
 // src/classes/registry.ts
 var CLASSES = {
   "timing-unsafe-secret-compare": {
@@ -34281,6 +34446,34 @@ writer.writerow([cell(u.name), cell(u.email)])`
   }
 };
 var CLASS_LIST = Object.values(CLASSES);
+var CATALOG_SUBJECT = {
+  id: CATALOG_ROW,
+  title: "Framework request inputs and routes known to the taint catalog",
+  cwe: "CWE-20",
+  invariant: "Every way the framework hands request data to application code (parameters, bodies, headers, cookies, path segments, procedure inputs) is a taint SOURCE the engine knows, and every way it exposes code to the network (routes, actions, controllers) is an ENTRY POINT \u2014 for the version the repository runs.",
+  guard: "Not a guard: recognition. The framework's input accessors and route declarations, as THIS repository writes them, matched by catalog rows labelled for the framework at a version range that includes the one detected.",
+  rubric: "An unrecognized input API is not a vulnerability; it is a blind spot for every taint class at once. Report what the code reads and where it is routed, then hunt the classes the walk could not reach from it.",
+  examples: [
+    {
+      language: "javascript",
+      vulnerable: 'app.get("/export", (c) => db.query(c.req.query("q")));',
+      fixed: "// Hono: `c.req.query(...)` is the request input; the route is `app.get(path, handler)`."
+    },
+    {
+      language: "elixir",
+      vulnerable: `def index(conn, params) do
+  Repo.query("SELECT * FROM t WHERE q = '#{params["q"]}'")`,
+      fixed: "# Phoenix: `params` (and `conn.params`) is the request input; the router line is the route."
+    },
+    {
+      language: "python",
+      vulnerable: '@app.get("/export")\nasync def export(request):\n    q = request.args.get("q")',
+      fixed: "# Sanic: `request.args` / `request.json` are the inputs; `@app.get` declares the route."
+    }
+  ]
+};
+var MATRIX_ROWS = [...CLASS_LIST, CATALOG_SUBJECT];
+var HUNT_SUBJECTS = { ...CLASSES, [CATALOG_ROW]: CATALOG_SUBJECT };
 
 // src/classes/packs/shared.ts
 var MENTIONS_CSV = /text\/csv|\.csv\b|\bcsv\b/i;
@@ -35900,24 +36093,6 @@ var PHP_PACKS = [PHP_PACK, LARAVEL_PACK];
 // src/classes/packs/index.ts
 var PACKS = [COMMON_PACK, ...NODE_PACKS, ...PYTHON_PACKS, ...JAVA_PACKS, ...GO_PACKS, ...RUBY_PACKS, ...PHP_PACKS];
 
-// src/classes/types.ts
-var CLASS_IDS = [
-  "timing-unsafe-secret-compare",
-  "csv-formula-injection",
-  "client-ip-first-xff",
-  "unbounded-public-export",
-  "security-headers-absent",
-  "session-cookie-chunks-on-logout",
-  "env-bool-coercion",
-  "insecure-session-cookie",
-  "proxy-headers-trusted",
-  "request-body-unbounded",
-  "graphql-introspection-enabled",
-  "csrf-protection-disabled",
-  "debug-mode-enabled"
-];
-var CONFIG_FORMATS = { yaml: "yaml", yml: "yaml", properties: "properties", conf: "conf", nginx: "conf" };
-
 // src/classes/engine.ts
 var SKIPPED_EXTS = /* @__PURE__ */ new Set(["ipynb", "pyi"]);
 var LEGACY_PREFIX = { webconfig: "Web misconfig \u2014 ", authtokens: "Auth token \u2014 ", class: "Weakness \u2014 " };
@@ -36953,14 +37128,37 @@ function readsAny(p, languages) {
 }
 var nests = (a, b) => a === b || a === "" || b === "" || b.startsWith(`${a}/`) || a.startsWith(`${b}/`);
 var outside = (f, p) => p.testedWith && f.version && !satisfies(f.version, p.testedWith) ? `${f.title} ${f.version} is outside ${p.id} testedWith ${p.testedWith}` : void 0;
-function classCoverage(stack, packs = PACKS) {
+function attachedLibraries(f, libraries) {
+  const languages = languagesOf(f);
+  return libraries.filter((l) => nests(l.dir, f.dir) && languages.some((x) => languagesOf(l).includes(x)));
+}
+function catalogCell(f, libs, idioms) {
+  const base = { class: CATALOG_ROW, framework: f.id, ecosystem: f.ecosystem, dir: f.dir, ...f.version ? { version: f.version } : {} };
+  const languages = languagesOf(f);
+  const owners = f.kind === "inferred" ? libs : [f, ...libs];
+  const mine = idioms.filter((i2) => owners.some((o) => o.id === i2.framework));
+  if (!mine.length) {
+    const generic = languages.filter((l) => genericRequestSources(l).length);
+    const noLabel = f.kind === "inferred" ? `${f.title} \u2014 no catalog row can know it` : `no ${f.title} input or route idiom in the taint catalog`;
+    return generic.length ? { ...base, state: "deterministic", packs: ["catalog"], degraded: `${noLabel} \u2014 only the generic ${generic.join("/")} request shapes` } : { ...base, state: "not-covered", packs: [], degraded: `${noLabel}, and no generic ${languages.join("/")} request shape either` };
+  }
+  const why = [];
+  for (const o of owners) {
+    if (!o.version) continue;
+    const off = [...new Set(mine.filter((i2) => i2.framework === o.id && !satisfies(o.version, i2.testedWith)).map((i2) => `${i2.title} (${i2.testedWith})`))];
+    if (off.length) why.push(`${o.title} ${o.version} is outside the catalog's testedWith for ${off.join(", ")}`);
+  }
+  return { ...base, state: "deterministic", packs: ["catalog"], ...why.length ? { degraded: why.join("; ") } : {} };
+}
+function classCoverage(stack, packs = PACKS, idioms = catalogIdioms()) {
   const cells = [];
   const libraries = stack.filter((f) => f.kind === "library");
   for (const f of stack) {
     if (f.kind === "library") continue;
     const languages = languagesOf(f);
     const fwPack = f.kind === "inferred" ? void 0 : packs.find((p) => p.framework === f.id);
-    const libPacks = libraries.filter((l) => nests(l.dir, f.dir) && languages.some((x) => languagesOf(l).includes(x))).flatMap((l) => packs.filter((p) => p.library === l.id).map((p) => ({ lib: l, pack: p })));
+    const libs = attachedLibraries(f, libraries);
+    const libPacks = libs.flatMap((l) => packs.filter((p) => p.library === l.id).map((p) => ({ lib: l, pack: p })));
     const langPacks = packs.filter((p) => !p.framework && !p.library && readsAny(p, languages));
     const columnOutOfRange = fwPack ? outside(f, fwPack) : void 0;
     const noPack = f.kind === "inferred" ? `${f.title} \u2014 no pack can know it` : `no ${f.title} pack`;
@@ -36994,11 +37192,12 @@ function classCoverage(stack, packs = PACKS) {
         );
       cells.push({ ...base, state: "deterministic", packs: ruled.map((p) => p.id), ...why.length ? { degraded: why.join("; ") } : {} });
     }
+    cells.push(catalogCell(f, libs, idioms));
   }
   return cells;
 }
 function matrixStack(stack, inferred = [], packs = PACKS) {
-  const libraryIds = new Set(packs.flatMap((p) => p.library ? [p.library] : []));
+  const libraryIds = /* @__PURE__ */ new Set([...packs.flatMap((p) => p.library ? [p.library] : []), ...catalogIdioms().map((i2) => i2.framework)]);
   return [...stack.filter((f) => f.kind !== "library"), ...inferred, ...stack.filter((f) => f.kind === "library" && libraryIds.has(f.id))];
 }
 function huntProgress(run2) {
@@ -37046,7 +37245,7 @@ function renderClassCoverageMd(cells) {
   L.push("");
   L.push(`| class | ${columns.map((c2) => `${c2.framework}${c2.version ? ` ${c2.version}` : ""}${c2.dir ? ` (\`${c2.dir}\`)` : ""}`).join(" | ")} |`);
   L.push(`|---|${columns.map(() => "---").join("|")}|`);
-  for (const cls of CLASS_LIST) {
+  for (const cls of MATRIX_ROWS) {
     const row = columns.map((col) => {
       const cell = cells.find((c2) => c2.class === cls.id && c2.framework === col.framework && c2.dir === col.dir);
       return cell ? `${MARK[cell.state]}${cell.degraded ? " \u26A0" : ""}` : "\u2014";
@@ -42939,13 +43138,15 @@ import { join as join67 } from "path";
 var MAX_HUNT_FILES = 8;
 var MAX_EXAMPLES = 3;
 function huntPrompt(h) {
-  return `Weakness class \`${h.class}\` (${h.cwe}) on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""} \u2014 ${h.reason}. INVARIANT: ${CLASSES[h.class].invariant} A VALID GUARD: ${CLASSES[h.class].guard} Find how THIS repository writes the class with ${h.framework} \u2014 its own helpers, middlewares, config and wrappers \u2014 and check every place the invariant can break. Each break is a Discovery (cite a resolvable [file:line], set "hunt": "${h.id}"). Each idiom you recognize \u2014 the unsafe call AND the guard the code relies on \u2014 goes to \`idioms[]\` ({hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}) so a maintainer can turn it into pack data. Looked and found nothing? Put "${h.id}" in \`hunted[]\` \u2014 an empty result is a result.`;
+  const subject = HUNT_SUBJECTS[h.class];
+  const what = h.class === CATALOG_ROW ? "Taint-catalog coverage" : `Weakness class \`${h.class}\` (${h.cwe})`;
+  return `${what} on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""} \u2014 ${h.reason}. INVARIANT: ${subject.invariant} A VALID GUARD: ${subject.guard} Find how THIS repository writes the class with ${h.framework} \u2014 its own helpers, middlewares, config and wrappers \u2014 and check every place the invariant can break. Each break is a Discovery (cite a resolvable [file:line], set "hunt": "${h.id}"). Each idiom you recognize \u2014 the unsafe call AND the guard the code relies on \u2014 goes to \`idioms[]\` ({hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}) so a maintainer can turn it into pack data. Looked and found nothing? Put "${h.id}" in \`hunted[]\` \u2014 an empty result is a result.`;
 }
 function buildClassHunts(manifest, surface) {
   const cells = (manifest.weaknessClasses ?? []).filter(needsHunt);
   const out2 = [];
   for (const cell of cells) {
-    const cls = CLASSES[cell.class];
+    const cls = HUNT_SUBJECTS[cell.class];
     const fw = manifest.frameworks?.find((f) => f.id === cell.framework && f.dir === cell.dir);
     const lang = ECOSYSTEM_LANGUAGES[cell.ecosystem]?.[0];
     const examples = [...cls.examples].sort((a, b) => Number(b.language === lang) - Number(a.language === lang)).slice(0, MAX_EXAMPLES);
@@ -42986,7 +43187,7 @@ function parseIdiom(raw) {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { reason: badField("idiom", raw, "an object") };
   const d = raw;
   const bad = [];
-  if (!CLASS_IDS.includes(d.class)) bad.push(notInVocabulary("class", d.class, CLASS_IDS));
+  if (!MATRIX_ROW_IDS.includes(d.class)) bad.push(notInVocabulary("class", d.class, MATRIX_ROW_IDS));
   if (!IDIOM_KINDS.includes(d.kind)) bad.push(notInVocabulary("kind", d.kind, IDIOM_KINDS));
   for (const field of ["framework", "pattern", "file"]) {
     if (typeof d[field] !== "string" || !d[field].trim()) bad.push(badField(field, d[field], "a non-empty string"));

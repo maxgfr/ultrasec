@@ -217,6 +217,7 @@ pack, or a version outside the range the pack was validated on — and is hunted
 | graphql-introspection-enabled | ✅ pack |
 | csrf-protection-disabled | ✅ pack |
 | debug-mode-enabled | ✅ pack |
+| taint-catalog | ✅ pack |
 
 Degraded or uncovered (1): express — pack express has no idiom for this class.
 Run `ultrasec investigate` — it emits one hunt per such cell.
