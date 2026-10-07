@@ -182,7 +182,8 @@ function isExportRoute(v: FileView, r: RouteQueryRule): boolean {
   for (let i = 0; i < v.code.length; i++) {
     if (v.comment[i]) continue;
     const m = r.routeDecl.exec(v.code[i]!);
-    if (m?.[1] && r.exportPath.test(m[1])) return true;
+    const named = m?.slice(1).find((g) => g !== undefined);
+    if (named && r.exportPath.test(named)) return true;
   }
   return false;
 }
@@ -192,9 +193,13 @@ function runRouteQuery(v: FileView, r: RouteQueryRule, emit: (line: number, evid
   for (const q of r.queries) {
     const re = new RegExp(q.start.source, q.start.flags.includes("g") ? q.start.flags : `${q.start.flags}g`);
     for (const m of v.content.matchAll(re)) {
-      const start = m.index ?? 0;
-      const ln = lineOf(v.content, start);
+      const at = m.index ?? 0;
+      const ln = lineOf(v.content, at);
       if (v.comment[ln - 1]) continue;
+      // A balanced statement is read from the start of its line, so a bound
+      // chained BEFORE the matched call (`db.Limit(10).Find(&rows)`,
+      // `User::where(…)->limit(10)->get()`) still counts.
+      const start = r.statement === "balanced" ? v.content.lastIndexOf("\n", at - 1) + 1 : at;
       const stmt = statementAt(v.content, start, r.statement);
       if (q.requires && !q.requires.test(stmt)) continue;
       if (q.bounded.test(stmt)) continue;
@@ -212,15 +217,16 @@ interface Pending {
   root: string;
 }
 
-/** The directory an absence is judged over: the framework's package when the
- *  file sits in one, the anchor's own directory otherwise. */
+/** The package an absence is judged over: the innermost detected framework
+ *  package holding the file, or the whole repository when none does — with
+ *  no package to bound it, a protection anywhere counts (the quiet direction). */
 function packageRoot(rel: string, frameworks: readonly FrameworkScope[]): string {
   let best: string | undefined;
   for (const f of frameworks) {
     const d = f.dir ? `${f.dir}/` : "";
     if (rel.startsWith(d) && (best === undefined || d.length > best.length)) best = d;
   }
-  return best ?? dirOfRel(rel);
+  return best ?? "";
 }
 
 function frameworkAt(rel: string, id: string, frameworks: readonly FrameworkScope[]): boolean {
@@ -250,12 +256,13 @@ export function auditWeaknessClasses(
   const presentDirs = new Map<BoundRule, string[]>();
 
   const record = (b: BoundRule, rel: string, line: number, evidence: string): void => {
-    const shape = shapeFor(b.classId, b.rule);
-    const f = hit(rel, line, shape, evidence);
     hits.push({ classId: b.classId, packId: b.pack.id, ruleId: b.rule.id, file: rel, line });
-    if (seen.has(f.id)) return;
-    seen.add(f.id);
-    findings.push(f);
+    // One finding per class per line, whichever idiom saw it first — two packs
+    // recognizing the same comparison are one weakness, not two.
+    const key = `${b.classId}\0${rel}\0${line}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    findings.push(hit(rel, line, shapeFor(b.classId, b.rule), evidence));
   };
 
   for (const wf of tree?.files ?? walk(repo)) {
@@ -263,23 +270,26 @@ export function auditWeaknessClasses(
     const ext = extOf(wf.rel);
     if (SKIPPED_EXTS.has(ext)) continue;
     const lang = langForFile(wf.rel)?.id;
-    if (!lang) continue;
-    const forFile = rules.filter((b) => b.rule.languages.includes(lang) && (!b.rule.files || b.rule.files.test(wf.rel)));
-    const treeChecks = rules.filter(
-      (b) =>
-        b.rule.kind === "absent" &&
-        b.rule.presentInTree &&
-        (!b.rule.presentInTree.languages || b.rule.presentInTree.languages.includes(lang)) &&
-        (!b.rule.presentInTree.files || b.rule.presentInTree.files.test(wf.rel)),
-    );
+    const forFile = lang ? rules.filter((b) => b.rule.languages.includes(lang) && (!b.rule.files || b.rule.files.test(wf.rel))) : [];
+    // A presence test reads code by language, or a named non-code file (a
+    // build manifest that declares the protection's dependency).
+    const treeChecks = rules.filter((b) => {
+      const t = b.rule.kind === "absent" ? b.rule.presentInTree : undefined;
+      if (!t) return false;
+      if (t.files && !t.files.test(wf.rel)) return false;
+      return lang ? !t.languages || t.languages.includes(lang) : !!t.files;
+    });
     if (!forFile.length && !treeChecks.length) continue;
     const content = read(wf.abs);
     if (!content) continue;
-    const v = view(wf.rel, lang, content);
+    const v = view(wf.rel, lang ?? "", content);
 
     for (const b of treeChecks) {
-      const r = b.rule as AbsentRule;
-      if (r.presentInTree!.re.test(v.codeText)) (presentDirs.get(b) ?? presentDirs.set(b, []).get(b)!).push(dirOfRel(v.rel));
+      const t = (b.rule as AbsentRule).presentInTree!;
+      // Package scope compares PACKAGES, so a nested app's protection does not
+      // clear its parent; the anchor-dir scope is a plain subtree.
+      if (t.re.test(v.codeText))
+        (presentDirs.get(b) ?? presentDirs.set(b, []).get(b)!).push(t.scope === "package" ? packageRoot(v.rel, frameworks) : dirOfRel(v.rel));
     }
 
     for (const b of forFile) {
@@ -312,7 +322,8 @@ export function auditWeaknessClasses(
   // protection may sit in any file of the app's own tree (middleware, a helper,
   // the config itself) — but a sibling app's does not count.
   for (const p of pending) {
-    if ((presentDirs.get(p.bound) ?? []).some((d) => d.startsWith(p.root))) continue;
+    const scope = (p.bound.rule as AbsentRule).presentInTree!.scope;
+    if ((presentDirs.get(p.bound) ?? []).some((d) => (scope === "package" ? d === p.root : d.startsWith(p.root)))) continue;
     record(p.bound, p.rel, p.line, p.evidence);
   }
   return { findings, hits };

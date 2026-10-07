@@ -1,4 +1,4 @@
-import type { Pack } from "../types.js";
+import type { Pack, QueryIdiom } from "../types.js";
 import { EXPORT_PATH, HEADERS_MIDDLEWARE, MENTIONS_CSV, NEUTRALIZES_FORMULA } from "./shared.js";
 
 // Node.js: the language idioms (any framework), then one pack per framework.
@@ -37,12 +37,24 @@ const HANDLES_CHUNKS =
 const CELL_JOIN = /\.join\(\s*(["'`])(?:;|,|\\t)\1\s*\)/;
 
 // ── Query idioms shared by every Node framework's export routes ─────────────
-const NODE_QUERIES = [
+const NODE_QUERIES: QueryIdiom[] = [
   // Drizzle / Knex-style builders: a select that reads FROM a table.
   { start: /\.\s*select(?:Distinct)?\s*\(/, requires: /\.\s*from\s*\(/, bounded: /\.\s*(?:limit|paginate|\$paginate)\s*\(/ },
   // Prisma.
   { start: /\.\s*findMany\s*\(/, bounded: /\btake\s*:/ },
 ];
+/** Sequelize, TypeORM and Mongoose on top of the builders above. An argument-
+ *  less `.find()` cannot be `Array.prototype.find` — that one needs a callback. */
+const NODE_ORM_QUERIES: QueryIdiom[] = [
+  ...NODE_QUERIES,
+  { start: /\.\s*findAll\s*\(/, bounded: /\blimit\s*:/ },
+  { start: /\.\s*getMany\s*\(/, bounded: /\.\s*(?:take|limit)\s*\(/ },
+  { start: /\.\s*find\s*\(\s*\)/, bounded: /\.\s*(?:limit|take)\s*\(/ },
+  { start: /\.\s*find\s*\(\s*\{/, bounded: /\btake\s*:|\.\s*limit\s*\(/ },
+];
+/** `app.get("/export/users", …)`, `router.route('/public/feed')`, `fastify.get(…)`. */
+const JS_ROUTE_DECL = /\b(?:app|router|server|fastify|api|routes?)\s*\.\s*(?:get|post|all|route)\s*\(\s*["'`]([^"'`]+)["'`]/;
+
 export const NODE_PACK: Pack = {
   id: "node",
   ecosystem: "node",
@@ -98,6 +110,13 @@ export const NODE_PACK: Pack = {
       rules: [
         { id: "zod-coerce-env-key", kind: "line", languages: JS, match: ENV_KEY_COERCE, emit: "webconfig/env-coerce-boolean" },
         { id: "zod-coerce-env-file", kind: "line", languages: JS, match: COERCE_BOOLEAN, fileGate: READS_ENV, emit: "webconfig/env-coerce-boolean" },
+        {
+          id: "boolean-of-env",
+          kind: "line",
+          languages: JS,
+          match: /\bBoolean\s*\(\s*process\.env(?:\.\w+|\[[^\]]+\])\s*\)/,
+          note: '`Boolean(process.env.X)` is true for every non-empty string, including "false" and "0" — an operator writing X=false turns the flag ON. Compare the string explicitly (`process.env.X === "true"`).',
+        },
       ],
     },
     "session-cookie-chunks-on-logout": {
@@ -182,6 +201,58 @@ export const EXPRESS_PACK: Pack = {
         { id: "no-helmet", kind: "absent", languages: JS, anchor: /\bexpress\s*\(\s*\)/, presentInFile: HEADERS_MIDDLEWARE, emit: "webconfig/helmet-missing" },
       ],
     },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "router",
+          kind: "route-query",
+          languages: JS,
+          exportPath: EXPORT_PATH,
+          routeDecl: JS_ROUTE_DECL,
+          queries: NODE_ORM_QUERIES,
+          statement: "balanced",
+        },
+      ],
+    },
+  },
+};
+
+// ── NestJS ──────────────────────────────────────────────────────────────────
+// No headers unless helmet (Express adapter) / @fastify/helmet is registered —
+// or, from NestJS 12.1, the built-in `app.useSecurityHeaders()`.
+// Source: https://docs.nestjs.com/security/helmet
+export const NESTJS_PACK: Pack = {
+  id: "nestjs",
+  ecosystem: "node",
+  framework: "nestjs",
+  testedWith: ">=9 <13",
+  sources: ["https://docs.nestjs.com/security/helmet"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-helmet",
+          kind: "absent",
+          languages: JS,
+          anchor: /\bNestFactory\s*\.\s*create\s*(?:<[^>]*>)?\s*\(/,
+          presentInFile: new RegExp(`${HEADERS_MIDDLEWARE.source}|\\.useSecurityHeaders\\s*\\(`),
+          emit: "webconfig/helmet-missing",
+        },
+      ],
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "controller",
+          kind: "route-query",
+          languages: JS,
+          exportPath: EXPORT_PATH,
+          routeDecl: /@(?:Controller|Get|Post|All)\s*\(\s*["'`]([^"'`]*)["'`]/,
+          queries: NODE_ORM_QUERIES,
+          statement: "balanced",
+        },
+      ],
+    },
   },
 };
 
@@ -204,6 +275,29 @@ export const FASTIFY_PACK: Pack = {
           anchor: /\b(?:fastify|Fastify)\s*\(\s*\)/,
           presentInFile: HEADERS_MIDDLEWARE,
           emit: "webconfig/helmet-missing",
+        },
+        // The same constructor with an options object, which the original
+        // detector's `fastify()` anchor did not see.
+        {
+          id: "no-helmet-options",
+          kind: "absent",
+          languages: JS,
+          anchor: /\b(?:fastify|Fastify)\s*\(\s*\{/,
+          presentInFile: HEADERS_MIDDLEWARE,
+          emit: "webconfig/helmet-missing",
+        },
+      ],
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route",
+          kind: "route-query",
+          languages: JS,
+          exportPath: EXPORT_PATH,
+          routeDecl: JS_ROUTE_DECL,
+          queries: NODE_ORM_QUERIES,
+          statement: "balanced",
         },
       ],
     },
@@ -230,4 +324,4 @@ export const KOA_PACK = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
 export const HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
 export const ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
 
-export const NODE_PACKS: Pack[] = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];
+export const NODE_PACKS: Pack[] = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];

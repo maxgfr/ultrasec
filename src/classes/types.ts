@@ -136,7 +136,7 @@ export interface RouteQueryRule extends RuleBase {
   routeFile?: RegExp;
   /** …whose path names an export… */
   exportPath: RegExp;
-  /** …or the file declares a route whose path/name (capture group 1) names one. */
+  /** …or the file declares a route whose path/name (first capture group that matched) names one. */
   routeDecl?: RegExp;
   queries: QueryIdiom[];
   /**

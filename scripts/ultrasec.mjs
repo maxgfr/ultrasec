@@ -34169,6 +34169,7 @@ var XFF = /x-forwarded-for|HTTP_X_FORWARDED_FOR|X_FORWARDED_FOR/i;
 var XFF_LOOKBACK = 5;
 var EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|xlsx|feed|dump)(?:[/._-]|$)/i;
 var HEADERS_MIDDLEWARE = /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
+var SETS_SECURITY_HEADER = /Content-Security-Policy|X-Frame-Options|Strict-Transport-Security/i;
 var FLAG_NAME = String.raw`\w*(?:enabled|disabled|enable|disable|flag|debug|mock|fake|skip|bypass|allow|insecure|feature|dry_?run|test_?mode)\w*`;
 
 // src/classes/packs/common.ts
@@ -34212,6 +34213,14 @@ var NODE_QUERIES = [
   // Prisma.
   { start: /\.\s*findMany\s*\(/, bounded: /\btake\s*:/ }
 ];
+var NODE_ORM_QUERIES = [
+  ...NODE_QUERIES,
+  { start: /\.\s*findAll\s*\(/, bounded: /\blimit\s*:/ },
+  { start: /\.\s*getMany\s*\(/, bounded: /\.\s*(?:take|limit)\s*\(/ },
+  { start: /\.\s*find\s*\(\s*\)/, bounded: /\.\s*(?:limit|take)\s*\(/ },
+  { start: /\.\s*find\s*\(\s*\{/, bounded: /\btake\s*:|\.\s*limit\s*\(/ }
+];
+var JS_ROUTE_DECL = /\b(?:app|router|server|fastify|api|routes?)\s*\.\s*(?:get|post|all|route)\s*\(\s*["'`]([^"'`]+)["'`]/;
 var NODE_PACK = {
   id: "node",
   ecosystem: "node",
@@ -34266,7 +34275,14 @@ var NODE_PACK = {
     "env-bool-coercion": {
       rules: [
         { id: "zod-coerce-env-key", kind: "line", languages: JS3, match: ENV_KEY_COERCE, emit: "webconfig/env-coerce-boolean" },
-        { id: "zod-coerce-env-file", kind: "line", languages: JS3, match: COERCE_BOOLEAN, fileGate: READS_ENV, emit: "webconfig/env-coerce-boolean" }
+        { id: "zod-coerce-env-file", kind: "line", languages: JS3, match: COERCE_BOOLEAN, fileGate: READS_ENV, emit: "webconfig/env-coerce-boolean" },
+        {
+          id: "boolean-of-env",
+          kind: "line",
+          languages: JS3,
+          match: /\bBoolean\s*\(\s*process\.env(?:\.\w+|\[[^\]]+\])\s*\)/,
+          note: '`Boolean(process.env.X)` is true for every non-empty string, including "false" and "0" \u2014 an operator writing X=false turns the flag ON. Compare the string explicitly (`process.env.X === "true"`).'
+        }
       ]
     },
     "session-cookie-chunks-on-logout": {
@@ -34339,6 +34355,53 @@ var EXPRESS_PACK = {
       rules: [
         { id: "no-helmet", kind: "absent", languages: JS3, anchor: /\bexpress\s*\(\s*\)/, presentInFile: HEADERS_MIDDLEWARE, emit: "webconfig/helmet-missing" }
       ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "router",
+          kind: "route-query",
+          languages: JS3,
+          exportPath: EXPORT_PATH,
+          routeDecl: JS_ROUTE_DECL,
+          queries: NODE_ORM_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var NESTJS_PACK = {
+  id: "nestjs",
+  ecosystem: "node",
+  framework: "nestjs",
+  testedWith: ">=9 <13",
+  sources: ["https://docs.nestjs.com/security/helmet"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-helmet",
+          kind: "absent",
+          languages: JS3,
+          anchor: /\bNestFactory\s*\.\s*create\s*(?:<[^>]*>)?\s*\(/,
+          presentInFile: new RegExp(`${HEADERS_MIDDLEWARE.source}|\\.useSecurityHeaders\\s*\\(`),
+          emit: "webconfig/helmet-missing"
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "controller",
+          kind: "route-query",
+          languages: JS3,
+          exportPath: EXPORT_PATH,
+          routeDecl: /@(?:Controller|Get|Post|All)\s*\(\s*["'`]([^"'`]*)["'`]/,
+          queries: NODE_ORM_QUERIES,
+          statement: "balanced"
+        }
+      ]
     }
   }
 };
@@ -34358,6 +34421,29 @@ var FASTIFY_PACK = {
           anchor: /\b(?:fastify|Fastify)\s*\(\s*\)/,
           presentInFile: HEADERS_MIDDLEWARE,
           emit: "webconfig/helmet-missing"
+        },
+        // The same constructor with an options object, which the original
+        // detector's `fastify()` anchor did not see.
+        {
+          id: "no-helmet-options",
+          kind: "absent",
+          languages: JS3,
+          anchor: /\b(?:fastify|Fastify)\s*\(\s*\{/,
+          presentInFile: HEADERS_MIDDLEWARE,
+          emit: "webconfig/helmet-missing"
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route",
+          kind: "route-query",
+          languages: JS3,
+          exportPath: EXPORT_PATH,
+          routeDecl: JS_ROUTE_DECL,
+          queries: NODE_ORM_QUERIES,
+          statement: "balanced"
         }
       ]
     }
@@ -34379,10 +34465,207 @@ var ctorPack = (id, ctor, testedWith) => ({
 var KOA_PACK = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
 var HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
 var ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
-var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];
+var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];
 
 // src/classes/packs/python.ts
 var PY3 = ["python"];
+var SECRET = String.raw`["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
+var NOT_PRESENCE = String.raw`(?!\s*(?:None|""|''))`;
+var PY_CONSTANT_TIME = /compare_digest|constant_time_compare/;
+var SQLALCHEMY_QUERIES = [
+  // Flask-SQLAlchemy `Model.query.all()` / `.filter(...).all()`.
+  {
+    start: /\.query\s*\.\s*(?:all|filter|filter_by|order_by)\s*\(/,
+    bounded: /\.(?:limit|paginate|first|get|one|one_or_none|count|slice)\s*\(|\[\s*:\s*\w+\s*\]/
+  },
+  // `session.query(Model)….all()` / `db.query(Model).all()`.
+  { start: /\b(?:session|db)\s*\.\s*query\s*\(/, requires: /\.all\s*\(/, bounded: /\.(?:limit|slice|yield_per)\s*\(/ },
+  // 2.0 style: `session.scalars(select(Model)).all()`.
+  { start: /\bsession\s*\.\s*(?:scalars|execute)\s*\(\s*select\s*\(/, requires: /\.all\s*\(/, bounded: /\.limit\s*\(/ }
+];
+var PY_ROUTE_DECORATOR = /@\w+(?:\.\w+)*\.(?:route|get|post|api_route)\s*\(\s*["']([^"']+)["']/;
+var PYTHON_PACK = {
+  id: "python",
+  ecosystem: "python",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        // The original detector's Python rule.
+        {
+          id: "env-secret",
+          kind: "line",
+          languages: PY3,
+          match: new RegExp(`(?:==|!=)\\s*os\\.(?:environ\\[|getenv\\()\\s*${SECRET}`),
+          unless: PY_CONSTANT_TIME,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          id: "env-secret-left",
+          kind: "line",
+          languages: PY3,
+          match: new RegExp(`os\\.(?:environ\\[|environ\\.get\\(|getenv\\()\\s*${SECRET}\\s*[\\])]\\s*(?:==|!=)${NOT_PRESENCE}`),
+          unless: PY_CONSTANT_TIME,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          id: "settings-secret",
+          kind: "line",
+          languages: PY3,
+          match: new RegExp(
+            `(?:==|!=)\\s*(?:settings\\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])|(?:settings\\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])\\s*(?:==|!=)${NOT_PRESENCE}`
+          ),
+          unless: PY_CONSTANT_TIME,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          id: "credential-header",
+          kind: "line",
+          languages: PY3,
+          match: /headers\.get\(\s*["'](?:x-api-key|authorization|x-webhook-secret|x-auth-token)["'][^)]*\)\s*(?:==|!=)(?!\s*(?:None|""|''))/i,
+          unless: PY_CONSTANT_TIME,
+          emit: "authtokens/secret-compare-timing"
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: PY3,
+          gate: [MENTIONS_CSV],
+          anchor: /\.writerows?\s*\(|["'][,;]["']\s*\.join\s*\(/,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA_ANY,
+          note: 'A CSV is written from non-constant cells (`csv.writer`/`DictWriter`, or `",".join`) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `\'` \u2014 or write through `defusedcsv`, which does it.'
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        // `.split(",", 1)[0]` and `.partition(",")[0]` — the common pack has `.split(",")[0]`.
+        {
+          id: "maxsplit-first",
+          kind: "line",
+          languages: PY3,
+          match: /\.split\(\s*["']\s*,\s*["']\s*,\s*1\s*\)\s*\[\s*0\s*\]|\.partition\(\s*["']\s*,\s*["']\s*\)\s*\[\s*0\s*\]/,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "bool-of-env",
+          kind: "line",
+          languages: PY3,
+          match: /\bbool\s*\(\s*os\.(?:environ\.get|getenv)\s*\(|\bbool\s*\(\s*os\.environ\[/,
+          note: '`bool(os.environ.get("X"))` is True for every non-empty string, including "false" and "0" \u2014 an operator writing X=false turns the flag ON. Compare the lowered string against an explicit set of true spellings.'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "Python web frameworks keep the session server-side (Django, Flask-Session) or in one signed cookie (Flask's default); none splits it into numbered chunks that a logout could leave behind."
+    }
+  }
+};
+var DJANGO_SECURITY_MIDDLEWARES = /^(?=[\s\S]*django\.middleware\.security\.SecurityMiddleware)(?=[\s\S]*django\.middleware\.clickjacking\.XFrameOptionsMiddleware)/;
+var DJANGO_QUERIES = [
+  {
+    start: /\.objects\s*\.\s*(?:all|filter|exclude|values|values_list|order_by|select_related|prefetch_related)\s*\(/,
+    bounded: /\[\s*\w*\s*:\s*\w+\s*\]|\bPaginator\s*\(|\.(?:iterator|first|last|get|exists|count|aggregate)\s*\(/
+  }
+];
+var DJANGO_PACK = {
+  id: "django",
+  ecosystem: "python",
+  framework: "django",
+  testedWith: ">=3.2 <7",
+  sources: ["https://docs.djangoproject.com/en/stable/ref/middleware/", "https://docs.djangoproject.com/en/stable/ref/settings/"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "middleware-missing",
+          kind: "absent",
+          languages: PY3,
+          anchor: /^\s*MIDDLEWARE\s*=/,
+          presentInFile: DJANGO_SECURITY_MIDDLEWARES,
+          note: "MIDDLEWARE lacks `django.middleware.security.SecurityMiddleware` or `django.middleware.clickjacking.XFrameOptionsMiddleware` (or has them commented out). Those two are what make Django send X-Content-Type-Options, Referrer-Policy, Cross-Origin-Opener-Policy and X-Frame-Options by default; without them the responses carry none. Restore both \u2014 and set SECURE_HSTS_SECONDS and SECURE_CSP, which are off by default either way."
+        },
+        {
+          id: "default-turned-off",
+          kind: "line",
+          languages: PY3,
+          match: /^\s*(?:SECURE_CONTENT_TYPE_NOSNIFF\s*=\s*False|SECURE_REFERRER_POLICY\s*=\s*None|SECURE_CROSS_ORIGIN_OPENER_POLICY\s*=\s*None|X_FRAME_OPTIONS\s*=\s*["']ALLOWALL["'])/,
+          note: "A security header Django sends by default is switched off in settings. Remove the override unless a proxy in front sets the header instead."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "view",
+          kind: "route-query",
+          languages: PY3,
+          exportPath: EXPORT_PATH,
+          // A view function named for the export, or a URL pattern whose path is one.
+          routeDecl: /^\s*(?:async\s+)?def\s+(\w+)\s*\(\s*request\b|^\s*(?:re_)?path\s*\(\s*r?["']([^"']+)["']/,
+          queries: DJANGO_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var FLASK_PACK = {
+  id: "flask",
+  ecosystem: "python",
+  framework: "flask",
+  testedWith: ">=2 <4",
+  sources: ["https://flask.palletsprojects.com/en/stable/web-security/"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-talisman",
+          kind: "absent",
+          languages: PY3,
+          requiresFramework: "flask",
+          anchor: /\bFlask\s*\(\s*__name__/,
+          presentInFile: HEADERS_MIDDLEWARE,
+          presentInTree: { re: new RegExp(`\\bTalisman\\s*\\(|${SETS_SECURITY_HEADER.source}`, "i"), scope: "package", languages: PY3 },
+          note: "The Flask app is built and nothing in the package sets security headers (no Flask-Talisman, no `after_request` writing CSP / X-Frame-Options / HSTS). Flask sends none by default. Add Talisman or set them in `after_request` \u2014 unless the proxy in front sets them."
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "access-route-first",
+          kind: "line",
+          languages: PY3,
+          match: /\brequest\.access_route\s*\[\s*0\s*\]/,
+          note: "Werkzeug's `request.access_route` is the X-Forwarded-For list followed by the socket address, so element 0 is whatever the client sent. Configure `ProxyFix(app.wsgi_app, x_for=1)` and read `request.remote_addr` instead."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route",
+          kind: "route-query",
+          languages: PY3,
+          exportPath: EXPORT_PATH,
+          routeDecl: PY_ROUTE_DECORATOR,
+          queries: SQLALCHEMY_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
 var FASTAPI_PACK = {
   id: "fastapi",
   ecosystem: "python",
@@ -34401,13 +34684,519 @@ var FASTAPI_PACK = {
           emit: "webconfig/helmet-missing"
         }
       ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route",
+          kind: "route-query",
+          languages: PY3,
+          exportPath: EXPORT_PATH,
+          routeDecl: PY_ROUTE_DECORATOR,
+          queries: SQLALCHEMY_QUERIES,
+          statement: "balanced"
+        }
+      ]
     }
   }
 };
-var PYTHON_PACKS = [FASTAPI_PACK];
+var PYTHON_PACKS = [PYTHON_PACK, DJANGO_PACK, FLASK_PACK, FASTAPI_PACK];
+
+// src/classes/packs/java.ts
+var JVM2 = ["java", "kotlin"];
+var SECRET2 = String.raw`"[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
+var SECRET_FIELD = String.raw`\w*(?:apiKey|ApiKey|API_KEY|sharedSecret|SharedSecret|webhookSecret|WebhookSecret|clientSecret|ClientSecret|apiToken|ApiToken)\w*`;
+var JAVA_PACK = {
+  id: "java",
+  ecosystem: "java",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "equals-secret",
+          kind: "line",
+          languages: JVM2,
+          match: new RegExp(
+            `\\.equals\\(\\s*(?:System\\.getenv\\(\\s*${SECRET2}\\s*\\)|${SECRET_FIELD})\\s*\\)|(?:System\\.getenv\\(\\s*${SECRET2}\\s*\\)|\\b${SECRET_FIELD})\\s*\\.equals\\(|getHeader\\(\\s*"(?:X-Api-Key|X-API-Key|Authorization|X-Webhook-Secret)"\\s*\\)\\s*\\.equals\\(`
+          ),
+          unless: /MessageDigest\.isEqual|constantTime/i,
+          note: "A credential is checked with `String.equals`, which returns at the first differing character, so response time leaks how much of a guess is right. Compare digests with `MessageDigest.isEqual`."
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: JVM2,
+          gate: [MENTIONS_CSV],
+          anchor: /String\.join\(\s*"[,;]"|\.printRecord\s*\(|\.writeNext\s*\(/,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA_ANY,
+          note: "A CSV is written (`String.join`, Commons CSV `printRecord`, OpenCSV `writeNext`) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'`."
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "getenv-not-null",
+          kind: "line",
+          languages: JVM2,
+          match: new RegExp(`(?:boolean|Boolean|var|val)\\s+${FLAG_NAME}\\s*(?::\\s*Boolean\\s*)?=\\s*System\\.getenv\\(\\s*"[^"]+"\\s*\\)\\s*!=\\s*null`, "i"),
+          note: 'The flag is "the variable is set": X=false and X=0 turn it ON. Parse the value \u2014 `Boolean.parseBoolean(System.getenv("X"))` \u2014 or bind it with Spring\'s typed `@Value`.'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "Java servlet containers keep the session server-side behind a single JSESSIONID-style cookie; there are no numbered chunks for a logout to miss."
+    }
+  }
+};
+var SPRING_QUERIES = [
+  // A repository `findAll()` with no Pageable/Sort argument loads the table.
+  { start: /\b\w*(?:Repository|Repo|repository|repo)\s*\.\s*findAll\s*\(\s*\)/, bounded: /(?!)/ },
+  // JdbcTemplate with a literal SELECT.
+  { start: /\.\s*query(?:ForList)?\s*\(\s*"\s*SELECT\b/i, bounded: /\bLIMIT\b|\bFETCH\s+FIRST\b/i }
+];
+var SPRING_PACK = {
+  id: "spring",
+  ecosystem: "java",
+  framework: "spring",
+  testedWith: ">=2.7 <5",
+  sources: ["https://docs.spring.io/spring-security/reference/servlet/exploits/headers.html"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "headers-disabled",
+          kind: "line",
+          languages: JVM2,
+          match: /\.headers\s*\(\s*(?:\(?\s*\w+\s*\)?\s*->\s*\w+\s*\.\s*disable\s*\(\s*\)|AbstractHttpConfigurer::disable)\s*\)|\.headers\s*\(\s*\)\s*\.\s*disable\s*\(|\.defaultsDisabled\s*\(/,
+          note: "Spring Security's default response headers (X-Content-Type-Options, X-Frame-Options: DENY, HSTS, Cache-Control) are switched off here. Keep the defaults (`headers(withDefaults())`) and only override the header you need to."
+        },
+        {
+          id: "no-spring-security",
+          kind: "absent",
+          languages: JVM2,
+          requiresFramework: "spring",
+          anchor: /@SpringBootApplication\b/,
+          presentInTree: {
+            re: new RegExp(
+              `spring-boot-starter-security|spring-security-(?:web|config)|SecurityFilterChain|addHeaderWriter|${SETS_SECURITY_HEADER.source}`,
+              "i"
+            ),
+            scope: "package",
+            files: /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?)$|\.(?:java|kt)$/
+          },
+          note: "This Spring Boot application has no Spring Security on its build and sets no security header itself, so responses carry none: Spring MVC writes no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Add spring-boot-starter-security (its defaults set most of them) or a header filter \u2014 unless the proxy in front sets them."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "controller",
+          kind: "route-query",
+          languages: JVM2,
+          exportPath: EXPORT_PATH,
+          routeDecl: /@(?:Get|Request|Post)Mapping\s*\(\s*(?:value\s*=\s*|path\s*=\s*)?\{?\s*"([^"]+)"/,
+          queries: SPRING_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var JAVA_PACKS = [JAVA_PACK, SPRING_PACK];
+
+// src/classes/packs/go.ts
+var GO = ["go"];
+var SECRET3 = String.raw`"[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
+var NOT_EMPTY = String.raw`(?!\s*"")`;
+var GO_QUERIES = [
+  // GORM: `db.Find(&rows)` with no `.Limit(` anywhere on the statement.
+  { start: /\.\s*Find\s*\(\s*&/, bounded: /\.\s*(?:Limit|Scopes)\s*\(|\.\s*FindInBatches\s*\(/ },
+  // database/sql with a literal SELECT.
+  { start: /\.\s*Query(?:Context)?\s*\(/, requires: /\bSELECT\b/i, bounded: /\bLIMIT\b/i }
+];
+var GO_SETS_HEADERS = new RegExp(`secure\\.New\\s*\\(|unrolled/secure|${SETS_SECURITY_HEADER.source}`, "i");
+var GO_PACK = {
+  id: "go",
+  ecosystem: "go",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "getenv-secret",
+          kind: "line",
+          languages: GO,
+          match: new RegExp(
+            `(?:==|!=)\\s*os\\.Getenv\\(\\s*${SECRET3}\\s*\\)|os\\.Getenv\\(\\s*${SECRET3}\\s*\\)\\s*(?:==|!=)${NOT_EMPTY}|\\.(?:Header\\.Get|GetHeader)\\(\\s*"(?:X-Api-Key|X-API-Key|Authorization|X-Webhook-Secret)"\\s*\\)\\s*(?:==|!=)${NOT_EMPTY}`
+          ),
+          unless: /subtle\.ConstantTimeCompare|hmac\.Equal/,
+          note: "A credential is compared with `==`/`!=`, which returns at the first differing byte, so response time leaks how much of a guess is right. Use `subtle.ConstantTimeCompare` (or `hmac.Equal` on digests)."
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: GO,
+          gate: [MENTIONS_CSV],
+          anchor: /csv\.NewWriter\s*\(|\.Write(?:All)?\s*\(\s*\[\]string|strings\.Join\([^)]*,\s*"[,;]"\s*\)/,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA_ANY,
+          note: "A CSV is written (`encoding/csv`, or `strings.Join` with a comma) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'`."
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "split-first",
+          kind: "line",
+          languages: GO,
+          // One level of nested call allowed in the argument: `Split(r.Header.Get("X-Forwarded-For"), ",")`.
+          match: /strings\.SplitN?\s*\((?:[^()]|\([^()]*\))*?,\s*"\s*,\s*"(?:\s*,\s*-?\d+)?\s*\)\s*\[\s*0\s*\]|strings\.Cut\s*\((?:[^()]|\([^()]*\))*?,\s*"\s*,\s*"\s*\)/,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "getenv-not-empty",
+          kind: "line",
+          languages: GO,
+          match: new RegExp(`\\b${FLAG_NAME}\\s*:?=\\s*os\\.Getenv\\(\\s*"[^"]+"\\s*\\)\\s*!=\\s*""`, "i"),
+          note: 'The flag is "the variable is non-empty": X=false and X=0 turn it ON. Parse it with `strconv.ParseBool`.'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "Go session libraries (gorilla/sessions, scs) keep one cookie per session and refuse an oversized value; none splits it into numbered chunks."
+    }
+  }
+};
+var NET_HTTP_PACK = {
+  id: "net-http",
+  ecosystem: "go",
+  framework: "net-http",
+  testedWith: ">=1.18 <2",
+  sources: ["https://pkg.go.dev/net/http"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-headers",
+          kind: "absent",
+          languages: GO,
+          requiresFramework: "net-http",
+          anchor: /\bhttp\.ListenAndServe(?:TLS)?\s*\(|&?http\.Server\s*\{/,
+          presentInTree: { re: GO_SETS_HEADERS, scope: "package", languages: GO },
+          note: "The server is started and nothing in the module sets security headers: net/http writes no CSP, HSTS, X-Frame-Options or X-Content-Type-Options on a normal response. Wrap the handler in a middleware that sets them (e.g. unrolled/secure) \u2014 unless the proxy in front does."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "handler",
+          kind: "route-query",
+          languages: GO,
+          exportPath: EXPORT_PATH,
+          // Go 1.22 patterns carry the method: "GET /export/users".
+          routeDecl: /\b(?:HandleFunc|Handle)\s*\(\s*"(?:[A-Z]+\s+)?([^"]+)"/,
+          queries: GO_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var GIN_PACK = {
+  id: "gin",
+  ecosystem: "go",
+  framework: "gin",
+  testedWith: ">=1.7 <2",
+  sources: ["https://gin-gonic.com/en/docs/server-config/trusted-proxies/", "https://github.com/gin-contrib/secure"],
+  classes: {
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "clientip-all-proxies-trusted",
+          kind: "absent",
+          languages: GO,
+          anchor: /\.ClientIP\s*\(\s*\)/,
+          presentInTree: { re: /\.SetTrustedProxies\s*\(|\bTrustedPlatform\s*=/, scope: "package", languages: GO },
+          note: "`c.ClientIP()` is read, and the engine never calls `SetTrustedProxies` (or sets `TrustedPlatform`). Gin trusts every proxy by default, so ClientIP returns the X-Forwarded-For entry the client wrote. Call `router.SetTrustedProxies([]string{<your proxy>})`, or `nil` when there is none."
+        }
+      ]
+    },
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-secure-middleware",
+          kind: "absent",
+          languages: GO,
+          anchor: /\bgin\.(?:Default|New)\s*\(\s*\)/,
+          presentInTree: { re: GO_SETS_HEADERS, scope: "package", languages: GO },
+          note: "The Gin engine is built and nothing in the module sets security headers; Gin sends none by default. Register `gin-contrib/secure` (or a middleware writing CSP, HSTS, X-Frame-Options, X-Content-Type-Options) \u2014 unless the proxy in front does."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route",
+          kind: "route-query",
+          languages: GO,
+          exportPath: EXPORT_PATH,
+          routeDecl: /\.(?:GET|POST|Any|Group)\s*\(\s*"([^"]+)"/,
+          queries: GO_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var GO_PACKS = [GO_PACK, NET_HTTP_PACK, GIN_PACK];
+
+// src/classes/packs/ruby.ts
+var RB = ["ruby"];
+var SECRET4 = String.raw`["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
+var ENV_SECRET = String.raw`ENV(?:\[\s*${SECRET4}\s*\]|\.fetch\(\s*${SECRET4}\s*\))`;
+var RUBY_PACK = {
+  id: "ruby",
+  ecosystem: "ruby",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "env-secret",
+          kind: "line",
+          languages: RB,
+          match: new RegExp(
+            `(?:==|!=)\\s*(?:${ENV_SECRET}|Rails\\.application\\.credentials\\.\\w*(?:token|secret|key)\\w*)|(?:${ENV_SECRET}|request\\.headers\\[\\s*["'](?:X-Api-Key|X-API-Key|Authorization|X-Webhook-Secret)["']\\s*\\])\\s*(?:==|!=)(?!\\s*(?:nil|""|''))`
+          ),
+          unless: /secure_compare|fixed_length_secure_compare/,
+          note: "A credential is compared with `==`, which returns at the first differing byte, so response time leaks how much of a guess is right. Use `ActiveSupport::SecurityUtils.secure_compare` (or `Rack::Utils.secure_compare`)."
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: RB,
+          gate: [MENTIONS_CSV],
+          anchor: /\bCSV\.(?:generate|open)\b|\bcsv\s*<<|\.to_csv\b/,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA_ANY,
+          note: "A CSV is written (`CSV.generate`, `csv << row`, `to_csv`) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'`."
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "split-first",
+          kind: "line",
+          languages: RB,
+          match: /\.split\(\s*["']\s*,\s*["']\s*\)\s*\.first\b/,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "env-truthiness",
+          kind: "line",
+          languages: RB,
+          match: /!!\s*ENV\[|ENV\[\s*["'][^"']+["']\s*\]\.present\?|ENV\.fetch\(\s*["'][^"']+["']\s*,\s*(?:true|false)\s*\)/,
+          note: 'Every environment value is a String and every String is truthy: X=false keeps the flag ON. Cast it \u2014 `ActiveModel::Type::Boolean.new.cast(ENV["X"])` \u2014 or compare against "true".'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "Rails' cookie store keeps the session in one cookie and raises CookieOverflow past 4 KB rather than splitting it; there are no chunks for a logout to miss."
+    }
+  }
+};
+var RAILS_QUERIES = [
+  {
+    start: /\b[A-Z]\w*(?:::[A-Z]\w*)*\.(?:all|where|order|includes|joins|select|eager_load)\b/,
+    bounded: /\.(?:limit|page|paginate|per|find_each|find_in_batches|in_batches|first|last|take|find_by|find|count|exists\?|pluck_first)\b/
+  }
+];
+var RAILS_PACK = {
+  id: "rails",
+  ecosystem: "ruby",
+  framework: "rails",
+  testedWith: ">=6 <9",
+  sources: ["https://guides.rubyonrails.org/security.html"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "default-headers-cleared",
+          kind: "line",
+          languages: RB,
+          match: /\bdefault_headers\s*=\s*\{\s*\}|\bdefault_headers\.clear\b/,
+          note: "Rails' default security headers (X-Frame-Options, X-Content-Type-Options, Referrer-Policy) are wiped here. Keep the defaults and override only the header you mean to change."
+        },
+        {
+          id: "no-csp",
+          kind: "absent",
+          languages: RB,
+          anchor: /<\s*Rails::Application\b/,
+          presentInTree: { re: /\bcontent_security_policy\b/, scope: "package", languages: RB },
+          note: "Rails sends X-Frame-Options, X-Content-Type-Options and Referrer-Policy by default, but no Content-Security-Policy until one is configured \u2014 and the generated `config/initializers/content_security_policy.rb` is entirely commented out. Configure the policy there (a nonce for inline scripts) \u2014 unless the proxy in front sets one."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "controller",
+          kind: "route-query",
+          languages: RB,
+          files: /_controller\.rb$/,
+          routeFile: /_controller\.rb$/,
+          exportPath: EXPORT_PATH,
+          routeDecl: /^\s*def\s+(\w+)/,
+          queries: RAILS_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var RUBY_PACKS = [RUBY_PACK, RAILS_PACK];
+
+// src/classes/packs/php.ts
+var PHP = ["php"];
+var SECRET_READ = String.raw`(?:env|getenv|config)\(\s*['"][^'"]*(?:token|secret|key|password)[^'"]*['"]\s*\)`;
+var EQ2 = "(?:===|!==|==|!=)";
+var NOT_EMPTY2 = String.raw`(?!\s*(?:null|''|""|false)\b)`;
+var PHP_PACK = {
+  id: "php",
+  ecosystem: "php",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "secret-read",
+          kind: "line",
+          languages: PHP,
+          match: new RegExp(
+            `${EQ2}\\s*${SECRET_READ}|${SECRET_READ}\\s*${EQ2}${NOT_EMPTY2}|\\$_SERVER\\[\\s*['"]HTTP_(?:X_API_KEY|AUTHORIZATION|X_WEBHOOK_SECRET)['"]\\s*\\]\\s*${EQ2}${NOT_EMPTY2}|->header\\(\\s*['"](?:X-Api-Key|X-API-Key|Authorization|X-Webhook-Secret)['"]\\s*\\)\\s*${EQ2}${NOT_EMPTY2}`,
+            "i"
+          ),
+          unless: /hash_equals/,
+          note: "A credential is compared with `===`/`==`, which returns at the first differing byte, so response time leaks how much of a guess is right. Use `hash_equals($known, $provided)`."
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: PHP,
+          gate: [MENTIONS_CSV],
+          anchor: /\bfputcsv\s*\(|\bimplode\s*\(\s*['"][,;]['"]|->insert(?:One|All)\s*\(/,
+          pick: "last",
+          // league/csv ships the neutralizer as a formatter.
+          unless: new RegExp(`${NEUTRALIZES_FORMULA_ANY.source}|EscapeFormula`, "i"),
+          note: "A CSV is written (`fputcsv`, `implode(',')`, league/csv `insertOne`) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'` (league/csv: `EscapeFormula`)."
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "explode-first",
+          kind: "line",
+          languages: PHP,
+          match: /explode\s*\(\s*['"]\s*,\s*['"]\s*,[^;]*?\)\s*\[\s*0\s*\]|strtok\s*\([^;]*X_FORWARDED_FOR[^;]*,\s*['"],['"]\s*\)/,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "bool-cast-env",
+          kind: "line",
+          languages: PHP,
+          match: /\(\s*bool\s*\)\s*(?:getenv\s*\(|\$_ENV\[|\$_SERVER\[)/,
+          note: '`(bool) getenv("X")` is true for every non-empty string, including "false". Use `filter_var(getenv("X"), FILTER_VALIDATE_BOOLEAN)` \u2014 Laravel\'s `env()` already maps "false"/"(false)" to false.'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "PHP sessions (native and Laravel's drivers) keep one session cookie; none splits it into numbered chunks for a logout to miss."
+    }
+  }
+};
+var LARAVEL_QUERIES = [
+  // `Model::all()` loads the table, whatever is chained after it.
+  { start: /\b[A-Z]\w*::all\s*\(\s*\)/, bounded: /(?!)/ },
+  {
+    start: /\b(?:[A-Z]\w*::(?:where|query|orderBy|select|with|latest|oldest)|DB::table)\s*\(/,
+    requires: /->get\s*\(\s*\)/,
+    bounded: /->(?:limit|take|paginate|simplePaginate|cursorPaginate|chunk|chunkById|lazy|lazyById|cursor|first|find|count|exists)\s*\(/
+  }
+];
+var LARAVEL_PACK = {
+  id: "laravel",
+  ecosystem: "php",
+  framework: "laravel",
+  testedWith: ">=9 <14",
+  sources: ["https://laravel.com/docs/12.x/requests"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-headers-middleware",
+          kind: "absent",
+          languages: PHP,
+          requiresFramework: "laravel",
+          anchor: /Application::configure\s*\(|class\s+Kernel\s+extends\s+HttpKernel\b/,
+          presentInTree: { re: new RegExp(`Spatie\\\\Csp|AddCspHeaders|SecureHeaders|${SETS_SECURITY_HEADER.source}`, "i"), scope: "package", languages: PHP },
+          note: "The Laravel application is configured and nothing in it sets security headers: Laravel's default middleware stack writes no CSP, HSTS or X-Frame-Options. Add a header middleware (or spatie/laravel-csp) \u2014 unless the web server in front sets them."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route-or-controller",
+          kind: "route-query",
+          languages: PHP,
+          exportPath: EXPORT_PATH,
+          routeDecl: /Route::(?:get|post|any|match)\s*\(\s*['"]([^'"]+)['"]|public\s+function\s+(\w+)\s*\(/,
+          queries: LARAVEL_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var PHP_PACKS = [PHP_PACK, LARAVEL_PACK];
 
 // src/classes/packs/index.ts
-var PACKS = [COMMON_PACK, ...NODE_PACKS, ...PYTHON_PACKS];
+var PACKS = [COMMON_PACK, ...NODE_PACKS, ...PYTHON_PACKS, ...JAVA_PACKS, ...GO_PACKS, ...RUBY_PACKS, ...PHP_PACKS];
 
 // src/classes/engine.ts
 var SKIPPED_EXTS = /* @__PURE__ */ new Set(["ipynb", "pyi"]);
@@ -34524,7 +35313,8 @@ function isExportRoute(v, r) {
   for (let i2 = 0; i2 < v.code.length; i2++) {
     if (v.comment[i2]) continue;
     const m = r.routeDecl.exec(v.code[i2]);
-    if (m?.[1] && r.exportPath.test(m[1])) return true;
+    const named = m?.slice(1).find((g) => g !== void 0);
+    if (named && r.exportPath.test(named)) return true;
   }
   return false;
 }
@@ -34533,9 +35323,10 @@ function runRouteQuery(v, r, emit2) {
   for (const q of r.queries) {
     const re = new RegExp(q.start.source, q.start.flags.includes("g") ? q.start.flags : `${q.start.flags}g`);
     for (const m of v.content.matchAll(re)) {
-      const start2 = m.index ?? 0;
-      const ln = lineOf3(v.content, start2);
+      const at = m.index ?? 0;
+      const ln = lineOf3(v.content, at);
       if (v.comment[ln - 1]) continue;
+      const start2 = r.statement === "balanced" ? v.content.lastIndexOf("\n", at - 1) + 1 : at;
       const stmt = statementAt2(v.content, start2, r.statement);
       if (q.requires && !q.requires.test(stmt)) continue;
       if (q.bounded.test(stmt)) continue;
@@ -34549,7 +35340,7 @@ function packageRoot(rel2, frameworks) {
     const d = f.dir ? `${f.dir}/` : "";
     if (rel2.startsWith(d) && (best === void 0 || d.length > best.length)) best = d;
   }
-  return best ?? dirOfRel(rel2);
+  return best ?? "";
 }
 function frameworkAt(rel2, id, frameworks) {
   return frameworks.some((f) => f.id === id && (f.dir === "" || rel2.startsWith(`${f.dir}/`)));
@@ -34563,30 +35354,32 @@ function auditWeaknessClasses(repo, prune, tree, frameworks = [], packs = PACKS)
   const pending2 = [];
   const presentDirs = /* @__PURE__ */ new Map();
   const record2 = (b, rel2, line2, evidence) => {
-    const shape = shapeFor(b.classId, b.rule);
-    const f = hit4(rel2, line2, shape, evidence);
     hits.push({ classId: b.classId, packId: b.pack.id, ruleId: b.rule.id, file: rel2, line: line2 });
-    if (seen.has(f.id)) return;
-    seen.add(f.id);
-    findings.push(f);
+    const key = `${b.classId}\0${rel2}\0${line2}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    findings.push(hit4(rel2, line2, shapeFor(b.classId, b.rule), evidence));
   };
   for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf5(wf.rel);
     if (SKIPPED_EXTS.has(ext)) continue;
     const lang = langForFile(wf.rel)?.id;
-    if (!lang) continue;
-    const forFile = rules.filter((b) => b.rule.languages.includes(lang) && (!b.rule.files || b.rule.files.test(wf.rel)));
-    const treeChecks = rules.filter(
-      (b) => b.rule.kind === "absent" && b.rule.presentInTree && (!b.rule.presentInTree.languages || b.rule.presentInTree.languages.includes(lang)) && (!b.rule.presentInTree.files || b.rule.presentInTree.files.test(wf.rel))
-    );
+    const forFile = lang ? rules.filter((b) => b.rule.languages.includes(lang) && (!b.rule.files || b.rule.files.test(wf.rel))) : [];
+    const treeChecks = rules.filter((b) => {
+      const t = b.rule.kind === "absent" ? b.rule.presentInTree : void 0;
+      if (!t) return false;
+      if (t.files && !t.files.test(wf.rel)) return false;
+      return lang ? !t.languages || t.languages.includes(lang) : !!t.files;
+    });
     if (!forFile.length && !treeChecks.length) continue;
     const content = read(wf.abs);
     if (!content) continue;
-    const v = view(wf.rel, lang, content);
+    const v = view(wf.rel, lang ?? "", content);
     for (const b of treeChecks) {
-      const r = b.rule;
-      if (r.presentInTree.re.test(v.codeText)) (presentDirs.get(b) ?? presentDirs.set(b, []).get(b)).push(dirOfRel(v.rel));
+      const t = b.rule.presentInTree;
+      if (t.re.test(v.codeText))
+        (presentDirs.get(b) ?? presentDirs.set(b, []).get(b)).push(t.scope === "package" ? packageRoot(v.rel, frameworks) : dirOfRel(v.rel));
     }
     for (const b of forFile) {
       const r = b.rule;
@@ -34614,7 +35407,8 @@ function auditWeaknessClasses(repo, prune, tree, frameworks = [], packs = PACKS)
     }
   }
   for (const p of pending2) {
-    if ((presentDirs.get(p.bound) ?? []).some((d) => d.startsWith(p.root))) continue;
+    const scope = p.bound.rule.presentInTree.scope;
+    if ((presentDirs.get(p.bound) ?? []).some((d) => scope === "package" ? d === p.root : d.startsWith(p.root))) continue;
     record2(p.bound, p.rel, p.line, p.evidence);
   }
   return { findings, hits };
