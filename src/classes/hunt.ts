@@ -8,7 +8,8 @@ import { badField, describeValue, notInVocabulary, type DroppedRow } from "../ap
 import { byStr } from "../util.js";
 import { CLASSES } from "./registry.js";
 import { huntId, needsHunt, PACK_SUGGESTIONS_FILE, type ClassCoverageCell } from "./coverage.js";
-import { CLASS_IDS, type ClassExample, type ClassId } from "./types.js";
+import { CLASS_IDS, type ClassExample, type ClassId, type Ecosystem } from "./types.js";
+import { ECOSYSTEM_LANGUAGES } from "../stack.js";
 
 // The AI half of the weakness classes.
 //
@@ -49,9 +50,6 @@ export interface ClassHunt {
   examples: ClassExample[];
 }
 
-/** The language an ecosystem's examples are shown in first. */
-const ECOSYSTEM_LANGUAGE: Record<string, string> = { node: "javascript", python: "python", java: "java", go: "go", ruby: "ruby", php: "php" };
-
 const MAX_HUNT_FILES = 8;
 const MAX_EXAMPLES = 3;
 
@@ -73,7 +71,8 @@ export function buildClassHunts(manifest: Pick<Manifest, "weaknessClasses" | "fr
   for (const cell of cells) {
     const cls = CLASSES[cell.class];
     const fw = manifest.frameworks?.find((f) => f.id === cell.framework && f.dir === cell.dir);
-    const lang = ECOSYSTEM_LANGUAGE[cell.ecosystem];
+    // The language an ecosystem's examples are shown in first.
+    const lang = ECOSYSTEM_LANGUAGES[cell.ecosystem as Ecosystem]?.[0];
     const examples = [...cls.examples].sort((a, b) => Number(b.language === lang) - Number(a.language === lang)).slice(0, MAX_EXAMPLES);
     const prefix = cell.dir ? `${cell.dir}/` : "";
     // Where the framework lives: its manifest line first, then the package's

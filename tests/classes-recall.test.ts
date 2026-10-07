@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { auditWeaknessClasses } from "../src/classes/engine.js";
 import { PACKS } from "../src/classes/packs/index.js";
-import { CLASS_IDS, ECOSYSTEMS, type ClassId } from "../src/classes/types.js";
-import { FRAMEWORKS, detectFrameworks, satisfies } from "../src/frameworks.js";
+import { CLASS_IDS, type ClassId } from "../src/classes/types.js";
+import { FRAMEWORKS, detectFrameworks, satisfies, webFrameworks } from "../src/frameworks.js";
 
 // The recall matrix: weakness class × ecosystem (and × framework where the
 // idiom is the framework's). Every cell is a SYNTHETIC vulnerable/fixed pair
@@ -19,9 +19,12 @@ const expectations = JSON.parse(readFileSync(join(FIXTURE, "expectations.json"),
 
 /** The first lot: the frameworks every class must be decided for. */
 const FIRST_LOT = ["nextjs", "express", "nestjs", "fastify", "django", "flask", "fastapi", "spring", "net-http", "gin", "rails", "laravel"];
-const ecosystemOf = (cell: string): string => FRAMEWORKS.find((f) => f.id === cell)?.ecosystem ?? (cell === "net-http" ? "go" : cell);
+const ecosystemOf = (cell: string): string => FRAMEWORKS.find((f) => f.id === cell)?.ecosystem ?? cell;
+/** Ecosystems with a language pack: the ones a class must be decided for. An
+ *  ecosystem with none (Elixir, Rust, .NET, Deno) is detected and hunted. */
+const PACKED_ECOSYSTEMS = [...new Set(PACKS.filter((p) => !p.framework && p.ecosystem !== "*").map((p) => p.ecosystem))];
 
-const frameworks = detectFrameworks(FIXTURE);
+const frameworks = webFrameworks(detectFrameworks(FIXTURE));
 const { hits } = auditWeaknessClasses(FIXTURE, undefined, undefined, frameworks);
 const filesOf = (c: ClassId): Set<string> => new Set(hits.filter((h) => h.classId === c).map((h) => h.file));
 
@@ -53,7 +56,7 @@ describe("weakness classes — the matrix is complete for the first lot", () => 
   for (const c of CLASS_IDS) {
     it(`${c}: every ecosystem is either covered by a fixture cell or declared not applicable`, () => {
       const cells = Object.keys(expectations[c] ?? {});
-      for (const eco of ECOSYSTEMS) {
+      for (const eco of PACKED_ECOSYSTEMS) {
         const covered = cells.some((cell) => ecosystemOf(cell) === eco);
         const declaredNa = PACKS.some((p) => p.ecosystem === eco && p.classes[c] && "notApplicable" in p.classes[c]!);
         expect(covered || declaredNa, `${c} × ${eco}: no fixture cell and no notApplicable declaration`).toBe(true);

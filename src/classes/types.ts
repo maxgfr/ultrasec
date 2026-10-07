@@ -18,8 +18,13 @@ import type { Category, Severity } from "../types.js";
 // coverage. Adding a framework is adding data and fixtures — the engine
 // (engine.ts) never learns a framework's name.
 
-/** The ecosystems a pack can target. `*` is the language-agnostic pack. */
-export const ECOSYSTEMS = ["node", "python", "java", "go", "ruby", "php"] as const;
+/**
+ * The ecosystems a detected stack belongs to (`src/stack.ts`), and a pack can
+ * target. `java` is the JVM (Java, Kotlin, Scala); `deno` is JavaScript on
+ * Deno's registries. An ecosystem with no pack is still detected: its classes
+ * are hunted, not matched. `*` is the language-agnostic pack.
+ */
+export const ECOSYSTEMS = ["node", "python", "java", "go", "ruby", "php", "elixir", "rust", "dotnet", "deno"] as const;
 export type Ecosystem = (typeof ECOSYSTEMS)[number];
 
 export const CLASS_IDS = [

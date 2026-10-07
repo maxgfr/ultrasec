@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { join } from "node:path";
-import { detectFrameworks, floorOf, satisfies } from "../src/frameworks.js";
+import { detectFrameworks, floorOf, satisfies, stackLabels, webFrameworks } from "../src/frameworks.js";
 
 // Framework detection is what decides whether a weakness-class pack ran inside
 // the version range it was validated against. A wrong version there is a
@@ -10,22 +10,31 @@ import { detectFrameworks, floorOf, satisfies } from "../src/frameworks.js";
 const MONOREPO = join(import.meta.dirname, "fixtures", "frameworks-monorepo");
 
 describe("detectFrameworks", () => {
-  const found = detectFrameworks(MONOREPO);
-  const by = (id: string) => found.filter((f) => f.id === id);
+  const stack = detectFrameworks(MONOREPO);
+  const found = webFrameworks(stack);
+  const by = (id: string) => stack.filter((f) => f.id === id);
 
   it("finds one framework per package, with the line that declares it", () => {
     expect(found.map((f) => `${f.dir}:${f.id}`)).toEqual([
       "apps/api:express",
+      "apps/hapi:hapi",
       "apps/web:nextjs",
+      "services/deno:fresh",
+      "services/dotnet:aspnetcore",
       "services/flask:flask",
       "services/gin:gin",
       "services/gin:net-http",
       "services/java:spring",
       "services/kotlin:spring",
+      "services/ktor:ktor",
       "services/laravel:laravel",
       "services/mvc:spring",
+      "services/phoenix:phoenix",
       "services/py:django",
       "services/rails:rails",
+      "services/rust:axum",
+      "services/sanic:sanic",
+      "services/sanic:starlette",
     ]);
     expect(by("nextjs")[0]!.evidence).toBe("apps/web/package.json:5");
     expect(by("django")[0]!.evidence).toBe("services/py/requirements.txt:2");
@@ -53,12 +62,36 @@ describe("detectFrameworks", () => {
     expect(mvc.evidence).toBe("services/mvc/pom.xml:5");
   });
 
+  it("reads the ecosystems the context brief named but the matrix never saw, with their versions", () => {
+    expect(by("phoenix")[0]).toMatchObject({ ecosystem: "elixir", version: "1.7.14", versionSource: "lockfile", evidence: "services/phoenix/mix.exs:6" });
+    expect(by("axum")[0]).toMatchObject({ ecosystem: "rust", version: "0.7.5", versionSource: "lockfile", evidence: "services/rust/Cargo.toml:6" });
+    expect(by("aspnetcore")[0]).toMatchObject({ ecosystem: "dotnet", version: "8.0", versionSource: "toolchain", evidence: "services/dotnet/Api.csproj:1" });
+    expect(by("fresh")[0]).toMatchObject({ ecosystem: "deno", version: "1.6.8", versionSource: "declared", evidence: "services/deno/deno.json:3" });
+    expect(by("ktor")[0]).toMatchObject({ ecosystem: "java", languages: ["kotlin"], version: "2.3.12", versionSource: "declared" });
+    expect(by("hapi")[0]).toMatchObject({ ecosystem: "node", version: "21.3.0", versionSource: "declared" });
+    expect(by("sanic")[0]).toMatchObject({ ecosystem: "python", version: "23.12.1" });
+  });
+
+  it("reports libraries as libraries, from the same table", () => {
+    expect(by("react")[0]).toMatchObject({ kind: "library", dir: "apps/web", version: "19.0.0" });
+    expect(by("plug")[0]).toMatchObject({ kind: "library", dir: "services/phoenix", version: "2.7.1" });
+    expect(found.some((f) => f.kind === "library")).toBe(false);
+  });
+
+  it("names the stack for the context brief with its labels", () => {
+    const labels = stackLabels(stack);
+    expect(labels).toContain("next.js");
+    expect(labels).toContain("phoenix");
+    expect(labels).toContain("plug");
+    expect(labels).not.toContain("nextjs");
+  });
+
   it("dates Go's net/http by the toolchain the module declares", () => {
     expect(by("net-http")[0]).toMatchObject({ version: "1.22", versionSource: "toolchain" });
   });
 
   it("honours the prune predicate", () => {
-    expect(detectFrameworks(MONOREPO, (rel) => rel.startsWith("services/")).map((f) => f.id)).toEqual(["express", "nextjs"]);
+    expect(webFrameworks(detectFrameworks(MONOREPO, (rel) => rel.startsWith("services/"))).map((f) => f.id)).toEqual(["express", "hapi", "nextjs"]);
   });
 });
 

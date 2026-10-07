@@ -5030,8 +5030,8 @@ async function Module2(moduleArg = {}) {
       return;
     }
     addRunDependency("loadDylibs");
-    for (var lib of dynamicLibraries) {
-      await loadDynamicLibrary(lib, {
+    for (var lib2 of dynamicLibraries) {
+      await loadDynamicLibrary(lib2, {
         loadAsync: true,
         global: true,
         nodelete: true,
@@ -12180,9 +12180,9 @@ function buildRustCrates(root, fileSet) {
   for (const m of packages) {
     const defaultSrc = norm(posix2.join(m.dir, "src")).replace(/^\.$/, "");
     const libPath = m.libPath ? norm(posix2.join(m.dir, m.libPath)) : void 0;
-    const lib = libPath && !libPath.startsWith("..") && fileSet.has(libPath) ? libPath : void 0;
-    const srcDir = lib ? lib.includes("/") ? posix2.dirname(lib) : "" : defaultSrc;
-    const rootFile = lib ?? firstThat(fileSet, [posix2.join(defaultSrc, "lib.rs"), posix2.join(defaultSrc, "main.rs")]);
+    const lib2 = libPath && !libPath.startsWith("..") && fileSet.has(libPath) ? libPath : void 0;
+    const srcDir = lib2 ? lib2.includes("/") ? posix2.dirname(lib2) : "" : defaultSrc;
+    const rootFile = lib2 ?? firstThat(fileSet, [posix2.join(defaultSrc, "lib.rs"), posix2.join(defaultSrc, "main.rs")]);
     const ws = manifests.filter((w) => w.workspaceDeps && within(m.dir, w.dir)).sort((a, b) => b.dir.length - a.dir.length)[0];
     const renames = /* @__PURE__ */ new Map();
     for (const [alias, dep] of [...m.deps].sort((a, b) => byStr(a[0], b[0]))) {
@@ -28129,21 +28129,21 @@ var TIMEOUT_MS = 3e5;
 var MAX_BUFFER = 64 * 1024 * 1024;
 var MOUNT = "/work";
 function execAsync(name2, args2, cwd, useStderr = false, timeout = TIMEOUT_MS) {
-  return new Promise((resolve44) => {
+  return new Promise((resolve43) => {
     execFile(name2, args2, { cwd, encoding: "utf8", timeout, maxBuffer: MAX_BUFFER, windowsHide: true }, (error, stdout, stderr) => {
       const out2 = String(stdout ?? "");
       const errText = String(stderr ?? "");
       if (error && error.killed && error.signal) {
-        return resolve44({ stdout: "", failed: true, timedOut: true, err: `timed out after ${Math.round(timeout / 1e3)} s` });
+        return resolve43({ stdout: "", failed: true, timedOut: true, err: `timed out after ${Math.round(timeout / 1e3)} s` });
       }
       if (useStderr) {
         const code = error?.code;
-        if (error && typeof code !== "number") return resolve44({ stdout: "", failed: true, err: error.message });
-        return resolve44({ stdout: errText, failed: false });
+        if (error && typeof code !== "number") return resolve43({ stdout: "", failed: true, err: error.message });
+        return resolve43({ stdout: errText, failed: false });
       }
-      if (!error) return resolve44({ stdout: out2, failed: false });
-      if (out2.trim()) return resolve44({ stdout: out2, failed: false });
-      resolve44({ stdout: "", failed: true, err: withDiagnostic(error.message, errText) });
+      if (!error) return resolve43({ stdout: out2, failed: false });
+      if (out2.trim()) return resolve43({ stdout: out2, failed: false });
+      resolve43({ stdout: "", failed: true, err: withDiagnostic(error.message, errText) });
     });
   });
 }
@@ -29082,11 +29082,11 @@ function buildGraph2(scan2, opts = {}) {
   const symbolDefs = {};
   for (const [name2, files] of defs) symbolDefs[name2] = [...files].sort(byStr);
   const edgeMap = /* @__PURE__ */ new Map();
-  const resolve44 = buildFileResolver(scan2, opts.tree, opts.resolutionGaps);
+  const resolve43 = buildFileResolver(scan2, opts.tree, opts.resolutionGaps);
   const importsOf = /* @__PURE__ */ new Map();
   for (const f of scan2.files) {
     for (const imp of f.imports) {
-      const to = resolve44(f.rel, imp.spec);
+      const to = resolve43(f.rel, imp.spec);
       if (!to || to === f.rel) continue;
       add(edgeMap, { from: f.rel, to, kind: "import", weight: 1 });
       let set = importsOf.get(f.rel);
@@ -32568,7 +32568,7 @@ wrote ${join38(resolve14(out2), "MAP.md")} + attack-surface.json`);
 }
 
 // src/commands/scan.ts
-import { resolve as resolve17, join as join57, relative as relative13 } from "path";
+import { resolve as resolve16, join as join57, relative as relative13 } from "path";
 import { existsSync as existsSync29 } from "fs";
 
 // src/facts.ts
@@ -35672,42 +35672,126 @@ function groupAdvisoriesByPackage(findings) {
   );
 }
 
-// src/frameworks.ts
-var FRAMEWORKS = [
-  { id: "nextjs", title: "Next.js", ecosystem: "node", packages: ["next"] },
-  { id: "express", title: "Express", ecosystem: "node", packages: ["express"] },
-  { id: "nestjs", title: "NestJS", ecosystem: "node", packages: ["@nestjs/core"] },
-  { id: "fastify", title: "Fastify", ecosystem: "node", packages: ["fastify"] },
-  { id: "koa", title: "Koa", ecosystem: "node", packages: ["koa"] },
-  { id: "hono", title: "Hono", ecosystem: "node", packages: ["hono"] },
-  { id: "elysia", title: "Elysia", ecosystem: "node", packages: ["elysia"] },
-  { id: "nuxt", title: "Nuxt", ecosystem: "node", packages: ["nuxt"] },
-  { id: "sveltekit", title: "SvelteKit", ecosystem: "node", packages: ["@sveltejs/kit"] },
-  { id: "django", title: "Django", ecosystem: "python", packages: ["django"] },
-  { id: "flask", title: "Flask", ecosystem: "python", packages: ["flask"] },
-  { id: "fastapi", title: "FastAPI", ecosystem: "python", packages: ["fastapi"] },
-  { id: "tornado", title: "Tornado", ecosystem: "python", packages: ["tornado"] },
-  { id: "aiohttp", title: "aiohttp", ecosystem: "python", packages: ["aiohttp"] },
-  {
-    id: "spring",
-    title: "Spring Boot",
-    ecosystem: "java",
-    packages: ["spring-boot-starter-web", "spring-boot-starter-webflux", "spring-webmvc", "spring-webflux"]
-  },
-  { id: "quarkus", title: "Quarkus", ecosystem: "java", packages: ["quarkus-rest", "quarkus-resteasy", "quarkus-resteasy-reactive"] },
-  { id: "micronaut", title: "Micronaut", ecosystem: "java", packages: ["micronaut-http-server-netty"] },
-  { id: "gin", title: "Gin", ecosystem: "go", packages: ["github.com/gin-gonic/gin"] },
-  { id: "echo", title: "Echo", ecosystem: "go", packages: ["github.com/labstack/echo/v4", "github.com/labstack/echo"] },
-  { id: "fiber", title: "Fiber", ecosystem: "go", packages: ["github.com/gofiber/fiber/v2", "github.com/gofiber/fiber/v3"] },
-  { id: "chi", title: "chi", ecosystem: "go", packages: ["github.com/go-chi/chi/v5", "github.com/go-chi/chi"] },
-  { id: "rails", title: "Ruby on Rails", ecosystem: "ruby", packages: ["rails"] },
-  { id: "sinatra", title: "Sinatra", ecosystem: "ruby", packages: ["sinatra"] },
-  { id: "laravel", title: "Laravel", ecosystem: "php", packages: ["laravel/framework"] },
-  { id: "symfony", title: "Symfony", ecosystem: "php", packages: ["symfony/framework-bundle"] },
-  { id: "slim", title: "Slim", ecosystem: "php", packages: ["slim/slim"] }
+// src/stack.ts
+var ECOSYSTEM_LANGUAGES = {
+  node: ["javascript"],
+  deno: ["javascript"],
+  python: ["python"],
+  java: ["java", "kotlin", "scala"],
+  go: ["go"],
+  ruby: ["ruby"],
+  php: ["php"],
+  elixir: ["elixir"],
+  rust: ["rust"],
+  dotnet: ["csharp"]
+};
+var web = (id, title, ecosystem, deps, extra = {}) => ({
+  id,
+  title,
+  ecosystem,
+  kind: "web",
+  deps,
+  ...extra
+});
+var lib = (id, title, ecosystem, deps, extra = {}) => ({
+  id,
+  title,
+  ecosystem,
+  kind: "library",
+  deps,
+  ...extra
+});
+var STACK = [
+  // ── Node / Deno ───────────────────────────────────────────────────────────
+  web("nextjs", "Next.js", "node", { npm: ["next"] }, { label: "next.js" }),
+  web("express", "Express", "node", { npm: ["express"] }),
+  web("nestjs", "NestJS", "node", { npm: ["@nestjs/core"] }),
+  web("fastify", "Fastify", "node", { npm: ["fastify"] }),
+  web("koa", "Koa", "node", { npm: ["koa"] }),
+  web("hono", "Hono", "node", { npm: ["hono"], deno: ["hono", "@hono/hono"] }),
+  web("elysia", "Elysia", "node", { npm: ["elysia"] }),
+  web("hapi", "hapi", "node", { npm: ["@hapi/hapi", "hapi"] }),
+  web("restify", "restify", "node", { npm: ["restify"] }),
+  web("sails", "Sails", "node", { npm: ["sails"] }),
+  web("nuxt", "Nuxt", "node", { npm: ["nuxt"] }),
+  web("sveltekit", "SvelteKit", "node", { npm: ["@sveltejs/kit"] }),
+  web("fresh", "Fresh", "deno", { deno: ["fresh", "@fresh/core"] }),
+  web("oak", "Oak", "deno", { deno: ["oak", "@oak/oak"] }),
+  lib("next-auth", "NextAuth.js", "node", { npm: ["next-auth"] }),
+  lib("trpc", "tRPC", "node", { npm: ["@trpc/server"] }),
+  lib("drizzle", "Drizzle ORM", "node", { npm: ["drizzle-orm"] }),
+  lib("react", "React", "node", { npm: ["react"] }),
+  lib("vue", "Vue", "node", { npm: ["vue"] }),
+  lib("angular", "Angular", "node", { npm: ["@angular/core"] }),
+  lib("svelte", "Svelte", "node", { npm: ["svelte"] }),
+  lib("apollo", "Apollo Server", "node", { npm: ["apollo-server", "@apollo/server"] }),
+  lib("graphql", "GraphQL.js", "node", { npm: ["graphql"] }),
+  lib("socket.io", "Socket.IO", "node", { npm: ["socket.io"] }),
+  lib("mongoose", "Mongoose", "node", { npm: ["mongoose"] }),
+  lib("sequelize", "Sequelize", "node", { npm: ["sequelize"] }),
+  lib("prisma", "Prisma", "node", { npm: ["prisma", "@prisma/client"] }),
+  lib("knex", "Knex", "node", { npm: ["knex"] }),
+  lib("typeorm", "TypeORM", "node", { npm: ["typeorm"] }),
+  lib("passport", "Passport", "node", { npm: ["passport"] }),
+  lib("jwt", "jsonwebtoken", "node", { npm: ["jsonwebtoken"] }),
+  // ── Python ────────────────────────────────────────────────────────────────
+  web("django", "Django", "python", { pypi: ["django"] }),
+  web("flask", "Flask", "python", { pypi: ["flask"] }),
+  web("fastapi", "FastAPI", "python", { pypi: ["fastapi"] }),
+  web("starlette", "Starlette", "python", { pypi: ["starlette"] }),
+  web("sanic", "Sanic", "python", { pypi: ["sanic"] }),
+  web("tornado", "Tornado", "python", { pypi: ["tornado"] }),
+  web("aiohttp", "aiohttp", "python", { pypi: ["aiohttp"] }),
+  web("bottle", "Bottle", "python", { pypi: ["bottle"] }),
+  web("pyramid", "Pyramid", "python", { pypi: ["pyramid"] }),
+  web("quart", "Quart", "python", { pypi: ["quart"] }),
+  lib("sqlalchemy", "SQLAlchemy", "python", { pypi: ["sqlalchemy"] }),
+  // ── JVM ───────────────────────────────────────────────────────────────────
+  web("spring", "Spring Boot", "java", {
+    maven: ["spring-boot-starter-web", "spring-boot-starter-webflux", "spring-webmvc", "spring-webflux"]
+  }),
+  web("quarkus", "Quarkus", "java", { maven: ["quarkus-rest", "quarkus-resteasy", "quarkus-resteasy-reactive"] }),
+  web("micronaut", "Micronaut", "java", { maven: ["micronaut-http-server-netty"] }),
+  web("jersey", "Jersey", "java", { maven: ["jersey-server", "jersey-container-*"] }),
+  web("ktor", "Ktor", "java", { maven: ["ktor-server-core", "ktor-server-core-jvm", "ktor-server-netty", "ktor-server-netty-jvm"] }, { languages: ["kotlin"] }),
+  // ── Go ────────────────────────────────────────────────────────────────────
+  web("gin", "Gin", "go", { go: ["github.com/gin-gonic/gin"] }),
+  web("echo", "Echo", "go", { go: ["github.com/labstack/echo/v4", "github.com/labstack/echo"] }),
+  web("fiber", "Fiber", "go", { go: ["github.com/gofiber/fiber/v2", "github.com/gofiber/fiber/v3"] }),
+  web("chi", "chi", "go", { go: ["github.com/go-chi/chi/v5", "github.com/go-chi/chi"] }),
+  web("gorilla-mux", "gorilla/mux", "go", { go: ["github.com/gorilla/mux"] }, { label: "gorilla/mux" }),
+  web("net-http", "Go net/http", "go", {}, { codeImport: { registry: "go", extension: ".go", re: /^\s*(?:import\s+)?(?:\w+\s+)?"net\/http"\s*$/ } }),
+  lib("gorm", "GORM", "go", { go: ["gorm.io/gorm"] }),
+  // ── Ruby ──────────────────────────────────────────────────────────────────
+  web("rails", "Ruby on Rails", "ruby", { gem: ["rails"] }),
+  web("sinatra", "Sinatra", "ruby", { gem: ["sinatra"] }),
+  web("hanami", "Hanami", "ruby", { gem: ["hanami"] }),
+  lib("sequel", "Sequel", "ruby", { gem: ["sequel"] }),
+  // ── PHP ───────────────────────────────────────────────────────────────────
+  web("laravel", "Laravel", "php", { composer: ["laravel/framework"] }),
+  web("symfony", "Symfony", "php", { composer: ["symfony/framework-bundle"] }),
+  web("slim", "Slim", "php", { composer: ["slim/slim"] }),
+  // ── Elixir ────────────────────────────────────────────────────────────────
+  web("phoenix", "Phoenix", "elixir", { hex: ["phoenix"] }),
+  lib("plug", "Plug", "elixir", { hex: ["plug", "plug_cowboy"] }),
+  lib("ecto", "Ecto", "elixir", { hex: ["ecto", "ecto_sql"] }),
+  // ── Rust ──────────────────────────────────────────────────────────────────
+  web("actix-web", "actix-web", "rust", { cargo: ["actix-web"] }),
+  web("axum", "axum", "rust", { cargo: ["axum"] }),
+  web("rocket", "Rocket", "rust", { cargo: ["rocket"] }),
+  web("warp", "warp", "rust", { cargo: ["warp"] }),
+  web("tide", "tide", "rust", { cargo: ["tide"] }),
+  lib("diesel", "Diesel", "rust", { cargo: ["diesel"] }),
+  lib("sqlx", "SQLx", "rust", { cargo: ["sqlx"] }),
+  // ── .NET ──────────────────────────────────────────────────────────────────
+  // `Microsoft.NET.Sdk.Web` is the project SDK every ASP.NET Core app declares;
+  // the reader surfaces it as a dependency so it matches like any other.
+  web("aspnetcore", "ASP.NET Core", "dotnet", { nuget: ["microsoft.net.sdk.web", "microsoft.aspnetcore.*"] })
 ];
-var GO_STDLIB = { id: "net-http", title: "Go net/http", ecosystem: "go", packages: [] };
-var FRAMEWORK_IDS = [...FRAMEWORKS.map((f) => f.id), GO_STDLIB.id];
+
+// src/frameworks.ts
+var FRAMEWORKS = STACK.filter((e) => e.kind === "web");
+var FRAMEWORK_IDS = FRAMEWORKS.map((f) => f.id);
 var normPy = (n) => n.toLowerCase().replace(/[-_.]+/g, "-");
 function floorOf2(spec) {
   const m = /(\d+(?:\.\d+){0,3}(?:-[\w.]+)?)/.exec(spec ?? "");
@@ -35768,18 +35852,25 @@ function readPom(text) {
     const m = /<artifactId>\s*([^<\s]+)\s*<\/artifactId>/.exec(l);
     if (!m) return;
     const own2 = lines5.slice(i2, i2 + 4).join("\n").match(/<version>\s*([^<\s$]+)\s*<\/version>/)?.[1];
-    const boot = m[1].startsWith("spring-boot");
-    out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: (boot ? own2 : void 0) ?? parent ?? bootProp });
+    out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: jvmVersion(m[1], own2, parent ?? bootProp) });
   });
   return out2;
 }
-function readGradle(text) {
+function jvmVersion(artifact, own2, boot) {
+  if (artifact.startsWith("spring-boot")) return own2 ?? boot;
+  if (artifact.startsWith("spring-")) return boot;
+  return own2;
+}
+function readGradle(text, props = {}) {
   const lines5 = text.split(/\r?\n/);
   const plugin = /id\s*\(?\s*["']org\.springframework\.boot["']\s*\)?\s*version\s*["']([^"']+)["']/.exec(text)?.[1];
   const out2 = [];
   lines5.forEach((l, i2) => {
-    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([\w.-]+))?["']/g))
-      out2.push({ name: m[2].toLowerCase(), line: i2 + 1, spec: (m[2].startsWith("spring-boot") ? m[3] : void 0) ?? plugin });
+    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([^"'\s]+))?["']/g)) {
+      const raw = m[3];
+      const own2 = raw?.startsWith("$") ? props[raw.replace(/^\$\{?|\}$/g, "")] : raw;
+      out2.push({ name: m[2].toLowerCase(), line: i2 + 1, spec: jvmVersion(m[2], own2, plugin) });
+    }
   });
   return out2;
 }
@@ -35823,15 +35914,69 @@ function readComposer(text) {
   }
   return out2;
 }
+function readMix(text) {
+  const out2 = [];
+  text.split(/\r?\n/).forEach((l, i2) => {
+    for (const m of l.matchAll(/\{\s*:([a-z0-9_]+)\s*,\s*"([^"]+)"/g)) out2.push({ name: m[1], line: i2 + 1, spec: m[2] });
+  });
+  return out2;
+}
+function readCargo(text) {
+  const out2 = [];
+  let inDeps = false;
+  text.split(/\r?\n/).forEach((raw, i2) => {
+    const l = raw.replace(/#.*$/, "");
+    const table = /^\s*\[([^\]]+)\]/.exec(l);
+    if (table) {
+      inDeps = /(?:^|\.)(?:dev-|build-)?dependencies$/.test(table[1].trim());
+      return;
+    }
+    if (!inDeps) return;
+    const kv = /^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|\{[^}]*?version\s*=\s*"([^"]*)")?/.exec(l);
+    if (kv) out2.push({ name: kv[1].toLowerCase(), line: i2 + 1, spec: kv[2] ?? kv[3] });
+  });
+  return out2;
+}
+function readCsproj(text) {
+  const lines5 = text.split(/\r?\n/);
+  const out2 = [];
+  const target = /<TargetFrameworks?>\s*net(\d+\.\d+)/.exec(text)?.[1];
+  lines5.forEach((l, i2) => {
+    const sdk = /<Project\s+Sdk\s*=\s*"([^"]+)"/.exec(l);
+    if (sdk) out2.push({ name: sdk[1].toLowerCase(), line: i2 + 1, spec: target, toolchain: true });
+    for (const m of l.matchAll(/<PackageReference\s+Include\s*=\s*"([^"]+)"(?:\s+Version\s*=\s*"([^"]+)")?/g))
+      out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: m[2] });
+  });
+  return out2;
+}
+function readDeno(text) {
+  const lines5 = text.split(/\r?\n/);
+  const out2 = [];
+  lines5.forEach((l, i2) => {
+    for (const m of l.matchAll(/"(?:https?:\/\/deno\.land\/x\/([\w-]+)@([^/"]+)|(?:jsr|npm):(@?[\w.-]+(?:\/[\w.-]+)?)@([^/"]+))/g))
+      out2.push({ name: (m[1] ?? m[3]).toLowerCase(), line: i2 + 1, spec: m[2] ?? m[4] });
+  });
+  return out2;
+}
+function gradleProps(buildAbs) {
+  const text = readIfExists(join42(buildAbs, "..", "gradle.properties"));
+  const out2 = {};
+  for (const m of (text ?? "").matchAll(/^\s*([\w.-]+)\s*=\s*(\S+)\s*$/gm)) out2[m[1]] = m[2];
+  return out2;
+}
 var MANIFESTS = [
-  { ecosystem: "node", match: /(?:^|\/)package\.json$/, read: readPackageJson },
-  { ecosystem: "python", match: /(?:^|\/)requirements[\w.-]*\.(?:txt|in)$/, read: readRequirements },
-  { ecosystem: "python", match: /(?:^|\/)(?:pyproject\.toml|Pipfile)$/, read: readPyToml },
-  { ecosystem: "java", match: /(?:^|\/)pom\.xml$/, read: readPom },
-  { ecosystem: "java", match: /(?:^|\/)build\.gradle(?:\.kts)?$/, read: readGradle },
-  { ecosystem: "go", match: /(?:^|\/)go\.mod$/, read: readGoMod },
-  { ecosystem: "ruby", match: /(?:^|\/)Gemfile$/, read: readGemfile },
-  { ecosystem: "php", match: /(?:^|\/)composer\.json$/, read: readComposer }
+  { registry: "npm", match: /(?:^|\/)package\.json$/, read: readPackageJson },
+  { registry: "pypi", match: /(?:^|\/)requirements[\w.-]*\.(?:txt|in)$/, read: readRequirements },
+  { registry: "pypi", match: /(?:^|\/)(?:pyproject\.toml|Pipfile|setup\.py)$/, read: readPyToml },
+  { registry: "maven", match: /(?:^|\/)pom\.xml$/, read: readPom },
+  { registry: "maven", match: /(?:^|\/)build\.gradle(?:\.kts)?$/, read: (text, abs) => readGradle(text, gradleProps(abs)) },
+  { registry: "go", match: /(?:^|\/)go\.mod$/, read: readGoMod },
+  { registry: "gem", match: /(?:^|\/)Gemfile$/, read: readGemfile },
+  { registry: "composer", match: /(?:^|\/)composer\.json$/, read: readComposer },
+  { registry: "hex", match: /(?:^|\/)mix\.exs$/, read: readMix },
+  { registry: "cargo", match: /(?:^|\/)Cargo\.toml$/, read: readCargo },
+  { registry: "nuget", match: /\.csproj$/, read: readCsproj },
+  { registry: "deno", match: /(?:^|\/)deno\.jsonc?$/, read: readDeno }
 ];
 function readIfExists(abs) {
   try {
@@ -35859,6 +36004,14 @@ function pythonLocked(absDir, name2) {
   }
   return void 0;
 }
+function hexLocked(absDir, name2) {
+  const text = readIfExists(join42(absDir, "mix.lock"));
+  return text ? new RegExp(`"${esc(name2)}"\\s*:\\s*\\{\\s*:hex\\s*,\\s*:${esc(name2)}\\s*,\\s*"([^"]+)"`).exec(text)?.[1] : void 0;
+}
+function cargoLocked(absDir, name2) {
+  const text = readIfExists(join42(absDir, "Cargo.lock"));
+  return text ? new RegExp(`^name\\s*=\\s*"${esc(name2)}"\\s*\\r?\\nversion\\s*=\\s*"([^"]+)"`, "m").exec(text)?.[1] : void 0;
+}
 function rubyLocked(absDir, name2) {
   const text = readIfExists(join42(absDir, "Gemfile.lock"));
   return text ? new RegExp(`^ {4}${esc(name2)} \\(([^)]+)\\)`, "m").exec(text)?.[1] : void 0;
@@ -35876,21 +36029,44 @@ function composerLocked(absDir, name2) {
 function resolveVersion(repo, kind, manifestRel, dir, d) {
   const absDir = join42(repo, dir);
   let locked;
-  if (kind.ecosystem === "node") {
-    const inst = installedVersions(repo, manifestRel, d.name);
-    if (inst?.versions.length) locked = [...inst.versions].sort(compareVersions).at(-1);
-    if (!locked) {
-      const range = declaredRange(repo, manifestRel, d.name) ?? d.spec;
-      const floor2 = floorOf2(range);
-      return floor2 ? { version: floor2, versionSource: "declared" } : {};
+  switch (kind.registry) {
+    case "npm": {
+      const inst = installedVersions(repo, manifestRel, d.name);
+      if (inst?.versions.length) locked = [...inst.versions].sort(compareVersions).at(-1);
+      if (!locked) {
+        const floor2 = floorOf2(declaredRange(repo, manifestRel, d.name) ?? d.spec);
+        return floor2 ? { version: floor2, versionSource: "declared" } : {};
+      }
+      break;
     }
-  } else if (kind.ecosystem === "python") locked = pythonLocked(absDir, d.name);
-  else if (kind.ecosystem === "ruby") locked = rubyLocked(absDir, d.name);
-  else if (kind.ecosystem === "php") locked = composerLocked(absDir, d.name);
-  else if (kind.ecosystem === "go" && d.spec) locked = d.spec;
+    case "pypi":
+      locked = pythonLocked(absDir, d.name);
+      break;
+    case "gem":
+      locked = rubyLocked(absDir, d.name);
+      break;
+    case "composer":
+      locked = composerLocked(absDir, d.name);
+      break;
+    case "hex":
+      locked = hexLocked(absDir, d.name);
+      break;
+    case "cargo":
+      locked = cargoLocked(absDir, d.name);
+      break;
+    // go.mod pins an exact minimum version: it is what the build selects.
+    case "go":
+      locked = d.spec;
+      break;
+    default:
+      break;
+  }
   if (locked) return { version: locked, versionSource: "lockfile" };
   const floor = floorOf2(d.spec);
-  return floor ? { version: floor, versionSource: "declared" } : {};
+  return floor ? { version: floor, versionSource: d.toolchain ? "toolchain" : "declared" } : {};
+}
+function nameMatches(declared, names) {
+  return names.some((n) => n.endsWith("*") ? declared.startsWith(n.slice(0, -1)) : declared === n);
 }
 var dirOf8 = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/")) : "";
 function detectFrameworks(repo, prune, tree) {
@@ -35907,34 +36083,47 @@ function detectFrameworks(repo, prune, tree) {
     const text = read(wf.abs);
     if (!text) continue;
     const dir = dirOf8(wf.rel);
-    const declared = kind.read(text);
-    for (const def of FRAMEWORKS) {
-      if (def.ecosystem !== kind.ecosystem) continue;
-      const d = declared.find((x) => def.packages.includes(kind.ecosystem === "python" ? normPy(x.name) : x.name));
-      if (!d) continue;
-      add3({ id: def.id, title: def.title, ecosystem: def.ecosystem, dir, ...resolveVersion(repo, kind, wf.rel, dir, d), evidence: `${wf.rel}:${d.line}` });
-    }
-    if (kind.ecosystem === "go") {
-      const prefix = dir ? `${dir}/` : "";
-      for (const g of files) {
-        if (!g.rel.endsWith(".go") || !g.rel.startsWith(prefix) || g.rel.endsWith("_test.go")) continue;
-        const lines5 = read(g.abs).split(/\r?\n/);
-        const at = lines5.findIndex((l) => /^\s*(?:import\s+)?(?:\w+\s+)?"net\/http"\s*$/.test(l));
-        if (at < 0) continue;
-        const goLine = /^go\s+(\d+(?:\.\d+)*)/m.exec(text);
-        add3({
-          id: GO_STDLIB.id,
-          title: GO_STDLIB.title,
-          ecosystem: "go",
-          dir,
-          ...goLine ? { version: goLine[1], versionSource: "toolchain" } : {},
-          evidence: `${g.rel}:${at + 1}`
-        });
-        break;
+    const declared = kind.read(text, wf.abs);
+    for (const entry2 of STACK) {
+      const names = entry2.deps[kind.registry];
+      if (names?.length) {
+        const d = declared.find((x) => nameMatches(kind.registry === "pypi" ? normPy(x.name) : x.name, names));
+        if (d) add3(detected(entry2, dir, resolveVersion(repo, kind, wf.rel, dir, d), `${wf.rel}:${d.line}`));
+      }
+      if (entry2.codeImport?.registry === kind.registry) {
+        const prefix = dir ? `${dir}/` : "";
+        for (const g of files) {
+          if (!g.rel.endsWith(entry2.codeImport.extension) || !g.rel.startsWith(prefix) || isTestPath(g.rel)) continue;
+          const lines5 = read(g.abs).split(/\r?\n/);
+          const at = lines5.findIndex((l) => entry2.codeImport.re.test(l));
+          if (at < 0) continue;
+          const goLine = /^go\s+(\d+(?:\.\d+)*)/m.exec(text);
+          add3(detected(entry2, dir, goLine ? { version: goLine[1], versionSource: "toolchain" } : {}, `${g.rel}:${at + 1}`));
+          break;
+        }
       }
     }
   }
   return [...byPackage.values()].sort((a, b) => byStr(a.dir, b.dir) || byStr(a.id, b.id));
+}
+function detected(entry2, dir, version, evidence) {
+  return {
+    id: entry2.id,
+    title: entry2.title,
+    ecosystem: entry2.ecosystem,
+    ...entry2.kind === "library" ? { kind: "library" } : {},
+    dir,
+    ...version,
+    evidence,
+    ...entry2.languages ? { languages: entry2.languages } : {}
+  };
+}
+function webFrameworks(stack) {
+  return stack.filter((f) => f.kind !== "library");
+}
+function stackLabels(stack) {
+  const label = new Map(STACK.map((e) => [e.id, e.label ?? e.id]));
+  return [...new Set(stack.map((f) => label.get(f.id) ?? f.id))].sort(byStr);
 }
 function satisfies(version, range) {
   const v = version.replace(/^v/, "");
@@ -38124,174 +38313,13 @@ var ADAPTERS = [
 
 // src/context.ts
 import { existsSync as existsSync27, readFileSync as readFileSync31 } from "fs";
-import { join as join55, resolve as resolve16 } from "path";
+import { join as join55 } from "path";
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
 var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|getServerSession|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
 var THROTTLE_MARKER = /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
-var JS_FRAMEWORKS = {
-  express: "express",
-  koa: "koa",
-  fastify: "fastify",
-  "@nestjs/core": "nestjs",
-  next: "next.js",
-  nuxt: "nuxt",
-  "@hapi/hapi": "hapi",
-  hapi: "hapi",
-  sails: "sails",
-  restify: "restify",
-  react: "react",
-  vue: "vue",
-  "@angular/core": "angular",
-  svelte: "svelte",
-  "apollo-server": "apollo",
-  graphql: "graphql",
-  "socket.io": "socket.io",
-  mongoose: "mongoose",
-  sequelize: "sequelize",
-  prisma: "prisma",
-  knex: "knex",
-  typeorm: "typeorm",
-  passport: "passport",
-  jsonwebtoken: "jwt"
-};
-var PY_RULES = [
-  [/\bflask\b/i, "flask"],
-  [/\bdjango\b/i, "django"],
-  [/\bfastapi\b/i, "fastapi"],
-  [/\btornado\b/i, "tornado"],
-  [/\bbottle\b/i, "bottle"],
-  [/\bpyramid\b/i, "pyramid"],
-  [/\bsanic\b/i, "sanic"],
-  [/\baiohttp\b/i, "aiohttp"],
-  [/\bsqlalchemy\b/i, "sqlalchemy"]
-];
-var TEXT_MANIFESTS = [
-  {
-    file: "requirements.txt",
-    rules: PY_RULES
-  },
-  // Same rules, the manifests modern Python actually uses. requirements.txt alone
-  // reported "none detected" on any Poetry/PDM/uv or setuptools project.
-  {
-    file: "pyproject.toml",
-    rules: PY_RULES
-  },
-  {
-    file: "Pipfile",
-    rules: PY_RULES
-  },
-  {
-    file: "setup.py",
-    rules: PY_RULES
-  },
-  {
-    file: "Cargo.toml",
-    rules: [
-      [/^\s*actix-web\s*=/m, "actix-web"],
-      [/^\s*axum\s*=/m, "axum"],
-      [/^\s*rocket\s*=/m, "rocket"],
-      [/^\s*warp\s*=/m, "warp"],
-      [/^\s*tide\s*=/m, "tide"],
-      [/^\s*diesel\s*=/m, "diesel"],
-      [/^\s*sqlx\s*=/m, "sqlx"]
-    ]
-  },
-  {
-    file: "build.gradle.kts",
-    rules: [[/org\.springframework/, "spring"]]
-  },
-  {
-    file: "mix.exs",
-    rules: [
-      [/:phoenix\b/, "phoenix"],
-      [/:plug\b/, "plug"],
-      [/:ecto\b/, "ecto"]
-    ]
-  },
-  {
-    file: "deno.json",
-    rules: [
-      [/\boak\b/, "oak"],
-      [/\bfresh\b/, "fresh"]
-    ]
-  },
-  {
-    file: "go.mod",
-    rules: [
-      [/gin-gonic\/gin/, "gin"],
-      [/labstack\/echo/, "echo"],
-      [/gofiber\/fiber/, "fiber"],
-      [/go-chi\/chi/, "chi"],
-      [/gorilla\/mux/, "gorilla/mux"],
-      [/gorm\.io\/gorm/, "gorm"]
-    ]
-  },
-  {
-    file: "Gemfile",
-    rules: [
-      [/\brails\b/i, "rails"],
-      [/\bsinatra\b/i, "sinatra"],
-      [/\bsequel\b/i, "sequel"],
-      [/\bhanami\b/i, "hanami"]
-    ]
-  },
-  {
-    file: "composer.json",
-    rules: [
-      [/laravel\/framework/, "laravel"],
-      [/symfony\//, "symfony"],
-      [/slim\/slim/, "slim"]
-    ]
-  },
-  {
-    file: "build.gradle",
-    rules: [[/springframework|org\.springframework|spring-boot/i, "spring"]]
-  },
-  {
-    file: "pom.xml",
-    rules: [
-      [/springframework/i, "spring"],
-      [/jersey/i, "jersey"]
-    ]
-  }
-];
-function manifestDirs(repo, names) {
-  const dirs = new Set(findManifestDirs(repo, names));
-  try {
-    for (const w of detectWorkspaces(repo).packages) {
-      const dir = resolve16(repo, w.dir);
-      for (const name2 of names) if (existsSync27(join55(dir, name2))) dirs.add(dir);
-    }
-  } catch {
-  }
-  return [...dirs].sort(byStr);
-}
-function detectFrameworks2(repo) {
-  const found = /* @__PURE__ */ new Set();
-  for (const dir of manifestDirs(repo, ["package.json"])) {
-    try {
-      const pkg = JSON.parse(readFileSync31(join55(dir, "package.json"), "utf8"));
-      const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {}, ...pkg.peerDependencies ?? {} };
-      for (const name2 of Object.keys(deps)) {
-        const label = Object.hasOwn(JS_FRAMEWORKS, name2) ? JS_FRAMEWORKS[name2] : void 0;
-        if (label) found.add(label);
-      }
-    } catch {
-    }
-  }
-  for (const m of TEXT_MANIFESTS) {
-    for (const dir of manifestDirs(repo, [m.file])) {
-      let raw;
-      try {
-        raw = readFileSync31(join55(dir, m.file), "utf8");
-      } catch {
-        continue;
-      }
-      for (const [re, name2] of m.rules) if (re.test(raw)) found.add(name2);
-    }
-  }
-  return [...found].sort(byStr);
+function detectStackLabels(repo) {
+  return stackLabels(detectFrameworks(repo));
 }
 function appliesTo2(languages, langId) {
   return languages.includes("*") || languages.includes(langId);
@@ -38349,7 +38377,7 @@ function capBySite(items, weight, bySite) {
   return spread.slice(0, MAX_SCAFFOLD).sort(bySite);
 }
 function buildContextScaffold(repo, scan2, surface) {
-  const frameworks = detectFrameworks2(repo);
+  const frameworks = detectStackLabels(repo);
   const rank2 = new Map(surface.byFile.map((f) => [f.file, f.score]));
   const perFile = /* @__PURE__ */ new Map();
   for (const g of surface.entryPoints) {
@@ -38623,9 +38651,9 @@ function devOnlyPackages(repo) {
       }
     }
   }
-  const manifestDirs2 = findManifestDirs(repo, ["package.json"]);
-  if (manifestDirs2.length) sources.push("package.json");
-  for (const dir of manifestDirs2) {
+  const manifestDirs = findManifestDirs(repo, ["package.json"]);
+  if (manifestDirs.length) sources.push("package.json");
+  for (const dir of manifestDirs) {
     let pkg;
     try {
       pkg = JSON.parse(readFileSync32(join56(dir, "package.json"), "utf8"));
@@ -38666,8 +38694,8 @@ var BUDGETS = {
 };
 var REVDEP_DEPTH = 2;
 async function runScan2(args2) {
-  const repo = resolve17(flagStr(args2, "repo") ?? ".");
-  const out2 = resolve17(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve16(flagStr(args2, "repo") ?? ".");
+  const out2 = resolve16(flagStr(args2, "out") ?? ".ultrasec");
   resetDetectCache();
   if (!isScannableDir(repo)) {
     eprintln(`ultrasec: --repo '${repo}' is not a directory. Aborting \u2014 an unscannable path must not report a clean audit.`);
@@ -38777,7 +38805,7 @@ async function runScan2(args2) {
   const agenticFindings = auditAgenticWorkflows(repo, prune, tree);
   const webConfigFindings = auditWebConfig(repo, prune, tree);
   const authTokenFindings = auditAuthTokens(repo, prune, tree);
-  const frameworks = detectFrameworks(repo, prune, tree);
+  const frameworks = webFrameworks(detectFrameworks(repo, prune, tree));
   const classAudit = auditWeaknessClasses(repo, prune, tree, frameworks);
   const classCells = classCoverage(frameworks);
   const cloudFindings = auditCloud(repo, prune, tree);
@@ -39012,10 +39040,10 @@ async function runScan2(args2) {
 
 // src/commands/context.ts
 import { mkdirSync as mkdirSync14, writeFileSync as writeFileSync15 } from "fs";
-import { join as join58, resolve as resolve18 } from "path";
+import { join as join58, resolve as resolve17 } from "path";
 function runContext(args2) {
-  const repo = resolve18(flagStr(args2, "repo") ?? ".");
-  const out2 = resolve18(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve17(flagStr(args2, "repo") ?? ".");
+  const out2 = resolve17(flagStr(args2, "out") ?? ".ultrasec");
   if (!isScannableDir(repo)) {
     eprintln(`ultrasec context: --repo '${repo}' is not a directory.`);
     return 2;
@@ -39057,7 +39085,7 @@ function runContext(args2) {
 }
 
 // src/commands/import.ts
-import { resolve as resolve19, join as join59 } from "path";
+import { resolve as resolve18, join as join59 } from "path";
 import { existsSync as existsSync30, readFileSync as readFileSync33 } from "fs";
 
 // src/tools/deepsec.ts
@@ -39129,7 +39157,7 @@ async function runImport(args2) {
     eprintln("ultrasec import: need a findings file \u2014 `ultrasec import <findings.json> --run <dir>`.");
     return 2;
   }
-  const run2 = resolve19(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve18(flagStr(args2, "run") ?? ".ultrasec");
   const format = flagStr(args2, "format") ?? "deepsec-json";
   if (format !== "deepsec-json") {
     eprintln(`ultrasec import: unknown --format '${format}' (supported: deepsec-json).`);
@@ -39137,7 +39165,7 @@ async function runImport(args2) {
   }
   let raw;
   try {
-    raw = readFileSync33(resolve19(file), "utf8");
+    raw = readFileSync33(resolve18(file), "utf8");
   } catch (e) {
     eprintln(`ultrasec import: cannot read ${file} (${e instanceof Error ? e.message : String(e)}).`);
     return 2;
@@ -39158,7 +39186,7 @@ async function runImport(args2) {
   }
   const prevFindings = prev?.findings ?? [];
   const correlated = correlate([...prevFindings, ...imported]);
-  const repo = prev?.manifest.repo ?? resolve19(flagStr(args2, "repo") ?? ".");
+  const repo = prev?.manifest.repo ?? resolve18(flagStr(args2, "repo") ?? ".");
   const enrichOn = !(flagBool(args2, "no-enrich") || flagBool(args2, "offline"));
   const { findings: enriched, note: riskNote } = await enrichFindings(correlated, { enabled: enrichOn, context: loadContextDoc(run2) });
   const blameOn = flagBool(args2, "blame") || flagBool(args2, "provenance");
@@ -39196,7 +39224,7 @@ async function runImport(args2) {
 }
 
 // src/commands/logs.ts
-import { resolve as resolve20, join as join60, dirname as dirname13, extname as extname5, sep as sep10 } from "path";
+import { resolve as resolve19, join as join60, dirname as dirname13, extname as extname5, sep as sep10 } from "path";
 import { existsSync as existsSync31, statSync as statSync16, readdirSync as readdirSync5, mkdirSync as mkdirSync15, writeFileSync as writeFileSync16, openSync, readSync, closeSync } from "fs";
 
 // src/logs/analyze.ts
@@ -40118,7 +40146,7 @@ async function runLogs(args2) {
     eprintln(`ultrasec logs: ${e instanceof Error ? e.message : String(e)}`);
     return 2;
   }
-  const out2 = resolve20(flagStr(args2, "out") ?? ".ultrasec-logs");
+  const out2 = resolve19(flagStr(args2, "out") ?? ".ultrasec-logs");
   const budget = flagStr(args2, "budget") ?? "standard";
   if (!["quick", "standard", "thorough"].includes(budget)) {
     eprintln(`ultrasec logs: unknown --budget '${budget}' (expected quick|standard|thorough).`);
@@ -40237,7 +40265,7 @@ function looksLikeText(path) {
 function expandInputs(inputs) {
   const out2 = /* @__PURE__ */ new Set();
   for (const raw of inputs) {
-    const p = resolve20(raw);
+    const p = resolve19(raw);
     if (!existsSync31(p)) throw new Error(`path not found: ${raw}`);
     const st = statSync16(p);
     if (st.isDirectory()) {
@@ -40275,7 +40303,7 @@ function strictCommonAncestor(dirs) {
   return joined === "" ? sep10 : joined;
 }
 function computeBase(absFiles) {
-  const cwd = resolve20(process.cwd());
+  const cwd = resolve19(process.cwd());
   if (absFiles.every((f) => f.startsWith(cwd + sep10))) return cwd;
   const common = strictCommonAncestor(absFiles.map((f) => dirname13(f)));
   if (!common) throw new Error("input log paths share no common ancestor directory \u2014 pass paths under one common root.");
@@ -40283,7 +40311,7 @@ function computeBase(absFiles) {
 }
 
 // src/commands/dossier.ts
-import { resolve as resolve21 } from "path";
+import { resolve as resolve20 } from "path";
 
 // src/dossier.ts
 import { extname as extname6, join as join61 } from "path";
@@ -40514,7 +40542,7 @@ function renderFindingDossier(repo, graph, f, options = {}) {
 
 // src/commands/dossier.ts
 function runDossier(args2) {
-  const run2 = resolve21(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve20(flagStr(args2, "run") ?? ".ultrasec");
   const id = args2._[1];
   if (!id) {
     eprintln("ultrasec dossier: need a <finding-id>. List them in DOSSIER.md or with `paths`.");
@@ -40540,11 +40568,11 @@ function runDossier(args2) {
 }
 
 // src/commands/triage.ts
-import { resolve as resolve24 } from "path";
+import { resolve as resolve23 } from "path";
 
 // src/stage.ts
 import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync17, readFileSync as readFileSync34, readdirSync as readdirSync6, statSync as statSync17 } from "fs";
-import { join as join62, resolve as resolve22 } from "path";
+import { join as join62, resolve as resolve21 } from "path";
 function stageFiles(stem2) {
   return { todo: `${stem2}.todo.json`, md: `${stem2}.md` };
 }
@@ -40556,8 +40584,8 @@ function emitWorklist(run2, files, items, md) {
   return todoPath;
 }
 function collectApplyFiles(applyPath, dirRegex) {
-  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve22(s.trim()));
-  const abs = resolve22(applyPath);
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve21(s.trim()));
+  const abs = resolve21(applyPath);
   let isDir = false;
   try {
     isDir = statSync17(abs).isDirectory();
@@ -41034,7 +41062,7 @@ function parseTriage(raw) {
 
 // src/orchestrate.ts
 import { existsSync as existsSync32, mkdirSync as mkdirSync17, readFileSync as readFileSync35, writeFileSync as writeFileSync18 } from "fs";
-import { join as join64, resolve as resolve23 } from "path";
+import { join as join64, resolve as resolve22 } from "path";
 
 // src/orchestrate-templates.ts
 import { join as join63 } from "path";
@@ -41536,7 +41564,7 @@ function readIds(path, id) {
 }
 var SURFACE_FILTERS = [...SURFACES, "all"];
 function listPhases(runDir, engineAbs, surface = "all") {
-  const run2 = resolve23(runDir);
+  const run2 = resolve22(runDir);
   const findingsPath = join64(run2, "findings.json");
   const allIds = readIds(findingsPath, (f) => f.id);
   let adjIds = [];
@@ -41598,7 +41626,7 @@ function repoOf(run2) {
   return "<repo>";
 }
 function orchestrateRun(runDir, engineAbs, opts = {}) {
-  const run2 = resolve23(runDir);
+  const run2 = resolve22(runDir);
   if (!existsSync32(run2)) {
     return { exitCode: 2, written: [], notices: [], errors: [`run dir not found: ${run2}`], phases: [] };
   }
@@ -41660,7 +41688,7 @@ function orchestrateRun(runDir, engineAbs, opts = {}) {
 
 // src/commands/triage.ts
 function runTriage(args2) {
-  const run2 = resolve24(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve23(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -41717,14 +41745,14 @@ function runTriage(args2) {
 
 // src/commands/investigate.ts
 import { readFileSync as readFileSync37 } from "fs";
-import { join as join68, resolve as resolve26 } from "path";
+import { join as join68, resolve as resolve25 } from "path";
 
 // src/check.ts
 import { existsSync as existsSync33, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
-import { join as join65, resolve as resolve25, sep as sep11 } from "path";
+import { join as join65, resolve as resolve24, sep as sep11 } from "path";
 function insideRepo(repo, file) {
-  const base = resolve25(repo);
-  const abs = resolve25(base, file);
+  const base = resolve24(repo);
+  const abs = resolve24(base, file);
   return abs === base || abs.startsWith(base + sep11);
 }
 var LINE_COUNT_CHUNK_BYTES = 1 << 20;
@@ -42041,7 +42069,6 @@ var CLASS_IDS = [
 ];
 
 // src/classes/hunt.ts
-var ECOSYSTEM_LANGUAGE = { node: "javascript", python: "python", java: "java", go: "go", ruby: "ruby", php: "php" };
 var MAX_HUNT_FILES = 8;
 var MAX_EXAMPLES = 3;
 function huntPrompt(h) {
@@ -42053,7 +42080,7 @@ function buildClassHunts(manifest, surface) {
   for (const cell of cells) {
     const cls = CLASSES[cell.class];
     const fw = manifest.frameworks?.find((f) => f.id === cell.framework && f.dir === cell.dir);
-    const lang = ECOSYSTEM_LANGUAGE[cell.ecosystem];
+    const lang = ECOSYSTEM_LANGUAGES[cell.ecosystem]?.[0];
     const examples = [...cls.examples].sort((a, b) => Number(b.language === lang) - Number(a.language === lang)).slice(0, MAX_EXAMPLES);
     const prefix = cell.dir ? `${cell.dir}/` : "";
     const files = [...fw ? [fw.evidence.replace(/:\d+$/, "")] : [], ...(surface?.byFile ?? []).map((f) => f.file).filter((f) => f.startsWith(prefix))];
@@ -42406,7 +42433,7 @@ function parseDiscoveries(raw) {
 
 // src/commands/investigate.ts
 function runInvestigate(args2) {
-  const run2 = resolve26(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve25(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -42414,7 +42441,7 @@ function runInvestigate(args2) {
     eprintln(`ultrasec investigate: ${e.message}`);
     return 2;
   }
-  const repo = resolve26(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve25(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -42534,11 +42561,11 @@ function runInvestigate(args2) {
 }
 
 // src/commands/paths.ts
-import { resolve as resolve27 } from "path";
+import { resolve as resolve26 } from "path";
 var isSeverity = (s) => SEVERITIES2.includes(s);
 var rank = (s) => SEVERITIES2.indexOf(s);
 function runPaths(args2) {
-  const run2 = resolve27(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve26(flagStr(args2, "run") ?? ".ultrasec");
   const kind = flagStr(args2, "kind");
   const sev = flagStr(args2, "severity");
   const floor = flagStr(args2, "min-severity");
@@ -42609,9 +42636,9 @@ function runPaths(args2) {
 }
 
 // src/commands/verify.ts
-import { join as join69, resolve as resolve28 } from "path";
+import { join as join69, resolve as resolve27 } from "path";
 function runVerify(args2) {
-  const run2 = resolve28(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve27(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -42700,9 +42727,9 @@ function applyMode(run2, dossier, applyPath, args2) {
 }
 
 // src/commands/revalidate.ts
-import { resolve as resolve29 } from "path";
+import { resolve as resolve28 } from "path";
 function runRevalidate(args2) {
-  const run2 = resolve29(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve28(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -42710,7 +42737,7 @@ function runRevalidate(args2) {
     eprintln(`ultrasec revalidate: ${e.message}`);
     return 2;
   }
-  const repo = resolve29(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve28(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -42775,7 +42802,7 @@ function runRevalidate(args2) {
 
 // src/commands/variants.ts
 import { writeFileSync as writeFileSync20 } from "fs";
-import { join as join70, resolve as resolve30 } from "path";
+import { join as join70, resolve as resolve29 } from "path";
 
 // src/variants.ts
 function sinkOf(f) {
@@ -42932,7 +42959,7 @@ function renderRegressionRules(results) {
 
 // src/commands/variants.ts
 function runVariants(args2) {
-  const run2 = resolve30(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve29(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -42940,7 +42967,7 @@ function runVariants(args2) {
     eprintln(`ultrasec variants: ${e.message}`);
     return 2;
   }
-  const repo = resolve30(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve29(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -43002,7 +43029,7 @@ function runVariants(args2) {
 }
 
 // src/commands/guards.ts
-import { resolve as resolve31 } from "path";
+import { resolve as resolve30 } from "path";
 
 // src/guards.ts
 import { join as join71 } from "path";
@@ -43372,7 +43399,7 @@ function markerFlags(args2) {
 }
 var isLens = (s) => GUARD_LENSES.includes(s);
 function runGuards(args2) {
-  const run2 = resolve31(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve30(flagStr(args2, "run") ?? ".ultrasec");
   const strict = flagBool(args2, "strict");
   const lensName = flagStr(args2, "lens");
   if (lensName !== void 0 && !isLens(lensName)) {
@@ -43390,7 +43417,7 @@ function runGuards(args2) {
     eprintln(`ultrasec guards: ${e.message}`);
     return 2;
   }
-  const repo = resolve31(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve30(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const markers = [.../* @__PURE__ */ new Set([...contextMarkers(loadContextDoc(run2), lens), ...markerFlags(args2)])];
   const matrixOpts = { includeTests: dossier.manifest.passes?.includeTests === true };
   const applyPath = flagStr(args2, "apply");
@@ -43464,9 +43491,9 @@ function runGuards(args2) {
 
 // src/commands/assumptions.ts
 import { writeFileSync as writeFileSync21 } from "fs";
-import { join as join72, resolve as resolve32 } from "path";
+import { join as join72, resolve as resolve31 } from "path";
 function runAssumptions(args2) {
-  const run2 = resolve32(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve31(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -43474,7 +43501,7 @@ function runAssumptions(args2) {
     eprintln(`ultrasec assumptions: ${e.message}`);
     return 2;
   }
-  const repo = resolve32(flagStr(args2, "repo") ?? dossier.manifest.repo);
+  const repo = resolve31(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -43530,7 +43557,7 @@ function runAssumptions(args2) {
 
 // src/commands/coverage.ts
 import { writeFileSync as writeFileSync22 } from "fs";
-import { join as join73, resolve as resolve33 } from "path";
+import { join as join73, resolve as resolve32 } from "path";
 
 // src/coverage.ts
 var ASVS_CATEGORIES = [
@@ -43982,7 +44009,7 @@ function renderCoverageMd(rows, standardTitle = "OWASP ASVS", dossier, classCell
 
 // src/commands/coverage.ts
 function runCoverage(args2) {
-  const run2 = resolve33(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve32(flagStr(args2, "run") ?? ".ultrasec");
   const standardId = flagStr(args2, "standard") ?? DEFAULT_STANDARD;
   if (!own(STANDARDS, standardId)) {
     eprintln(`ultrasec coverage: unknown --standard '${standardId}' (expected ${Object.keys(STANDARDS).join("|")}).`);
@@ -44016,7 +44043,7 @@ function runCoverage(args2) {
 }
 
 // src/commands/narrative.ts
-import { resolve as resolve34 } from "path";
+import { resolve as resolve33 } from "path";
 
 // src/narrative.ts
 var AI_DISCLAIMER = "AI-authored \u2014 verify against the cited findings before acting.";
@@ -44193,7 +44220,7 @@ function hardeningNotesMd(n) {
 
 // src/commands/narrative.ts
 function runNarrative(args2) {
-  const run2 = resolve34(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve33(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -44218,7 +44245,7 @@ function runNarrative(args2) {
 }
 
 // src/commands/implement.ts
-import { resolve as resolve35 } from "path";
+import { resolve as resolve34 } from "path";
 
 // src/implement.ts
 import { existsSync as existsSync35, readFileSync as readFileSync38 } from "fs";
@@ -44379,7 +44406,7 @@ function renderImplementMd(wl, context) {
 
 // src/commands/implement.ts
 function runImplement(args2) {
-  const run2 = resolve35(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve34(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -44388,7 +44415,7 @@ function runImplement(args2) {
     return 2;
   }
   const narrFile = flagStr(args2, "narrative");
-  const narrative = loadNarrative(run2, dossier, narrFile ? resolve35(narrFile) : void 0);
+  const narrative = loadNarrative(run2, dossier, narrFile ? resolve34(narrFile) : void 0);
   const wl = buildImplementWorklist(dossier, narrative);
   const todoPath = emitWorklist(run2, stageFiles("IMPLEMENT"), wl, renderImplementMd(wl, loadContextDoc(run2)));
   if (flagBool(args2, "json")) {
@@ -44407,9 +44434,9 @@ function runImplement(args2) {
 }
 
 // src/commands/check.ts
-import { resolve as resolve36 } from "path";
+import { resolve as resolve35 } from "path";
 function runCheck(args2) {
-  const run2 = resolve36(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve35(flagStr(args2, "run") ?? ".ultrasec");
   const repo = flagStr(args2, "repo");
   const semantic = flagBool(args2, "semantic");
   const minSevRaw = flagStr(args2, "min-severity");
@@ -44450,7 +44477,7 @@ function runCheck(args2) {
 
 // src/commands/render.ts
 import { readFileSync as readFileSync39, writeFileSync as writeFileSync23 } from "fs";
-import { join as join75, resolve as resolve37 } from "path";
+import { join as join75, resolve as resolve36 } from "path";
 
 // src/render/mermaid.ts
 function esc2(s) {
@@ -45366,7 +45393,7 @@ function renderHtml(d, narrative) {
 
 // src/commands/render.ts
 function runRender(args2) {
-  const run2 = resolve37(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve36(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -45380,7 +45407,7 @@ function runRender(args2) {
   if (narrativePath) {
     let parsed2;
     try {
-      parsed2 = parseNarrative(readFileSync39(resolve37(narrativePath), "utf8"));
+      parsed2 = parseNarrative(readFileSync39(resolve36(narrativePath), "utf8"));
     } catch (e) {
       eprintln(`ultrasec render: cannot read narrative at ${narrativePath}: ${e.message}`);
       return 2;
@@ -45422,7 +45449,7 @@ function runRender(args2) {
 // src/commands/clean.ts
 import { execFileSync as execFileSync9 } from "child_process";
 import { existsSync as existsSync36, rmSync as rmSync10, readdirSync as readdirSync7 } from "fs";
-import { join as join76, resolve as resolve38 } from "path";
+import { join as join76, resolve as resolve37 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 var DELIVERABLES = /* @__PURE__ */ new Set(["SUMMARY.md", "REPORT.md", "index.html", "findings.json", JOURNAL_FILE]);
@@ -45446,7 +45473,7 @@ function docker(args2) {
   }
 }
 function runClean(args2) {
-  const run2 = resolve38(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve37(flagStr(args2, "run") ?? ".ultrasec");
   const dry = flagBool(args2, "dry-run");
   const withDocker = flagBool(args2, "docker");
   const keepOutput = flagBool(args2, "keep-output");
@@ -45509,7 +45536,7 @@ function runClean(args2) {
 
 // src/commands/run.ts
 import { existsSync as existsSync38 } from "fs";
-import { join as join78, resolve as resolve39 } from "path";
+import { join as join78, resolve as resolve38 } from "path";
 
 // src/powered/agent.ts
 import { spawnSync as spawnSync3 } from "child_process";
@@ -45870,8 +45897,8 @@ function runPipeline(opts) {
 
 // src/commands/run.ts
 function runRun(args2) {
-  const repo = resolve39(flagStr(args2, "repo") ?? ".");
-  const run2 = resolve39(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve38(flagStr(args2, "repo") ?? ".");
+  const run2 = resolve38(flagStr(args2, "out") ?? ".ultrasec");
   const powered = flagBool(args2, "powered");
   const noScan = flagBool(args2, "no-scan");
   const requested = listFlag(args2, "stages");
@@ -45996,7 +46023,7 @@ function runOrchestrate(args2) {
 
 // src/commands/probe.ts
 import { mkdirSync as mkdirSync18, writeFileSync as writeFileSync25 } from "fs";
-import { join as join80, resolve as resolve40 } from "path";
+import { join as join80, resolve as resolve39 } from "path";
 import { request as httpsRequest } from "https";
 import { request as httpRequest } from "http";
 import { lookup } from "dns/promises";
@@ -46377,7 +46404,7 @@ async function runProbe(args2, deps = {}) {
   const deep = flagBool(args2, "deep");
   const graphql = flagBool(args2, "graphql");
   const timeout = numFlag(args2, "timeout") ?? 1e4;
-  const out2 = resolve40(flagStr(args2, "out") ?? ".ultrasec");
+  const out2 = resolve39(flagStr(args2, "out") ?? ".ultrasec");
   const ctx = { cap: deep ? 24 : 12, made: 0, timeout, findings: [], truncated: false, pinned };
   const main2 = await fetchWithin(ctx, url, { method: "GET" });
   if (!main2) {
@@ -46428,7 +46455,7 @@ async function runProbe(args2, deps = {}) {
 
 // src/commands/route.ts
 import { mkdirSync as mkdirSync19, writeFileSync as writeFileSync26 } from "fs";
-import { join as join81, resolve as resolve41 } from "path";
+import { join as join81, resolve as resolve40 } from "path";
 var ROUTE_TABLE = [
   {
     id: "android-apk",
@@ -46689,7 +46716,7 @@ function runRoute(args2) {
   const c2 = classifyTarget(target);
   const result = buildResult(target, c2);
   if (flagStr(args2, "out") !== void 0 || flagBool(args2, "write")) {
-    const out2 = resolve41(flagStr(args2, "out") ?? ".");
+    const out2 = resolve40(flagStr(args2, "out") ?? ".");
     mkdirSync19(out2, { recursive: true });
     const p = join81(out2, "ROUTE.md");
     writeFileSync26(p, renderMd(result));
@@ -46752,7 +46779,7 @@ import { createInterface as createInterface3 } from "readline";
 
 // src/mcp/handlers.ts
 import { existsSync as existsSync40, readFileSync as readFileSync41, realpathSync as realpathSync9, statSync as statSync19 } from "fs";
-import { isAbsolute as isAbsolute12, join as join82, resolve as resolve42, sep as sep12 } from "path";
+import { isAbsolute as isAbsolute12, join as join82, resolve as resolve41, sep as sep12 } from "path";
 
 // src/run-lock.ts
 var chains = /* @__PURE__ */ new Map();
@@ -46815,7 +46842,7 @@ function positive(v, key) {
 function requiredRepo(args2, defaults) {
   const repo = str2(args2.repo) ?? defaults.defaultRun;
   if (!repo) throw new ToolError("`repo` is required: an absolute path to the repository root.");
-  const abs = resolve42(repo);
+  const abs = resolve41(repo);
   if (!isScannableDir(abs)) {
     throw new ToolError(`\`repo\` is not a directory: ${abs}. Refusing to continue \u2014 an unscannable path must not report a clean audit.`);
   }
@@ -46825,7 +46852,7 @@ function resolveRun(args2, repo) {
   const explicit = str2(args2.run) ?? str2(args2.out);
   if (explicit) {
     if (!isAbsolute12(explicit)) throw new ToolError("`run` must be an absolute path.");
-    return resolve42(explicit);
+    return resolve41(explicit);
   }
   return join82(repo, ".ultrasec");
 }
@@ -46995,7 +47022,7 @@ function handleRead(args2, repo, run2) {
     try {
       return realpathSync9(d);
     } catch {
-      return resolve42(d);
+      return resolve41(d);
     }
   });
   if (!allowed.some((root) => real === root || real.startsWith(root + sep12))) {
@@ -47493,13 +47520,13 @@ var DECLARED = new Set([...TOOLS3, ...WRITE_TOOLS].map((t) => t.name));
 
 // src/mcp/resources.ts
 import { existsSync as existsSync41, readdirSync as readdirSync8, readFileSync as readFileSync42, realpathSync as realpathSync10, statSync as statSync20 } from "fs";
-import { basename as basename6, dirname as dirname14, join as join83, resolve as resolve43, sep as sep13 } from "path";
+import { basename as basename6, dirname as dirname14, join as join83, resolve as resolve42, sep as sep13 } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 var SKILL_NAME = "ultrasec";
 var URI_SCHEME = "skill://";
 function resolveSkillRoot(moduleDir) {
   const here = moduleDir ?? dirname14(fileURLToPath4(import.meta.url));
-  const candidates = [resolve43(here, ".."), resolve43(here, "..", "skills", SKILL_NAME), resolve43(here, "..", "..", "skills", SKILL_NAME)];
+  const candidates = [resolve42(here, ".."), resolve42(here, "..", "skills", SKILL_NAME), resolve42(here, "..", "..", "skills", SKILL_NAME)];
   return candidates.find((dir) => existsSync41(join83(dir, "SKILL.md")));
 }
 function listResources(moduleDir) {
@@ -47522,7 +47549,7 @@ function readResource(uri, moduleDir) {
   if (!root) throw new ResourceError("no skill payload found next to this build \u2014 nothing to read");
   const rel2 = uri.slice(URI_SCHEME.length);
   if (!rel2) throw new ResourceError("empty resource path");
-  const target = resolve43(root, rel2);
+  const target = resolve42(root, rel2);
   const rootReal = realpathSync10(root);
   let targetReal;
   try {
@@ -47726,10 +47753,10 @@ async function runStdioServer(opts = {}) {
   let pendingWrite = Promise.resolve();
   const queueWrite = (frame) => {
     pendingWrite = pendingWrite.then(
-      () => new Promise((resolve44, reject) => {
+      () => new Promise((resolve43, reject) => {
         emit2(frame, (error) => {
           if (error) reject(error);
-          else resolve44();
+          else resolve43();
         });
       })
     );
@@ -47815,14 +47842,14 @@ function startHttpServer(opts = {}) {
   server.requestTimeout = 0;
   server.headersTimeout = 6e4;
   server.keepAliveTimeout = 12e4;
-  return new Promise((resolve44, reject) => {
+  return new Promise((resolve43, reject) => {
     server.once("error", reject);
     server.listen(opts.port ?? 0, bind, () => {
       server.removeListener("error", reject);
       const addr2 = server.address();
       const port = typeof addr2 === "object" && addr2 ? addr2.port : opts.port ?? 0;
       const host = bind.includes(":") ? `[${bind}]` : bind;
-      resolve44({
+      resolve43({
         server,
         port,
         url: `http://${host}:${port}${MCP_PATH}`,
@@ -47931,7 +47958,7 @@ function sendJson(res, status, body2, origin, extra = {}) {
 }
 var DRAIN_LIMIT = MAX_BODY_BYTES * 8;
 function readBody(req) {
-  return new Promise((resolve44, reject) => {
+  return new Promise((resolve43, reject) => {
     const chunks = [];
     let size = 0;
     let over = false;
@@ -47955,7 +47982,7 @@ function readBody(req) {
     });
     req.on("end", () => {
       if (over) reject(new Error("too large"));
-      else resolve44(Buffer.concat(chunks).toString("utf8"));
+      else resolve43(Buffer.concat(chunks).toString("utf8"));
     });
     req.on("error", reject);
     req.on("aborted", () => reject(new Error("client aborted the request")));

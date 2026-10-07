@@ -1,0 +1,4 @@
+%{
+  "phoenix": {:hex, :phoenix, "1.7.14", "a7d0b3f1", [:mix], [], "hexpm", "c7859bc5"},
+  "plug_cowboy": {:hex, :plug_cowboy, "2.7.1", "87677ffe", [:mix], [], "hexpm", "02dbd5f9"},
+}

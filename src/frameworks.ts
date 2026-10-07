@@ -4,7 +4,9 @@ import { readText, walk, type RepoTree } from "./walk.js";
 import { installedVersions, declaredRange } from "./tools/lockfile-versions.js";
 import { compareVersions } from "./deps.js";
 import { byStr } from "./util.js";
+import { isTestPath } from "./vendor/codeindex-engine.mjs";
 import type { Ecosystem } from "./classes/types.js";
+import { STACK, type Registry, type StackEntry } from "./stack.js";
 
 // Which web frameworks a repository uses, at which version, and where it says
 // so — read from the dependency manifests, one package directory at a time.
@@ -22,10 +24,16 @@ import type { Ecosystem } from "./classes/types.js";
 // guessed one.
 
 export interface DetectedFramework {
-  /** Framework id, as packs name it (`nextjs`, `django`, `net-http`, …). */
+  /** Stack id, as packs name it (`nextjs`, `django`, `net-http`, `next-auth`, …). */
   id: string;
   title: string;
   ecosystem: Ecosystem;
+  /**
+   * `library` for a library row of the stack table; `inferred` for a web
+   * framework the table does not know, inferred from the package's own code
+   * (see `inferUnknownFrameworks`). Absent: a known web framework.
+   */
+  kind?: "library" | "inferred";
   /** Repo-relative package directory (`""` = the repo root). */
   dir: string;
   /** Installed version when a lockfile records it, else the floor of the declared range. */
@@ -34,57 +42,14 @@ export interface DetectedFramework {
   versionSource?: "lockfile" | "declared" | "toolchain";
   /** `file:line` of the declaration. */
   evidence: string;
+  /** The languages its code is written in, when not its ecosystem's. */
+  languages?: readonly string[];
 }
 
-interface FrameworkDef {
-  id: string;
-  title: string;
-  ecosystem: Ecosystem;
-  /** Dependency names that mean "this package uses the framework" (lower case). */
-  packages: string[];
-}
+/** The web frameworks of the stack table — what becomes a matrix column. */
+export const FRAMEWORKS: readonly StackEntry[] = STACK.filter((e) => e.kind === "web");
 
-/** The frameworks detected. A framework with no pack is still listed: its
- *  classes are then hunted by the AI pass instead of matched by a pack. */
-export const FRAMEWORKS: FrameworkDef[] = [
-  { id: "nextjs", title: "Next.js", ecosystem: "node", packages: ["next"] },
-  { id: "express", title: "Express", ecosystem: "node", packages: ["express"] },
-  { id: "nestjs", title: "NestJS", ecosystem: "node", packages: ["@nestjs/core"] },
-  { id: "fastify", title: "Fastify", ecosystem: "node", packages: ["fastify"] },
-  { id: "koa", title: "Koa", ecosystem: "node", packages: ["koa"] },
-  { id: "hono", title: "Hono", ecosystem: "node", packages: ["hono"] },
-  { id: "elysia", title: "Elysia", ecosystem: "node", packages: ["elysia"] },
-  { id: "nuxt", title: "Nuxt", ecosystem: "node", packages: ["nuxt"] },
-  { id: "sveltekit", title: "SvelteKit", ecosystem: "node", packages: ["@sveltejs/kit"] },
-  { id: "django", title: "Django", ecosystem: "python", packages: ["django"] },
-  { id: "flask", title: "Flask", ecosystem: "python", packages: ["flask"] },
-  { id: "fastapi", title: "FastAPI", ecosystem: "python", packages: ["fastapi"] },
-  { id: "tornado", title: "Tornado", ecosystem: "python", packages: ["tornado"] },
-  { id: "aiohttp", title: "aiohttp", ecosystem: "python", packages: ["aiohttp"] },
-  {
-    id: "spring",
-    title: "Spring Boot",
-    ecosystem: "java",
-    packages: ["spring-boot-starter-web", "spring-boot-starter-webflux", "spring-webmvc", "spring-webflux"],
-  },
-  { id: "quarkus", title: "Quarkus", ecosystem: "java", packages: ["quarkus-rest", "quarkus-resteasy", "quarkus-resteasy-reactive"] },
-  { id: "micronaut", title: "Micronaut", ecosystem: "java", packages: ["micronaut-http-server-netty"] },
-  { id: "gin", title: "Gin", ecosystem: "go", packages: ["github.com/gin-gonic/gin"] },
-  { id: "echo", title: "Echo", ecosystem: "go", packages: ["github.com/labstack/echo/v4", "github.com/labstack/echo"] },
-  { id: "fiber", title: "Fiber", ecosystem: "go", packages: ["github.com/gofiber/fiber/v2", "github.com/gofiber/fiber/v3"] },
-  { id: "chi", title: "chi", ecosystem: "go", packages: ["github.com/go-chi/chi/v5", "github.com/go-chi/chi"] },
-  { id: "rails", title: "Ruby on Rails", ecosystem: "ruby", packages: ["rails"] },
-  { id: "sinatra", title: "Sinatra", ecosystem: "ruby", packages: ["sinatra"] },
-  { id: "laravel", title: "Laravel", ecosystem: "php", packages: ["laravel/framework"] },
-  { id: "symfony", title: "Symfony", ecosystem: "php", packages: ["symfony/framework-bundle"] },
-  { id: "slim", title: "Slim", ecosystem: "php", packages: ["slim/slim"] },
-];
-
-/** Go's standard library server — a framework with no manifest entry, detected
- *  from the `net/http` import of a module's own code. */
-const GO_STDLIB: FrameworkDef = { id: "net-http", title: "Go net/http", ecosystem: "go", packages: [] };
-
-export const FRAMEWORK_IDS: readonly string[] = [...FRAMEWORKS.map((f) => f.id), GO_STDLIB.id];
+export const FRAMEWORK_IDS: readonly string[] = FRAMEWORKS.map((f) => f.id);
 
 /** One dependency declaration read from a manifest. */
 interface Declared {
@@ -92,6 +57,8 @@ interface Declared {
   line: number;
   /** The range/pin as written, when the manifest carries one. */
   spec?: string;
+  /** The spec is the toolchain's version (a .NET target framework), not the package's. */
+  toolchain?: boolean;
 }
 
 const normPy = (n: string): string => n.toLowerCase().replace(/[-_.]+/g, "-");
@@ -171,22 +138,35 @@ function readPom(text: string): Declared[] {
       .slice(i, i + 4)
       .join("\n")
       .match(/<version>\s*([^<\s$]+)\s*<\/version>/)?.[1];
-    // The `spring` framework is versioned as Spring Boot (what `testedWith`
-    // means): a non-Boot artifact's own version is Spring Framework's, so it
-    // only inherits the Boot parent/property, never its own number.
-    const boot = m[1]!.startsWith("spring-boot");
-    out.push({ name: m[1]!.toLowerCase(), line: i + 1, spec: (boot ? own : undefined) ?? parent ?? bootProp });
+    out.push({ name: m[1]!.toLowerCase(), line: i + 1, spec: jvmVersion(m[1]!, own, parent ?? bootProp) });
   });
   return out;
 }
 
-function readGradle(text: string): Declared[] {
+/**
+ * The version a JVM artifact is read at. The `spring` framework is versioned as
+ * Spring Boot (what its `testedWith` means): a Boot artifact keeps its own
+ * version, a non-Boot `spring-*` artifact's own number is Spring Framework's,
+ * so it only inherits the Boot parent/property/plugin. Anything else (Ktor,
+ * Quarkus, Jersey) is its own version.
+ */
+function jvmVersion(artifact: string, own: string | undefined, boot: string | undefined): string | undefined {
+  if (artifact.startsWith("spring-boot")) return own ?? boot;
+  if (artifact.startsWith("spring-")) return boot;
+  return own;
+}
+
+function readGradle(text: string, props: Record<string, string> = {}): Declared[] {
   const lines = text.split(/\r?\n/);
   const plugin = /id\s*\(?\s*["']org\.springframework\.boot["']\s*\)?\s*version\s*["']([^"']+)["']/.exec(text)?.[1];
   const out: Declared[] = [];
   lines.forEach((l, i) => {
-    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([\w.-]+))?["']/g))
-      out.push({ name: m[2]!.toLowerCase(), line: i + 1, spec: (m[2]!.startsWith("spring-boot") ? m[3] : undefined) ?? plugin });
+    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([^"'\s]+))?["']/g)) {
+      // `$ktor_version` / `${ktorVersion}`: resolved from gradle.properties when it is there.
+      const raw = m[3];
+      const own = raw?.startsWith("$") ? props[raw.replace(/^\$\{?|\}$/g, "")] : raw;
+      out.push({ name: m[2]!.toLowerCase(), line: i + 1, spec: jvmVersion(m[2]!, own, plugin) });
+    }
   });
   return out;
 }
@@ -234,21 +214,85 @@ function readComposer(text: string): Declared[] {
   return out;
 }
 
+/** mix.exs: `{:phoenix, "~> 1.7.14"}`. */
+function readMix(text: string): Declared[] {
+  const out: Declared[] = [];
+  text.split(/\r?\n/).forEach((l, i) => {
+    for (const m of l.matchAll(/\{\s*:([a-z0-9_]+)\s*,\s*"([^"]+)"/g)) out.push({ name: m[1]!, line: i + 1, spec: m[2] });
+  });
+  return out;
+}
+
+/** Cargo.toml: `axum = "0.7"` / `axum = { version = "0.7", … }` under a `[*dependencies]` table. */
+function readCargo(text: string): Declared[] {
+  const out: Declared[] = [];
+  let inDeps = false;
+  text.split(/\r?\n/).forEach((raw, i) => {
+    const l = raw.replace(/#.*$/, "");
+    const table = /^\s*\[([^\]]+)\]/.exec(l);
+    if (table) {
+      inDeps = /(?:^|\.)(?:dev-|build-)?dependencies$/.test(table[1]!.trim());
+      return;
+    }
+    if (!inDeps) return;
+    const kv = /^\s*([A-Za-z0-9_-]+)\s*=\s*(?:"([^"]*)"|\{[^}]*?version\s*=\s*"([^"]*)")?/.exec(l);
+    if (kv) out.push({ name: kv[1]!.toLowerCase(), line: i + 1, spec: kv[2] ?? kv[3] });
+  });
+  return out;
+}
+
+/** *.csproj: `<PackageReference Include="X" Version="Y" />`, and the project SDK as a dependency. */
+function readCsproj(text: string): Declared[] {
+  const lines = text.split(/\r?\n/);
+  const out: Declared[] = [];
+  const target = /<TargetFrameworks?>\s*net(\d+\.\d+)/.exec(text)?.[1];
+  lines.forEach((l, i) => {
+    const sdk = /<Project\s+Sdk\s*=\s*"([^"]+)"/.exec(l);
+    if (sdk) out.push({ name: sdk[1]!.toLowerCase(), line: i + 1, spec: target, toolchain: true });
+    for (const m of l.matchAll(/<PackageReference\s+Include\s*=\s*"([^"]+)"(?:\s+Version\s*=\s*"([^"]+)")?/g))
+      out.push({ name: m[1]!.toLowerCase(), line: i + 1, spec: m[2] });
+  });
+  return out;
+}
+
+/** deno.json(c) `imports`: `https://deno.land/x/fresh@1.6.8/`, `jsr:@fresh/core@^2`, `npm:hono@4`. */
+function readDeno(text: string): Declared[] {
+  const lines = text.split(/\r?\n/);
+  const out: Declared[] = [];
+  lines.forEach((l, i) => {
+    for (const m of l.matchAll(/"(?:https?:\/\/deno\.land\/x\/([\w-]+)@([^/"]+)|(?:jsr|npm):(@?[\w.-]+(?:\/[\w.-]+)?)@([^/"]+))/g))
+      out.push({ name: (m[1] ?? m[3])!.toLowerCase(), line: i + 1, spec: m[2] ?? m[4] });
+  });
+  return out;
+}
+
 interface ManifestKind {
-  ecosystem: Ecosystem;
+  registry: Registry;
   match: RegExp;
-  read: (text: string) => Declared[];
+  read: (text: string, abs: string) => Declared[];
+}
+
+/** `key=value` lines of the gradle.properties next to a build file. */
+function gradleProps(buildAbs: string): Record<string, string> {
+  const text = readIfExists(join(buildAbs, "..", "gradle.properties"));
+  const out: Record<string, string> = {};
+  for (const m of (text ?? "").matchAll(/^\s*([\w.-]+)\s*=\s*(\S+)\s*$/gm)) out[m[1]!] = m[2]!;
+  return out;
 }
 
 const MANIFESTS: ManifestKind[] = [
-  { ecosystem: "node", match: /(?:^|\/)package\.json$/, read: readPackageJson },
-  { ecosystem: "python", match: /(?:^|\/)requirements[\w.-]*\.(?:txt|in)$/, read: readRequirements },
-  { ecosystem: "python", match: /(?:^|\/)(?:pyproject\.toml|Pipfile)$/, read: readPyToml },
-  { ecosystem: "java", match: /(?:^|\/)pom\.xml$/, read: readPom },
-  { ecosystem: "java", match: /(?:^|\/)build\.gradle(?:\.kts)?$/, read: readGradle },
-  { ecosystem: "go", match: /(?:^|\/)go\.mod$/, read: readGoMod },
-  { ecosystem: "ruby", match: /(?:^|\/)Gemfile$/, read: readGemfile },
-  { ecosystem: "php", match: /(?:^|\/)composer\.json$/, read: readComposer },
+  { registry: "npm", match: /(?:^|\/)package\.json$/, read: readPackageJson },
+  { registry: "pypi", match: /(?:^|\/)requirements[\w.-]*\.(?:txt|in)$/, read: readRequirements },
+  { registry: "pypi", match: /(?:^|\/)(?:pyproject\.toml|Pipfile|setup\.py)$/, read: readPyToml },
+  { registry: "maven", match: /(?:^|\/)pom\.xml$/, read: readPom },
+  { registry: "maven", match: /(?:^|\/)build\.gradle(?:\.kts)?$/, read: (text, abs) => readGradle(text, gradleProps(abs)) },
+  { registry: "go", match: /(?:^|\/)go\.mod$/, read: readGoMod },
+  { registry: "gem", match: /(?:^|\/)Gemfile$/, read: readGemfile },
+  { registry: "composer", match: /(?:^|\/)composer\.json$/, read: readComposer },
+  { registry: "hex", match: /(?:^|\/)mix\.exs$/, read: readMix },
+  { registry: "cargo", match: /(?:^|\/)Cargo\.toml$/, read: readCargo },
+  { registry: "nuget", match: /\.csproj$/, read: readCsproj },
+  { registry: "deno", match: /(?:^|\/)deno\.jsonc?$/, read: readDeno },
 ];
 
 // ── Lockfile versions (non-npm) ─────────────────────────────────────────────
@@ -283,6 +327,18 @@ function pythonLocked(absDir: string, name: string): string | undefined {
   return undefined;
 }
 
+/** mix.lock: `"phoenix": {:hex, :phoenix, "1.7.14", …}`. */
+function hexLocked(absDir: string, name: string): string | undefined {
+  const text = readIfExists(join(absDir, "mix.lock"));
+  return text ? new RegExp(`"${esc(name)}"\\s*:\\s*\\{\\s*:hex\\s*,\\s*:${esc(name)}\\s*,\\s*"([^"]+)"`).exec(text)?.[1] : undefined;
+}
+
+/** Cargo.lock: `name = "axum"` then `version = "0.7.5"`. */
+function cargoLocked(absDir: string, name: string): string | undefined {
+  const text = readIfExists(join(absDir, "Cargo.lock"));
+  return text ? new RegExp(`^name\\s*=\\s*"${esc(name)}"\\s*\\r?\\nversion\\s*=\\s*"([^"]+)"`, "m").exec(text)?.[1] : undefined;
+}
+
 function rubyLocked(absDir: string, name: string): string | undefined {
   const text = readIfExists(join(absDir, "Gemfile.lock"));
   return text ? new RegExp(`^ {4}${esc(name)} \\(([^)]+)\\)`, "m").exec(text)?.[1] : undefined;
@@ -302,29 +358,54 @@ function composerLocked(absDir: string, name: string): string | undefined {
 function resolveVersion(repo: string, kind: ManifestKind, manifestRel: string, dir: string, d: Declared): Pick<DetectedFramework, "version" | "versionSource"> {
   const absDir = join(repo, dir);
   let locked: string | undefined;
-  if (kind.ecosystem === "node") {
-    const inst = installedVersions(repo, manifestRel, d.name);
-    if (inst?.versions.length) locked = [...inst.versions].sort(compareVersions).at(-1);
-    if (!locked) {
-      const range = declaredRange(repo, manifestRel, d.name) ?? d.spec;
-      const floor = floorOf(range);
-      return floor ? { version: floor, versionSource: "declared" } : {};
+  switch (kind.registry) {
+    case "npm": {
+      const inst = installedVersions(repo, manifestRel, d.name);
+      if (inst?.versions.length) locked = [...inst.versions].sort(compareVersions).at(-1);
+      if (!locked) {
+        const floor = floorOf(declaredRange(repo, manifestRel, d.name) ?? d.spec);
+        return floor ? { version: floor, versionSource: "declared" } : {};
+      }
+      break;
     }
-  } else if (kind.ecosystem === "python") locked = pythonLocked(absDir, d.name);
-  else if (kind.ecosystem === "ruby") locked = rubyLocked(absDir, d.name);
-  else if (kind.ecosystem === "php") locked = composerLocked(absDir, d.name);
-  // go.mod pins an exact minimum version: it is what the build selects.
-  else if (kind.ecosystem === "go" && d.spec) locked = d.spec;
+    case "pypi":
+      locked = pythonLocked(absDir, d.name);
+      break;
+    case "gem":
+      locked = rubyLocked(absDir, d.name);
+      break;
+    case "composer":
+      locked = composerLocked(absDir, d.name);
+      break;
+    case "hex":
+      locked = hexLocked(absDir, d.name);
+      break;
+    case "cargo":
+      locked = cargoLocked(absDir, d.name);
+      break;
+    // go.mod pins an exact minimum version: it is what the build selects.
+    case "go":
+      locked = d.spec;
+      break;
+    default:
+      break;
+  }
   if (locked) return { version: locked, versionSource: "lockfile" };
   const floor = floorOf(d.spec);
-  return floor ? { version: floor, versionSource: "declared" } : {};
+  return floor ? { version: floor, versionSource: d.toolchain ? "toolchain" : "declared" } : {};
+}
+
+/** Does a declared dependency name match one of an entry's names (`*` = prefix)? */
+function nameMatches(declared: string, names: readonly string[]): boolean {
+  return names.some((n) => (n.endsWith("*") ? declared.startsWith(n.slice(0, -1)) : declared === n));
 }
 
 const dirOf = (rel: string): string => (rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/")) : "");
 
 /**
- * Detect the frameworks of every package in the repository. Deterministic and
- * offline; sorted by package directory then framework id.
+ * Detect the stack — web frameworks and libraries — of every package in the
+ * repository, from the one table in `src/stack.ts`. Deterministic and offline;
+ * sorted by package directory then id. `kind` says which rows are libraries.
  */
 export function detectFrameworks(repo: string, prune?: (rel: string) => boolean, tree?: RepoTree): DetectedFramework[] {
   const read = tree?.read ?? readText;
@@ -341,37 +422,56 @@ export function detectFrameworks(repo: string, prune?: (rel: string) => boolean,
     const text = read(wf.abs);
     if (!text) continue;
     const dir = dirOf(wf.rel);
-    const declared = kind.read(text);
-    for (const def of FRAMEWORKS) {
-      if (def.ecosystem !== kind.ecosystem) continue;
-      const d = declared.find((x) => def.packages.includes(kind.ecosystem === "python" ? normPy(x.name) : x.name));
-      if (!d) continue;
-      add({ id: def.id, title: def.title, ecosystem: def.ecosystem, dir, ...resolveVersion(repo, kind, wf.rel, dir, d), evidence: `${wf.rel}:${d.line}` });
-    }
+    const declared = kind.read(text, wf.abs);
+    for (const entry of STACK) {
+      const names = entry.deps[kind.registry];
+      if (names?.length) {
+        const d = declared.find((x) => nameMatches(kind.registry === "pypi" ? normPy(x.name) : x.name, names));
+        if (d) add(detected(entry, dir, resolveVersion(repo, kind, wf.rel, dir, d), `${wf.rel}:${d.line}`));
+      }
 
-    // Go's own server: a module whose code imports net/http. The version is
-    // the toolchain the module declares, which is what decides its behaviour.
-    if (kind.ecosystem === "go") {
-      const prefix = dir ? `${dir}/` : "";
-      for (const g of files) {
-        if (!g.rel.endsWith(".go") || !g.rel.startsWith(prefix) || g.rel.endsWith("_test.go")) continue;
-        const lines = read(g.abs).split(/\r?\n/);
-        const at = lines.findIndex((l) => /^\s*(?:import\s+)?(?:\w+\s+)?"net\/http"\s*$/.test(l));
-        if (at < 0) continue;
-        const goLine = /^go\s+(\d+(?:\.\d+)*)/m.exec(text);
-        add({
-          id: GO_STDLIB.id,
-          title: GO_STDLIB.title,
-          ecosystem: "go",
-          dir,
-          ...(goLine ? { version: goLine[1], versionSource: "toolchain" as const } : {}),
-          evidence: `${g.rel}:${at + 1}`,
-        });
-        break;
+      // A framework with no manifest entry (Go's own server): a package whose
+      // code imports it. The version is the toolchain the manifest declares,
+      // which is what decides its behaviour.
+      if (entry.codeImport?.registry === kind.registry) {
+        const prefix = dir ? `${dir}/` : "";
+        for (const g of files) {
+          if (!g.rel.endsWith(entry.codeImport.extension) || !g.rel.startsWith(prefix) || isTestPath(g.rel)) continue;
+          const lines = read(g.abs).split(/\r?\n/);
+          const at = lines.findIndex((l) => entry.codeImport!.re.test(l));
+          if (at < 0) continue;
+          const goLine = /^go\s+(\d+(?:\.\d+)*)/m.exec(text);
+          add(detected(entry, dir, goLine ? { version: goLine[1], versionSource: "toolchain" } : {}, `${g.rel}:${at + 1}`));
+          break;
+        }
       }
     }
   }
   return [...byPackage.values()].sort((a, b) => byStr(a.dir, b.dir) || byStr(a.id, b.id));
+}
+
+function detected(entry: StackEntry, dir: string, version: Pick<DetectedFramework, "version" | "versionSource">, evidence: string): DetectedFramework {
+  return {
+    id: entry.id,
+    title: entry.title,
+    ecosystem: entry.ecosystem,
+    ...(entry.kind === "library" ? { kind: "library" as const } : {}),
+    dir,
+    ...version,
+    evidence,
+    ...(entry.languages ? { languages: entry.languages } : {}),
+  };
+}
+
+/** The web frameworks among a detection — the matrix columns. */
+export function webFrameworks(stack: readonly DetectedFramework[]): DetectedFramework[] {
+  return stack.filter((f) => f.kind !== "library");
+}
+
+/** The context brief's names for a detection, sorted and unique. */
+export function stackLabels(stack: readonly DetectedFramework[]): string[] {
+  const label = new Map(STACK.map((e) => [e.id, e.label ?? e.id]));
+  return [...new Set(stack.map((f) => label.get(f.id) ?? f.id))].sort(byStr);
 }
 
 /**

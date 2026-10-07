@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
-import { buildPruneMatcher, findManifestDirs, readText, walk } from "./walk.js";
-import { detectWorkspaces, isTestPath } from "./vendor/codeindex-engine.mjs";
+import { join } from "node:path";
+import { buildPruneMatcher, readText, walk } from "./walk.js";
+import { isTestPath } from "./vendor/codeindex-engine.mjs";
+import { detectFrameworks, stackLabels } from "./frameworks.js";
 import { langForFile, type LangSpec } from "./lang.js";
 import { SANITIZERS, findSinks, findTextSinks } from "./catalog.js";
 import type { RepoScan } from "./scan.js";
@@ -62,214 +63,16 @@ export const AUTH_MARKER =
 export const THROTTLE_MARKER =
   /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
 
-// Dependency name → friendly framework label (package.json deps/devDeps keys).
-const JS_FRAMEWORKS: Record<string, string> = {
-  express: "express",
-  koa: "koa",
-  fastify: "fastify",
-  "@nestjs/core": "nestjs",
-  next: "next.js",
-  nuxt: "nuxt",
-  "@hapi/hapi": "hapi",
-  hapi: "hapi",
-  sails: "sails",
-  restify: "restify",
-  react: "react",
-  vue: "vue",
-  "@angular/core": "angular",
-  svelte: "svelte",
-  "apollo-server": "apollo",
-  graphql: "graphql",
-  "socket.io": "socket.io",
-  mongoose: "mongoose",
-  sequelize: "sequelize",
-  prisma: "prisma",
-  knex: "knex",
-  typeorm: "typeorm",
-  passport: "passport",
-  jsonwebtoken: "jwt",
-};
-
-/** Shared by every Python manifest — the framework names are the same whichever
- *  file declares them. */
-const PY_RULES: [RegExp, string][] = [
-  [/\bflask\b/i, "flask"],
-  [/\bdjango\b/i, "django"],
-  [/\bfastapi\b/i, "fastapi"],
-  [/\btornado\b/i, "tornado"],
-  [/\bbottle\b/i, "bottle"],
-  [/\bpyramid\b/i, "pyramid"],
-  [/\bsanic\b/i, "sanic"],
-  [/\baiohttp\b/i, "aiohttp"],
-  [/\bsqlalchemy\b/i, "sqlalchemy"],
-];
-
-// Substring/regex detectors for text-based manifests (offline, tolerant of format).
-const TEXT_MANIFESTS: { file: string; rules: [RegExp, string][] }[] = [
-  {
-    file: "requirements.txt",
-    rules: PY_RULES,
-  },
-  // Same rules, the manifests modern Python actually uses. requirements.txt alone
-  // reported "none detected" on any Poetry/PDM/uv or setuptools project.
-  {
-    file: "pyproject.toml",
-    rules: PY_RULES,
-  },
-  {
-    file: "Pipfile",
-    rules: PY_RULES,
-  },
-  {
-    file: "setup.py",
-    rules: PY_RULES,
-  },
-  {
-    file: "Cargo.toml",
-    rules: [
-      [/^\s*actix-web\s*=/m, "actix-web"],
-      [/^\s*axum\s*=/m, "axum"],
-      [/^\s*rocket\s*=/m, "rocket"],
-      [/^\s*warp\s*=/m, "warp"],
-      [/^\s*tide\s*=/m, "tide"],
-      [/^\s*diesel\s*=/m, "diesel"],
-      [/^\s*sqlx\s*=/m, "sqlx"],
-    ],
-  },
-  {
-    file: "build.gradle.kts",
-    rules: [[/org\.springframework/, "spring"]],
-  },
-  {
-    file: "mix.exs",
-    rules: [
-      [/:phoenix\b/, "phoenix"],
-      [/:plug\b/, "plug"],
-      [/:ecto\b/, "ecto"],
-    ],
-  },
-  {
-    file: "deno.json",
-    rules: [
-      [/\boak\b/, "oak"],
-      [/\bfresh\b/, "fresh"],
-    ],
-  },
-  {
-    file: "go.mod",
-    rules: [
-      [/gin-gonic\/gin/, "gin"],
-      [/labstack\/echo/, "echo"],
-      [/gofiber\/fiber/, "fiber"],
-      [/go-chi\/chi/, "chi"],
-      [/gorilla\/mux/, "gorilla/mux"],
-      [/gorm\.io\/gorm/, "gorm"],
-    ],
-  },
-  {
-    file: "Gemfile",
-    rules: [
-      [/\brails\b/i, "rails"],
-      [/\bsinatra\b/i, "sinatra"],
-      [/\bsequel\b/i, "sequel"],
-      [/\bhanami\b/i, "hanami"],
-    ],
-  },
-  {
-    file: "composer.json",
-    rules: [
-      [/laravel\/framework/, "laravel"],
-      [/symfony\//, "symfony"],
-      [/slim\/slim/, "slim"],
-    ],
-  },
-  {
-    file: "build.gradle",
-    rules: [[/springframework|org\.springframework|spring-boot/i, "spring"]],
-  },
-  {
-    file: "pom.xml",
-    rules: [
-      [/springframework/i, "spring"],
-      [/jersey/i, "jersey"],
-    ],
-  },
-];
-
 /**
- * Detect frameworks from on-disk manifests. Offline + tolerant: a missing or
- * malformed manifest contributes nothing rather than throwing.
- *
- * EVERY manifest in the tree is read, not just the root's. A monorepo keeps its
- * dependencies in the workspace packages — `targets/frontend/package.json`, not
- * `./package.json` — so reading only the root reported `frameworks: —` on a
- * repo whose whole attack surface was a Next.js app, and the trust boundaries
- * inferred from that emptiness were wrong for the same reason. `findManifestDirs`
- * is the same bounded walk the lockfile adapters already use for exactly this.
+ * The stack the brief names: every web framework and library of the one stack
+ * table (`src/stack.ts`), read from every manifest in the tree by the same
+ * detection the weakness-class matrix uses — so the brief and the matrix can no
+ * longer disagree about what a repository is built with. A monorepo keeps its
+ * dependencies in the workspace packages, not the root, which is why the whole
+ * tree is read.
  */
-/**
- * Directories to look for manifests in: the bounded basename walk, UNION the
- * workspaces the repo actually declares.
- *
- * The walk alone is capped at `MANIFEST_MAX_DEPTH` and knows nothing about
- * membership, so a two-deep `packages` layout is found and a four-deep one is
- * not — and it counts a `package.json` in an untracked scratch tree no build sees.
- * `detectWorkspaces` reads the declarations instead (npm/yarn `workspaces`,
- * `pnpm-workspace.yaml`, `lerna.json`, `nx.json`, Cargo, go.work, Maven, uv,
- * Composer, Gradle). It is already vendored and already used by `regionKeyer`
- * for `investigate` regions — so those were workspace-aware while the stack
- * detection right next to them was not.
- *
- * Union, not replacement: a manifest outside any declared workspace is still a
- * manifest, and losing it to be principled would be a worse bug than the one
- * being fixed.
- */
-function manifestDirs(repo: string, names: readonly string[]): string[] {
-  const dirs = new Set(findManifestDirs(repo, names));
-  try {
-    for (const w of detectWorkspaces(repo).packages) {
-      const dir = resolve(repo, w.dir);
-      for (const name of names) if (existsSync(join(dir, name))) dirs.add(dir);
-    }
-  } catch {
-    /* not a workspace, or an unreadable declaration — the walk still stands */
-  }
-  return [...dirs].sort(byStr);
-}
-
-function detectFrameworks(repo: string): string[] {
-  const found = new Set<string>();
-
-  for (const dir of manifestDirs(repo, ["package.json"])) {
-    try {
-      const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8")) as {
-        dependencies?: Record<string, string>;
-        devDependencies?: Record<string, string>;
-        peerDependencies?: Record<string, string>;
-      };
-      const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}), ...(pkg.peerDependencies ?? {}) };
-      for (const name of Object.keys(deps)) {
-        const label = Object.hasOwn(JS_FRAMEWORKS, name) ? JS_FRAMEWORKS[name] : undefined;
-        if (label) found.add(label);
-      }
-    } catch {
-      /* malformed package.json — skip */
-    }
-  }
-
-  for (const m of TEXT_MANIFESTS) {
-    for (const dir of manifestDirs(repo, [m.file])) {
-      let raw: string;
-      try {
-        raw = readFileSync(join(dir, m.file), "utf8");
-      } catch {
-        continue;
-      }
-      for (const [re, name] of m.rules) if (re.test(raw)) found.add(name);
-    }
-  }
-
-  return [...found].sort(byStr);
+function detectStackLabels(repo: string): string[] {
+  return stackLabels(detectFrameworks(repo));
 }
 
 function appliesTo(languages: string[], langId: string): boolean {
@@ -366,7 +169,7 @@ function capBySite<T extends { file: string; line: number; kind?: string }>(item
 }
 
 export function buildContextScaffold(repo: string, scan: RepoScan, surface: AttackSurface): ContextScaffold {
-  const frameworks = detectFrameworks(repo);
+  const frameworks = detectStackLabels(repo);
 
   // ONE entry point per (file, kind), selected by rank, presented by path.
   //

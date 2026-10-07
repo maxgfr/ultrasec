@@ -12,7 +12,7 @@ import { auditAgenticWorkflows } from "../actions.js";
 import { auditWebConfig } from "../webconfig.js";
 import { auditAuthTokens } from "../authtokens.js";
 import { auditWeaknessClasses } from "../classes/engine.js";
-import { detectFrameworks } from "../frameworks.js";
+import { detectFrameworks, webFrameworks } from "../frameworks.js";
 import { classCoverage, needsHunt } from "../classes/coverage.js";
 import { auditCloud } from "../cloud.js";
 import { buildPruneMatcher, snapshotTree } from "../walk.js";
@@ -299,7 +299,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   // Frameworks and versions per package, read from the dependency manifests:
   // they gate the framework-specific idioms and say which packs ran inside the
   // version range they were validated against.
-  const frameworks = detectFrameworks(repo, prune, tree);
+  const frameworks = webFrameworks(detectFrameworks(repo, prune, tree));
   const classAudit = auditWeaknessClasses(repo, prune, tree, frameworks);
   const classCells = classCoverage(frameworks);
 
