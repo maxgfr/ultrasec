@@ -199,12 +199,6 @@ export const WEBCONFIG_SHAPES: Record<string, WebConfigShape> = {
   },
 };
 
-/** The line that constructs the app, per framework, for the absence shapes. */
-// Flask is deliberately absent: its header middleware (Talisman) is rare
-// enough that the absence would fire on nearly every Flask app.
-const APP_CTOR = /\b(?:express|fastify|Fastify)\s*\(\s*\)|\bnew\s+(?:Hono|Koa|Elysia)\s*\(|\bFastAPI\s*\(/;
-const HEADERS_MIDDLEWARE =
-  /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
 const TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
 const BODY_PARSER = /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\(([^)]*)\)/g;
 
@@ -353,73 +347,11 @@ function scanCookies(rel: string, content: string, out: Finding[]): void {
   }
 }
 
-// ── Application-code shapes ─────────────────────────────────────────────────
-/** True when the line is a comment, not code. */
-const COMMENT_LINE = /^\s*(?:\/\/|\*|\/\*)/;
-
-// CSV formula injection (CWE-1236) — the hand-built half. The catalog rule
-// knows CSV LIBRARIES (writerow, csv-stringify); a CSV assembled with
-// `.join(";")` was invisible, on a public export whose cells came from the
-// database.
-const MENTIONS_CSV = /text\/csv|\.csv\b|\bcsv\b/i;
-const CELL_JOIN = /\.join\(\s*(["'`])(?:;|,|\\t)\1\s*\)/;
-const NEUTRALIZES_FORMULA =
-  /\[[^\]\n]*=[^\]\n]*\+[^\]\n]*\]|\[[^\]\n]*\+[^\]\n]*=[^\]\n]*\]|["']=["']\s*,\s*["']\+["']|formula|neutrali[sz]|csv-?injection|escapeCsv|sanitizeCsv/i;
-
-function scanCsvFormula(rel: string, ls: Line[], content: string, out: Finding[]): void {
-  if (!MENTIONS_CSV.test(content)) return;
-  // Code only: a comment saying "cells are not neutralized" is not a neutralizer.
-  const code = ls
-    .filter((l) => !COMMENT_LINE.test(l.text))
-    .map((l) => l.text.replace(/\s\/\/.*$/, ""))
-    .join("\n");
-  if (NEUTRALIZES_FORMULA.test(code)) return;
-  // The data rows are joined after the header: cite the last cell join.
-  const joins = ls.filter((l) => CELL_JOIN.test(l.text) && !COMMENT_LINE.test(l.text));
-  const at = joins[joins.length - 1];
-  if (at) out.push(hit(rel, at.n, WEBCONFIG_SHAPES["csv-formula"]!, at.text));
-}
-
-// `z.coerce.boolean()` on an env var (CWE-704). An env schema key is
-// UPPER_SNAKE; any other key still counts in a file that reads the environment.
-const COERCE_BOOLEAN = /\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
-const ENV_KEY = /^\s*["']?[A-Z][A-Z0-9_]*["']?\s*:/;
-const READS_ENV = /\bprocess\.env\b|\bimport\.meta\.env\b|\bcreateEnv\s*\(|\bDeno\.env\b|\bBun\.env\b/;
-
-// First X-Forwarded-For hop (CWE-348): the split and the header within a few lines.
-const FIRST_HOP = /\.split\(\s*(["'])\s*,\s*\1\s*\)\s*(?:\[\s*0\s*\]|\.shift\(\s*\)|\.at\(\s*0\s*\))/;
-const XFF = /x-forwarded-for|HTTP_X_FORWARDED_FOR|X_FORWARDED_FOR/i;
-const XFF_LOOKBACK = 5;
-
-// Unbounded query in a public/export route (CWE-770).
-const ROUTE_FILE = /(?:^|\/)app\/(?:.*\/)?route\.[cm]?[jt]s$|(?:^|\/)pages\/api\/.+\.[cm]?[jt]sx?$/;
-const EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|xlsx|feed|dump)(?:[/._-]|$)/i;
-const SELECT_START = /\.\s*select(?:Distinct)?\s*\(|\.\s*findMany\s*\(/g;
-const MAX_STATEMENT = 2000;
-
-function scanUnboundedExport(rel: string, content: string, out: Finding[]): void {
-  if (!ROUTE_FILE.test(rel) || !EXPORT_PATH.test(rel)) return;
-  for (const m of content.matchAll(SELECT_START)) {
-    const start = m.index ?? 0;
-    // The statement: up to the first `;` or blank line after the call.
-    const rest = content.slice(start, start + MAX_STATEMENT);
-    const end = rest.search(/;|\n\s*\n/);
-    const stmt = end === -1 ? rest : rest.slice(0, end);
-    const prisma = /findMany/.test(m[0]);
-    if (!prisma && !/\.\s*from\s*\(/.test(stmt)) continue;
-    if (prisma ? /\btake\s*:/.test(stmt) : /\.\s*(?:limit|paginate|\$paginate)\s*\(/.test(stmt)) continue;
-    out.push(hit(rel, lineOf(content, start), WEBCONFIG_SHAPES["unbounded-export"]!, stmt.split("\n")[0]!));
-  }
-}
-
-// Next.js with no security headers (CWE-693): an absence, grounded on the
-// config object — where `headers()` would go.
-const NEXT_CONFIG = /(?:^|\/)next\.config\.(?:js|mjs|cjs|ts|mts)$/;
-const NEXT_HEADERS = /\bheaders\s*(?:\(|:)/;
-const SETS_CSP = /Content-Security-Policy|\bhelmet\s*\(|next-secure-headers|@nosecone|\bnosecone\b|next-safe/i;
-const CONFIG_OBJECT = /(?:const|let|var)\s+\w*[cC]onfig\w*\s*(?::[^=]+)?=\s*\{|module\.exports\s*=|export\s+default\b/;
-
-const dirOfRel = (rel: string): string => (rel.includes("/") ? rel.slice(0, rel.lastIndexOf("/") + 1) : "");
+// The application-code shapes (csv-formula, env-coerce-boolean, xff-first-hop,
+// unbounded-export) and the two header-posture absences (helmet-missing,
+// next-headers-missing) are weakness classes now: their idioms live in the
+// packs under src/classes/packs and run on the class engine, which reports
+// them under the shapes above so their ids are unchanged.
 
 /**
  * Audit a repo for API / web misconfiguration. Returns candidates — a wildcard
@@ -429,10 +361,6 @@ const dirOfRel = (rel: string): string => (rel.includes("/") ? rel.slice(0, rel.
 export function auditWebConfig(repo: string, prune?: (rel: string) => boolean, tree?: RepoTree): Finding[] {
   const out: Finding[] = [];
   const read = tree?.read ?? readText;
-  // Next.js configs without `headers()`, and the directories where something
-  // sets a CSP — decided after the walk, since the setter can be any file.
-  const nextConfigs: { rel: string; ls: Line[] }[] = [];
-  const cspDirs: string[] = [];
   for (const wf of tree?.files ?? walk(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf(wf.rel);
@@ -469,48 +397,8 @@ export function auditWebConfig(repo: string, prune?: (rel: string) => boolean, t
       }
     }
 
-    // Cited on the line that constructs the app — the one place a missing
-    // middleware can be grounded.
-    if (!HEADERS_MIDDLEWARE.test(content)) {
-      const ctor = ls.find((l) => APP_CTOR.test(l.text));
-      if (ctor) out.push(hit(rel, ctor.n, WEBCONFIG_SHAPES["helmet-missing"]!, ctor.text));
-    }
-
     scanCors(rel, content, out);
     scanCookies(rel, content, out);
-
-    if (JS.has(ext)) {
-      scanCsvFormula(rel, ls, content, out);
-      scanUnboundedExport(rel, content, out);
-      const readsEnv = READS_ENV.test(content);
-      for (let i = 0; i < ls.length; i++) {
-        const l = ls[i]!;
-        if (COMMENT_LINE.test(l.text)) continue;
-        const code = l.text.split("//")[0]!;
-        if (COERCE_BOOLEAN.test(code) && (ENV_KEY.test(code) || readsEnv)) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["env-coerce-boolean"]!, l.text));
-      }
-      if (SETS_CSP.test(content) && !NEXT_CONFIG.test(rel)) cspDirs.push(dirOfRel(rel));
-      if (NEXT_CONFIG.test(rel)) {
-        if (SETS_CSP.test(content)) cspDirs.push(dirOfRel(rel));
-        if (!NEXT_HEADERS.test(content)) nextConfigs.push({ rel, ls });
-      }
-    }
-    if (CODE.has(ext)) {
-      for (let i = 0; i < ls.length; i++) {
-        const l = ls[i]!;
-        if (COMMENT_LINE.test(l.text) || !FIRST_HOP.test(l.text)) continue;
-        const window = ls.slice(Math.max(0, i - XFF_LOOKBACK), i + 1);
-        if (window.some((w) => XFF.test(w.text))) out.push(hit(rel, l.n, WEBCONFIG_SHAPES["xff-first-hop"]!, l.text));
-      }
-    }
-  }
-  for (const cfg of nextConfigs) {
-    // A CSP set anywhere in the app's own tree (middleware, a helper, the
-    // config itself) answers the question; a sibling app's does not.
-    const root = dirOfRel(cfg.rel);
-    if (cspDirs.some((d) => d.startsWith(root))) continue;
-    const at = cfg.ls.find((l) => CONFIG_OBJECT.test(l.text)) ?? cfg.ls[0];
-    if (at) out.push(hit(cfg.rel, at.n, WEBCONFIG_SHAPES["next-headers-missing"]!, at.text));
   }
   return out;
 }

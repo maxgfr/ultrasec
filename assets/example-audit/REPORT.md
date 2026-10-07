@@ -196,6 +196,22 @@ reason is how coverage silently shrinks between audits.
 - **V11 Business logic** — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance. Anti-automation is partly enumerated: `scan` finds unbounded similarity/distance calls (CWE-407), `guards --lens throttle` finds handlers nothing rate-limits.
 - **V13 API & web service** — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.
 
+### Weakness classes × frameworks
+
+Each detected framework against each weakness class: matched by a pack (`✅`), not applicable (`➖`),
+handed to the AI hunt (`🔎` pending, `🧭` done), or **not covered**. A `⚠` cell is degraded — no framework
+pack, or a version outside the range the pack was validated on — and is hunted, not trusted.
+
+| class | express 4.17.1 |
+|---|---|
+| timing-unsafe-secret-compare | ✅ pack |
+| csv-formula-injection | ✅ pack |
+| client-ip-first-xff | ✅ pack |
+| unbounded-public-export | ✅ pack |
+| security-headers-absent | ✅ pack |
+| session-cookie-chunks-on-logout | ✅ pack |
+| env-bool-coercion | ✅ pack |
+
 
 ---
 Engine: ultrasec 0.0.0-development. Taint candidates are deterministic; external-tool results depend on installed scanners.

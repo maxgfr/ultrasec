@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { auditWebConfig, WEBCONFIG_SHAPES } from "../src/webconfig.js";
+import { auditWeaknessClasses } from "../src/classes/engine.js";
 
 // The API/web-misconfig detector, measured the bench way: vuln/safe twins with an
 // expectations map. TPR=1 (every vuln file yields EXACTLY its expected shapes) and
@@ -14,7 +15,9 @@ const expectations = JSON.parse(readFileSync(join(FIXTURE, "expectations.json"),
 // title → shape id, so a finding's shape is recoverable from its (unique) title.
 const idByTitle = new Map(Object.values(WEBCONFIG_SHAPES).map((s) => [`Web misconfig — ${s.title}`, s.id]));
 
-const findings = auditWebConfig(FIXTURE);
+// The shapes that became weakness classes run on the class engine and keep
+// their shape ids, so this fixture's expectations hold unchanged across both.
+const findings = [...auditWebConfig(FIXTURE), ...auditWeaknessClasses(FIXTURE).findings];
 const shapesByFile = new Map<string, Set<string>>();
 for (const f of findings) {
   const rel = f.sink!.file;

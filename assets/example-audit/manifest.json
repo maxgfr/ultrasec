@@ -1,6 +1,6 @@
 {
   "version": "0.0.0-development",
-  "schemaVersion": 9,
+  "schemaVersion": 10,
   "repo": "examples/vuln-express",
   "generatedNote": "Taint candidates are deterministic; external-tool results depend on installed scanners.",
   "languages": [
@@ -32,5 +32,95 @@
     "sources": [
       "package.json"
     ]
-  }
+  },
+  "frameworks": [
+    {
+      "id": "express",
+      "title": "Express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "versionSource": "declared",
+      "evidence": "package.json:7"
+    }
+  ],
+  "weaknessClasses": [
+    {
+      "class": "timing-unsafe-secret-compare",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "csv-formula-injection",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "client-ip-first-xff",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "common"
+      ]
+    },
+    {
+      "class": "unbounded-public-export",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "express"
+      ]
+    },
+    {
+      "class": "security-headers-absent",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "express"
+      ]
+    },
+    {
+      "class": "session-cookie-chunks-on-logout",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    },
+    {
+      "class": "env-bool-coercion",
+      "framework": "express",
+      "ecosystem": "node",
+      "dir": "",
+      "version": "4.17.1",
+      "state": "deterministic",
+      "packs": [
+        "node"
+      ]
+    }
+  ]
 }

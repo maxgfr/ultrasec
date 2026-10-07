@@ -178,6 +178,8 @@ describe("runPipeline — powered", () => {
       "apply:throttle",
       "emit:investigate",
       "fill:investigate",
+      // Weakness-class hunt idioms go to PACK-SUGGESTIONS.json, beside the findings.
+      "write:investigate",
       "apply:investigate",
       "emit:verify",
       "fill:verify",

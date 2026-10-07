@@ -1,0 +1,70 @@
+{
+  "timing-unsafe-secret-compare": {
+    "node": { "vuln": ["node-vuln/timing.ts"], "fixed": ["node-fixed/timing.ts"] },
+    "python": { "vuln": ["python-vuln/timing.py"], "fixed": ["python-fixed/timing.py"] },
+    "java": { "vuln": ["java-vuln/src/main/java/demo/ApiKeyFilter.java"], "fixed": ["java-fixed/src/main/java/demo/ApiKeyFilter.java"] },
+    "go": { "vuln": ["go-vuln/timing.go"], "fixed": ["go-fixed/timing.go"] },
+    "ruby": { "vuln": ["ruby-vuln/app/controllers/api_controller.rb"], "fixed": ["ruby-fixed/app/controllers/api_controller.rb"] },
+    "php": { "vuln": ["php-vuln/app/Http/Middleware/PartnerKey.php"], "fixed": ["php-fixed/app/Http/Middleware/PartnerKey.php"] }
+  },
+  "csv-formula-injection": {
+    "node": { "vuln": ["node-vuln/csv.ts"], "fixed": ["node-fixed/csv.ts"] },
+    "python": { "vuln": ["python-vuln/csv_export.py"], "fixed": ["python-fixed/csv_export.py"] },
+    "java": { "vuln": ["java-vuln/src/main/java/demo/CsvExport.java"], "fixed": ["java-fixed/src/main/java/demo/CsvExport.java"] },
+    "go": { "vuln": ["go-vuln/csv.go"], "fixed": ["go-fixed/csv.go"] },
+    "ruby": { "vuln": ["ruby-vuln/lib/users_csv.rb"], "fixed": ["ruby-fixed/lib/users_csv.rb"] },
+    "php": { "vuln": ["php-vuln/app/Support/UsersCsv.php"], "fixed": ["php-fixed/app/Support/UsersCsv.php"] }
+  },
+  "client-ip-first-xff": {
+    "node": { "vuln": ["node-vuln/xff.ts"], "fixed": ["node-fixed/xff.ts"] },
+    "python": { "vuln": ["python-vuln/xff.py"], "fixed": ["python-fixed/xff.py"] },
+    "flask": { "vuln": ["python-vuln/flaskapp/client_ip.py"], "fixed": ["python-fixed/flaskapp/client_ip.py"] },
+    "java": { "vuln": ["java-vuln/src/main/java/demo/ClientIp.java"], "fixed": ["java-fixed/src/main/java/demo/ClientIp.java"] },
+    "go": { "vuln": ["go-vuln/xff.go"], "fixed": ["go-fixed/xff.go"] },
+    "gin": { "vuln": ["go-vuln/gin_app.go"], "fixed": ["go-fixed/gin_app.go"] },
+    "ruby": { "vuln": ["ruby-vuln/lib/client_ip.rb"], "fixed": ["ruby-fixed/lib/client_ip.rb"] },
+    "php": { "vuln": ["php-vuln/app/Support/ClientIp.php"], "fixed": ["php-fixed/app/Support/ClientIp.php"] }
+  },
+  "unbounded-public-export": {
+    "nextjs": { "vuln": ["node-vuln/app/api/export/route.ts"], "fixed": ["node-fixed/app/api/export/route.ts"] },
+    "express": { "vuln": ["node-vuln/express-export.js"], "fixed": ["node-fixed/express-export.js"] },
+    "nestjs": { "vuln": ["node-vuln/nest-export.controller.ts"], "fixed": ["node-fixed/nest-export.controller.ts"] },
+    "fastify": { "vuln": ["node-vuln/fastify-export.js"], "fixed": ["node-fixed/fastify-export.js"] },
+    "django": { "vuln": ["python-vuln/djangoapp/views.py"], "fixed": ["python-fixed/djangoapp/views.py"] },
+    "flask": { "vuln": ["python-vuln/flaskapp/export.py"], "fixed": ["python-fixed/flaskapp/export.py"] },
+    "fastapi": { "vuln": ["python-vuln/fastapiapp/export.py"], "fixed": ["python-fixed/fastapiapp/export.py"] },
+    "spring": { "vuln": ["java-vuln/src/main/java/demo/ExportController.java"], "fixed": ["java-fixed/src/main/java/demo/ExportController.java"] },
+    "net-http": { "vuln": ["go-vuln/handlers.go"], "fixed": ["go-fixed/handlers.go"] },
+    "gin": { "vuln": ["go-vuln/gin_export.go"], "fixed": ["go-fixed/gin_export.go"] },
+    "rails": { "vuln": ["ruby-vuln/app/controllers/exports_controller.rb"], "fixed": ["ruby-fixed/app/controllers/exports_controller.rb"] },
+    "laravel": { "vuln": ["php-vuln/routes/api.php"], "fixed": ["php-fixed/routes/api.php"] }
+  },
+  "security-headers-absent": {
+    "nextjs": { "vuln": ["node-vuln/next.config.mjs"], "fixed": ["node-fixed/next.config.mjs"] },
+    "express": { "vuln": ["node-vuln/express-app.js"], "fixed": ["node-fixed/express-app.js"] },
+    "nestjs": { "vuln": ["node-vuln/nest-main.ts"], "fixed": ["node-fixed/nest-main.ts"] },
+    "fastify": { "vuln": ["node-vuln/fastify-app.js"], "fixed": ["node-fixed/fastify-app.js"] },
+    "django": { "vuln": ["python-vuln/djangoapp/settings.py"], "fixed": ["python-fixed/djangoapp/settings.py"] },
+    "flask": { "vuln": ["python-vuln/flaskapp/app.py"], "fixed": ["python-fixed/flaskapp/app.py"] },
+    "fastapi": { "vuln": ["python-vuln/fastapiapp/main.py"], "fixed": ["python-fixed/fastapiapp/main.py"] },
+    "spring": {
+      "vuln": ["java-vuln/src/main/java/demo/Application.java", "java-vuln/disabled/src/main/java/demo/SecurityConfig.java"],
+      "fixed": ["java-fixed/src/main/java/demo/Application.java", "java-fixed/src/main/java/demo/SecurityConfig.java"]
+    },
+    "net-http": { "vuln": ["go-vuln/server.go"], "fixed": ["go-fixed/server.go"] },
+    "gin": { "vuln": ["go-vuln/gin_app.go"], "fixed": ["go-fixed/gin_app.go"] },
+    "rails": { "vuln": ["ruby-vuln/config/application.rb"], "fixed": ["ruby-fixed/config/application.rb"] },
+    "laravel": { "vuln": ["php-vuln/bootstrap/app.php"], "fixed": ["php-fixed/bootstrap/app.php"] }
+  },
+  "session-cookie-chunks-on-logout": {
+    "node": { "vuln": ["node-vuln/session.ts"], "fixed": ["node-fixed/session.ts"] }
+  },
+  "env-bool-coercion": {
+    "node": { "vuln": ["node-vuln/env.js"], "fixed": ["node-fixed/env.js"] },
+    "python": { "vuln": ["python-vuln/env_flags.py"], "fixed": ["python-fixed/env_flags.py"] },
+    "java": { "vuln": ["java-vuln/src/main/java/demo/Flags.java"], "fixed": ["java-fixed/src/main/java/demo/Flags.java"] },
+    "go": { "vuln": ["go-vuln/flags.go"], "fixed": ["go-fixed/flags.go"] },
+    "ruby": { "vuln": ["ruby-vuln/lib/flags.rb"], "fixed": ["ruby-fixed/lib/flags.rb"] },
+    "php": { "vuln": ["php-vuln/app/Support/Flags.php"], "fixed": ["php-fixed/app/Support/Flags.php"] }
+  }
+}

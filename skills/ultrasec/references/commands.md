@@ -277,7 +277,7 @@ The verdict→status table and every JSON shape live in [schemas.md](schemas.md)
 | `guards --marker <name>[,…]` | same | same | adds the project's own guard helpers to the lens vocabulary (whole, possibly dotted names); `Auth markers:` / `Throttle markers:` lines in `CONTEXT.md` do the same for every run |
 | `guards --lens throttle --run <d>` | `THROTTLE.todo.json` + `.md` | `throttled\|unthrottled\|not-abusable` | `unthrottled` becomes a cited `other` finding — **CWE-307 + CWE-204** on an auth-shaped handler, CWE-770 otherwise |
 | `verify --run <d>` | `VERIFY.todo.json` + `.md` | `supported\|partial\|unsupported\|refuted` | `partial` → needs-human at any severity; `unsupported` → needs-human on high/critical |
-| `investigate --run <d>` | `INVESTIGATE.todo.json` + `.md` | `Discovery[]` | citations checked **before** ingest; a bad one is rejected, not folded |
+| `investigate --run <d>` | `INVESTIGATE.todo.json` + `.md` | `Discovery[]`, or `{discoveries, idioms, hunted}` | citations checked **before** ingest; a bad one is rejected, not folded. Weakness-class hunts (`region: hunt:…`) take `idioms[]` too, citation-checked into `PACK-SUGGESTIONS.json` — proposals, never applied; `--strict` counts refused idioms |
 | `revalidate --run <d>` | `REVALIDATE.todo.json` + `.md` | `still-valid\|fixed\|false-positive\|uncertain` | `fixed` → dismissed + `fixedIn`; high/critical `false-positive` → needs-human |
 
 Shared `--apply` behaviour: the argument may be **a file, a comma-separated list, or a
@@ -341,6 +341,15 @@ refusing to produce them would trade a misleading report for no report, and the 
 the moment the terminal scrolls while the HTML is what gets shared. Open dependency advisories
 never trigger it: triaging the ranked list and stopping at the bar is the prescribed outcome
 ([supply-chain.md](supply-chain.md)). `--draft` acknowledges the state and exits 0.
+
+### `coverage --run <dir>`
+Read-only. Scores the run against a standard (`--standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25`,
+default ASVS) and appends the **weakness-class × framework matrix** from `manifest.weaknessClasses`:
+each detected framework against each class, `✅ pack` / `➖ n/a` / `⬜ not covered`, overlaid with
+this run's AI hunt (`🔎` emitted by `investigate`, `🧭` recorded by an apply). A `⚠` cell is
+degraded — no framework pack, or a version outside the pack's `testedWith` — and is hunted rather
+than trusted. `--write` saves COVERAGE.md; `--json` prints the standard rows, `--classes --json`
+the class matrix.
 
 ### `check --run <dir>`
 The exit gate. **Read-only — it writes nothing and changes no status.** Fails on any finding

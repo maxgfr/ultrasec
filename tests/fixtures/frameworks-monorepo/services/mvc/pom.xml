@@ -1,0 +1,9 @@
+<project>
+  <dependencies>
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-webmvc</artifactId>
+      <version>5.3.39</version>
+    </dependency>
+  </dependencies>
+</project>

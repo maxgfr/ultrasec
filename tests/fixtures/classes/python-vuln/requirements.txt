@@ -1,0 +1,4 @@
+Django==4.2.7
+Flask==3.0.3
+fastapi==0.115.0
+SQLAlchemy==2.0.30

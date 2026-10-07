@@ -163,9 +163,16 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
   //                 audit-playbook.md, the "do not open a dossier per CVE" ladder to
   //                 supply-chain.md, the flags to commands.md. Paid for in part by merging the
   //                 two candidate mistakes into one and tightening steps 6 and 11 (-43 words).
+  //   3304 -> 3345: weakness-class hunts. `investigate` now carries `hunt:` items — a class
+  //                 no pack covers for a framework — and an agent that treats them as regions
+  //                 returns discoveries but never the idioms and `hunted` ids the item asks
+  //                 for; and a `degraded` cell in `manifest.weaknessClasses` reads as covered
+  //                 ground unless step 3 says otherwise. One clause in each step; the format,
+  //                 the method and the promotion path went to references/schemas.md,
+  //                 references/investigate-playbook.md and docs/weakness-classes.md.
   it("keeps the SKILL.md body within its word budget", () => {
     const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
-    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(3304);
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(3345);
   });
 
   // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits

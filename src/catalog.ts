@@ -1863,6 +1863,16 @@ function scanStatementLine(text: string, hash: boolean): { clean: string; net: n
   return { clean, net };
 }
 
+/**
+ * One line's code with its comment cut off and its string literals kept — the
+ * same comment model the sink matcher reads statements with, exposed for the
+ * line-oriented auditors (src/classes) so the two can never disagree about
+ * what a comment is in a given language.
+ */
+export function codeOfLine(text: string, langId: string): string {
+  return scanStatementLine(text, HASH_COMMENT_LANGS.has(langId)).clean;
+}
+
 /** How far a wrapped argument list may run past its callee. */
 const MAX_CONTINUATION_LINES = 3;
 

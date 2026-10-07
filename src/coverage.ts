@@ -1,5 +1,6 @@
 import type { Dossier } from "./store.js";
 import type { Finding, Manifest } from "./types.js";
+import { renderClassCoverageMd, type ClassCoverageCell } from "./classes/coverage.js";
 
 // The coverage matrix — the honest complement to "only report what you can
 // exploit".
@@ -545,7 +546,17 @@ function failedToolLines(dossier?: Dossier): string[] {
   ];
 }
 
-export function renderCoverageMd(rows: CoverageRow[], standardTitle: string = "OWASP ASVS", dossier?: Dossier): string {
+/**
+ * `classCells` is the weakness-class × framework matrix to append; it defaults
+ * to the one the scan recorded, and the `coverage` command passes it with the
+ * run's AI-hunt progress overlaid.
+ */
+export function renderCoverageMd(
+  rows: CoverageRow[],
+  standardTitle: string = "OWASP ASVS",
+  dossier?: Dossier,
+  classCells: readonly ClassCoverageCell[] = dossier?.manifest.weaknessClasses ?? [],
+): string {
   const unexamined = rows.filter((r) => r.state === "unexamined");
   const judgment = rows.filter((r) => r.judgment && r.state !== "examined");
   const L: string[] = [`## Coverage (${standardTitle})`, ""];
@@ -573,5 +584,7 @@ export function renderCoverageMd(rows: CoverageRow[], standardTitle: string = "O
     for (const r of judgment) L.push(`- **${r.id} ${r.title}** — ${r.hint}`);
     L.push("");
   }
+  const classes = renderClassCoverageMd(classCells);
+  if (classes) L.push(classes, "");
   return L.join("\n") + "\n";
 }

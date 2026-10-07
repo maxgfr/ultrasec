@@ -245,7 +245,7 @@ cell's source text: readable, correctly numbered, JSON-escaped.
 
 ## Beyond taint: config & auth line-detectors (run under `scan`)
 
-Some classes have no source→sink flow — the bug is a value that is wrong on its own line. Two
+Some classes have no source→sink flow — the bug is a value that is wrong on its own line. These
 line-oriented detectors run automatically under `ultrasec scan` and emit grounded `[file:line]`
 candidates (`category: config`/`authz`/`crypto`), correlated with the scanners like any other:
 
@@ -257,19 +257,28 @@ candidates (`category: config`/`authz`/`crypto`), correlated with the scanners l
   **CSRF guard switched off** (CWE-352 — a commented-out `protect_from_forgery`, a
   `skip_before_action :verify_authenticity_token`, `@csrf_exempt`, `csrf: false`). Only shapes with
   a line to cite: a framework that never had a guard is an *absence*, which is the access-control
-  lens's job, not a groundable finding. Also, from application code: a **CSV built by hand**
-  (`.join(";")`) with no formula neutralization (CWE-1236 — the catalog rule only knows CSV
-  libraries); **`z.coerce.boolean()` on an env var**, where `"false"` is true (CWE-704); the
-  **client IP taken from the first `X-Forwarded-For` hop** (CWE-348); a **public/export route
-  querying without a row limit** (CWE-770); a **Next.js app with no `headers()` and no CSP**
-  anywhere in its tree (CWE-693, low — `probe` confirms what is served).
+  lens's job, not a groundable finding.
 - **Auth tokens** (`src/authtokens.ts`) — JWT `alg:none`, verified without pinning `algorithms`
   (RS256→HS256 key confusion), decoded without verifying, expiry not enforced (CWE-347/613);
   hardcoded or weak/default secrets (CWE-798/521); OAuth implicit flow, loose `redirect_uri`,
   missing state+PKCE (CWE-757/1385/352); SAML signature disabled (CWE-347); weak password hashing
-  (CWE-916); a **secret compared with `===`/`!==`** (a rebuilt `Bearer ${…}`, a credential-named
-  env var, a `tokens.has(bearer)` lookup — CWE-208); a **hand-written NextAuth logout** that
-  expires the session cookie but not its `.0`/`.1` chunks (CWE-613).
+  (CWE-916).
+- **Weakness classes** (`src/classes`) — seven classes defined once (an invariant, a valid guard,
+  examples) and matched per ecosystem/framework by idiom packs for Express, Next.js, NestJS,
+  Fastify, Django, Flask, FastAPI, Spring Boot, Go net/http, Gin, Rails and Laravel: a **secret
+  compared in non-constant time** (CWE-208); **CSV cells without formula neutralization**
+  (CWE-1236 — hand-built joins and writer libraries); the **client IP taken from the first
+  `X-Forwarded-For` hop**, including Werkzeug `access_route[0]` and Gin's `ClientIP()` with every
+  proxy trusted (CWE-348); a **public/export route querying without a row limit** (CWE-770); an app
+  that **serves no security headers**, judged against each framework's own defaults (Django's
+  SecurityMiddleware, Rails' default headers without CSP, Spring Security's headers, none for
+  Express/Next/Flask/Gin/…; CWE-693, low — `probe` confirms what is served); a **hand-written
+  NextAuth logout** that leaves the session cookie's `.0`/`.1` chunks (CWE-613, Node only — declared
+  not applicable elsewhere); an **environment flag parsed by truthiness** (`z.coerce.boolean()`,
+  `bool(os.environ.get(...))`, `(bool) getenv(...)`, CWE-704). `manifest.frameworks` names each
+  framework and version; `coverage` shows the class × framework matrix, and a cell no pack covers
+  — or a version outside the pack's `testedWith` — becomes an `investigate` hunt
+  ([investigate-playbook.md](investigate-playbook.md)).
 - **Cloud / IaC** (`src/cloud.ts`) — besides the K8s/IAM/storage shapes: an **Ingress in front of a
   mail catcher or admin/metrics UI** with no auth annotation (CWE-306); **docker-compose data
   services published on 0.0.0.0** (`"5432:5432"`, CWE-284); a **Dockerfile copying a directory**

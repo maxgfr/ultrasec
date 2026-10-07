@@ -1,3 +1,6 @@
+import type { DetectedFramework } from "./frameworks.js";
+import type { ClassCoverageCell } from "./classes/coverage.js";
+
 // Single source of truth for the version the bundle reports. `sync-version.mjs`
 // rewrites this string at release time (kept in lockstep with package.json and
 // SKILL.md). SCHEMA_VERSION bumps when the on-disk audit-dossier format changes.
@@ -33,7 +36,11 @@ export const VERSION = "1.57.0";
 // path confined to the test harness, a vendored build artifact. Additive +
 // optional; it is re-derived by every scan rather than authored, and it carries
 // a suggested refutation ground into the triage/verify worklists.
-export const SCHEMA_VERSION = 9;
+// 10: manifest gained optional `frameworks` (web frameworks per package, with
+// version and the manifest line that declares them) and `weaknessClasses`
+// (the weakness-class × framework coverage matrix). Additive + optional —
+// older dossiers omit both and every reader treats that as "not recorded".
+export const SCHEMA_VERSION = 10;
 
 // ── Severity / confidence ──────────────────────────────────────────────────
 export const SEVERITIES = ["critical", "high", "medium", "low", "info"] as const;
@@ -699,4 +706,19 @@ export interface Manifest {
    * the id derivation needs fixing. Additive/optional — absent on a clean run.
    */
   duplicateIds?: { id: string; dropped: number; differing: boolean }[];
+  /**
+   * Web frameworks found in the dependency manifests, one entry per package
+   * directory, with the version and the `file:line` that declares them. What
+   * the weakness-class packs are matched against (`testedWith`). Additive/
+   * optional — absent when no known framework is declared.
+   */
+  frameworks?: DetectedFramework[];
+  /**
+   * The weakness-class × framework matrix as the scan left it: matched by a
+   * pack (`deterministic`, `degraded` when the framework has no pack or its
+   * version is outside the pack's `testedWith`), `not-applicable`, or
+   * `not-covered`. `coverage` overlays the AI-hunt progress of the run.
+   * Additive/optional — absent when no framework was detected.
+   */
+  weaknessClasses?: ClassCoverageCell[];
 }

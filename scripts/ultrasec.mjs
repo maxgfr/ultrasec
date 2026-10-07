@@ -1116,11 +1116,11 @@ function readHistory(dir, since) {
   const boundary = shallowBoundary(resolve2(dir, shallowFile));
   const revs = [head, ...window2.exclude, ...boundary.map((sha2) => `^${sha2}`)];
   const key = JSON.stringify([resolve2(dir), revs, window2.args]);
-  const hit5 = LOG_MEMO.get(key);
-  if (hit5) {
+  const hit6 = LOG_MEMO.get(key);
+  if (hit6) {
     LOG_MEMO.delete(key);
-    LOG_MEMO.set(key, hit5);
-    return { ok: true, log: hit5 };
+    LOG_MEMO.set(key, hit6);
+    return { ok: true, log: hit6 };
   }
   const args2 = [...gitArgs(dir), "log", "--no-color", "--no-renames", ...window2.args, "--pretty=format:%x1e", "--name-only", "-z", "--stdin"];
   if (prefix) args2.push("--full-history", "--full-diff", "--", ".");
@@ -9977,8 +9977,8 @@ function nameStart(node, name2) {
       if (c2.namedChildren.length === 0) {
         if (c2.text === name2) return c2.startIndex;
       } else if (depth < 3 && !NAME_SEARCH_SKIP.test(c2.type)) {
-        const hit5 = visit(c2, depth + 1);
-        if (hit5 !== void 0) return hit5;
+        const hit6 = visit(c2, depth + 1);
+        if (hit6 !== void 0) return hit6;
       }
     }
     return void 0;
@@ -12410,7 +12410,7 @@ function resolveDocLink(fromRel, spec, ctx) {
   let p = norm(posix2.join(base, rooted ? target.slice(1) : target));
   if (p === ".") p = "";
   if (p.startsWith("..")) return { kind: "dangling", reason: "escapes-repo-root" };
-  const hit5 = firstExisting(ctx, [
+  const hit6 = firstExisting(ctx, [
     p,
     p + ".md",
     p + ".mdx",
@@ -12419,22 +12419,22 @@ function resolveDocLink(fromRel, spec, ctx) {
     posix2.join(p, "index.md"),
     posix2.join(p, "index.mdx")
   ]);
-  if (hit5) return { kind: "resolved", target: hit5 };
+  if (hit6) return { kind: "resolved", target: hit6 };
   if (!p || ctx.dirSet.has(p)) return { kind: "external" };
   return { kind: "dangling", reason: "missing-target" };
 }
 function resolveJs(fromRel, rawSpec, ctx) {
   const probe2 = (p) => firstExisting(ctx, [...JS_EXT_PROBES.map((e) => p + e), ...JS_INDEX.map((i2) => posix2.join(p, i2))]);
   const tryResolve = (p) => {
-    const hit5 = probe2(p);
-    if (hit5) return hit5;
+    const hit6 = probe2(p);
+    if (hit6) return hit6;
     const noJs = p.replace(/\.(js|jsx|mjs|cjs)$/, "");
     return noJs !== p ? probe2(noJs) : void 0;
   };
   const probeEntry = (pkgDir, entry2) => {
     for (const cand of [entry2, ...distToSrcCandidates(entry2)]) {
-      const hit5 = tryResolve(norm(posix2.join(pkgDir, cand)));
-      if (hit5) return hit5;
+      const hit6 = tryResolve(norm(posix2.join(pkgDir, cand)));
+      if (hit6) return hit6;
     }
     return void 0;
   };
@@ -12445,8 +12445,8 @@ function resolveJs(fromRel, rawSpec, ctx) {
     const base = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
     const p = norm(posix2.join(base, spec));
     if (p.startsWith("..")) return { kind: "dangling", reason: "escapes-repo-root" };
-    const hit5 = tryResolve(p);
-    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
+    const hit6 = tryResolve(p);
+    return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-module" };
   }
   let aliasFallback;
   let bareBase;
@@ -12462,8 +12462,8 @@ function resolveJs(fromRel, rawSpec, ctx) {
       for (const t of tp.targets) {
         const resolved = tp.star ? t.replace(/\*/, suffix) : t;
         const p = norm(posix2.join(cfg.baseUrl, resolved));
-        const hit5 = tryResolve(p);
-        if (hit5) return { kind: "resolved", target: hit5 };
+        const hit6 = tryResolve(p);
+        if (hit6) return { kind: "resolved", target: hit6 };
         const tdir = p.includes("/") ? posix2.dirname(p) : "";
         if (ctx.dirSet.has(tdir) || ctx.fileSet.has(p)) targetTreeExists = true;
       }
@@ -12473,15 +12473,15 @@ function resolveJs(fromRel, rawSpec, ctx) {
     if (matched) break;
   }
   if (bareBase !== void 0 && !spec.startsWith("/")) {
-    const hit5 = tryResolve(norm(posix2.join(bareBase, spec)));
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = tryResolve(norm(posix2.join(bareBase, spec)));
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   if (spec.startsWith("#")) {
     const scope = ctx.packageScopes.find((s) => !s.dir || fromRel.startsWith(s.dir + "/"));
     const targets = scope ? matchEntryTargets(scope.importEntries, spec) : void 0;
     for (const t of targets ?? []) {
-      const hit5 = scope && t.startsWith("./") ? probeEntry(scope.dir, t) : void 0;
-      if (hit5) return { kind: "resolved", target: hit5 };
+      const hit6 = scope && t.startsWith("./") ? probeEntry(scope.dir, t) : void 0;
+      if (hit6) return { kind: "resolved", target: hit6 };
     }
     return aliasFallback ?? { kind: "external" };
   }
@@ -12489,19 +12489,19 @@ function resolveJs(fromRel, rawSpec, ctx) {
     if (spec !== pkg.name && !spec.startsWith(pkg.name + "/")) continue;
     const sub = spec.slice(pkg.name.length).replace(/^\//, "");
     for (const t of matchEntryTargets(pkg.exportEntries, sub ? "./" + sub : ".") ?? []) {
-      const hit5 = probeEntry(pkg.dir, t);
-      if (hit5) return { kind: "resolved", target: hit5 };
+      const hit6 = probeEntry(pkg.dir, t);
+      if (hit6) return { kind: "resolved", target: hit6 };
     }
     if (!sub) {
       for (const m of pkg.mainCandidates) {
-        const hit5 = probeEntry(pkg.dir, m);
-        if (hit5) return { kind: "resolved", target: hit5 };
+        const hit6 = probeEntry(pkg.dir, m);
+        if (hit6) return { kind: "resolved", target: hit6 };
       }
     }
     const bases = sub ? [posix2.join(pkg.dir, "src", sub), posix2.join(pkg.dir, sub)] : [posix2.join(pkg.dir, "src", "index"), posix2.join(pkg.dir, "index"), posix2.join(pkg.dir, "src")];
     for (const b of bases) {
-      const hit5 = tryResolve(norm(b));
-      if (hit5) return { kind: "resolved", target: hit5 };
+      const hit6 = tryResolve(norm(b));
+      if (hit6) return { kind: "resolved", target: hit6 };
     }
     return { kind: "external" };
   }
@@ -12519,8 +12519,8 @@ function resolvePython(fromRel, spec, ctx) {
     const base = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
     let dir = base;
     for (let i2 = 1; i2 < dots; i2++) dir = dir.includes("/") ? posix2.dirname(dir) : "";
-    const hit5 = rest ? probeModule(dir, rest) : firstExisting(ctx, [posix2.join(norm(dir), "__init__.py")]);
-    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
+    const hit6 = rest ? probeModule(dir, rest) : firstExisting(ctx, [posix2.join(norm(dir), "__init__.py")]);
+    return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-module" };
   }
   const enclosing = [];
   const others = [];
@@ -12528,8 +12528,8 @@ function resolvePython(fromRel, spec, ctx) {
     (!root || fromRel.startsWith(root + "/") ? enclosing : others).push(root);
   }
   for (const root of [...enclosing.reverse(), ...others]) {
-    const hit5 = probeModule(root, spec);
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = probeModule(root, spec);
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   return { kind: "external" };
 }
@@ -12616,8 +12616,8 @@ function resolveRust(fromRel, spec, ctx) {
     return { kind: "external" };
   }
   if (!rest.length) return { kind: "external" };
-  const hit5 = walkPath(baseDir, rest);
-  if (hit5) return { kind: "resolved", target: hit5 };
+  const hit6 = walkPath(baseDir, rest);
+  if (hit6) return { kind: "resolved", target: hit6 };
   if (home && baseDir === home.srcDir && home.rootFile) return { kind: "resolved", target: home.rootFile };
   const ownerDir = baseDir.includes("/") ? posix2.dirname(baseDir) : "";
   const ownerName = baseDir.slice(baseDir.lastIndexOf("/") + 1);
@@ -12689,35 +12689,35 @@ function lookupJvm(jvm, spec) {
     if (pkg) return pkg;
   }
   for (let n = segs.length; n >= Math.min(2, segs.length); n--) {
-    const hit5 = jvm.types.get(n === segs.length ? segs.join(".") : segs.slice(0, n).join("."));
-    if (hit5) return hit5;
+    const hit6 = jvm.types.get(n === segs.length ? segs.join(".") : segs.slice(0, n).join("."));
+    if (hit6) return hit6;
   }
   return void 0;
 }
 function resolveJvm(fromRel, spec, ctx) {
   const jvm = ctx.jvm ??= buildJvmIndex(ctx);
-  let hit5 = lookupJvm(jvm, spec);
-  const pkg = hit5 ? void 0 : jvm.scalaPkg.get(fromRel);
-  for (let p = pkg; p && !hit5; p = p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : void 0) {
-    hit5 = lookupJvm(jvm, p + "." + spec);
+  let hit6 = lookupJvm(jvm, spec);
+  const pkg = hit6 ? void 0 : jvm.scalaPkg.get(fromRel);
+  for (let p = pkg; p && !hit6; p = p.includes(".") ? p.slice(0, p.lastIndexOf(".")) : void 0) {
+    hit6 = lookupJvm(jvm, p + "." + spec);
   }
-  return hit5 ? { kind: "resolved", target: hit5 } : { kind: "external" };
+  return hit6 ? { kind: "resolved", target: hit6 } : { kind: "external" };
 }
 function resolveC(fromRel, spec, ctx) {
   const fromDir = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
-  const hit5 = firstExisting(ctx, [posix2.join(fromDir, spec), ...ctx.cIncludeRoots.map((r) => posix2.join(r, spec))]);
-  return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-include" };
+  const hit6 = firstExisting(ctx, [posix2.join(fromDir, spec), ...ctx.cIncludeRoots.map((r) => posix2.join(r, spec))]);
+  return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-include" };
 }
 function resolveRuby(fromRel, spec, ctx) {
   if (spec.startsWith(".")) {
     const fromDir = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
     const base = norm(posix2.join(fromDir, spec));
-    const hit5 = firstExisting(ctx, [base + ".rb", posix2.join(base, "index.rb")]);
-    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
+    const hit6 = firstExisting(ctx, [base + ".rb", posix2.join(base, "index.rb")]);
+    return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-module" };
   }
   for (const root of ctx.rubyLibRoots) {
-    const hit5 = firstExisting(ctx, [posix2.join(root, spec + ".rb")]);
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = firstExisting(ctx, [posix2.join(root, spec + ".rb")]);
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   return { kind: "external" };
 }
@@ -12725,15 +12725,15 @@ function resolvePhp(fromRel, spec, ctx) {
   if (spec.startsWith(".")) {
     const fromDir = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
     const base = norm(posix2.join(fromDir, spec));
-    const hit5 = firstExisting(ctx, [base, base + ".php"]);
-    return hit5 ? { kind: "resolved", target: hit5 } : { kind: "dangling", reason: "missing-module" };
+    const hit6 = firstExisting(ctx, [base, base + ".php"]);
+    return hit6 ? { kind: "resolved", target: hit6 } : { kind: "dangling", reason: "missing-module" };
   }
   const ns = spec.replace(/^\\+/, "");
   for (const { prefix, dir } of ctx.phpPsr4) {
     if (prefix && ns !== prefix && !ns.startsWith(prefix + "\\")) continue;
     const rest = prefix ? ns.slice(prefix.length).replace(/^\\+/, "") : ns;
-    const hit5 = firstExisting(ctx, [posix2.join(dir, rest.replace(/\\/g, "/")) + ".php"]);
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = firstExisting(ctx, [posix2.join(dir, rest.replace(/\\/g, "/")) + ".php"]);
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   return { kind: "external" };
 }
@@ -12779,15 +12779,15 @@ function resolveLua(fromRel, spec, ctx) {
   const enclosing = roots.filter((r) => !r || fromDir === r || fromDir.startsWith(r + "/")).reverse();
   const order = [...enclosing, fromDir, ...roots.filter((r) => !enclosing.includes(r))];
   for (const root of order) {
-    const hit5 = firstExisting(ctx, [posix2.join(root, name2 + ".lua"), posix2.join(root, name2, "init.lua")]);
-    if (hit5) return { kind: "resolved", target: hit5 };
+    const hit6 = firstExisting(ctx, [posix2.join(root, name2 + ".lua"), posix2.join(root, name2, "init.lua")]);
+    if (hit6) return { kind: "resolved", target: hit6 };
   }
   return { kind: "external" };
 }
 function resolveShell(fromRel, spec, ctx) {
   const fromDir = fromRel.includes("/") ? posix2.dirname(fromRel) : "";
-  const hit5 = firstExisting(ctx, [posix2.join(fromDir, spec), spec]);
-  return hit5 ? { kind: "resolved", target: hit5 } : { kind: "external" };
+  const hit6 = firstExisting(ctx, [posix2.join(fromDir, spec), spec]);
+  return hit6 ? { kind: "resolved", target: hit6 } : { kind: "external" };
 }
 function hasImportResolver(ext) {
   return JS_TS2.has(ext) || SFC_HTML.has(ext) || PY2.has(ext) || C_CPP2.has(ext) || JVM_OTHER.has(ext) || SHELL2.has(ext) || RESOLVER_EXTS.has(ext);
@@ -13248,7 +13248,7 @@ function goParamCount(signature, name2) {
   return void 0;
 }
 function goImplementations(scan2) {
-  const dirOf8 = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/")) : "";
+  const dirOf82 = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/")) : "";
   const types = /* @__PURE__ */ new Map();
   const typesByName = /* @__PURE__ */ new Map();
   const methods = /* @__PURE__ */ new Map();
@@ -13256,7 +13256,7 @@ function goImplementations(scan2) {
   const assertions = [];
   const goFiles = scan2.files.filter((f) => f.lang === "go" && !f.rel.endsWith("_test.go"));
   for (const f of goFiles) {
-    const dir = dirOf8(f.rel);
+    const dir = dirOf82(f.rel);
     for (const s of f.symbols) {
       if (s.kind === "type" && !s.parent) {
         const key = `${dir}${SEP}${s.name}`;
@@ -13281,7 +13281,7 @@ function goImplementations(scan2) {
   const embeds = [];
   for (const f of goFiles) {
     for (const r of f.relations ?? []) {
-      if (r.kind === "extends" && /^\w+$/.test(r.to)) embeds.push([`${dirOf8(f.rel)}${SEP}${r.from}`, `${dirOf8(f.rel)}${SEP}${r.to}`]);
+      if (r.kind === "extends" && /^\w+$/.test(r.to)) embeds.push([`${dirOf82(f.rel)}${SEP}${r.from}`, `${dirOf82(f.rel)}${SEP}${r.to}`]);
     }
   }
   embeds.sort((a, b) => byStr(a[0], b[0]) || byStr(a[1], b[1]));
@@ -13313,8 +13313,8 @@ function goImplementations(scan2) {
       if (/[~|]/.test(line2) && !line2.includes("(")) known = false;
       if (!/^[\w.]+$/.test(line2)) continue;
       const dot = line2.lastIndexOf(".");
-      const embedded = dot === -1 ? types.get(`${dirOf8(iface.file)}${SEP}${line2}`) : void 0;
-      const inner = embedded && isInterface(embedded) ? methodSet(`${dirOf8(embedded.file)}${SEP}${embedded.name}`, embedded, seen) : void 0;
+      const embedded = dot === -1 ? types.get(`${dirOf82(iface.file)}${SEP}${line2}`) : void 0;
+      const inner = embedded && isInterface(embedded) ? methodSet(`${dirOf82(embedded.file)}${SEP}${embedded.name}`, embedded, seen) : void 0;
       if (!inner) known = false;
       else for (const [m, n] of inner) own2.set(m, n);
     }
@@ -13343,7 +13343,7 @@ function goImplementations(scan2) {
       if (tkey === ikey) continue;
       const type = types.get(tkey);
       if (!type || isInterface(type)) continue;
-      if (internal && dirOf8(type.file) !== dirOf8(iface.file)) continue;
+      if (internal && dirOf82(type.file) !== dirOf82(iface.file)) continue;
       const have2 = methods.get(tkey);
       const covers = names.every((m) => {
         if (!have2.has(m)) return false;
@@ -13364,7 +13364,7 @@ function goImplementations(scan2) {
     return all.length === 1 ? all[0] : void 0;
   };
   for (const a of assertions) {
-    const dir = dirOf8(a.sym.file);
+    const dir = dirOf82(a.sym.file);
     const iface = lookup2(a.iface, dir);
     const type = lookup2(a.type, dir);
     if (iface && type && isInterface(iface) && !isInterface(type)) add3(type, iface, false);
@@ -13469,8 +13469,8 @@ function shortestPaths(sources, targets, next, maxHops, maxPaths) {
     if (!level.length) break;
     level.sort(byStr);
     levels.push(level);
-    const hit5 = level.filter((n) => targets.has(n));
-    if (hit5.length) found = hit5;
+    const hit6 = level.filter((n) => targets.has(n));
+    if (hit6.length) found = hit6;
   }
   if (!found) return { hops: null, paths: [], pathCount: 0 };
   const hops = levels.length - 1;
@@ -13568,8 +13568,8 @@ function buildSymbolGraph(scan2, importPairs) {
     for (const c2 of f.calls) {
       const caller = enclosingAmong(own2, c2.line);
       if (!caller) continue;
-      const hit5 = bind(c2, caller);
-      if (hit5) add3(symbolId(caller), symbolId(hit5.def), "calls");
+      const hit6 = bind(c2, caller);
+      if (hit6) add3(symbolId(caller), symbolId(hit6.def), "calls");
     }
   }
   const typeIdByNameFile = /* @__PURE__ */ new Map();
@@ -13603,8 +13603,8 @@ function buildSymbolGraph(scan2, importPairs) {
 }
 function overridePairs(scan2, relations) {
   const langOf = new Map(scan2.files.map((f) => [f.rel, f.lang]));
-  const dirOf8 = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/")) : "";
-  const typeKey = (name2, file) => familyOf(langOf.get(file) ?? "") === "go" ? `go${SEP2}${dirOf8(file)}${SEP2}${name2}` : `${file}${SEP2}${name2}`;
+  const dirOf82 = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/")) : "";
+  const typeKey = (name2, file) => familyOf(langOf.get(file) ?? "") === "go" ? `go${SEP2}${dirOf82(file)}${SEP2}${name2}` : `${file}${SEP2}${name2}`;
   const members = /* @__PURE__ */ new Map();
   for (const f of scan2.files) {
     for (const s of f.symbols) {
@@ -14850,14 +14850,14 @@ function indexCallers(scan2, pairs, recall, only) {
     const bind = binder.forFile(f);
     if (!bind) continue;
     for (const c2 of f.calls) {
-      const hit5 = bind(c2);
-      if (!hit5) continue;
-      const key = hit5.def.name + "\0" + hit5.def.file;
+      const hit6 = bind(c2);
+      if (!hit6) continue;
+      const key = hit6.def.name + "\0" + hit6.def.file;
       let entry2 = sites.get(key);
-      if (!entry2) sites.set(key, entry2 = { def: hit5.def, callers: [] });
-      else if (hit5.def.line < entry2.def.line) entry2.def = hit5.def;
+      if (!entry2) sites.set(key, entry2 = { def: hit6.def, callers: [] });
+      else if (hit6.def.line < entry2.def.line) entry2.def = hit6.def;
       entry2.callers.push(
-        recall ? { file: f.rel, line: c2.line, confidence: hit5.corroborated ? "corroborated" : "unique-name" } : { file: f.rel, line: c2.line }
+        recall ? { file: f.rel, line: c2.line, confidence: hit6.corroborated ? "corroborated" : "unique-name" } : { file: f.rel, line: c2.line }
       );
     }
   }
@@ -15533,16 +15533,16 @@ function resolveCallEdges(scan2, importPairs, ctx) {
     const bind = binder.forFile(f);
     if (!bind) continue;
     for (const c2 of f.calls) {
-      const hit5 = bind(c2);
-      if (!hit5 || hit5.def.file === f.rel) continue;
-      const confidence = hit5.corroborated ? "extracted" : "inferred";
-      const key = `${f.rel}|${hit5.def.file}`;
+      const hit6 = bind(c2);
+      if (!hit6 || hit6.def.file === f.rel) continue;
+      const confidence = hit6.corroborated ? "extracted" : "inferred";
+      const key = `${f.rel}|${hit6.def.file}`;
       const prev = agg.get(key);
       if (prev) {
         prev.weight += 1;
         if (confidence === "extracted") prev.confidence = "extracted";
       } else {
-        agg.set(key, { from: f.rel, to: hit5.def.file, weight: 1, confidence });
+        agg.set(key, { from: f.rel, to: hit6.def.file, weight: 1, confidence });
       }
     }
   }
@@ -21099,10 +21099,10 @@ function brokenImports(scan2, graph, removed) {
     for (let d = dir; d && !ctx.dirSet.has(d); d = d.includes("/") ? posix7.dirname(d) : "") ctx.dirSet.add(d);
   }
   if (!renamedTo.size) return [];
-  const extOf7 = new Map(scan2.files.map((f) => [f.rel, f.ext]));
+  const extOf8 = new Map(scan2.files.map((f) => [f.rel, f.ext]));
   const out2 = [];
   for (const e of dangling) {
-    const ext = extOf7.get(e.from);
+    const ext = extOf8.get(e.from);
     if (ext === void 0) continue;
     const kind = e.kind === "doc-link" ? "doc-link" : "import";
     const r = kind === "doc-link" ? resolveDocLink(e.from, e.to, ctx) : resolveImport(e.from, ext, e.to, ctx);
@@ -21522,11 +21522,11 @@ function resolutionReport(scan2, opts = {}) {
         acc.row.dangling++;
         acc.reasons.set(r.reason, (acc.reasons.get(r.reason) ?? 0) + 1);
         const key = `${ref2.spec}\0${r.reason}`;
-        const hit5 = acc.dangling.get(key);
-        if (!hit5) acc.dangling.set(key, { reason: r.reason, count: 1, example: f.rel });
+        const hit6 = acc.dangling.get(key);
+        if (!hit6) acc.dangling.set(key, { reason: r.reason, count: 1, example: f.rel });
         else {
-          hit5.count++;
-          if (byStr(f.rel, hit5.example) < 0) hit5.example = f.rel;
+          hit6.count++;
+          if (byStr(f.rel, hit6.example) < 0) hit6.example = f.rel;
         }
       }
     }
@@ -21759,18 +21759,18 @@ function sessionKey(repo, opts) {
 }
 function getScan(repo, opts = {}, walked) {
   const key = sessionKey(repo, opts);
-  const hit5 = sessionGet(key);
-  if (hit5) {
-    if (walked && hit5.walked === walked) {
-      syncCommit(hit5, headCommit(repo));
-      return hit5.scan;
+  const hit6 = sessionGet(key);
+  if (hit6) {
+    if (walked && hit6.walked === walked) {
+      syncCommit(hit6, headCommit(repo));
+      return hit6.scan;
     }
-    const fresh22 = scanRepo(repo, { ...opts, cache: hit5.cacheMap, precomputedWalk: walked });
+    const fresh22 = scanRepo(repo, { ...opts, cache: hit6.cacheMap, precomputedWalk: walked });
     if (fresh22.contentUnchanged) {
-      if (fresh22.cacheDirty) hit5.cacheMap = toCacheMap(fresh22);
-      syncCommit(hit5, fresh22.commit);
-      hit5.walked = walked;
-      return hit5.scan;
+      if (fresh22.cacheDirty) hit6.cacheMap = toCacheMap(fresh22);
+      syncCommit(hit6, fresh22.commit);
+      hit6.walked = walked;
+      return hit6.scan;
     }
     sessionPut({ key, scan: fresh22, cacheMap: toCacheMap(fresh22), walked });
     return fresh22;
@@ -25453,13 +25453,13 @@ function renderScip(scan2, opts = {}) {
   const packageAt2 = /* @__PURE__ */ new Map();
   const packageOf = (dir, manifest) => {
     const key = `${dir}\0${manifest}`;
-    let hit5 = packageAt2.get(key);
-    if (hit5 === void 0) {
+    let hit6 = packageAt2.get(key);
+    if (hit6 === void 0) {
       const c2 = manifestCoordinates(scan2.root, dir, manifest);
-      hit5 = c2 ? `${packageField(c2.manager)} ${packageField(c2.name)} ${packageField(c2.version)}` : dir ? packageOf(dirOf4(dir), manifest) : NO_PACKAGE;
-      packageAt2.set(key, hit5);
+      hit6 = c2 ? `${packageField(c2.manager)} ${packageField(c2.name)} ${packageField(c2.version)}` : dir ? packageOf(dirOf4(dir), manifest) : NO_PACKAGE;
+      packageAt2.set(key, hit6);
     }
-    return hit5;
+    return hit6;
   };
   const prefixOf = (f) => {
     const manifest = PACKAGE_MANIFEST.get(f.lang);
@@ -25576,8 +25576,8 @@ function renderScip(scan2, opts = {}) {
     for (const c2 of f.calls ?? []) {
       const target = resolveRef(c2.name, callerFamily);
       if (!target) continue;
-      const hit5 = bind?.(c2);
-      if (!hit5 || symbolOfDecl.get(hit5.def) !== target) continue;
+      const hit6 = bind?.(c2);
+      if (!hit6 || symbolOfDecl.get(hit6.def) !== target) continue;
       occs.push({ range: locate(c2.line, c2.name), symbol: target, roles: 0 });
     }
     for (const s of f.symbols) {
@@ -27023,9 +27023,9 @@ async function runCli(rawArgv) {
     let rel2 = flags2.positional;
     if (rel2 !== void 0) {
       const known = new Set(scan2.files.map((f) => f.rel));
-      const hit5 = fileArgReadings(flags2.repo, rel2).find((r) => known.has(r));
-      if (hit5 === void 0) throw new Error(`no such file in the index: ${rel2}`);
-      rel2 = hit5;
+      const hit6 = fileArgReadings(flags2.repo, rel2).find((r) => known.has(r));
+      if (hit6 === void 0) throw new Error(`no such file in the index: ${rel2}`);
+      rel2 = hit6;
     }
     emit(JSON.stringify(symbolComplexity(scan2, rel2, flags2.limit), null, 2) + "\n", flags2.out);
   } else if (cmd === "risk") {
@@ -27098,7 +27098,7 @@ init_text();
 
 // src/types.ts
 var VERSION = "1.57.0";
-var SCHEMA_VERSION2 = 9;
+var SCHEMA_VERSION2 = 10;
 var SEVERITIES2 = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
 var CATEGORIES = ["taint", "sast", "dep", "secret", "config", "authz", "crypto", "logs", "privacy", "other"];
@@ -27248,6 +27248,7 @@ var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "help",
   "version",
   "json",
+  "classes",
   "quiet",
   "offline",
   "no-enrich",
@@ -27744,9 +27745,9 @@ function resetDetectCache() {
   detectCache.clear();
 }
 function detect(name2) {
-  let hit5 = detectCache.get(name2);
-  if (!hit5) detectCache.set(name2, hit5 = probe(name2));
-  return hit5;
+  let hit6 = detectCache.get(name2);
+  if (!hit6) detectCache.set(name2, hit6 = probe(name2));
+  return hit6;
 }
 function probe(name2) {
   try {
@@ -27921,13 +27922,13 @@ function parseJsonStream(raw) {
   const out2 = [];
   let depth = 0;
   let inStr = false;
-  let esc3 = false;
+  let esc4 = false;
   let start2 = -1;
   for (let i2 = 0; i2 < raw.length; i2++) {
     const ch = raw[i2];
     if (inStr) {
-      if (esc3) esc3 = false;
-      else if (ch === "\\") esc3 = true;
+      if (esc4) esc4 = false;
+      else if (ch === "\\") esc4 = true;
       else if (ch === '"') inStr = false;
       continue;
     }
@@ -28215,8 +28216,8 @@ async function runNative(adapter, repo, ctx) {
   const cache = adapter.cacheable ? ctx.cache : void 0;
   const key = cache ? cacheKey(adapter, cmd, argv, cache) : void 0;
   if (cache && key) {
-    const hit5 = cache.entries.get(adapter.name);
-    if (hit5 && hit5.key === key) return { ...hit5.result, findings: [...hit5.result.findings], note: `${hit5.result.note} \xB7 ${CACHED_NOTE}` };
+    const hit6 = cache.entries.get(adapter.name);
+    if (hit6 && hit6.key === key) return { ...hit6.result, findings: [...hit6.result.findings], note: `${hit6.result.note} \xB7 ${CACHED_NOTE}` };
   }
   const run2 = (c2) => staged(adapter, repo, c2, async (target) => {
     const args2 = target === repo ? argv : buildArgv(adapter, repo, target, c2) ?? argv;
@@ -28798,7 +28799,7 @@ function notebookShadow(raw) {
   let cursor = 0;
   let scanned = 0;
   let scannedLine = 1;
-  const lineOf4 = (index) => {
+  const lineOf5 = (index) => {
     for (; scanned < index; scanned++) if (raw.charCodeAt(scanned) === 10) scannedLine++;
     return scannedLine;
   };
@@ -28823,7 +28824,7 @@ function notebookShadow(raw) {
         continue;
       }
       cursor = at + 1;
-      const line2 = lineOf4(at);
+      const line2 = lineOf5(at);
       if (line2 > total) {
         unaligned++;
         continue;
@@ -30625,6 +30626,9 @@ function scanStatementLine(text, hash) {
     clean += ch;
   }
   return { clean, net };
+}
+function codeOfLine(text, langId) {
+  return scanStatementLine(text, HASH_COMMENT_LANGS.has(langId)).clean;
 }
 var MAX_CONTINUATION_LINES = 3;
 var EMPTY_STATEMENT = { text: "", quoted: new Uint8Array(0), partner: new Int32Array(0) };
@@ -32500,8 +32504,8 @@ wrote ${join38(resolve14(out2), "MAP.md")} + attack-surface.json`);
 }
 
 // src/commands/scan.ts
-import { resolve as resolve17, join as join55, relative as relative13 } from "path";
-import { existsSync as existsSync27 } from "fs";
+import { resolve as resolve17, join as join57, relative as relative13 } from "path";
+import { existsSync as existsSync29 } from "fs";
 
 // src/facts.ts
 import { join as join39 } from "path";
@@ -33563,8 +33567,6 @@ var WEBCONFIG_SHAPES = {
     note: "This `next.config` defines no `headers()`, and nothing in the app sets a Content-Security-Policy (no middleware, no helper). Next.js sends no CSP, HSTS, X-Frame-Options, X-Content-Type-Options or Referrer-Policy by default. Add them in `headers()` or middleware \u2014 unless a reverse proxy or CDN in front sets them, which is the thing to check (`ultrasec probe` sees what is actually served)."
   }
 };
-var APP_CTOR = /\b(?:express|fastify|Fastify)\s*\(\s*\)|\bnew\s+(?:Hono|Koa|Elysia)\s*\(|\bFastAPI\s*\(/;
-var HEADERS_MIDDLEWARE = /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
 var TRUST_PROXY = /\.set\s*\(\s*['"]trust proxy['"]\s*,(?!\s*false\b)/;
 var BODY_PARSER = /\b(?:express|bodyParser|body-parser)\s*\.\s*(?:json|urlencoded|text|raw)\s*\(([^)]*)\)/g;
 function lines2(content) {
@@ -33677,51 +33679,9 @@ function scanCookies(rel2, content, out2) {
     else if (sameSite[1]?.toLowerCase() === "none" && !hasSecure) out2.push(hit2(rel2, ln, WEBCONFIG_SHAPES["cookie-samesite-none-insecure"], m[0]));
   }
 }
-var COMMENT_LINE = /^\s*(?:\/\/|\*|\/\*)/;
-var MENTIONS_CSV = /text\/csv|\.csv\b|\bcsv\b/i;
-var CELL_JOIN = /\.join\(\s*(["'`])(?:;|,|\\t)\1\s*\)/;
-var NEUTRALIZES_FORMULA = /\[[^\]\n]*=[^\]\n]*\+[^\]\n]*\]|\[[^\]\n]*\+[^\]\n]*=[^\]\n]*\]|["']=["']\s*,\s*["']\+["']|formula|neutrali[sz]|csv-?injection|escapeCsv|sanitizeCsv/i;
-function scanCsvFormula(rel2, ls, content, out2) {
-  if (!MENTIONS_CSV.test(content)) return;
-  const code = ls.filter((l) => !COMMENT_LINE.test(l.text)).map((l) => l.text.replace(/\s\/\/.*$/, "")).join("\n");
-  if (NEUTRALIZES_FORMULA.test(code)) return;
-  const joins = ls.filter((l) => CELL_JOIN.test(l.text) && !COMMENT_LINE.test(l.text));
-  const at = joins[joins.length - 1];
-  if (at) out2.push(hit2(rel2, at.n, WEBCONFIG_SHAPES["csv-formula"], at.text));
-}
-var COERCE_BOOLEAN = /\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
-var ENV_KEY = /^\s*["']?[A-Z][A-Z0-9_]*["']?\s*:/;
-var READS_ENV = /\bprocess\.env\b|\bimport\.meta\.env\b|\bcreateEnv\s*\(|\bDeno\.env\b|\bBun\.env\b/;
-var FIRST_HOP = /\.split\(\s*(["'])\s*,\s*\1\s*\)\s*(?:\[\s*0\s*\]|\.shift\(\s*\)|\.at\(\s*0\s*\))/;
-var XFF = /x-forwarded-for|HTTP_X_FORWARDED_FOR|X_FORWARDED_FOR/i;
-var XFF_LOOKBACK = 5;
-var ROUTE_FILE = /(?:^|\/)app\/(?:.*\/)?route\.[cm]?[jt]s$|(?:^|\/)pages\/api\/.+\.[cm]?[jt]sx?$/;
-var EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|xlsx|feed|dump)(?:[/._-]|$)/i;
-var SELECT_START = /\.\s*select(?:Distinct)?\s*\(|\.\s*findMany\s*\(/g;
-var MAX_STATEMENT = 2e3;
-function scanUnboundedExport(rel2, content, out2) {
-  if (!ROUTE_FILE.test(rel2) || !EXPORT_PATH.test(rel2)) return;
-  for (const m of content.matchAll(SELECT_START)) {
-    const start2 = m.index ?? 0;
-    const rest = content.slice(start2, start2 + MAX_STATEMENT);
-    const end = rest.search(/;|\n\s*\n/);
-    const stmt = end === -1 ? rest : rest.slice(0, end);
-    const prisma = /findMany/.test(m[0]);
-    if (!prisma && !/\.\s*from\s*\(/.test(stmt)) continue;
-    if (prisma ? /\btake\s*:/.test(stmt) : /\.\s*(?:limit|paginate|\$paginate)\s*\(/.test(stmt)) continue;
-    out2.push(hit2(rel2, lineOf(content, start2), WEBCONFIG_SHAPES["unbounded-export"], stmt.split("\n")[0]));
-  }
-}
-var NEXT_CONFIG = /(?:^|\/)next\.config\.(?:js|mjs|cjs|ts|mts)$/;
-var NEXT_HEADERS = /\bheaders\s*(?:\(|:)/;
-var SETS_CSP = /Content-Security-Policy|\bhelmet\s*\(|next-secure-headers|@nosecone|\bnosecone\b|next-safe/i;
-var CONFIG_OBJECT = /(?:const|let|var)\s+\w*[cC]onfig\w*\s*(?::[^=]+)?=\s*\{|module\.exports\s*=|export\s+default\b/;
-var dirOfRel = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/") + 1) : "";
 function auditWebConfig(repo, prune, tree) {
   const out2 = [];
   const read = tree?.read ?? readText2;
-  const nextConfigs = [];
-  const cspDirs = [];
   for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
     const ext = extOf3(wf.rel);
@@ -33747,42 +33707,8 @@ function auditWebConfig(repo, prune, tree) {
         if (!/\blimit\s*:/.test(m[1] ?? "")) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["body-limit-missing"], m[0]));
       }
     }
-    if (!HEADERS_MIDDLEWARE.test(content)) {
-      const ctor = ls.find((l) => APP_CTOR.test(l.text));
-      if (ctor) out2.push(hit2(rel2, ctor.n, WEBCONFIG_SHAPES["helmet-missing"], ctor.text));
-    }
     scanCors(rel2, content, out2);
     scanCookies(rel2, content, out2);
-    if (JS.has(ext)) {
-      scanCsvFormula(rel2, ls, content, out2);
-      scanUnboundedExport(rel2, content, out2);
-      const readsEnv = READS_ENV.test(content);
-      for (let i2 = 0; i2 < ls.length; i2++) {
-        const l = ls[i2];
-        if (COMMENT_LINE.test(l.text)) continue;
-        const code = l.text.split("//")[0];
-        if (COERCE_BOOLEAN.test(code) && (ENV_KEY.test(code) || readsEnv)) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["env-coerce-boolean"], l.text));
-      }
-      if (SETS_CSP.test(content) && !NEXT_CONFIG.test(rel2)) cspDirs.push(dirOfRel(rel2));
-      if (NEXT_CONFIG.test(rel2)) {
-        if (SETS_CSP.test(content)) cspDirs.push(dirOfRel(rel2));
-        if (!NEXT_HEADERS.test(content)) nextConfigs.push({ rel: rel2, ls });
-      }
-    }
-    if (CODE.has(ext)) {
-      for (let i2 = 0; i2 < ls.length; i2++) {
-        const l = ls[i2];
-        if (COMMENT_LINE.test(l.text) || !FIRST_HOP.test(l.text)) continue;
-        const window2 = ls.slice(Math.max(0, i2 - XFF_LOOKBACK), i2 + 1);
-        if (window2.some((w) => XFF.test(w.text))) out2.push(hit2(rel2, l.n, WEBCONFIG_SHAPES["xff-first-hop"], l.text));
-      }
-    }
-  }
-  for (const cfg of nextConfigs) {
-    const root = dirOfRel(cfg.rel);
-    if (cspDirs.some((d) => d.startsWith(root))) continue;
-    const at = cfg.ls.find((l) => CONFIG_OBJECT.test(l.text)) ?? cfg.ls[0];
-    if (at) out2.push(hit2(cfg.rel, at.n, WEBCONFIG_SHAPES["next-headers-missing"], at.text));
   }
   return out2;
 }
@@ -33987,28 +33913,6 @@ var LINE_RULES = [
   // loose redirect_uri validation.
   { langs: null, re: /(?:redirect_uri|redirecturi|redirect_url|redirecturl)[^\n]*\.(?:startsWith|indexOf|includes|search)\s*\(/i, shape: "oauth-redirect-uri" }
 ];
-var SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
-var EQ = "(?:===|!==|==|!=)";
-var COMPARE_RULES = [
-  { langs: JS2, re: new RegExp(`${EQ}\\s*\`Bearer \\$\\{|\`Bearer \\$\\{[^\`]*\`\\s*${EQ}`) },
-  { langs: JS2, re: new RegExp(`${EQ}\\s*${SECRET_ENV}|${SECRET_ENV}\\s*${EQ}(?!\\s*(?:undefined|null|""|''|\`\`)\\b)`) },
-  // A credential looked up in a Set/Map: `allowedKeys.has(bearer)`.
-  // The receiver has to be named for credentials: `allowedKeys.has(key)` is as
-  // often an object-key allow-list as an API-key one.
-  { langs: JS2, re: /\b\w*(?:tokens|secrets|api_?keys|bearers)\w*\s*\.\s*has\s*\(\s*(?:bearer|token|apiKey|api_key|key|secret|provided)\w*\s*\)/i },
-  { langs: /* @__PURE__ */ new Set(["py"]), re: /(?:==|!=)\s*os\.(?:environ\[|getenv\()\s*["'][A-Z][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']/ }
-];
-var CONSTANT_TIME = /timingSafeEqual|safeCompare|secureCompare|constantTime|compare_digest|tsscmp|safe-compare/i;
-var PRESENCE_CHECK = new RegExp(`${SECRET_ENV}\\s*${EQ}\\s*(?:undefined|null|""|''|\`\`)(?![\\w$])|(?:undefined|null|""|'')\\s*${EQ}\\s*${SECRET_ENV}`);
-var isCommentLine = (t) => /^\s*(?:\/\/|\*|\/\*|#)/.test(t);
-var SESSION_COOKIE = /(?:__Secure-)?(?:next-auth|authjs)\.session-token/;
-var EXPIRES_COOKIE = /maxAge\s*:\s*0\b|expires\s*:\s*new\s+Date\(\s*0\s*\)|Max-Age=0|\.delete\s*\(|expires=Thu, 01 Jan 1970/i;
-var HANDLES_CHUNKS = /session-token\.\d|session-token\.\$\{|session-token\.["'`]|\.startsWith\s*\([^)]*(?:session|token|name|cookie)|\\\.\\d|\.\$\{\s*i\s*\}|getAll\s*\(/i;
-function scanSessionChunks(rel2, content, out2) {
-  if (!SESSION_COOKIE.test(content) || !EXPIRES_COOKIE.test(content) || HANDLES_CHUNKS.test(content)) return;
-  const at = lines3(content).find((l) => SESSION_COOKIE.test(l.text) && !isCommentLine(l.text));
-  if (at) out2.push(hit3(rel2, at.n, AUTH_SHAPES["session-chunks-not-cleared"], at.text));
-}
 var PWHASH_RULES = [
   { langs: JS2, re: /createHash\(\s*['"](?:md5|sha1)['"]\s*\)[^\n]*(?:pass|pwd)/i },
   { langs: /* @__PURE__ */ new Set(["py"]), re: /hashlib\.(?:md5|sha1)\(\s*[^)]*(?:pass|pwd)/i },
@@ -34063,22 +33967,2038 @@ function auditAuthTokens(repo, prune, tree) {
     for (const l of lines3(content)) {
       for (const r of LINE_RULES) if ((r.langs === null || r.langs.has(ext)) && r.re.test(l.text)) out2.push(hit3(rel2, l.n, AUTH_SHAPES[r.shape], l.text));
       for (const r of PWHASH_RULES) if (r.langs.has(ext) && r.re.test(l.text)) out2.push(hit3(rel2, l.n, AUTH_SHAPES["password-hash"], l.text));
-      if (!isCommentLine(l.text) && !CONSTANT_TIME.test(l.text) && !PRESENCE_CHECK.test(l.text)) {
-        if (COMPARE_RULES.some((r) => r.langs.has(ext) && r.re.test(l.text))) out2.push(hit3(rel2, l.n, AUTH_SHAPES["secret-compare-timing"], l.text));
-      }
       const cost = /(?:genSalt(?:Sync)?|bcrypt\.hash(?:Sync)?)\s*\([^)]*?(?:^|,)\s*(\d{1,2})\s*[,)]/.exec(l.text);
       if (cost && Number(cost[1]) < 10) out2.push(hit3(rel2, l.n, AUTH_SHAPES["password-hash"], l.text));
     }
     scanJwtCalls(rel2, content, ext, out2);
     scanOAuthStatePkce(rel2, content, out2);
-    if (JS2.has(ext)) scanSessionChunks(rel2, content, out2);
   }
   return out2;
 }
 
-// src/cloud.ts
+// src/classes/registry.ts
+var CLASSES = {
+  "timing-unsafe-secret-compare": {
+    id: "timing-unsafe-secret-compare",
+    title: "Secret compared with a non-constant-time operator",
+    cwe: "CWE-208",
+    severity: "medium",
+    category: "crypto",
+    invariant: "A value the caller supplies (header, query, body) is compared to a shared secret (API key, bearer token, webhook secret, password) by an operation whose running time does not depend on how many leading bytes match.",
+    guard: "A constant-time comparison of equal-length inputs (ideally fixed-length digests of both): Node `crypto.timingSafeEqual`, Python `hmac.compare_digest`, Go `subtle.ConstantTimeCompare`/`hmac.Equal`, Java `MessageDigest.isEqual`, Ruby `ActiveSupport::SecurityUtils.secure_compare`, PHP `hash_equals`. A presence check (`=== undefined`) is not a comparison.",
+    rubric: "medium for a static shared secret that is the whole authentication of a route; low when the endpoint is rate-limited and the secret is long and random, or the comparison is on a hash; high only with a demonstrated remote timing oracle (local network, many samples).",
+    note: "A credential is compared with an operator that returns at the first differing byte, so response time leaks how much of a guess is right. Compare fixed-length digests with the platform's constant-time helper.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: "if (req.headers.authorization !== `Bearer ${process.env.API_TOKEN}`) return res.sendStatus(401);",
+        fixed: 'const a = createHash("sha256").update(req.headers.authorization ?? "").digest();\nconst b = createHash("sha256").update(`Bearer ${process.env.API_TOKEN}`).digest();\nif (!timingSafeEqual(a, b)) return res.sendStatus(401);'
+      },
+      {
+        language: "python",
+        vulnerable: 'if request.headers.get("X-Api-Key") != os.environ["API_KEY"]:\n    abort(401)',
+        fixed: 'if not hmac.compare_digest(request.headers.get("X-Api-Key", ""), os.environ["API_KEY"]):\n    abort(401)'
+      },
+      {
+        language: "go",
+        vulnerable: 'if r.Header.Get("X-Api-Key") != os.Getenv("API_KEY") {',
+        fixed: 'if subtle.ConstantTimeCompare([]byte(r.Header.Get("X-Api-Key")), []byte(os.Getenv("API_KEY"))) != 1 {'
+      },
+      {
+        language: "ruby",
+        vulnerable: 'head :unauthorized unless request.headers["X-Api-Key"] == ENV["API_KEY"]',
+        fixed: 'head :unauthorized unless ActiveSupport::SecurityUtils.secure_compare(request.headers["X-Api-Key"].to_s, ENV["API_KEY"])'
+      }
+    ]
+  },
+  "csv-formula-injection": {
+    id: "csv-formula-injection",
+    title: "CSV cells written without formula neutralization",
+    cwe: "CWE-1236",
+    severity: "medium",
+    category: "config",
+    invariant: "Every cell of a CSV a user may open in a spreadsheet, whose value is not a constant (request data, or database rows \u2014 second-order), is neutralized when it starts with `=`, `+`, `-`, `@`, a tab or a carriage return.",
+    guard: "A per-cell function that prefixes such a value with `'` (OWASP CSV injection), applied to every non-constant cell before the writer/join; or a writer configured to do it (Python `defusedcsv`). Quoting alone is not a guard.",
+    rubric: "medium for an export a privileged user opens (admins, analysts) whose cells carry data another user can write; low when every cell is server-generated (ids, dates, enums) \u2014 prove it; high when the export is mailed or auto-opened.",
+    note: "A CSV is produced from non-constant cells and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'`, including values that come from the database.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: 'const body = rows.map((r) => [r.name, r.email].join(";"));',
+        fixed: 'const cell = (v) => (/^[=+\\-@\\t\\r]/.test(String(v)) ? `\'${v}` : String(v));\nconst body = rows.map((r) => [r.name, r.email].map(cell).join(";"));'
+      },
+      {
+        language: "python",
+        vulnerable: "writer = csv.writer(out)\nfor u in users:\n    writer.writerow([u.name, u.email])",
+        fixed: `def cell(v):
+    s = str(v)
+    return "'" + s if s[:1] in ("=", "+", "-", "@", "\\t", "\\r") else s
+writer.writerow([cell(u.name), cell(u.email)])`
+      },
+      {
+        language: "php",
+        vulnerable: "fputcsv($out, [$user->name, $user->email]);",
+        fixed: `fputcsv($out, array_map(fn ($v) => preg_match('/^[=+\\-@\\t\\r]/', (string) $v) ? "'".$v : $v, [$user->name, $user->email]));`
+      }
+    ]
+  },
+  "client-ip-first-xff": {
+    id: "client-ip-first-xff",
+    title: "Client IP taken from the first X-Forwarded-For entry",
+    cwe: "CWE-348",
+    severity: "medium",
+    category: "config",
+    invariant: "The client address used for a security decision (rate limit, allow-list, audit log, lockout) is the one written by a proxy the application trusts \u2014 counted from the RIGHT of X-Forwarded-For, or the socket address when no proxy is trusted.",
+    guard: "Taking the entry your own proxy appended (the last one, or the N-th from the right for N trusted hops), or a framework helper configured with the trusted proxy list (Express `trust proxy` with a hop count, Werkzeug `ProxyFix(x_for=1)`, Gin `SetTrustedProxies`, Rails `request.remote_ip`).",
+    rubric: "medium when the address keys a rate limit, lockout or audit log; high when it keys an allow-list that grants access; low when it is only displayed.",
+    note: "Proxies APPEND to X-Forwarded-For, so its first entry is whatever the client sent. Taking it lets any caller choose its own IP for rate limits, allow-lists and audit logs. Take the entry your own proxy wrote (count hops from the right), or a helper configured with the trusted proxies.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: 'const ip = req.headers["x-forwarded-for"].split(",")[0];',
+        fixed: 'const hops = String(req.headers["x-forwarded-for"] ?? "").split(",");\nconst ip = hops[hops.length - 1].trim(); // one trusted proxy'
+      },
+      {
+        language: "python",
+        vulnerable: 'ip = request.META["HTTP_X_FORWARDED_FOR"].split(",")[0]',
+        fixed: 'ip = request.META["HTTP_X_FORWARDED_FOR"].split(",")[-1].strip()  # one trusted proxy'
+      },
+      {
+        language: "go",
+        vulnerable: 'ip := strings.Split(r.Header.Get("X-Forwarded-For"), ",")[0]',
+        fixed: 'router.SetTrustedProxies([]string{"10.0.0.1"})\nip := c.ClientIP()'
+      }
+    ]
+  },
+  "unbounded-public-export": {
+    id: "unbounded-public-export",
+    title: "Public export/listing route queries without a row limit",
+    cwe: "CWE-770",
+    severity: "medium",
+    category: "config",
+    invariant: "A route reachable without privilege (public, export, download, feed) bounds the rows one request can materialize: a limit, a page size with a ceiling, or a stream with a hard cap.",
+    guard: "`limit`/`take`/`paginate`/a slice on the query itself, or a streaming/batched iterator with a ceiling. A rate limit in front reduces the rate, not the per-request cost.",
+    rubric: "medium when the table grows with user data and the route is anonymous; low when the table is small and bounded by construction (a list of countries) \u2014 say why; high when the response joins large tables or the route is unauthenticated and cache-less.",
+    note: "A route under a public/export path runs a query with no row limit. Every call materializes the whole table in memory and on the wire, and the cost grows with the data rather than the request \u2014 an amplification lever even behind a rate limit. Page it, cap it, or stream it with a hard ceiling.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: "const rows = await db.select().from(declarations);",
+        fixed: "const rows = await db.select().from(declarations).limit(PAGE_SIZE).offset(page * PAGE_SIZE);"
+      },
+      {
+        language: "python",
+        vulnerable: "def export_users(request):\n    rows = User.objects.all()",
+        fixed: "def export_users(request):\n    rows = Paginator(User.objects.order_by('id'), 500).page(request.GET.get('page', 1))"
+      },
+      { language: "ruby", vulnerable: "def export\n  @users = User.all", fixed: "def export\n  @users = User.order(:id).limit(500)" }
+    ]
+  },
+  "security-headers-absent": {
+    id: "security-headers-absent",
+    title: "Application serves no security headers",
+    cwe: "CWE-693",
+    severity: "low",
+    category: "config",
+    invariant: "Every HTML/API response carries the browser protections the deployment relies on \u2014 Content-Security-Policy, Strict-Transport-Security, X-Frame-Options or `frame-ancestors`, X-Content-Type-Options, Referrer-Policy \u2014 set by the framework's defaults, a middleware, or the proxy in front.",
+    guard: "The framework's own header defaults left on (Django SecurityMiddleware + XFrameOptionsMiddleware, Rails default_headers, Spring Security headers), a header middleware (helmet, Talisman, secure), or the headers set by the reverse proxy/CDN \u2014 which is the thing to check before reporting.",
+    rubric: "low as a posture note; medium when the app renders user content (CSP is then the XSS backstop) or has state-changing pages that can be framed; nothing when a proxy in front demonstrably sets them (`ultrasec probe`).",
+    note: "The application is built without the security headers its framework does not set by default (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy). Add them where the app is built \u2014 unless a reverse proxy in front sets them, which is the thing to check (`ultrasec probe` sees what is actually served).",
+    examples: [
+      { language: "javascript", vulnerable: "const app = express();\napp.use(router);", fixed: "const app = express();\napp.use(helmet());\napp.use(router);" },
+      {
+        language: "python",
+        vulnerable: 'MIDDLEWARE = [\n    "django.contrib.sessions.middleware.SessionMiddleware",\n]',
+        fixed: 'MIDDLEWARE = [\n    "django.middleware.security.SecurityMiddleware",\n    "django.contrib.sessions.middleware.SessionMiddleware",\n    "django.middleware.clickjacking.XFrameOptionsMiddleware",\n]'
+      },
+      { language: "java", vulnerable: "http.headers(headers -> headers.disable());", fixed: "http.headers(withDefaults());" }
+    ]
+  },
+  "session-cookie-chunks-on-logout": {
+    id: "session-cookie-chunks-on-logout",
+    title: "Logout clears the session cookie but not its chunks",
+    cwe: "CWE-613",
+    severity: "medium",
+    category: "authz",
+    invariant: "Logging out invalidates every cookie that carries the session: when a library splits a large session cookie into `<name>.0`, `<name>.1`, \u2026, all of them, on both the `__Secure-` and the plain name \u2014 or the session is revoked server-side.",
+    guard: "The library's own sign-out, or a loop over the cookie jar expiring every name that starts with the session cookie's name; or a server-side session store whose record is deleted.",
+    rubric: "medium: a stale chunk set keeps authenticating after logout on a shared device; low when sessions are short-lived and also revoked server-side.",
+    note: "A hand-written logout expires the session cookie by name, but the library splits a large session into `<name>.0`, `<name>.1`, \u2026 and those chunks still authenticate. Clear every cookie whose name starts with the session cookie's name, or call the library's own sign-out.",
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: 'response.cookies.set("next-auth.session-token", "", { maxAge: 0 });',
+        fixed: 'for (const c of (await cookies()).getAll()) if (c.name.startsWith("next-auth.session-token")) response.cookies.set(c.name, "", { maxAge: 0 });'
+      }
+    ]
+  },
+  "env-bool-coercion": {
+    id: "env-bool-coercion",
+    title: "Environment flag parsed by truthiness",
+    cwe: "CWE-704",
+    severity: "medium",
+    category: "config",
+    invariant: 'A boolean read from the environment is true only for an explicit true spelling (`true`, `1`, `yes`) \u2014 the string `"false"`, `"0"` or `"off"` an operator writes is false.',
+    guard: 'An explicit parse: Node `z.enum(["true","false"]).transform(v => v === "true")` or `z.stringbool()`, Python `strtobool`-style comparison / `env.bool()`, Go `strconv.ParseBool`, Java `Boolean.parseBoolean`, Ruby `ActiveModel::Type::Boolean.new.cast`, PHP `filter_var(\u2026, FILTER_VALIDATE_BOOLEAN)` or Laravel `env()`.',
+    rubric: "medium when the flag toggles a test seam, a mock, an auth bypass or a security control (FLAG=false turns it ON); low for cosmetic flags.",
+    note: 'An environment variable is turned into a boolean by truthiness: every non-empty string is true, including `"false"` and `"0"`. An operator writing FLAG=false turns the flag ON. Parse the string explicitly.',
+    examples: [
+      {
+        language: "javascript",
+        vulnerable: "FAKE_CLOCK: z.coerce.boolean().default(false),",
+        fixed: 'FAKE_CLOCK: z.enum(["true", "false"]).default("false").transform((v) => v === "true"),'
+      },
+      {
+        language: "python",
+        vulnerable: 'DEBUG = bool(os.environ.get("DEBUG"))',
+        fixed: 'DEBUG = os.environ.get("DEBUG", "false").lower() in ("1", "true", "yes")'
+      },
+      { language: "php", vulnerable: "$debug = (bool) getenv('APP_DEBUG');", fixed: "$debug = filter_var(getenv('APP_DEBUG'), FILTER_VALIDATE_BOOLEAN);" }
+    ]
+  }
+};
+var CLASS_LIST = Object.values(CLASSES);
+
+// src/classes/packs/shared.ts
+var MENTIONS_CSV = /text\/csv|\.csv\b|\bcsv\b/i;
+var NEUTRALIZES_FORMULA = /\[[^\]\n]*=[^\]\n]*\+[^\]\n]*\]|\[[^\]\n]*\+[^\]\n]*=[^\]\n]*\]|["']=["']\s*,\s*["']\+["']|formula|neutrali[sz]|csv-?injection|escapeCsv|sanitizeCsv/i;
+var NEUTRALIZES_FORMULA_ANY = new RegExp(
+  `${NEUTRALIZES_FORMULA.source}|(?:startswith|start_with\\?|str_starts_with|HasPrefix|startsWith)\\s*\\(?[^)\\n]*["'][=+@-]|defusedcsv|escape_formula|sanitize_?csv`,
+  "i"
+);
+var XFF = /x-forwarded-for|HTTP_X_FORWARDED_FOR|X_FORWARDED_FOR/i;
+var XFF_LOOKBACK = 5;
+var EXPORT_PATH = /(?:^|[/._-])(?:public|export|exports|download|downloads|csv|xlsx|feed|dump)(?:[/._-]|$)/i;
+var HEADERS_MIDDLEWARE = /\bhelmet\s*\(|\bsecureHeaders\s*\(|\bfastify-helmet\b|@fastify\/helmet|\bsecure_headers\b|\bSecureHeadersMiddleware\b|\bTalisman\s*\(|\bhelmet\.contentSecurityPolicy\b/;
+var SETS_SECURITY_HEADER = /Content-Security-Policy|X-Frame-Options|Strict-Transport-Security/i;
+var FLAG_NAME = String.raw`\w*(?:enabled|disabled|enable|disable|flag|debug|mock|fake|skip|bypass|allow|insecure|feature|dry_?run|test_?mode)\w*`;
+
+// src/classes/packs/common.ts
+var FIRST_HOP = /\.split\(\s*(["'])\s*,\s*\1\s*\)\s*(?:\[\s*0\s*\]|\.shift\(\s*\)|\.at\(\s*0\s*\))/;
+var COMMON_PACK = {
+  id: "common",
+  ecosystem: "*",
+  classes: {
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "split-first",
+          kind: "line",
+          languages: ["javascript", "python", "go", "java", "kotlin", "scala", "php", "ruby", "csharp"],
+          match: FIRST_HOP,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    }
+  }
+};
+
+// src/classes/packs/node.ts
+var JS3 = ["javascript"];
+var SECRET_ENV = String.raw`(?:process\.)?env(?:\.[A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD|PASSPHRASE)\b|\[\s*["'][A-Z0-9_]*(?:TOKEN|SECRET|API_?KEY|APIKEY|PASSWORD)["']\s*\])`;
+var EQ = "(?:===|!==|==|!=)";
+var CONSTANT_TIME = /timingSafeEqual|safeCompare|secureCompare|constantTime|compare_digest|tsscmp|safe-compare/i;
+var PRESENCE_CHECK = new RegExp(`${SECRET_ENV}\\s*${EQ}\\s*(?:undefined|null|""|''|\`\`)(?![\\w$])|(?:undefined|null|""|'')\\s*${EQ}\\s*${SECRET_ENV}`);
+var COMPARE_GUARD = new RegExp(`${CONSTANT_TIME.source}|${PRESENCE_CHECK.source}`, "i");
+var COERCE_BOOLEAN = /\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
+var ENV_KEY_COERCE = /^\s*["']?[A-Z][A-Z0-9_]*["']?\s*:.*\bz\s*\.\s*coerce\s*\.\s*boolean\s*\(/;
+var READS_ENV = /\bprocess\.env\b|\bimport\.meta\.env\b|\bcreateEnv\s*\(|\bDeno\.env\b|\bBun\.env\b/;
+var SESSION_COOKIE = /(?:__Secure-)?(?:next-auth|authjs)\.session-token/;
+var EXPIRES_COOKIE = /maxAge\s*:\s*0\b|expires\s*:\s*new\s+Date\(\s*0\s*\)|Max-Age=0|\.delete\s*\(|expires=Thu, 01 Jan 1970/i;
+var HANDLES_CHUNKS = /session-token\.\d|session-token\.\$\{|session-token\.["'`]|\.startsWith\s*\([^)]*(?:session|token|name|cookie)|\\\.\\d|\.\$\{\s*i\s*\}|getAll\s*\(/i;
+var CELL_JOIN = /\.join\(\s*(["'`])(?:;|,|\\t)\1\s*\)/;
+var NODE_QUERIES = [
+  // Drizzle / Knex-style builders: a select that reads FROM a table.
+  { start: /\.\s*select(?:Distinct)?\s*\(/, requires: /\.\s*from\s*\(/, bounded: /\.\s*(?:limit|paginate|\$paginate)\s*\(/ },
+  // Prisma.
+  { start: /\.\s*findMany\s*\(/, bounded: /\btake\s*:/ }
+];
+var NODE_ORM_QUERIES = [
+  ...NODE_QUERIES,
+  { start: /\.\s*findAll\s*\(/, bounded: /\blimit\s*:/ },
+  { start: /\.\s*getMany\s*\(/, bounded: /\.\s*(?:take|limit)\s*\(/ },
+  { start: /\.\s*find\s*\(\s*\)/, bounded: /\.\s*(?:limit|take)\s*\(/ },
+  { start: /\.\s*find\s*\(\s*\{/, bounded: /\btake\s*:|\.\s*limit\s*\(/ }
+];
+var JS_ROUTE_DECL = /\b(?:app|router|server|fastify|api|routes?)\s*\.\s*(?:get|post|all|route)\s*\(\s*["'`]([^"'`]+)["'`]/;
+var NODE_PACK = {
+  id: "node",
+  ecosystem: "node",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "bearer-template",
+          kind: "line",
+          languages: JS3,
+          match: new RegExp(`${EQ}\\s*\`Bearer \\$\\{|\`Bearer \\$\\{[^\`]*\`\\s*${EQ}`),
+          unless: COMPARE_GUARD,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          id: "env-secret",
+          kind: "line",
+          languages: JS3,
+          match: new RegExp(`${EQ}\\s*${SECRET_ENV}|${SECRET_ENV}\\s*${EQ}(?!\\s*(?:undefined|null|""|''|\`\`)\\b)`),
+          unless: COMPARE_GUARD,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          // The receiver has to be named for credentials: `allowedKeys.has(key)`
+          // is as often an object-key allow-list as an API-key one.
+          id: "credential-set",
+          kind: "line",
+          languages: JS3,
+          match: /\b\w*(?:tokens|secrets|api_?keys|bearers)\w*\s*\.\s*has\s*\(\s*(?:bearer|token|apiKey|api_key|key|secret|provided)\w*\s*\)/i,
+          unless: COMPARE_GUARD,
+          emit: "authtokens/secret-compare-timing"
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        // The catalog's `csv` sink knows CSV LIBRARIES; a CSV assembled with
+        // `.join(";")` was invisible. The data rows are joined after the
+        // header, so the last cell join is the line cited.
+        {
+          id: "hand-built",
+          kind: "file",
+          languages: JS3,
+          gate: [MENTIONS_CSV],
+          anchor: CELL_JOIN,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA,
+          emit: "webconfig/csv-formula"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        { id: "zod-coerce-env-key", kind: "line", languages: JS3, match: ENV_KEY_COERCE, emit: "webconfig/env-coerce-boolean" },
+        { id: "zod-coerce-env-file", kind: "line", languages: JS3, match: COERCE_BOOLEAN, fileGate: READS_ENV, emit: "webconfig/env-coerce-boolean" },
+        {
+          id: "boolean-of-env",
+          kind: "line",
+          languages: JS3,
+          match: /\bBoolean\s*\(\s*process\.env(?:\.\w+|\[[^\]]+\])\s*\)/,
+          note: '`Boolean(process.env.X)` is true for every non-empty string, including "false" and "0" \u2014 an operator writing X=false turns the flag ON. Compare the string explicitly (`process.env.X === "true"`).'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      rules: [
+        {
+          id: "nextauth-manual-logout",
+          kind: "file",
+          languages: JS3,
+          gate: [SESSION_COOKIE, EXPIRES_COOKIE],
+          anchor: SESSION_COOKIE,
+          pick: "first",
+          unless: HANDLES_CHUNKS,
+          emit: "authtokens/session-chunks-not-cleared"
+        }
+      ]
+    }
+  }
+};
+var NEXT_CONFIG = /(?:^|\/)next\.config\.(?:js|mjs|cjs|ts|mts)$/;
+var NEXT_HEADERS = /\bheaders\s*(?:\(|:)/;
+var SETS_CSP = /Content-Security-Policy|\bhelmet\s*\(|next-secure-headers|@nosecone|\bnosecone\b|next-safe/i;
+var CONFIG_OBJECT = /(?:const|let|var)\s+\w*[cC]onfig\w*\s*(?::[^=]+)?=\s*\{|module\.exports\s*=|export\s+default\b/;
+var NEXT_ROUTE_FILE = /(?:^|\/)app\/(?:.*\/)?route\.[cm]?[jt]s$|(?:^|\/)pages\/api\/.+\.[cm]?[jt]sx?$/;
+var NEXTJS_PACK = {
+  id: "nextjs",
+  ecosystem: "node",
+  framework: "nextjs",
+  testedWith: ">=12 <17",
+  sources: ["https://nextjs.org/docs/app/api-reference/config/next-config-js/headers"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-headers",
+          kind: "absent",
+          languages: JS3,
+          files: NEXT_CONFIG,
+          anchor: CONFIG_OBJECT,
+          fallbackLine1: true,
+          presentInFile: NEXT_HEADERS,
+          presentInTree: { re: SETS_CSP, scope: "anchor-dir", languages: JS3 },
+          emit: "webconfig/next-headers-missing"
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route-handler",
+          kind: "route-query",
+          languages: JS3,
+          routeFile: NEXT_ROUTE_FILE,
+          exportPath: EXPORT_PATH,
+          queries: NODE_QUERIES,
+          statement: "js-legacy",
+          emit: "webconfig/unbounded-export"
+        }
+      ]
+    }
+  }
+};
+var EXPRESS_PACK = {
+  id: "express",
+  ecosystem: "node",
+  framework: "express",
+  testedWith: ">=4 <6",
+  sources: ["https://expressjs.com/en/advanced/best-practice-security.html"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        { id: "no-helmet", kind: "absent", languages: JS3, anchor: /\bexpress\s*\(\s*\)/, presentInFile: HEADERS_MIDDLEWARE, emit: "webconfig/helmet-missing" }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "router",
+          kind: "route-query",
+          languages: JS3,
+          exportPath: EXPORT_PATH,
+          routeDecl: JS_ROUTE_DECL,
+          queries: NODE_ORM_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var NESTJS_PACK = {
+  id: "nestjs",
+  ecosystem: "node",
+  framework: "nestjs",
+  testedWith: ">=9 <13",
+  sources: ["https://docs.nestjs.com/security/helmet"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-helmet",
+          kind: "absent",
+          languages: JS3,
+          anchor: /\bNestFactory\s*\.\s*create\s*(?:<[^>]*>)?\s*\(/,
+          presentInFile: new RegExp(`${HEADERS_MIDDLEWARE.source}|\\.useSecurityHeaders\\s*\\(`),
+          emit: "webconfig/helmet-missing"
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "controller",
+          kind: "route-query",
+          languages: JS3,
+          exportPath: EXPORT_PATH,
+          routeDecl: /@(?:Controller|Get|Post|All)\s*\(\s*["'`]([^"'`]*)["'`]/,
+          queries: NODE_ORM_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var FASTIFY_PACK = {
+  id: "fastify",
+  ecosystem: "node",
+  framework: "fastify",
+  testedWith: ">=4 <6",
+  sources: ["https://github.com/fastify/fastify-helmet"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-helmet",
+          kind: "absent",
+          languages: JS3,
+          anchor: /\b(?:fastify|Fastify)\s*\(\s*\)/,
+          presentInFile: HEADERS_MIDDLEWARE,
+          emit: "webconfig/helmet-missing"
+        },
+        // The same constructor with an options object, which the original
+        // detector's `fastify()` anchor did not see.
+        {
+          id: "no-helmet-options",
+          kind: "absent",
+          languages: JS3,
+          anchor: /\b(?:fastify|Fastify)\s*\(\s*\{/,
+          presentInFile: HEADERS_MIDDLEWARE,
+          emit: "webconfig/helmet-missing"
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route",
+          kind: "route-query",
+          languages: JS3,
+          exportPath: EXPORT_PATH,
+          routeDecl: JS_ROUTE_DECL,
+          queries: NODE_ORM_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var ctorPack = (id, ctor, testedWith) => ({
+  id,
+  ecosystem: "node",
+  framework: id,
+  testedWith,
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        { id: "no-headers-middleware", kind: "absent", languages: JS3, anchor: ctor, presentInFile: HEADERS_MIDDLEWARE, emit: "webconfig/helmet-missing" }
+      ]
+    }
+  }
+});
+var KOA_PACK = ctorPack("koa", /\bnew\s+Koa\s*\(/, ">=2 <4");
+var HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
+var ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
+var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK];
+
+// src/classes/packs/python.ts
+var PY3 = ["python"];
+var SECRET = String.raw`["'][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
+var NOT_PRESENCE = String.raw`(?!\s*(?:None|""|''))`;
+var PY_CONSTANT_TIME = /compare_digest|constant_time_compare/;
+var SQLALCHEMY_QUERIES = [
+  // Flask-SQLAlchemy `Model.query.all()` / `.filter(...).all()`.
+  {
+    start: /\.query\s*\.\s*(?:all|filter|filter_by|order_by)\s*\(/,
+    bounded: /\.(?:limit|paginate|first|get|one|one_or_none|count|slice)\s*\(|\[\s*:\s*\w+\s*\]/
+  },
+  // `session.query(Model)….all()` / `db.query(Model).all()`.
+  { start: /\b(?:session|db)\s*\.\s*query\s*\(/, requires: /\.all\s*\(/, bounded: /\.(?:limit|slice|yield_per)\s*\(/ },
+  // 2.0 style: `session.scalars(select(Model)).all()`.
+  { start: /\bsession\s*\.\s*(?:scalars|execute)\s*\(\s*select\s*\(/, requires: /\.all\s*\(/, bounded: /\.limit\s*\(/ }
+];
+var PY_ROUTE_DECORATOR = /@\w+(?:\.\w+)*\.(?:route|get|post|api_route)\s*\(\s*["']([^"']+)["']/;
+var PYTHON_PACK = {
+  id: "python",
+  ecosystem: "python",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        // The original detector's Python rule.
+        {
+          id: "env-secret",
+          kind: "line",
+          languages: PY3,
+          match: new RegExp(`(?:==|!=)\\s*os\\.(?:environ\\[|getenv\\()\\s*${SECRET}`),
+          unless: PY_CONSTANT_TIME,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          id: "env-secret-left",
+          kind: "line",
+          languages: PY3,
+          match: new RegExp(`os\\.(?:environ\\[|environ\\.get\\(|getenv\\()\\s*${SECRET}\\s*[\\])]\\s*(?:==|!=)${NOT_PRESENCE}`),
+          unless: PY_CONSTANT_TIME,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          id: "settings-secret",
+          kind: "line",
+          languages: PY3,
+          match: new RegExp(
+            `(?:==|!=)\\s*(?:settings\\.[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])|(?:settings\\.[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)\\b|(?:current_)?app\\.config\\[\\s*${SECRET}\\s*\\])\\s*(?:==|!=)${NOT_PRESENCE}`
+          ),
+          unless: PY_CONSTANT_TIME,
+          emit: "authtokens/secret-compare-timing"
+        },
+        {
+          id: "credential-header",
+          kind: "line",
+          languages: PY3,
+          match: /headers\.get\(\s*["'](?:x-api-key|authorization|x-webhook-secret|x-auth-token)["'][^)]*\)\s*(?:==|!=)(?!\s*(?:None|""|''))/i,
+          unless: PY_CONSTANT_TIME,
+          emit: "authtokens/secret-compare-timing"
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: PY3,
+          gate: [MENTIONS_CSV],
+          anchor: /\.writerows?\s*\(|["'][,;]["']\s*\.join\s*\(/,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA_ANY,
+          note: 'A CSV is written from non-constant cells (`csv.writer`/`DictWriter`, or `",".join`) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `\'` \u2014 or write through `defusedcsv`, which does it.'
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        // `.split(",", 1)[0]` and `.partition(",")[0]` — the common pack has `.split(",")[0]`.
+        {
+          id: "maxsplit-first",
+          kind: "line",
+          languages: PY3,
+          match: /\.split\(\s*["']\s*,\s*["']\s*,\s*1\s*\)\s*\[\s*0\s*\]|\.partition\(\s*["']\s*,\s*["']\s*\)\s*\[\s*0\s*\]/,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "bool-of-env",
+          kind: "line",
+          languages: PY3,
+          match: /\bbool\s*\(\s*os\.(?:environ\.get|getenv)\s*\(|\bbool\s*\(\s*os\.environ\[/,
+          note: '`bool(os.environ.get("X"))` is True for every non-empty string, including "false" and "0" \u2014 an operator writing X=false turns the flag ON. Compare the lowered string against an explicit set of true spellings.'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "Python web frameworks keep the session server-side (Django, Flask-Session) or in one signed cookie (Flask's default); none splits it into numbered chunks that a logout could leave behind."
+    }
+  }
+};
+var DJANGO_SECURITY_MIDDLEWARES = /^(?=[\s\S]*django\.middleware\.security\.SecurityMiddleware)(?=[\s\S]*django\.middleware\.clickjacking\.XFrameOptionsMiddleware)/;
+var DJANGO_QUERIES = [
+  {
+    start: /\.objects\s*\.\s*(?:all|filter|exclude|values|values_list|order_by|select_related|prefetch_related)\s*\(/,
+    bounded: /\[\s*\w*\s*:\s*\w+\s*\]|\bPaginator\s*\(|\.(?:iterator|first|last|get|exists|count|aggregate)\s*\(/
+  }
+];
+var DJANGO_PACK = {
+  id: "django",
+  ecosystem: "python",
+  framework: "django",
+  testedWith: ">=3.2 <7",
+  sources: ["https://docs.djangoproject.com/en/stable/ref/middleware/", "https://docs.djangoproject.com/en/stable/ref/settings/"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "middleware-missing",
+          kind: "absent",
+          languages: PY3,
+          anchor: /^\s*MIDDLEWARE\s*=/,
+          presentInFile: DJANGO_SECURITY_MIDDLEWARES,
+          note: "MIDDLEWARE lacks `django.middleware.security.SecurityMiddleware` or `django.middleware.clickjacking.XFrameOptionsMiddleware` (or has them commented out). Those two are what make Django send X-Content-Type-Options, Referrer-Policy, Cross-Origin-Opener-Policy and X-Frame-Options by default; without them the responses carry none. Restore both \u2014 and set SECURE_HSTS_SECONDS and SECURE_CSP, which are off by default either way."
+        },
+        {
+          id: "default-turned-off",
+          kind: "line",
+          languages: PY3,
+          match: /^\s*(?:SECURE_CONTENT_TYPE_NOSNIFF\s*=\s*False|SECURE_REFERRER_POLICY\s*=\s*None|SECURE_CROSS_ORIGIN_OPENER_POLICY\s*=\s*None|X_FRAME_OPTIONS\s*=\s*["']ALLOWALL["'])/,
+          note: "A security header Django sends by default is switched off in settings. Remove the override unless a proxy in front sets the header instead."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "view",
+          kind: "route-query",
+          languages: PY3,
+          exportPath: EXPORT_PATH,
+          // A view function named for the export, or a URL pattern whose path is one.
+          routeDecl: /^\s*(?:async\s+)?def\s+(\w+)\s*\(\s*request\b|^\s*(?:re_)?path\s*\(\s*r?["']([^"']+)["']/,
+          queries: DJANGO_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var FLASK_PACK = {
+  id: "flask",
+  ecosystem: "python",
+  framework: "flask",
+  testedWith: ">=2 <4",
+  sources: ["https://flask.palletsprojects.com/en/stable/web-security/"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-talisman",
+          kind: "absent",
+          languages: PY3,
+          requiresFramework: "flask",
+          anchor: /\bFlask\s*\(\s*__name__/,
+          presentInFile: HEADERS_MIDDLEWARE,
+          presentInTree: { re: new RegExp(`\\bTalisman\\s*\\(|${SETS_SECURITY_HEADER.source}`, "i"), scope: "package", languages: PY3 },
+          note: "The Flask app is built and nothing in the package sets security headers (no Flask-Talisman, no `after_request` writing CSP / X-Frame-Options / HSTS). Flask sends none by default. Add Talisman or set them in `after_request` \u2014 unless the proxy in front sets them."
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "access-route-first",
+          kind: "line",
+          languages: PY3,
+          match: /\brequest\.access_route\s*\[\s*0\s*\]/,
+          note: "Werkzeug's `request.access_route` is the X-Forwarded-For list followed by the socket address, so element 0 is whatever the client sent. Configure `ProxyFix(app.wsgi_app, x_for=1)` and read `request.remote_addr` instead."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route",
+          kind: "route-query",
+          languages: PY3,
+          exportPath: EXPORT_PATH,
+          routeDecl: PY_ROUTE_DECORATOR,
+          queries: SQLALCHEMY_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var FASTAPI_PACK = {
+  id: "fastapi",
+  ecosystem: "python",
+  framework: "fastapi",
+  testedWith: ">=0.100 <1",
+  sources: ["https://fastapi.tiangolo.com/advanced/middleware/"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-headers-middleware",
+          kind: "absent",
+          languages: PY3,
+          anchor: /\bFastAPI\s*\(/,
+          presentInFile: HEADERS_MIDDLEWARE,
+          emit: "webconfig/helmet-missing"
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route",
+          kind: "route-query",
+          languages: PY3,
+          exportPath: EXPORT_PATH,
+          routeDecl: PY_ROUTE_DECORATOR,
+          queries: SQLALCHEMY_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var PYTHON_PACKS = [PYTHON_PACK, DJANGO_PACK, FLASK_PACK, FASTAPI_PACK];
+
+// src/classes/packs/java.ts
+var JVM2 = ["java", "kotlin"];
+var SECRET2 = String.raw`"[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
+var SECRET_FIELD = String.raw`\w*(?:apiKey|ApiKey|API_KEY|sharedSecret|SharedSecret|webhookSecret|WebhookSecret|clientSecret|ClientSecret|apiToken|ApiToken)\w*`;
+var JAVA_PACK = {
+  id: "java",
+  ecosystem: "java",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "equals-secret",
+          kind: "line",
+          languages: JVM2,
+          match: new RegExp(
+            `\\.equals\\(\\s*(?:System\\.getenv\\(\\s*${SECRET2}\\s*\\)|${SECRET_FIELD})\\s*\\)|(?:System\\.getenv\\(\\s*${SECRET2}\\s*\\)|\\b${SECRET_FIELD})\\s*\\.equals\\(|getHeader\\(\\s*"(?:X-Api-Key|X-API-Key|Authorization|X-Webhook-Secret)"\\s*\\)\\s*\\.equals\\(`
+          ),
+          unless: /MessageDigest\.isEqual|constantTime/i,
+          note: "A credential is checked with `String.equals`, which returns at the first differing character, so response time leaks how much of a guess is right. Compare digests with `MessageDigest.isEqual`."
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: JVM2,
+          gate: [MENTIONS_CSV],
+          anchor: /String\.join\(\s*"[,;]"|\.printRecord\s*\(|\.writeNext\s*\(/,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA_ANY,
+          note: "A CSV is written (`String.join`, Commons CSV `printRecord`, OpenCSV `writeNext`) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'`."
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "getenv-not-null",
+          kind: "line",
+          languages: JVM2,
+          match: new RegExp(`(?:boolean|Boolean|var|val)\\s+${FLAG_NAME}\\s*(?::\\s*Boolean\\s*)?=\\s*System\\.getenv\\(\\s*"[^"]+"\\s*\\)\\s*!=\\s*null`, "i"),
+          note: 'The flag is "the variable is set": X=false and X=0 turn it ON. Parse the value \u2014 `Boolean.parseBoolean(System.getenv("X"))` \u2014 or bind it with Spring\'s typed `@Value`.'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "Java servlet containers keep the session server-side behind a single JSESSIONID-style cookie; there are no numbered chunks for a logout to miss."
+    }
+  }
+};
+var SPRING_QUERIES = [
+  // A repository `findAll()` with no Pageable/Sort argument loads the table.
+  { start: /\b\w*(?:Repository|Repo|repository|repo)\s*\.\s*findAll\s*\(\s*\)/, bounded: /(?!)/ },
+  // JdbcTemplate with a literal SELECT.
+  { start: /\.\s*query(?:ForList)?\s*\(\s*"\s*SELECT\b/i, bounded: /\bLIMIT\b|\bFETCH\s+FIRST\b/i }
+];
+var SPRING_PACK = {
+  id: "spring",
+  ecosystem: "java",
+  framework: "spring",
+  testedWith: ">=2.7 <5",
+  sources: ["https://docs.spring.io/spring-security/reference/servlet/exploits/headers.html"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "headers-disabled",
+          kind: "line",
+          languages: JVM2,
+          match: /\.headers\s*\(\s*(?:\(?\s*\w+\s*\)?\s*->\s*\w+\s*\.\s*disable\s*\(\s*\)|AbstractHttpConfigurer::disable)\s*\)|\.headers\s*\(\s*\)\s*\.\s*disable\s*\(|\.defaultsDisabled\s*\(/,
+          note: "Spring Security's default response headers (X-Content-Type-Options, X-Frame-Options: DENY, HSTS, Cache-Control) are switched off here. Keep the defaults (`headers(withDefaults())`) and only override the header you need to."
+        },
+        {
+          id: "no-spring-security",
+          kind: "absent",
+          languages: JVM2,
+          requiresFramework: "spring",
+          anchor: /@SpringBootApplication\b/,
+          presentInTree: {
+            re: new RegExp(
+              `spring-boot-starter-security|spring-security-(?:web|config)|SecurityFilterChain|addHeaderWriter|${SETS_SECURITY_HEADER.source}`,
+              "i"
+            ),
+            scope: "package",
+            files: /(?:^|\/)(?:pom\.xml|build\.gradle(?:\.kts)?)$|\.(?:java|kt)$/
+          },
+          note: "This Spring Boot application has no Spring Security on its build and sets no security header itself, so responses carry none: Spring MVC writes no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Add spring-boot-starter-security (its defaults set most of them) or a header filter \u2014 unless the proxy in front sets them."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "controller",
+          kind: "route-query",
+          languages: JVM2,
+          exportPath: EXPORT_PATH,
+          routeDecl: /@(?:Get|Request|Post)Mapping\s*\(\s*(?:value\s*=\s*|path\s*=\s*)?\{?\s*"([^"]+)"/,
+          queries: SPRING_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var JAVA_PACKS = [JAVA_PACK, SPRING_PACK];
+
+// src/classes/packs/go.ts
+var GO = ["go"];
+var SECRET3 = String.raw`"[A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)"`;
+var NOT_EMPTY = String.raw`(?!\s*"")`;
+var GO_QUERIES = [
+  // GORM: `db.Find(&rows)` with no `.Limit(` anywhere on the statement.
+  { start: /\.\s*Find\s*\(\s*&/, bounded: /\.\s*(?:Limit|Scopes)\s*\(|\.\s*FindInBatches\s*\(/ },
+  // database/sql with a literal SELECT.
+  { start: /\.\s*Query(?:Context)?\s*\(/, requires: /\bSELECT\b/i, bounded: /\bLIMIT\b/i }
+];
+var GO_SETS_HEADERS = new RegExp(`secure\\.New\\s*\\(|unrolled/secure|${SETS_SECURITY_HEADER.source}`, "i");
+var GO_PACK = {
+  id: "go",
+  ecosystem: "go",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "getenv-secret",
+          kind: "line",
+          languages: GO,
+          match: new RegExp(
+            `(?:==|!=)\\s*os\\.Getenv\\(\\s*${SECRET3}\\s*\\)|os\\.Getenv\\(\\s*${SECRET3}\\s*\\)\\s*(?:==|!=)${NOT_EMPTY}|\\.(?:Header\\.Get|GetHeader)\\(\\s*"(?:X-Api-Key|X-API-Key|Authorization|X-Webhook-Secret)"\\s*\\)\\s*(?:==|!=)${NOT_EMPTY}`
+          ),
+          unless: /subtle\.ConstantTimeCompare|hmac\.Equal/,
+          note: "A credential is compared with `==`/`!=`, which returns at the first differing byte, so response time leaks how much of a guess is right. Use `subtle.ConstantTimeCompare` (or `hmac.Equal` on digests)."
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: GO,
+          gate: [MENTIONS_CSV],
+          anchor: /csv\.NewWriter\s*\(|\.Write(?:All)?\s*\(\s*\[\]string|strings\.Join\([^)]*,\s*"[,;]"\s*\)/,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA_ANY,
+          note: "A CSV is written (`encoding/csv`, or `strings.Join` with a comma) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'`."
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "split-first",
+          kind: "line",
+          languages: GO,
+          // One level of nested call allowed in the argument: `Split(r.Header.Get("X-Forwarded-For"), ",")`.
+          match: /strings\.SplitN?\s*\((?:[^()]|\([^()]*\))*?,\s*"\s*,\s*"(?:\s*,\s*-?\d+)?\s*\)\s*\[\s*0\s*\]|strings\.Cut\s*\((?:[^()]|\([^()]*\))*?,\s*"\s*,\s*"\s*\)/,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "getenv-not-empty",
+          kind: "line",
+          languages: GO,
+          match: new RegExp(`\\b${FLAG_NAME}\\s*:?=\\s*os\\.Getenv\\(\\s*"[^"]+"\\s*\\)\\s*!=\\s*""`, "i"),
+          note: 'The flag is "the variable is non-empty": X=false and X=0 turn it ON. Parse it with `strconv.ParseBool`.'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "Go session libraries (gorilla/sessions, scs) keep one cookie per session and refuse an oversized value; none splits it into numbered chunks."
+    }
+  }
+};
+var NET_HTTP_PACK = {
+  id: "net-http",
+  ecosystem: "go",
+  framework: "net-http",
+  testedWith: ">=1.18 <2",
+  sources: ["https://pkg.go.dev/net/http"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-headers",
+          kind: "absent",
+          languages: GO,
+          requiresFramework: "net-http",
+          anchor: /\bhttp\.ListenAndServe(?:TLS)?\s*\(|&?http\.Server\s*\{/,
+          presentInTree: { re: GO_SETS_HEADERS, scope: "package", languages: GO },
+          note: "The server is started and nothing in the module sets security headers: net/http writes no CSP, HSTS, X-Frame-Options or X-Content-Type-Options on a normal response. Wrap the handler in a middleware that sets them (e.g. unrolled/secure) \u2014 unless the proxy in front does."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "handler",
+          kind: "route-query",
+          languages: GO,
+          exportPath: EXPORT_PATH,
+          // Go 1.22 patterns carry the method: "GET /export/users".
+          routeDecl: /\b(?:HandleFunc|Handle)\s*\(\s*"(?:[A-Z]+\s+)?([^"]+)"/,
+          queries: GO_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var GIN_PACK = {
+  id: "gin",
+  ecosystem: "go",
+  framework: "gin",
+  testedWith: ">=1.7 <2",
+  sources: ["https://gin-gonic.com/en/docs/server-config/trusted-proxies/", "https://github.com/gin-contrib/secure"],
+  classes: {
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "clientip-all-proxies-trusted",
+          kind: "absent",
+          languages: GO,
+          anchor: /\.ClientIP\s*\(\s*\)/,
+          presentInTree: { re: /\.SetTrustedProxies\s*\(|\bTrustedPlatform\s*=/, scope: "package", languages: GO },
+          note: "`c.ClientIP()` is read, and the engine never calls `SetTrustedProxies` (or sets `TrustedPlatform`). Gin trusts every proxy by default, so ClientIP returns the X-Forwarded-For entry the client wrote. Call `router.SetTrustedProxies([]string{<your proxy>})`, or `nil` when there is none."
+        }
+      ]
+    },
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-secure-middleware",
+          kind: "absent",
+          languages: GO,
+          anchor: /\bgin\.(?:Default|New)\s*\(\s*\)/,
+          presentInTree: { re: GO_SETS_HEADERS, scope: "package", languages: GO },
+          note: "The Gin engine is built and nothing in the module sets security headers; Gin sends none by default. Register `gin-contrib/secure` (or a middleware writing CSP, HSTS, X-Frame-Options, X-Content-Type-Options) \u2014 unless the proxy in front does."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route",
+          kind: "route-query",
+          languages: GO,
+          exportPath: EXPORT_PATH,
+          routeDecl: /\.(?:GET|POST|Any|Group)\s*\(\s*"([^"]+)"/,
+          queries: GO_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var GO_PACKS = [GO_PACK, NET_HTTP_PACK, GIN_PACK];
+
+// src/classes/packs/ruby.ts
+var RB = ["ruby"];
+var SECRET4 = String.raw`["'][A-Z0-9_]*(?:TOKEN|SECRET|KEY|PASSWORD)["']`;
+var ENV_SECRET = String.raw`ENV(?:\[\s*${SECRET4}\s*\]|\.fetch\(\s*${SECRET4}\s*\))`;
+var RUBY_PACK = {
+  id: "ruby",
+  ecosystem: "ruby",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "env-secret",
+          kind: "line",
+          languages: RB,
+          match: new RegExp(
+            `(?:==|!=)\\s*(?:${ENV_SECRET}|Rails\\.application\\.credentials\\.\\w*(?:token|secret|key)\\w*)|(?:${ENV_SECRET}|request\\.headers\\[\\s*["'](?:X-Api-Key|X-API-Key|Authorization|X-Webhook-Secret)["']\\s*\\])\\s*(?:==|!=)(?!\\s*(?:nil|""|''))`
+          ),
+          unless: /secure_compare|fixed_length_secure_compare/,
+          note: "A credential is compared with `==`, which returns at the first differing byte, so response time leaks how much of a guess is right. Use `ActiveSupport::SecurityUtils.secure_compare` (or `Rack::Utils.secure_compare`)."
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: RB,
+          gate: [MENTIONS_CSV],
+          anchor: /\bCSV\.(?:generate|open)\b|\bcsv\s*<<|\.to_csv\b/,
+          pick: "last",
+          unless: NEUTRALIZES_FORMULA_ANY,
+          note: "A CSV is written (`CSV.generate`, `csv << row`, `to_csv`) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'`."
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "split-first",
+          kind: "line",
+          languages: RB,
+          match: /\.split\(\s*["']\s*,\s*["']\s*\)\s*\.first\b/,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "env-truthiness",
+          kind: "line",
+          languages: RB,
+          match: /!!\s*ENV\[|ENV\[\s*["'][^"']+["']\s*\]\.present\?|ENV\.fetch\(\s*["'][^"']+["']\s*,\s*(?:true|false)\s*\)/,
+          note: 'Every environment value is a String and every String is truthy: X=false keeps the flag ON. Cast it \u2014 `ActiveModel::Type::Boolean.new.cast(ENV["X"])` \u2014 or compare against "true".'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "Rails' cookie store keeps the session in one cookie and raises CookieOverflow past 4 KB rather than splitting it; there are no chunks for a logout to miss."
+    }
+  }
+};
+var RAILS_QUERIES = [
+  {
+    start: /\b[A-Z]\w*(?:::[A-Z]\w*)*\.(?:all|where|order|includes|joins|select|eager_load)\b/,
+    bounded: /\.(?:limit|page|paginate|per|find_each|find_in_batches|in_batches|first|last|take|find_by|find|count|exists\?|pluck_first)\b/
+  }
+];
+var RAILS_PACK = {
+  id: "rails",
+  ecosystem: "ruby",
+  framework: "rails",
+  testedWith: ">=6 <9",
+  sources: ["https://guides.rubyonrails.org/security.html"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "default-headers-cleared",
+          kind: "line",
+          languages: RB,
+          match: /\bdefault_headers\s*=\s*\{\s*\}|\bdefault_headers\.clear\b/,
+          note: "Rails' default security headers (X-Frame-Options, X-Content-Type-Options, Referrer-Policy) are wiped here. Keep the defaults and override only the header you mean to change."
+        },
+        {
+          id: "no-csp",
+          kind: "absent",
+          languages: RB,
+          anchor: /<\s*Rails::Application\b/,
+          presentInTree: { re: /\bcontent_security_policy\b/, scope: "package", languages: RB },
+          note: "Rails sends X-Frame-Options, X-Content-Type-Options and Referrer-Policy by default, but no Content-Security-Policy until one is configured \u2014 and the generated `config/initializers/content_security_policy.rb` is entirely commented out. Configure the policy there (a nonce for inline scripts) \u2014 unless the proxy in front sets one."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "controller",
+          kind: "route-query",
+          languages: RB,
+          files: /_controller\.rb$/,
+          routeFile: /_controller\.rb$/,
+          exportPath: EXPORT_PATH,
+          routeDecl: /^\s*def\s+(\w+)/,
+          queries: RAILS_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var RUBY_PACKS = [RUBY_PACK, RAILS_PACK];
+
+// src/classes/packs/php.ts
+var PHP = ["php"];
+var SECRET_READ = String.raw`(?:env|getenv|config)\(\s*['"][^'"]*(?:token|secret|key|password)[^'"]*['"]\s*\)`;
+var EQ2 = "(?:===|!==|==|!=)";
+var NOT_EMPTY2 = String.raw`(?!\s*(?:null|''|""|false)\b)`;
+var PHP_PACK = {
+  id: "php",
+  ecosystem: "php",
+  classes: {
+    "timing-unsafe-secret-compare": {
+      rules: [
+        {
+          id: "secret-read",
+          kind: "line",
+          languages: PHP,
+          match: new RegExp(
+            `${EQ2}\\s*${SECRET_READ}|${SECRET_READ}\\s*${EQ2}${NOT_EMPTY2}|\\$_SERVER\\[\\s*['"]HTTP_(?:X_API_KEY|AUTHORIZATION|X_WEBHOOK_SECRET)['"]\\s*\\]\\s*${EQ2}${NOT_EMPTY2}|->header\\(\\s*['"](?:X-Api-Key|X-API-Key|Authorization|X-Webhook-Secret)['"]\\s*\\)\\s*${EQ2}${NOT_EMPTY2}`,
+            "i"
+          ),
+          unless: /hash_equals/,
+          note: "A credential is compared with `===`/`==`, which returns at the first differing byte, so response time leaks how much of a guess is right. Use `hash_equals($known, $provided)`."
+        }
+      ]
+    },
+    "csv-formula-injection": {
+      rules: [
+        {
+          id: "writer",
+          kind: "file",
+          languages: PHP,
+          gate: [MENTIONS_CSV],
+          anchor: /\bfputcsv\s*\(|\bimplode\s*\(\s*['"][,;]['"]|->insert(?:One|All)\s*\(/,
+          pick: "last",
+          // league/csv ships the neutralizer as a formatter.
+          unless: new RegExp(`${NEUTRALIZES_FORMULA_ANY.source}|EscapeFormula`, "i"),
+          note: "A CSV is written (`fputcsv`, `implode(',')`, league/csv `insertOne`) and nothing neutralizes a cell that starts with `=`, `+`, `-`, `@`, a tab or a carriage return. Opened in a spreadsheet such a cell is a formula. Prefix those cells with `'` (league/csv: `EscapeFormula`)."
+        }
+      ]
+    },
+    "client-ip-first-xff": {
+      rules: [
+        {
+          id: "explode-first",
+          kind: "line",
+          languages: PHP,
+          match: /explode\s*\(\s*['"]\s*,\s*['"]\s*,[^;]*?\)\s*\[\s*0\s*\]|strtok\s*\([^;]*X_FORWARDED_FOR[^;]*,\s*['"],['"]\s*\)/,
+          context: { re: XFF, before: XFF_LOOKBACK },
+          emit: "webconfig/xff-first-hop"
+        }
+      ]
+    },
+    "env-bool-coercion": {
+      rules: [
+        {
+          id: "bool-cast-env",
+          kind: "line",
+          languages: PHP,
+          match: /\(\s*bool\s*\)\s*(?:getenv\s*\(|\$_ENV\[|\$_SERVER\[)/,
+          note: '`(bool) getenv("X")` is true for every non-empty string, including "false". Use `filter_var(getenv("X"), FILTER_VALIDATE_BOOLEAN)` \u2014 Laravel\'s `env()` already maps "false"/"(false)" to false.'
+        }
+      ]
+    },
+    "session-cookie-chunks-on-logout": {
+      notApplicable: "PHP sessions (native and Laravel's drivers) keep one session cookie; none splits it into numbered chunks for a logout to miss."
+    }
+  }
+};
+var LARAVEL_QUERIES = [
+  // `Model::all()` loads the table, whatever is chained after it.
+  { start: /\b[A-Z]\w*::all\s*\(\s*\)/, bounded: /(?!)/ },
+  {
+    start: /\b(?:[A-Z]\w*::(?:where|query|orderBy|select|with|latest|oldest)|DB::table)\s*\(/,
+    requires: /->get\s*\(\s*\)/,
+    bounded: /->(?:limit|take|paginate|simplePaginate|cursorPaginate|chunk|chunkById|lazy|lazyById|cursor|first|find|count|exists)\s*\(/
+  }
+];
+var LARAVEL_PACK = {
+  id: "laravel",
+  ecosystem: "php",
+  framework: "laravel",
+  testedWith: ">=9 <14",
+  sources: ["https://laravel.com/docs/12.x/requests"],
+  classes: {
+    "security-headers-absent": {
+      rules: [
+        {
+          id: "no-headers-middleware",
+          kind: "absent",
+          languages: PHP,
+          requiresFramework: "laravel",
+          anchor: /Application::configure\s*\(|class\s+Kernel\s+extends\s+HttpKernel\b/,
+          presentInTree: { re: new RegExp(`Spatie\\\\Csp|AddCspHeaders|SecureHeaders|${SETS_SECURITY_HEADER.source}`, "i"), scope: "package", languages: PHP },
+          note: "The Laravel application is configured and nothing in it sets security headers: Laravel's default middleware stack writes no CSP, HSTS or X-Frame-Options. Add a header middleware (or spatie/laravel-csp) \u2014 unless the web server in front sets them."
+        }
+      ]
+    },
+    "unbounded-public-export": {
+      rules: [
+        {
+          id: "route-or-controller",
+          kind: "route-query",
+          languages: PHP,
+          exportPath: EXPORT_PATH,
+          routeDecl: /Route::(?:get|post|any|match)\s*\(\s*['"]([^'"]+)['"]|public\s+function\s+(\w+)\s*\(/,
+          queries: LARAVEL_QUERIES,
+          statement: "balanced"
+        }
+      ]
+    }
+  }
+};
+var PHP_PACKS = [PHP_PACK, LARAVEL_PACK];
+
+// src/classes/packs/index.ts
+var PACKS = [COMMON_PACK, ...NODE_PACKS, ...PYTHON_PACKS, ...JAVA_PACKS, ...GO_PACKS, ...RUBY_PACKS, ...PHP_PACKS];
+
+// src/classes/engine.ts
+var SKIPPED_EXTS = /* @__PURE__ */ new Set(["ipynb", "pyi"]);
+var LEGACY_PREFIX = { webconfig: "Web misconfig \u2014 ", authtokens: "Auth token \u2014 ", class: "Weakness \u2014 " };
+function boundRules(packs = PACKS) {
+  const out2 = [];
+  for (const pack of packs)
+    for (const [classId, cov] of Object.entries(pack.classes)) {
+      if (!cov || !("rules" in cov)) continue;
+      for (const rule2 of cov.rules) out2.push({ pack, classId, rule: rule2 });
+    }
+  return out2;
+}
+function shapeFor(classId, rule2) {
+  if (rule2.emit) {
+    const [family, id] = rule2.emit.split("/");
+    if (family === "webconfig") {
+      const s = WEBCONFIG_SHAPES[id];
+      if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: "config", note: s.note };
+    }
+    if (family === "authtokens") {
+      const s = AUTH_SHAPES[id];
+      if (s) return { family, id: s.id, title: s.title, severity: s.severity, cwe: s.cwe, category: s.category, note: s.note };
+    }
+    throw new Error(`classes: rule ${rule2.id} emits unknown shape ${rule2.emit}`);
+  }
+  const c2 = CLASSES[classId];
+  return { family: "class", id: c2.id, title: c2.title, severity: c2.severity, cwe: c2.cwe, category: c2.category, note: rule2.note ?? c2.note };
+}
+function hit4(rel2, line2, shape, evidence) {
+  return makeToolFinding({
+    tool: "ultrasec",
+    category: shape.category,
+    ident: `${shape.family}:${shape.id}:${rel2}:${line2}`,
+    title: `${LEGACY_PREFIX[shape.family]}${shape.title}`,
+    severity: shape.severity,
+    message: `${shape.note}
+
+Evidence: \`${evidence.trim().slice(0, 160)}\``,
+    file: rel2,
+    line: line2,
+    cwe: shape.cwe
+  });
+}
+function extOf5(rel2) {
+  const i2 = rel2.lastIndexOf(".");
+  return i2 === -1 ? "" : rel2.slice(i2 + 1).toLowerCase();
+}
+function lineOf3(content, index) {
+  let n = 1;
+  for (let i2 = 0; i2 < index && i2 < content.length; i2++) if (content[i2] === "\n") n++;
+  return n;
+}
+var dirOfRel = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/") + 1) : "";
+function view(rel2, lang, content) {
+  const raw = content.split(/\r?\n/);
+  const hash = lang === "python" || lang === "ruby" || lang === "shell" || lang === "elixir";
+  const code = raw.map((t) => codeOfLine(t, lang));
+  const comment = code.map((c2) => c2.trim() === "" || !hash && /^\s*\*/.test(c2));
+  return { rel: rel2, lang, content, raw, code, comment, codeText: code.map((c2, i2) => comment[i2] ? "" : c2).join("\n") };
+}
+function runLine(v, r, emit2) {
+  if (r.fileGate && !r.fileGate.test(v.content)) return;
+  for (let i2 = 0; i2 < v.raw.length; i2++) {
+    if (v.comment[i2]) continue;
+    const c2 = v.code[i2];
+    if (!r.match.test(c2) || r.unless?.test(c2)) continue;
+    if (r.context) {
+      let seen = false;
+      for (let j = Math.max(0, i2 - r.context.before); j <= i2 && !seen; j++) seen = !v.comment[j] && r.context.re.test(v.code[j]);
+      if (!seen) continue;
+    }
+    emit2(i2 + 1, v.raw[i2]);
+  }
+}
+function runFile(v, r, emit2) {
+  if (!r.gate.every((g) => g.test(v.content))) return;
+  if (r.unless?.test(v.codeText)) return;
+  let at = -1;
+  for (let i2 = 0; i2 < v.raw.length; i2++) {
+    if (v.comment[i2] || !r.anchor.test(v.code[i2])) continue;
+    at = i2;
+    if (r.pick === "first") break;
+  }
+  if (at >= 0) emit2(at + 1, v.raw[at]);
+}
+var MAX_STATEMENT = 2e3;
+function statementAt2(content, start2, mode) {
+  const rest = content.slice(start2, start2 + MAX_STATEMENT);
+  if (mode === "js-legacy") {
+    const end = rest.search(/;|\n\s*\n/);
+    return end === -1 ? rest : rest.slice(0, end);
+  }
+  let depth = 0;
+  let quote = null;
+  for (let i2 = 0; i2 < rest.length; i2++) {
+    const ch = rest[i2];
+    if (quote) {
+      if (ch === "\\") i2++;
+      else if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === "`") quote = ch;
+    else if (ch === "(" || ch === "[" || ch === "{") depth++;
+    else if (ch === ")" || ch === "]" || ch === "}") depth = Math.max(0, depth - 1);
+    else if (ch === ";" && depth === 0) return rest.slice(0, i2);
+    else if (ch === "\n" && depth === 0 && !/^\s*(?:\.|->)/.test(rest.slice(i2 + 1, i2 + 200))) return rest.slice(0, i2);
+  }
+  return rest;
+}
+function isExportRoute(v, r) {
+  if (r.routeFile?.test(v.rel) && r.exportPath.test(v.rel)) return true;
+  if (!r.routeDecl) return false;
+  for (let i2 = 0; i2 < v.code.length; i2++) {
+    if (v.comment[i2]) continue;
+    const m = r.routeDecl.exec(v.code[i2]);
+    const named = m?.slice(1).find((g) => g !== void 0);
+    if (named && r.exportPath.test(named)) return true;
+  }
+  return false;
+}
+function runRouteQuery(v, r, emit2) {
+  if (!isExportRoute(v, r)) return;
+  for (const q of r.queries) {
+    const re = new RegExp(q.start.source, q.start.flags.includes("g") ? q.start.flags : `${q.start.flags}g`);
+    for (const m of v.content.matchAll(re)) {
+      const at = m.index ?? 0;
+      const ln = lineOf3(v.content, at);
+      if (v.comment[ln - 1]) continue;
+      const start2 = r.statement === "balanced" ? v.content.lastIndexOf("\n", at - 1) + 1 : at;
+      const stmt = statementAt2(v.content, start2, r.statement);
+      if (q.requires && !q.requires.test(stmt)) continue;
+      if (q.bounded.test(stmt)) continue;
+      emit2(ln, stmt.split("\n")[0]);
+    }
+  }
+}
+function packageRoot(rel2, frameworks) {
+  let best;
+  for (const f of frameworks) {
+    const d = f.dir ? `${f.dir}/` : "";
+    if (rel2.startsWith(d) && (best === void 0 || d.length > best.length)) best = d;
+  }
+  return best ?? "";
+}
+function frameworkAt(rel2, id, frameworks) {
+  return frameworks.some((f) => f.id === id && (f.dir === "" || rel2.startsWith(`${f.dir}/`)));
+}
+function auditWeaknessClasses(repo, prune, tree, frameworks = [], packs = PACKS) {
+  const rules = boundRules(packs);
+  const read = tree?.read ?? readText2;
+  const findings = [];
+  const hits = [];
+  const seen = /* @__PURE__ */ new Set();
+  const pending2 = [];
+  const presentDirs = /* @__PURE__ */ new Map();
+  const record2 = (b, rel2, line2, evidence) => {
+    hits.push({ classId: b.classId, packId: b.pack.id, ruleId: b.rule.id, file: rel2, line: line2 });
+    const key = `${b.classId}\0${rel2}\0${line2}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    findings.push(hit4(rel2, line2, shapeFor(b.classId, b.rule), evidence));
+  };
+  for (const wf of tree?.files ?? walk2(repo)) {
+    if (prune?.(wf.rel)) continue;
+    const ext = extOf5(wf.rel);
+    if (SKIPPED_EXTS.has(ext)) continue;
+    const lang = langForFile(wf.rel)?.id;
+    const forFile = lang ? rules.filter((b) => b.rule.languages.includes(lang) && (!b.rule.files || b.rule.files.test(wf.rel))) : [];
+    const treeChecks = rules.filter((b) => {
+      const t = b.rule.kind === "absent" ? b.rule.presentInTree : void 0;
+      if (!t) return false;
+      if (t.files && !t.files.test(wf.rel)) return false;
+      return lang ? !t.languages || t.languages.includes(lang) : !!t.files;
+    });
+    if (!forFile.length && !treeChecks.length) continue;
+    const content = read(wf.abs);
+    if (!content) continue;
+    const v = view(wf.rel, lang ?? "", content);
+    for (const b of treeChecks) {
+      const t = b.rule.presentInTree;
+      if (t.re.test(v.codeText))
+        (presentDirs.get(b) ?? presentDirs.set(b, []).get(b)).push(t.scope === "package" ? packageRoot(v.rel, frameworks) : dirOfRel(v.rel));
+    }
+    for (const b of forFile) {
+      const r = b.rule;
+      if (r.requiresFramework && !frameworkAt(v.rel, r.requiresFramework, frameworks)) continue;
+      const emit2 = (line2, evidence) => record2(b, v.rel, line2, evidence);
+      if (r.kind === "line") runLine(v, r, emit2);
+      else if (r.kind === "file") runFile(v, r, emit2);
+      else if (r.kind === "route-query") runRouteQuery(v, r, emit2);
+      else {
+        if (r.fileGate && !r.fileGate.test(v.content)) continue;
+        if (r.presentInFile?.test(v.codeText)) continue;
+        let at = v.code.findIndex((c2, i2) => !v.comment[i2] && r.anchor.test(c2));
+        if (at < 0 && r.fallbackLine1) at = 0;
+        if (at < 0) continue;
+        if (!r.presentInTree) emit2(at + 1, v.raw[at]);
+        else
+          pending2.push({
+            bound: b,
+            rel: v.rel,
+            line: at + 1,
+            evidence: v.raw[at],
+            root: r.presentInTree.scope === "package" ? packageRoot(v.rel, frameworks) : dirOfRel(v.rel)
+          });
+      }
+    }
+  }
+  for (const p of pending2) {
+    const scope = p.bound.rule.presentInTree.scope;
+    if ((presentDirs.get(p.bound) ?? []).some((d) => scope === "package" ? d === p.root : d.startsWith(p.root))) continue;
+    record2(p.bound, p.rel, p.line, p.evidence);
+  }
+  return { findings, hits };
+}
+
+// src/frameworks.ts
+import { existsSync as existsSync17, readFileSync as readFileSync24 } from "fs";
+import { join as join42 } from "path";
+
+// src/tools/lockfile-versions.ts
 import { existsSync as existsSync16, readFileSync as readFileSync23 } from "fs";
-import { join as join41 } from "path";
+import { dirname as dirname11, join as join41, posix as posix8, relative as relative10, sep as sep8 } from "path";
+var READABLE_LOCKFILES = ["pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock"];
+var toPosix = (p) => p.split(sep8).join(posix8.sep);
+var escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+function cleanVersion(raw) {
+  const v = raw.trim().replace(/^['"]|['"]$/g, "").replace(/\(.*$/, "");
+  return /^\d/.test(v) ? v : void 0;
+}
+function sorted(set) {
+  return [...new Set(set)].sort();
+}
+function fromPnpmImporter(lines5, importer, pkg) {
+  const keyRe = new RegExp(`^ {2}['"]?${escapeRe(importer)}['"]?:\\s*$`);
+  const start2 = lines5.findIndex((l) => keyRe.test(l));
+  if (start2 < 0) return void 0;
+  const depRe = new RegExp(`^ {6}['"]?${escapeRe(pkg)}['"]?:\\s*$`);
+  for (let i2 = start2 + 1; i2 < lines5.length; i2++) {
+    const l = lines5[i2];
+    if (/^ {0,2}\S/.test(l)) break;
+    if (!depRe.test(l)) continue;
+    for (let j = i2 + 1; j < lines5.length && /^ {8}/.test(lines5[j]); j++) {
+      const m = /^ {8}version:\s*(.+)$/.exec(lines5[j]);
+      if (m) return cleanVersion(m[1]);
+    }
+  }
+  return void 0;
+}
+function pnpm(text, importer, pkg) {
+  const lines5 = text.split(/\r?\n/);
+  const exact = fromPnpmImporter(lines5, importer, pkg);
+  if (exact) return [exact];
+  const keyRe = new RegExp(`^ {2}['"]?/?${escapeRe(pkg)}[@/](\\d[^(:'"\\s]*)`);
+  return sorted(lines5.map((l) => keyRe.exec(l)?.[1]).filter((v) => !!v));
+}
+function npm(text, manifestDir, pkg) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const pkgs = data.packages ?? {};
+  for (const key of [manifestDir ? `${manifestDir}/node_modules/${pkg}` : "", `node_modules/${pkg}`]) {
+    const v = key ? pkgs[key]?.version : void 0;
+    if (typeof v === "string" && cleanVersion(v)) return [v];
+  }
+  const legacy = data.dependencies?.[pkg]?.version;
+  return typeof legacy === "string" && cleanVersion(legacy) ? [legacy] : [];
+}
+function yarn(text, pkg) {
+  const out2 = [];
+  const lines5 = text.split(/\r?\n/);
+  const header3 = new RegExp(`(?:^|[\\s,"])${escapeRe(pkg)}@`);
+  for (let i2 = 0; i2 < lines5.length; i2++) {
+    const l = lines5[i2];
+    if (/^\s/.test(l) || !l.trim().endsWith(":") || !header3.test(l)) continue;
+    for (let j = i2 + 1; j < lines5.length && /^\s/.test(lines5[j]); j++) {
+      const m = /^\s+version:?\s+"?([^"\s]+)"?/.exec(lines5[j]);
+      if (m) {
+        const v = cleanVersion(m[1]);
+        if (v) out2.push(v);
+        break;
+      }
+    }
+  }
+  return sorted(out2);
+}
+function installedVersions(repo, manifestRel, pkg) {
+  let dir = dirname11(join41(repo, manifestRel));
+  for (; ; ) {
+    for (const name2 of READABLE_LOCKFILES) {
+      const path = join41(dir, name2);
+      if (!existsSync16(path)) continue;
+      let text;
+      try {
+        text = readFileSync23(path, "utf8");
+      } catch {
+        continue;
+      }
+      const importer = toPosix(relative10(dir, dirname11(join41(repo, manifestRel)))) || ".";
+      const versions = name2 === "pnpm-lock.yaml" ? pnpm(text, importer, pkg) : name2 === "yarn.lock" ? yarn(text, pkg) : npm(text, importer === "." ? "" : importer, pkg);
+      if (versions.length) return { lockfile: toPosix(relative10(repo, path)), versions };
+    }
+    if (relative10(repo, dir) === "" || dir === dirname11(dir)) return null;
+    dir = dirname11(dir);
+  }
+}
+function declaredRange(repo, manifestRel, pkg) {
+  try {
+    const m = JSON.parse(readFileSync23(join41(repo, manifestRel), "utf8"));
+    for (const section of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+      const v = m[section]?.[pkg];
+      if (typeof v === "string") return v;
+    }
+  } catch {
+  }
+  return void 0;
+}
+
+// src/deps.ts
+function fixedVersionOf(f) {
+  if (f.fixedVersion) return f.fixedVersion;
+  const m = /\(fixed in ([^)]+)\)/i.exec(f.message ?? "");
+  return m ? m[1].trim() : void 0;
+}
+var REACH_RANK = { runtime: 0, unproven: 1, toolchain: 2 };
+function worseReachability(a, b) {
+  if (!a) return b;
+  if (!b) return a;
+  return REACH_RANK[a] <= REACH_RANK[b] ? a : b;
+}
+function worseSeverity(a, b) {
+  return SEVERITIES2.indexOf(a) <= SEVERITIES2.indexOf(b) ? a : b;
+}
+function locationsOf2(f) {
+  if (f.locations?.length) return f.locations;
+  if (f.sink) return [{ file: f.sink.file, line: f.sink.line, ...f.version ? { version: f.version } : {} }];
+  return [];
+}
+var UNGROUPED = "\0";
+function keyOf3(f) {
+  return f.pkg?.trim() || UNGROUPED + f.id;
+}
+function compareVersions(a, b) {
+  const split = (v) => {
+    const at = v.search(/[-+]/);
+    const core = (at === -1 ? v : v.slice(0, at)).split(".").map((x) => Number.parseInt(x, 10));
+    return { core, pre: at === -1 ? "" : v.slice(at + 1) };
+  };
+  const va = split(a);
+  const vb = split(b);
+  for (let i2 = 0; i2 < Math.max(va.core.length, vb.core.length); i2++) {
+    const na = va.core[i2] ?? 0;
+    const nb = vb.core[i2] ?? 0;
+    if (!Number.isFinite(na) || !Number.isFinite(nb)) {
+      const c2 = byStr(String(va.core[i2] ?? ""), String(vb.core[i2] ?? ""));
+      if (c2) return c2;
+      continue;
+    }
+    if (na !== nb) return na - nb;
+  }
+  if (va.pre === vb.pre) return 0;
+  if (!va.pre) return 1;
+  if (!vb.pre) return -1;
+  return byStr(va.pre, vb.pre);
+}
+function groupAdvisoriesByPackage(findings) {
+  const byPkg = /* @__PURE__ */ new Map();
+  for (const f of findings) {
+    const k = keyOf3(f);
+    const list = byPkg.get(k);
+    if (list) list.push(f);
+    else byPkg.set(k, [f]);
+  }
+  const rows = [];
+  for (const [key, group] of byPkg) {
+    const advisories = group.slice().sort(compareWithinStatus);
+    const lead = advisories[0];
+    const versions = [...new Set(group.flatMap((f) => [f.version, ...locationsOf2(f).map((l) => l.version)]).filter((v) => Boolean(v)))].sort(
+      byStr
+    );
+    const locByKey = /* @__PURE__ */ new Map();
+    for (const f of group) for (const l of locationsOf2(f)) locByKey.set(`${l.version ?? ""}|${l.file}|${l.line ?? ""}`, l);
+    const epss = group.map((f) => f.epss).filter((e) => typeof e === "number");
+    const fixes = [...new Set(group.map(fixedVersionOf).filter((v) => Boolean(v)))];
+    const reach = group.map((f) => f.reachability).reduce(worseReachability, void 0);
+    rows.push({
+      pkg: key.startsWith(UNGROUPED) ? lead.pkg ?? lead.title : key,
+      versions,
+      worst: group.reduce((s, f) => worseSeverity(s, f.severity), "info"),
+      worstRisk: Math.max(...group.map(rankScore)),
+      count: group.length,
+      kev: group.filter((f) => f.kev).length,
+      ...epss.length ? { maxEpss: Math.max(...epss) } : {},
+      // Several advisories on one package name several fixed versions; the
+      // highest is the one upgrade that clears them all.
+      ...fixes.length ? { fixedVersion: fixes.reduce((a, b) => compareVersions(a, b) >= 0 ? a : b) } : {},
+      ...reach ? { reachability: reach } : {},
+      locations: [...locByKey.entries()].sort((a, b) => byStr(a[0], b[0])).map(([, l]) => l),
+      advisories
+    });
+  }
+  return rows.sort(
+    (a, b) => b.worstRisk - a.worstRisk || SEVERITIES2.indexOf(a.worst) - SEVERITIES2.indexOf(b.worst) || b.count - a.count || byStr(a.pkg, b.pkg)
+  );
+}
+
+// src/frameworks.ts
+var FRAMEWORKS = [
+  { id: "nextjs", title: "Next.js", ecosystem: "node", packages: ["next"] },
+  { id: "express", title: "Express", ecosystem: "node", packages: ["express"] },
+  { id: "nestjs", title: "NestJS", ecosystem: "node", packages: ["@nestjs/core"] },
+  { id: "fastify", title: "Fastify", ecosystem: "node", packages: ["fastify"] },
+  { id: "koa", title: "Koa", ecosystem: "node", packages: ["koa"] },
+  { id: "hono", title: "Hono", ecosystem: "node", packages: ["hono"] },
+  { id: "elysia", title: "Elysia", ecosystem: "node", packages: ["elysia"] },
+  { id: "nuxt", title: "Nuxt", ecosystem: "node", packages: ["nuxt"] },
+  { id: "sveltekit", title: "SvelteKit", ecosystem: "node", packages: ["@sveltejs/kit"] },
+  { id: "django", title: "Django", ecosystem: "python", packages: ["django"] },
+  { id: "flask", title: "Flask", ecosystem: "python", packages: ["flask"] },
+  { id: "fastapi", title: "FastAPI", ecosystem: "python", packages: ["fastapi"] },
+  { id: "tornado", title: "Tornado", ecosystem: "python", packages: ["tornado"] },
+  { id: "aiohttp", title: "aiohttp", ecosystem: "python", packages: ["aiohttp"] },
+  {
+    id: "spring",
+    title: "Spring Boot",
+    ecosystem: "java",
+    packages: ["spring-boot-starter-web", "spring-boot-starter-webflux", "spring-webmvc", "spring-webflux"]
+  },
+  { id: "quarkus", title: "Quarkus", ecosystem: "java", packages: ["quarkus-rest", "quarkus-resteasy", "quarkus-resteasy-reactive"] },
+  { id: "micronaut", title: "Micronaut", ecosystem: "java", packages: ["micronaut-http-server-netty"] },
+  { id: "gin", title: "Gin", ecosystem: "go", packages: ["github.com/gin-gonic/gin"] },
+  { id: "echo", title: "Echo", ecosystem: "go", packages: ["github.com/labstack/echo/v4", "github.com/labstack/echo"] },
+  { id: "fiber", title: "Fiber", ecosystem: "go", packages: ["github.com/gofiber/fiber/v2", "github.com/gofiber/fiber/v3"] },
+  { id: "chi", title: "chi", ecosystem: "go", packages: ["github.com/go-chi/chi/v5", "github.com/go-chi/chi"] },
+  { id: "rails", title: "Ruby on Rails", ecosystem: "ruby", packages: ["rails"] },
+  { id: "sinatra", title: "Sinatra", ecosystem: "ruby", packages: ["sinatra"] },
+  { id: "laravel", title: "Laravel", ecosystem: "php", packages: ["laravel/framework"] },
+  { id: "symfony", title: "Symfony", ecosystem: "php", packages: ["symfony/framework-bundle"] },
+  { id: "slim", title: "Slim", ecosystem: "php", packages: ["slim/slim"] }
+];
+var GO_STDLIB = { id: "net-http", title: "Go net/http", ecosystem: "go", packages: [] };
+var FRAMEWORK_IDS = [...FRAMEWORKS.map((f) => f.id), GO_STDLIB.id];
+var normPy = (n) => n.toLowerCase().replace(/[-_.]+/g, "-");
+function floorOf2(spec) {
+  const m = /(\d+(?:\.\d+){0,3}(?:-[\w.]+)?)/.exec(spec ?? "");
+  return m?.[1];
+}
+function lineMatching(lines5, re) {
+  const i2 = lines5.findIndex((l) => re.test(l));
+  return i2 < 0 ? 1 : i2 + 1;
+}
+var esc = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+function readPackageJson(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const lines5 = text.split(/\r?\n/);
+  const out2 = [];
+  for (const section of ["dependencies", "devDependencies", "peerDependencies", "optionalDependencies"]) {
+    for (const [name2, spec] of Object.entries(data[section] ?? {})) {
+      out2.push({
+        name: name2.toLowerCase(),
+        line: lineMatching(lines5, new RegExp(`^\\s*"${esc(name2)}"\\s*:`)),
+        spec: typeof spec === "string" ? spec : void 0
+      });
+    }
+  }
+  return out2;
+}
+function readRequirements(text) {
+  const out2 = [];
+  text.split(/\r?\n/).forEach((raw, i2) => {
+    const l = raw.replace(/#.*$/, "").trim();
+    const m = /^([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*(.*)$/.exec(l);
+    if (m && !l.startsWith("-")) out2.push({ name: normPy(m[1]), line: i2 + 1, spec: m[2]?.trim() || void 0 });
+  });
+  return out2;
+}
+function readPyToml(text) {
+  const out2 = [];
+  text.split(/\r?\n/).forEach((raw, i2) => {
+    const l = raw.replace(/#.*$/, "");
+    for (const m of l.matchAll(/["']([A-Za-z0-9][A-Za-z0-9._-]*)(?:\[[^\]]*\])?\s*([<>=!~^][^"';]*)?["']/g))
+      out2.push({ name: normPy(m[1]), line: i2 + 1, spec: m[2]?.trim() });
+    const kv = /^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*=\s*(?:["']([^"']*)["']|\{[^}]*version\s*=\s*["']([^"']*)["'])/.exec(l);
+    if (kv && !/^(?:name|version|description|python|requires-python|readme|license|build-backend)$/i.test(kv[1]))
+      out2.push({ name: normPy(kv[1]), line: i2 + 1, spec: kv[2] ?? kv[3] });
+  });
+  return out2;
+}
+function readPom(text) {
+  const lines5 = text.split(/\r?\n/);
+  const out2 = [];
+  const parent = /<artifactId>\s*spring-boot-starter-parent\s*<\/artifactId>/.test(text) ? /<parent>[\s\S]*?<version>\s*([^<\s]+)\s*<\/version>[\s\S]*?<\/parent>/.exec(text)?.[1] : void 0;
+  const bootProp = /<spring-boot\.version>\s*([^<\s]+)\s*</.exec(text)?.[1];
+  lines5.forEach((l, i2) => {
+    const m = /<artifactId>\s*([^<\s]+)\s*<\/artifactId>/.exec(l);
+    if (!m) return;
+    const own2 = lines5.slice(i2, i2 + 4).join("\n").match(/<version>\s*([^<\s$]+)\s*<\/version>/)?.[1];
+    const boot = m[1].startsWith("spring-boot");
+    out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: (boot ? own2 : void 0) ?? parent ?? bootProp });
+  });
+  return out2;
+}
+function readGradle(text) {
+  const lines5 = text.split(/\r?\n/);
+  const plugin = /id\s*\(?\s*["']org\.springframework\.boot["']\s*\)?\s*version\s*["']([^"']+)["']/.exec(text)?.[1];
+  const out2 = [];
+  lines5.forEach((l, i2) => {
+    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([\w.-]+))?["']/g))
+      out2.push({ name: m[2].toLowerCase(), line: i2 + 1, spec: (m[2].startsWith("spring-boot") ? m[3] : void 0) ?? plugin });
+  });
+  return out2;
+}
+function readGoMod(text) {
+  const out2 = [];
+  let inRequire = false;
+  text.split(/\r?\n/).forEach((raw, i2) => {
+    const l = raw.replace(/\/\/.*$/, "").trim();
+    if (/^require\s*\($/.test(l)) inRequire = true;
+    else if (inRequire && l === ")") inRequire = false;
+    const m = (inRequire ? /^(\S+)\s+(v\S+)/ : /^require\s+(\S+)\s+(v\S+)/).exec(l);
+    if (m) out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: m[2].replace(/^v/, "") });
+  });
+  return out2;
+}
+function readGemfile(text) {
+  const out2 = [];
+  text.split(/\r?\n/).forEach((l, i2) => {
+    const m = /^\s*gem\s+["']([\w-]+)["']\s*(?:,\s*["']([^"']+)["'])?/.exec(l);
+    if (m) out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: m[2] });
+  });
+  return out2;
+}
+function readComposer(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    return [];
+  }
+  const lines5 = text.split(/\r?\n/);
+  const out2 = [];
+  for (const section of ["require", "require-dev"]) {
+    for (const [name2, spec] of Object.entries(data[section] ?? {})) {
+      out2.push({
+        name: name2.toLowerCase(),
+        line: lineMatching(lines5, new RegExp(`^\\s*"${esc(name2)}"\\s*:`)),
+        spec: typeof spec === "string" ? spec : void 0
+      });
+    }
+  }
+  return out2;
+}
+var MANIFESTS = [
+  { ecosystem: "node", match: /(?:^|\/)package\.json$/, read: readPackageJson },
+  { ecosystem: "python", match: /(?:^|\/)requirements[\w.-]*\.(?:txt|in)$/, read: readRequirements },
+  { ecosystem: "python", match: /(?:^|\/)(?:pyproject\.toml|Pipfile)$/, read: readPyToml },
+  { ecosystem: "java", match: /(?:^|\/)pom\.xml$/, read: readPom },
+  { ecosystem: "java", match: /(?:^|\/)build\.gradle(?:\.kts)?$/, read: readGradle },
+  { ecosystem: "go", match: /(?:^|\/)go\.mod$/, read: readGoMod },
+  { ecosystem: "ruby", match: /(?:^|\/)Gemfile$/, read: readGemfile },
+  { ecosystem: "php", match: /(?:^|\/)composer\.json$/, read: readComposer }
+];
+function readIfExists(abs) {
+  try {
+    return existsSync17(abs) ? readFileSync24(abs, "utf8") : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function pythonLocked(absDir, name2) {
+  for (const lock of ["poetry.lock", "uv.lock", "pdm.lock"]) {
+    const text = readIfExists(join42(absDir, lock));
+    if (!text) continue;
+    const m = new RegExp(`^name\\s*=\\s*"${esc(name2)}"\\s*\\r?\\nversion\\s*=\\s*"([^"]+)"`, "im").exec(text.replace(/_/g, "-"));
+    if (m) return m[1];
+  }
+  const pipfile = readIfExists(join42(absDir, "Pipfile.lock"));
+  if (pipfile) {
+    try {
+      const data = JSON.parse(pipfile);
+      for (const section of ["default", "develop"]) {
+        for (const [k, v] of Object.entries(data[section] ?? {})) if (normPy(k) === name2 && v.version) return v.version.replace(/^==/, "");
+      }
+    } catch {
+    }
+  }
+  return void 0;
+}
+function rubyLocked(absDir, name2) {
+  const text = readIfExists(join42(absDir, "Gemfile.lock"));
+  return text ? new RegExp(`^ {4}${esc(name2)} \\(([^)]+)\\)`, "m").exec(text)?.[1] : void 0;
+}
+function composerLocked(absDir, name2) {
+  const text = readIfExists(join42(absDir, "composer.lock"));
+  if (!text) return void 0;
+  try {
+    const data = JSON.parse(text);
+    return data.packages?.find((p) => p.name === name2)?.version?.replace(/^v/, "");
+  } catch {
+    return void 0;
+  }
+}
+function resolveVersion(repo, kind, manifestRel, dir, d) {
+  const absDir = join42(repo, dir);
+  let locked;
+  if (kind.ecosystem === "node") {
+    const inst = installedVersions(repo, manifestRel, d.name);
+    if (inst?.versions.length) locked = [...inst.versions].sort(compareVersions).at(-1);
+    if (!locked) {
+      const range = declaredRange(repo, manifestRel, d.name) ?? d.spec;
+      const floor2 = floorOf2(range);
+      return floor2 ? { version: floor2, versionSource: "declared" } : {};
+    }
+  } else if (kind.ecosystem === "python") locked = pythonLocked(absDir, d.name);
+  else if (kind.ecosystem === "ruby") locked = rubyLocked(absDir, d.name);
+  else if (kind.ecosystem === "php") locked = composerLocked(absDir, d.name);
+  else if (kind.ecosystem === "go" && d.spec) locked = d.spec;
+  if (locked) return { version: locked, versionSource: "lockfile" };
+  const floor = floorOf2(d.spec);
+  return floor ? { version: floor, versionSource: "declared" } : {};
+}
+var dirOf8 = (rel2) => rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/")) : "";
+function detectFrameworks(repo, prune, tree) {
+  const read = tree?.read ?? readText2;
+  const files = (tree?.files ?? walk2(repo)).filter((f) => !prune?.(f.rel));
+  const byPackage = /* @__PURE__ */ new Map();
+  const add3 = (f) => {
+    const key = `${f.dir}\0${f.id}`;
+    if (!byPackage.has(key)) byPackage.set(key, f);
+  };
+  for (const wf of files) {
+    const kind = MANIFESTS.find((k) => k.match.test(wf.rel));
+    if (!kind) continue;
+    const text = read(wf.abs);
+    if (!text) continue;
+    const dir = dirOf8(wf.rel);
+    const declared = kind.read(text);
+    for (const def of FRAMEWORKS) {
+      if (def.ecosystem !== kind.ecosystem) continue;
+      const d = declared.find((x) => def.packages.includes(kind.ecosystem === "python" ? normPy(x.name) : x.name));
+      if (!d) continue;
+      add3({ id: def.id, title: def.title, ecosystem: def.ecosystem, dir, ...resolveVersion(repo, kind, wf.rel, dir, d), evidence: `${wf.rel}:${d.line}` });
+    }
+    if (kind.ecosystem === "go") {
+      const prefix = dir ? `${dir}/` : "";
+      for (const g of files) {
+        if (!g.rel.endsWith(".go") || !g.rel.startsWith(prefix) || g.rel.endsWith("_test.go")) continue;
+        const lines5 = read(g.abs).split(/\r?\n/);
+        const at = lines5.findIndex((l) => /^\s*(?:import\s+)?(?:\w+\s+)?"net\/http"\s*$/.test(l));
+        if (at < 0) continue;
+        const goLine = /^go\s+(\d+(?:\.\d+)*)/m.exec(text);
+        add3({
+          id: GO_STDLIB.id,
+          title: GO_STDLIB.title,
+          ecosystem: "go",
+          dir,
+          ...goLine ? { version: goLine[1], versionSource: "toolchain" } : {},
+          evidence: `${g.rel}:${at + 1}`
+        });
+        break;
+      }
+    }
+  }
+  return [...byPackage.values()].sort((a, b) => byStr(a.dir, b.dir) || byStr(a.id, b.id));
+}
+function satisfies(version, range) {
+  const v = version.replace(/^v/, "");
+  return range.split("||").some(
+    (alt) => alt.trim().split(/\s+/).filter(Boolean).every((c2) => {
+      const m = /^(>=|<=|>|<|=)?\s*(.+)$/.exec(c2);
+      if (!m) return false;
+      const cmp = compareVersions(v, m[2]);
+      switch (m[1]) {
+        case ">=":
+          return cmp >= 0;
+        case "<=":
+          return cmp <= 0;
+        case ">":
+          return cmp > 0;
+        case "<":
+          return cmp < 0;
+        default:
+          return cmp === 0;
+      }
+    })
+  );
+}
+
+// src/classes/coverage.ts
+import { existsSync as existsSync18, readFileSync as readFileSync25 } from "fs";
+import { join as join43 } from "path";
+var PACK_SUGGESTIONS_FILE = "PACK-SUGGESTIONS.json";
+function huntId(cell) {
+  return `hunt:${cell.class}:${cell.framework}${cell.dir ? `@${cell.dir}` : ""}`;
+}
+function needsHunt(cell) {
+  return cell.state !== "not-applicable" && (cell.state !== "deterministic" || cell.degraded !== void 0);
+}
+function classCoverage(frameworks, packs = PACKS) {
+  const cells = [];
+  for (const f of frameworks) {
+    const fwPack = packs.find((p) => p.framework === f.id);
+    const ecoPacks = packs.filter((p) => !p.framework && (p.ecosystem === f.ecosystem || p.ecosystem === "*"));
+    const outOfRange = fwPack?.testedWith && f.version && !satisfies(f.version, fwPack.testedWith) ? fwPack.testedWith : void 0;
+    for (const c2 of CLASS_LIST) {
+      const base = { class: c2.id, framework: f.id, ecosystem: f.ecosystem, dir: f.dir, ...f.version ? { version: f.version } : {} };
+      const considered = [...fwPack ? [fwPack] : [], ...ecoPacks];
+      const ruled = considered.filter((p) => {
+        const cov = p.classes[c2.id];
+        return cov && "rules" in cov && cov.rules.length > 0;
+      });
+      const na = considered.map((p) => p.classes[c2.id]).find((cov) => cov && "notApplicable" in cov);
+      if (!ruled.length && na && "notApplicable" in na) {
+        cells.push({ ...base, state: "not-applicable", packs: [], reason: na.notApplicable });
+        continue;
+      }
+      if (!ruled.length) {
+        cells.push({ ...base, state: "not-covered", packs: [], degraded: fwPack ? `pack ${fwPack.id} has no idiom for this class` : `no ${f.title} pack` });
+        continue;
+      }
+      const degraded = !fwPack ? `no ${f.title} pack \u2014 only the ${f.ecosystem} language idioms ran` : outOfRange && ruled.includes(fwPack) ? `${f.title} ${f.version} is outside ${fwPack.id} testedWith ${outOfRange}` : void 0;
+      cells.push({ ...base, state: "deterministic", packs: ruled.map((p) => p.id), ...degraded ? { degraded } : {} });
+    }
+  }
+  return cells;
+}
+function huntProgress(run2) {
+  const emitted = /* @__PURE__ */ new Set();
+  const hunted = /* @__PURE__ */ new Set();
+  try {
+    const todo = join43(run2, "INVESTIGATE.todo.json");
+    if (existsSync18(todo)) {
+      for (const r of JSON.parse(readFileSync25(todo, "utf8"))) if (r.hunt?.id) emitted.add(r.hunt.id);
+    }
+  } catch {
+  }
+  try {
+    const sug = join43(run2, PACK_SUGGESTIONS_FILE);
+    if (existsSync18(sug)) for (const id of JSON.parse(readFileSync25(sug, "utf8")).hunted ?? []) hunted.add(id);
+  } catch {
+  }
+  return { emitted, hunted };
+}
+function withHuntProgress(cells, run2) {
+  if (!run2) return [...cells];
+  const { emitted, hunted } = huntProgress(run2);
+  return cells.map((c2) => {
+    if (!needsHunt(c2)) return c2;
+    const id = huntId(c2);
+    if (hunted.has(id)) return { ...c2, state: "ai-hunted" };
+    if (emitted.has(id)) return { ...c2, state: "ai-hunt" };
+    return c2;
+  });
+}
+var MARK = {
+  deterministic: "\u2705 pack",
+  "not-applicable": "\u2796 n/a",
+  "not-covered": "\u2B1C **not covered**",
+  "ai-hunt": "\u{1F50E} AI hunt pending",
+  "ai-hunted": "\u{1F9ED} AI hunted"
+};
+function renderClassCoverageMd(cells) {
+  if (!cells.length) return "";
+  const columns = [...new Map(cells.map((c2) => [`${c2.framework}@${c2.dir}`, c2])).values()];
+  const L = ["### Weakness classes \xD7 frameworks", ""];
+  L.push("Each detected framework against each weakness class: matched by a pack (`\u2705`), not applicable (`\u2796`),");
+  L.push("handed to the AI hunt (`\u{1F50E}` pending, `\u{1F9ED}` done), or **not covered**. A `\u26A0` cell is degraded \u2014 no framework");
+  L.push("pack, or a version outside the range the pack was validated on \u2014 and is hunted, not trusted.");
+  L.push("");
+  L.push(`| class | ${columns.map((c2) => `${c2.framework}${c2.version ? ` ${c2.version}` : ""}${c2.dir ? ` (\`${c2.dir}\`)` : ""}`).join(" | ")} |`);
+  L.push(`|---|${columns.map(() => "---").join("|")}|`);
+  for (const cls of CLASS_LIST) {
+    const row = columns.map((col) => {
+      const cell = cells.find((c2) => c2.class === cls.id && c2.framework === col.framework && c2.dir === col.dir);
+      return cell ? `${MARK[cell.state]}${cell.degraded ? " \u26A0" : ""}` : "\u2014";
+    });
+    L.push(`| ${cls.id} | ${row.join(" | ")} |`);
+  }
+  L.push("");
+  const degraded = cells.filter((c2) => c2.degraded);
+  if (degraded.length) {
+    L.push(
+      `Degraded or uncovered (${degraded.length}): ${[...new Set(degraded.map((c2) => `${c2.framework}${c2.dir ? ` (${c2.dir})` : ""} \u2014 ${c2.degraded}`))].join("; ")}.`
+    );
+    L.push("Run `ultrasec investigate` \u2014 it emits one hunt per such cell.");
+  }
+  return L.join("\n").replace(/\n+$/, "");
+}
+
+// src/cloud.ts
+import { existsSync as existsSync19, readFileSync as readFileSync26 } from "fs";
+import { join as join44 } from "path";
 var CLOUD_SHAPES = {
   "k8s-privileged": {
     id: "k8s-privileged",
@@ -34182,14 +36102,14 @@ var CLOUD_SHAPES = {
 function lines4(content) {
   return content.split(/\r?\n/).map((text, i2) => ({ n: i2 + 1, text }));
 }
-function extOf5(rel2) {
+function extOf6(rel2) {
   const i2 = rel2.lastIndexOf(".");
   return i2 === -1 ? "" : rel2.slice(i2 + 1).toLowerCase();
 }
 var CODE3 = /* @__PURE__ */ new Set(["js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts", "py", "go", "java", "kt", "scala", "php", "rb", "cs"]);
 var IAC_EXTS = /* @__PURE__ */ new Set(["yaml", "yml", "json", "tf", "tfvars", "hcl", "template"]);
 var SCAN2 = /* @__PURE__ */ new Set([...IAC_EXTS, ...CODE3]);
-function hit4(rel2, line2, shape, evidence) {
+function hit5(rel2, line2, shape, evidence) {
   return makeToolFinding({
     tool: "ultrasec",
     category: "config",
@@ -34204,7 +36124,7 @@ Evidence: \`${evidence.trim().slice(0, 160)}\``,
     cwe: shape.cwe
   });
 }
-function lineOf3(content, index) {
+function lineOf4(content, index) {
   let n = 1;
   for (let i2 = 0; i2 < index && i2 < content.length; i2++) if (content[i2] === "\n") n++;
   return n;
@@ -34246,7 +36166,7 @@ function scanIngresses(rel2, ls, out2) {
     const routed = doc.map((l) => /^\s*(?:-\s+)?(?:name|serviceName|host):\s*["']?([^"'\s#]+)/.exec(l.text)?.[1]).filter((v) => !!v);
     if (!routed.some((v) => SENSITIVE_UI.test(v))) continue;
     if (doc.some((l) => INGRESS_AUTH.test(l.text))) continue;
-    out2.push(hit4(rel2, kind.n, CLOUD_SHAPES["k8s-ingress-unauthenticated"], kind.text));
+    out2.push(hit5(rel2, kind.n, CLOUD_SHAPES["k8s-ingress-unauthenticated"], kind.text));
   }
 }
 var COMPOSE_FILE = /(?:^|\/)(?:docker-)?compose(?:[.-][\w.-]+)?\.ya?ml$/;
@@ -34266,7 +36186,7 @@ function scanCompose(rel2, ls, out2) {
   let inPorts = false;
   let portsIndent = -1;
   const flush = () => {
-    if (DATA_IMAGE.test(image)) for (const l of pending2) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["compose-public-port"], l.text));
+    if (DATA_IMAGE.test(image)) for (const l of pending2) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["compose-public-port"], l.text));
     pending2 = [];
     image = "";
   };
@@ -34320,19 +36240,19 @@ function scanDockerfile(repo, rel2, ls, out2) {
   const copy = ls.find((l) => copiesDirectory(l.text));
   if (!copy) return;
   const dir = rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/")) : "";
-  const candidates = [`${rel2}.dockerignore`, join41(dir, ".dockerignore"), ".dockerignore"];
+  const candidates = [`${rel2}.dockerignore`, join44(dir, ".dockerignore"), ".dockerignore"];
   for (const c2 of candidates) {
-    const abs = join41(repo, c2);
-    if (existsSync16(abs) && dockerignoreExcludesEnv(readFileSync23(abs, "utf8"))) return;
+    const abs = join44(repo, c2);
+    if (existsSync19(abs) && dockerignoreExcludesEnv(readFileSync26(abs, "utf8"))) return;
   }
-  out2.push(hit4(rel2, copy.n, CLOUD_SHAPES["dockerignore-env"], copy.text));
+  out2.push(hit5(rel2, copy.n, CLOUD_SHAPES["dockerignore-env"], copy.text));
 }
 function auditCloud(repo, prune, tree) {
   const out2 = [];
   const read = tree?.read ?? readText2;
   for (const wf of tree?.files ?? walk2(repo)) {
     if (prune?.(wf.rel)) continue;
-    const ext = extOf5(wf.rel);
+    const ext = extOf6(wf.rel);
     if (DOCKERFILE.test(wf.rel)) {
       const content2 = read(wf.abs);
       if (content2) scanDockerfile(repo, wf.rel, lines4(content2), out2);
@@ -34343,48 +36263,48 @@ function auditCloud(repo, prune, tree) {
     if (!content) continue;
     const rel2 = wf.rel;
     const ls = lines4(content);
-    for (const l of ls) if (METADATA_RE.test(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["cloud-metadata"], l.text));
+    for (const l of ls) if (METADATA_RE.test(l.text)) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["cloud-metadata"], l.text));
     if (!IAC_EXTS.has(ext)) continue;
     const isK8s = /(^|\n)\s*apiVersion:/.test(content) && /(^|\n)\s*kind:/.test(content);
     if (isK8s) scanIngresses(rel2, ls, out2);
     if (COMPOSE_FILE.test(rel2)) scanCompose(rel2, ls, out2);
     if (isK8s) {
       for (const l of ls) {
-        if (/^\s*privileged:\s*true\b/i.test(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["k8s-privileged"], l.text));
+        if (/^\s*privileged:\s*true\b/i.test(l.text)) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["k8s-privileged"], l.text));
         if (/^\s*host(?:Network|PID|IPC):\s*true\b/i.test(l.text) || /^\s*hostPath:/i.test(l.text))
-          out2.push(hit4(rel2, l.n, CLOUD_SHAPES["k8s-host-namespace"], l.text));
+          out2.push(hit5(rel2, l.n, CLOUD_SHAPES["k8s-host-namespace"], l.text));
         if (/^\s*allowPrivilegeEscalation:\s*true\b/i.test(l.text) || /^\s*runAsNonRoot:\s*false\b/i.test(l.text))
-          out2.push(hit4(rel2, l.n, CLOUD_SHAPES["k8s-privesc"], l.text));
+          out2.push(hit5(rel2, l.n, CLOUD_SHAPES["k8s-privesc"], l.text));
       }
     }
     const hasActionStar = /"Action"\s*:\s*(?:"\*"|\[\s*"\*"\s*\])/.test(content);
     const hasResourceStar = /"Resource"\s*:\s*(?:"\*"|\[\s*"\*"\s*\])/.test(content);
     if (hasActionStar && hasResourceStar) {
       const m = /"Action"\s*:\s*(?:"\*"|\[\s*"\*"\s*\])/.exec(content);
-      if (m) out2.push(hit4(rel2, lineOf3(content, m.index), CLOUD_SHAPES["iam-wildcard"], m[0]));
+      if (m) out2.push(hit5(rel2, lineOf4(content, m.index), CLOUD_SHAPES["iam-wildcard"], m[0]));
     }
     const allowPublic = /"Effect"\s*:\s*"Allow"/.test(content) && /"Principal"\s*:\s*(?:"\*"|\{\s*"AWS"\s*:\s*"\*"\s*\})/.test(content);
     if (allowPublic) {
       const m = /"Principal"\s*:\s*(?:"\*"|\{\s*"AWS"\s*:\s*"\*"\s*\})/.exec(content);
-      if (m) out2.push(hit4(rel2, lineOf3(content, m.index), CLOUD_SHAPES["iam-public-principal"], m[0]));
+      if (m) out2.push(hit5(rel2, lineOf4(content, m.index), CLOUD_SHAPES["iam-public-principal"], m[0]));
     }
     for (const l of ls) {
       if ((/(?:cidr_blocks|cidr_ip|source_ranges|CidrIp)\b[^\n]*(?:0\.0\.0\.0\/0|::\/0)/i.test(l.text) || /^\s*-?\s*["']?(?:0\.0\.0\.0\/0|::\/0)["']?\s*$/.test(l.text)) && !isEgressRule(ls, l.n))
-        out2.push(hit4(rel2, l.n, CLOUD_SHAPES["open-ingress"], l.text));
+        out2.push(hit5(rel2, l.n, CLOUD_SHAPES["open-ingress"], l.text));
       if (/\bacl\b[^\n]*["']public-read(?:-write)?["']|["']public-read(?:-write)?["']/i.test(l.text) && /\bacl\b/i.test(l.text))
-        out2.push(hit4(rel2, l.n, CLOUD_SHAPES["public-storage"], l.text));
+        out2.push(hit5(rel2, l.n, CLOUD_SHAPES["public-storage"], l.text));
       if (/\b(?:storage_encrypted|encrypted|encryption_enabled|encrypt_at_rest)\s*=\s*false\b/i.test(l.text))
-        out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-unencrypted"], l.text));
-      if (/\bpublicly_accessible\s*=\s*true\b/i.test(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-public-instance"], l.text));
-      if (IAC_SECRET_RE.test(l.text) && isLiteralSecret2(l.text)) out2.push(hit4(rel2, l.n, CLOUD_SHAPES["iac-hardcoded-secret"], l.text));
+        out2.push(hit5(rel2, l.n, CLOUD_SHAPES["iac-unencrypted"], l.text));
+      if (/\bpublicly_accessible\s*=\s*true\b/i.test(l.text)) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["iac-public-instance"], l.text));
+      if (IAC_SECRET_RE.test(l.text) && isLiteralSecret2(l.text)) out2.push(hit5(rel2, l.n, CLOUD_SHAPES["iac-hardcoded-secret"], l.text));
     }
   }
   return out2;
 }
 
 // src/provenance.ts
-import { existsSync as existsSync17, readFileSync as readFileSync24 } from "fs";
-import { join as join42 } from "path";
+import { existsSync as existsSync20, readFileSync as readFileSync27 } from "fs";
+import { join as join45 } from "path";
 function compileCodeowner(pattern) {
   const dirOnly = pattern.endsWith("/") && pattern.length > 1;
   let core = dirOnly ? pattern.slice(0, -1) : pattern;
@@ -34415,10 +36335,10 @@ function ownerFor(rules, file) {
 var CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
 function loadCodeowners(repo) {
   for (const p of CODEOWNERS_PATHS) {
-    const abs = join42(repo, p);
-    if (existsSync17(abs)) {
+    const abs = join45(repo, p);
+    if (existsSync20(abs)) {
       try {
-        return parseCodeowners(readFileSync24(abs, "utf8"));
+        return parseCodeowners(readFileSync27(abs, "utf8"));
       } catch {
         return [];
       }
@@ -34457,11 +36377,11 @@ function addProvenance(findings, repo, opts = {}) {
 
 // src/cache.ts
 import { createHash as createHash6 } from "crypto";
-import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync11, readFileSync as readFileSync25 } from "fs";
-import { join as join43 } from "path";
+import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync11, readFileSync as readFileSync28 } from "fs";
+import { join as join46 } from "path";
 var CACHE_VERSION = 2;
 function cachePath(run2) {
-  return join43(run2, "cache", "scan-cache.json");
+  return join46(run2, "cache", "scan-cache.json");
 }
 function isCacheEntry(key, v) {
   if (!v || typeof v !== "object") return false;
@@ -34478,7 +36398,7 @@ function isCacheEntry(key, v) {
 }
 function loadScanCache(run2) {
   try {
-    const data = JSON.parse(readFileSync25(cachePath(run2), "utf8"));
+    const data = JSON.parse(readFileSync28(cachePath(run2), "utf8"));
     if (!data || data.cacheVersion !== CACHE_VERSION || data.extractorVersion !== EXTRACTOR_VERSION) return /* @__PURE__ */ new Map();
     if (!data.entries || typeof data.entries !== "object" || Array.isArray(data.entries)) return /* @__PURE__ */ new Map();
     const out2 = /* @__PURE__ */ new Map();
@@ -34489,7 +36409,7 @@ function loadScanCache(run2) {
   }
 }
 function toolsCachePath(run2) {
-  return join43(run2, "cache", "tools-cache.json");
+  return join46(run2, "cache", "tools-cache.json");
 }
 function isToolCacheEntry(name2, v) {
   if (!v || typeof v !== "object") return false;
@@ -34501,7 +36421,7 @@ function isToolCacheEntry(name2, v) {
 }
 function loadToolsCache(run2) {
   try {
-    const data = JSON.parse(readFileSync25(toolsCachePath(run2), "utf8"));
+    const data = JSON.parse(readFileSync28(toolsCachePath(run2), "utf8"));
     if (!data || data.cacheVersion !== CACHE_VERSION) return /* @__PURE__ */ new Map();
     if (!data.entries || typeof data.entries !== "object" || Array.isArray(data.entries)) return /* @__PURE__ */ new Map();
     const out2 = /* @__PURE__ */ new Map();
@@ -34512,7 +36432,7 @@ function loadToolsCache(run2) {
   }
 }
 function saveToolsCache(run2, cache) {
-  const dir = join43(run2, "cache");
+  const dir = join46(run2, "cache");
   mkdirSync9(dir, { recursive: true });
   const entries = {};
   for (const [k, v] of [...cache.entries()].sort((a, b) => byStr(a[0], b[0]))) entries[k] = v;
@@ -34551,13 +36471,13 @@ function stageTimer(now = () => performance.now()) {
   };
 }
 function saveTimings(run2, timings) {
-  const dir = join43(run2, "cache");
+  const dir = join46(run2, "cache");
   mkdirSync9(dir, { recursive: true });
-  writeFileSync11(join43(dir, "timings.json"), `${JSON.stringify(timings, null, 2)}
+  writeFileSync11(join46(dir, "timings.json"), `${JSON.stringify(timings, null, 2)}
 `);
 }
 function saveScanCache(run2, cache) {
-  const dir = join43(run2, "cache");
+  const dir = join46(run2, "cache");
   mkdirSync9(dir, { recursive: true });
   const entries = {};
   for (const [k, v] of [...cache.entries()].sort((a, b) => byStr(a[0], b[0]))) entries[k] = v;
@@ -34565,10 +36485,10 @@ function saveScanCache(run2, cache) {
 }
 
 // src/tools/scoring.ts
-import { existsSync as existsSync18, mkdirSync as mkdirSync10, readFileSync as readFileSync26, statSync as statSync14, writeFileSync as writeFileSync12 } from "fs";
+import { existsSync as existsSync21, mkdirSync as mkdirSync10, readFileSync as readFileSync29, statSync as statSync14, writeFileSync as writeFileSync12 } from "fs";
 import { gunzipSync as gunzipSync2 } from "zlib";
 import { homedir as homedir3 } from "os";
-import { join as join44 } from "path";
+import { join as join47 } from "path";
 var SEVERITY_WEIGHT = {
   critical: 1,
   high: 0.8,
@@ -34660,11 +36580,11 @@ var KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vu
 var TTL_MS = 24 * 60 * 60 * 1e3;
 var FETCH_TIMEOUT_MS = 2e4;
 function cacheDir() {
-  return process.env.ULTRASEC_CACHE_DIR || join44(homedir3(), ".cache", "ultrasec");
+  return process.env.ULTRASEC_CACHE_DIR || join47(homedir3(), ".cache", "ultrasec");
 }
 function fresh2(path) {
   try {
-    return existsSync18(path) && Date.now() - statSync14(path).mtimeMs < TTL_MS;
+    return existsSync21(path) && Date.now() - statSync14(path).mtimeMs < TTL_MS;
   } catch {
     return false;
   }
@@ -34682,10 +36602,10 @@ async function fetchBuf(url) {
 }
 async function loadCached(url, file, gz) {
   const dir = cacheDir();
-  const path = join44(dir, file);
+  const path = join47(dir, file);
   if (fresh2(path)) {
     try {
-      return readFileSync26(path, "utf8");
+      return readFileSync29(path, "utf8");
     } catch {
     }
   }
@@ -34700,7 +36620,7 @@ async function loadCached(url, file, gz) {
     return text;
   } catch {
     try {
-      if (existsSync18(path)) return readFileSync26(path, "utf8");
+      if (existsSync21(path)) return readFileSync29(path, "utf8");
     } catch {
     }
     return "";
@@ -34738,7 +36658,7 @@ function deploymentNote(d) {
 // src/tools/sbom.ts
 import { execFileSync as execFileSync5 } from "child_process";
 import { mkdirSync as mkdirSync11, writeFileSync as writeFileSync13 } from "fs";
-import { join as join45, relative as relative10, resolve as resolve15 } from "path";
+import { join as join48, relative as relative11, resolve as resolve15 } from "path";
 function componentCount(cdxJson) {
   try {
     const data = JSON.parse(cdxJson);
@@ -34748,7 +36668,7 @@ function componentCount(cdxJson) {
   }
 }
 function syftExcludeArgs(repo, outDir) {
-  const rel2 = relative10(repo, outDir);
+  const rel2 = relative11(repo, outDir);
   if (!rel2 || rel2 === "." || rel2.startsWith("..")) return [];
   return ["--exclude", `./${rel2}/**`];
 }
@@ -34762,7 +36682,7 @@ function generateSbom(repo, outDir) {
       stdio: ["ignore", "pipe", "ignore"]
     });
     mkdirSync11(outDir, { recursive: true });
-    const path = join45(outDir, "sbom.cdx.json");
+    const path = join48(outDir, "sbom.cdx.json");
     writeFileSync13(path, stdout);
     const count2 = componentCount(stdout);
     return { path: resolve15(path), note: `sbom.cdx.json${count2 !== void 0 ? ` (${count2} components)` : ""}` };
@@ -34840,14 +36760,14 @@ var trivy = {
 };
 
 // src/tools/gitleaks.ts
-import { existsSync as existsSync19 } from "fs";
-import { join as join47 } from "path";
+import { existsSync as existsSync22 } from "fs";
+import { join as join50 } from "path";
 
 // src/tools/snapshot.ts
 import { execFileSync as execFileSync6 } from "child_process";
 import { constants, copyFileSync, lstatSync as lstatSync4, mkdirSync as mkdirSync12, mkdtempSync as mkdtempSync5, rmSync as rmSync8 } from "fs";
 import { tmpdir as tmpdir3 } from "os";
-import { dirname as dirname11, join as join46 } from "path";
+import { dirname as dirname12, join as join49 } from "path";
 function trackedFiles(repo) {
   let raw;
   try {
@@ -34865,11 +36785,11 @@ function trackedFiles(repo) {
 function stageTrackedFiles(repo, degraded) {
   const files = trackedFiles(repo);
   if (!files) return null;
-  const dir = mkdtempSync5(join46(tmpdir3(), "ultrasec-snapshot-"));
+  const dir = mkdtempSync5(join49(tmpdir3(), "ultrasec-snapshot-"));
   let staged2 = 0;
   try {
     for (const rel2 of files) {
-      const src = join46(repo, rel2);
+      const src = join49(repo, rel2);
       let regular = false;
       try {
         regular = lstatSync4(src).isFile();
@@ -34877,8 +36797,8 @@ function stageTrackedFiles(repo, degraded) {
         continue;
       }
       if (!regular) continue;
-      const dst = join46(dir, rel2);
-      mkdirSync12(dirname11(dst), { recursive: true });
+      const dst = join49(dir, rel2);
+      mkdirSync12(dirname12(dst), { recursive: true });
       copyFileSync(src, dst, constants.COPYFILE_FICLONE);
       staged2++;
     }
@@ -34917,8 +36837,8 @@ var gitleaks = {
   // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);
   // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
   argv: (target, ctx) => {
-    const onHost = existsSync19(target);
-    const hasGit = !onHost || existsSync19(join47(target, ".git"));
+    const onHost = existsSync22(target);
+    const hasGit = !onHost || existsSync22(join50(target, ".git"));
     const legacy = onHost && gitleaksIsLegacy(detect("gitleaks").version);
     return gitleaksArgv(target, { history: !!ctx?.history && hasGit, legacy });
   },
@@ -35468,16 +37388,16 @@ var trufflehog = {
 };
 
 // src/tools/guarddog.ts
-import { existsSync as existsSync20 } from "fs";
-import { join as join48 } from "path";
-var MANIFESTS = {
+import { existsSync as existsSync23 } from "fs";
+import { join as join51 } from "path";
+var MANIFESTS2 = {
   npm: ["package.json"],
   pypi: ["requirements.txt", "pyproject.toml", "setup.py"],
   go: ["go.mod"],
   github_action: [".github"]
 };
 function ecosystems(repo) {
-  return Object.entries(MANIFESTS).filter(([, names]) => names.some((n) => existsSync20(join48(repo, n)) || findManifestDirs(repo, [n]).length > 0)).map(([eco]) => eco);
+  return Object.entries(MANIFESTS2).filter(([, names]) => names.some((n) => existsSync23(join51(repo, n)) || findManifestDirs(repo, [n]).length > 0)).map(([eco]) => eco);
 }
 var SEV2 = { critical: "critical", high: "high", medium: "medium" };
 var guarddog = {
@@ -35650,13 +37570,13 @@ var grype = {
 };
 
 // src/tools/pip-audit.ts
-import { existsSync as existsSync21 } from "fs";
-import { join as join49 } from "path";
+import { existsSync as existsSync24 } from "fs";
+import { join as join52 } from "path";
 var pipAudit = {
   name: "pip-audit",
   category: "dep",
   network: true,
-  applicable: (repo) => existsSync21(join49(repo, "requirements.txt")) ? null : "no requirements.txt",
+  applicable: (repo) => existsSync24(join52(repo, "requirements.txt")) ? null : "no requirements.txt",
   argv: () => ["-r", "requirements.txt", "-f", "json", "--progress-spinner", "off"],
   parse(raw) {
     let data;
@@ -35697,8 +37617,8 @@ var pipAudit = {
 };
 
 // src/tools/pm-audit.ts
-import { existsSync as existsSync22 } from "fs";
-import { join as join50 } from "path";
+import { existsSync as existsSync25 } from "fs";
+import { join as join53 } from "path";
 import { execFileSync as execFileSync7 } from "child_process";
 var NPM_LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json"];
 var PNPM_LOCKFILES = ["pnpm-lock.yaml"];
@@ -35785,7 +37705,7 @@ function parseNpmV7(data, lockfile) {
   return out2;
 }
 function npmLockfileName(dir) {
-  if (!existsSync22(join50(dir, "package-lock.json")) && existsSync22(join50(dir, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
+  if (!existsSync25(join53(dir, "package-lock.json")) && existsSync25(join53(dir, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
   return "package-lock.json";
 }
 function lockfileIn(ctx, name2) {
@@ -35793,7 +37713,7 @@ function lockfileIn(ctx, name2) {
   return ws ? `${ws}/${name2}` : name2;
 }
 function auditedDir(repo, ctx) {
-  return ctx?.workspace ? join50(repo, ctx.workspace) : repo;
+  return ctx?.workspace ? join53(repo, ctx.workspace) : repo;
 }
 var npmAudit = {
   name: "npm-audit",
@@ -35906,124 +37826,21 @@ var yarnAudit = {
 // src/tools/package-checker.ts
 import { execFileSync as execFileSync8 } from "child_process";
 import { createHash as createHash7 } from "crypto";
-import { existsSync as existsSync24, mkdirSync as mkdirSync13, readFileSync as readFileSync28, readdirSync as readdirSync4, rmSync as rmSync9, writeFileSync as writeFileSync14 } from "fs";
-import { isAbsolute as isAbsolute11, join as join52, relative as relative12 } from "path";
-
-// src/tools/lockfile-versions.ts
-import { existsSync as existsSync23, readFileSync as readFileSync27 } from "fs";
-import { dirname as dirname12, join as join51, posix as posix8, relative as relative11, sep as sep8 } from "path";
-var READABLE_LOCKFILES = ["pnpm-lock.yaml", "package-lock.json", "npm-shrinkwrap.json", "yarn.lock"];
-var toPosix = (p) => p.split(sep8).join(posix8.sep);
-var escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-function cleanVersion(raw) {
-  const v = raw.trim().replace(/^['"]|['"]$/g, "").replace(/\(.*$/, "");
-  return /^\d/.test(v) ? v : void 0;
-}
-function sorted(set) {
-  return [...new Set(set)].sort();
-}
-function fromPnpmImporter(lines5, importer, pkg) {
-  const keyRe = new RegExp(`^ {2}['"]?${escapeRe(importer)}['"]?:\\s*$`);
-  const start2 = lines5.findIndex((l) => keyRe.test(l));
-  if (start2 < 0) return void 0;
-  const depRe = new RegExp(`^ {6}['"]?${escapeRe(pkg)}['"]?:\\s*$`);
-  for (let i2 = start2 + 1; i2 < lines5.length; i2++) {
-    const l = lines5[i2];
-    if (/^ {0,2}\S/.test(l)) break;
-    if (!depRe.test(l)) continue;
-    for (let j = i2 + 1; j < lines5.length && /^ {8}/.test(lines5[j]); j++) {
-      const m = /^ {8}version:\s*(.+)$/.exec(lines5[j]);
-      if (m) return cleanVersion(m[1]);
-    }
-  }
-  return void 0;
-}
-function pnpm(text, importer, pkg) {
-  const lines5 = text.split(/\r?\n/);
-  const exact = fromPnpmImporter(lines5, importer, pkg);
-  if (exact) return [exact];
-  const keyRe = new RegExp(`^ {2}['"]?/?${escapeRe(pkg)}[@/](\\d[^(:'"\\s]*)`);
-  return sorted(lines5.map((l) => keyRe.exec(l)?.[1]).filter((v) => !!v));
-}
-function npm(text, manifestDir, pkg) {
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  const pkgs = data.packages ?? {};
-  for (const key of [manifestDir ? `${manifestDir}/node_modules/${pkg}` : "", `node_modules/${pkg}`]) {
-    const v = key ? pkgs[key]?.version : void 0;
-    if (typeof v === "string" && cleanVersion(v)) return [v];
-  }
-  const legacy = data.dependencies?.[pkg]?.version;
-  return typeof legacy === "string" && cleanVersion(legacy) ? [legacy] : [];
-}
-function yarn(text, pkg) {
-  const out2 = [];
-  const lines5 = text.split(/\r?\n/);
-  const header3 = new RegExp(`(?:^|[\\s,"])${escapeRe(pkg)}@`);
-  for (let i2 = 0; i2 < lines5.length; i2++) {
-    const l = lines5[i2];
-    if (/^\s/.test(l) || !l.trim().endsWith(":") || !header3.test(l)) continue;
-    for (let j = i2 + 1; j < lines5.length && /^\s/.test(lines5[j]); j++) {
-      const m = /^\s+version:?\s+"?([^"\s]+)"?/.exec(lines5[j]);
-      if (m) {
-        const v = cleanVersion(m[1]);
-        if (v) out2.push(v);
-        break;
-      }
-    }
-  }
-  return sorted(out2);
-}
-function installedVersions(repo, manifestRel, pkg) {
-  let dir = dirname12(join51(repo, manifestRel));
-  for (; ; ) {
-    for (const name2 of READABLE_LOCKFILES) {
-      const path = join51(dir, name2);
-      if (!existsSync23(path)) continue;
-      let text;
-      try {
-        text = readFileSync27(path, "utf8");
-      } catch {
-        continue;
-      }
-      const importer = toPosix(relative11(dir, dirname12(join51(repo, manifestRel)))) || ".";
-      const versions = name2 === "pnpm-lock.yaml" ? pnpm(text, importer, pkg) : name2 === "yarn.lock" ? yarn(text, pkg) : npm(text, importer === "." ? "" : importer, pkg);
-      if (versions.length) return { lockfile: toPosix(relative11(repo, path)), versions };
-    }
-    if (relative11(repo, dir) === "" || dir === dirname12(dir)) return null;
-    dir = dirname12(dir);
-  }
-}
-function declaredRange(repo, manifestRel, pkg) {
-  try {
-    const m = JSON.parse(readFileSync27(join51(repo, manifestRel), "utf8"));
-    for (const section of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
-      const v = m[section]?.[pkg];
-      if (typeof v === "string") return v;
-    }
-  } catch {
-  }
-  return void 0;
-}
-
-// src/tools/package-checker.ts
+import { existsSync as existsSync26, mkdirSync as mkdirSync13, readFileSync as readFileSync30, readdirSync as readdirSync4, rmSync as rmSync9, writeFileSync as writeFileSync14 } from "fs";
+import { isAbsolute as isAbsolute11, join as join54, relative as relative12 } from "path";
 function hasRepoLocalPurlFeed(repo) {
   let entries;
   try {
-    entries = readdirSync4(join52(repo, "data"));
+    entries = readdirSync4(join54(repo, "data"));
   } catch {
     return false;
   }
   return entries.some((e) => e.toLowerCase().endsWith(".purl"));
 }
 function scriptPath() {
-  const dir = join52(cacheDir(), "package-checker");
-  const path = join52(dir, `script-${PACKAGE_CHECKER_SHA256.slice(0, 12)}.sh`);
-  if (!existsSync24(path)) {
+  const dir = join54(cacheDir(), "package-checker");
+  const path = join54(dir, `script-${PACKAGE_CHECKER_SHA256.slice(0, 12)}.sh`);
+  if (!existsSync26(path)) {
     mkdirSync13(dir, { recursive: true });
     writeFileSync14(path, PACKAGE_CHECKER_SH);
   }
@@ -36062,10 +37879,10 @@ function fetchAndCacheScript(tag) {
   const buf = curlFetch(`${rawBase()}/${UPSTREAM_REPO}/${tag}/script.sh`);
   if (!buf?.length) return null;
   const sha12 = createHash7("sha256").update(buf).digest("hex").slice(0, 12);
-  const dir = join52(cacheDir(), "package-checker");
-  const path = join52(dir, `script-${tag}-${sha12}.sh`);
+  const dir = join54(cacheDir(), "package-checker");
+  const path = join54(dir, `script-${tag}-${sha12}.sh`);
   try {
-    if (!existsSync24(path)) {
+    if (!existsSync26(path)) {
       mkdirSync13(dir, { recursive: true });
       writeFileSync14(path, buf);
     }
@@ -36087,7 +37904,7 @@ function resolveScriptSource() {
 }
 var cachedExportPath;
 function exportPath() {
-  if (!cachedExportPath) cachedExportPath = join52(cacheDir(), "package-checker", `export-${process.pid}.json`);
+  if (!cachedExportPath) cachedExportPath = join54(cacheDir(), "package-checker", `export-${process.pid}.json`);
   return cachedExportPath;
 }
 function splitPkgVersion(raw) {
@@ -36200,7 +38017,7 @@ var packageChecker = {
     const path = exportPath();
     let raw;
     try {
-      raw = readFileSync28(path, "utf8");
+      raw = readFileSync30(path, "utf8");
     } catch {
       return [];
     }
@@ -36242,8 +38059,8 @@ var ADAPTERS = [
 ];
 
 // src/context.ts
-import { existsSync as existsSync25, readFileSync as readFileSync29 } from "fs";
-import { join as join53, resolve as resolve16 } from "path";
+import { existsSync as existsSync27, readFileSync as readFileSync31 } from "fs";
+import { join as join55, resolve as resolve16 } from "path";
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
 var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|getServerSession|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
@@ -36380,17 +38197,17 @@ function manifestDirs(repo, names) {
   try {
     for (const w of detectWorkspaces(repo).packages) {
       const dir = resolve16(repo, w.dir);
-      for (const name2 of names) if (existsSync25(join53(dir, name2))) dirs.add(dir);
+      for (const name2 of names) if (existsSync27(join55(dir, name2))) dirs.add(dir);
     }
   } catch {
   }
   return [...dirs].sort(byStr);
 }
-function detectFrameworks(repo) {
+function detectFrameworks2(repo) {
   const found = /* @__PURE__ */ new Set();
   for (const dir of manifestDirs(repo, ["package.json"])) {
     try {
-      const pkg = JSON.parse(readFileSync29(join53(dir, "package.json"), "utf8"));
+      const pkg = JSON.parse(readFileSync31(join55(dir, "package.json"), "utf8"));
       const deps = { ...pkg.dependencies ?? {}, ...pkg.devDependencies ?? {}, ...pkg.peerDependencies ?? {} };
       for (const name2 of Object.keys(deps)) {
         const label = Object.hasOwn(JS_FRAMEWORKS, name2) ? JS_FRAMEWORKS[name2] : void 0;
@@ -36403,7 +38220,7 @@ function detectFrameworks(repo) {
     for (const dir of manifestDirs(repo, [m.file])) {
       let raw;
       try {
-        raw = readFileSync29(join53(dir, m.file), "utf8");
+        raw = readFileSync31(join55(dir, m.file), "utf8");
       } catch {
         continue;
       }
@@ -36468,7 +38285,7 @@ function capBySite(items, weight, bySite) {
   return spread.slice(0, MAX_SCAFFOLD).sort(bySite);
 }
 function buildContextScaffold(repo, scan2, surface) {
-  const frameworks = detectFrameworks(repo);
+  const frameworks = detectFrameworks2(repo);
   const rank2 = new Map(surface.byFile.map((f) => [f.file, f.score]));
   const perFile = /* @__PURE__ */ new Map();
   for (const g of surface.entryPoints) {
@@ -36500,7 +38317,7 @@ function buildContextScaffold(repo, scan2, surface) {
   for (const fileScan of scan2.files) {
     const spec = langForFile(fileScan.rel);
     if (!spec) continue;
-    const lines5 = readText2(join53(repo, fileScan.rel)).split(/\r?\n/);
+    const lines5 = readText2(join55(repo, fileScan.rel)).split(/\r?\n/);
     for (let i2 = 0; i2 < lines5.length; i2++) {
       const line2 = lines5[i2];
       const am = AUTH_MARKER.exec(line2);
@@ -36540,7 +38357,7 @@ function renderContextScaffoldMd(repo, run2, s) {
   L.push("");
   L.push(`- repo: \`${repo}\``);
   L.push("");
-  L.push(`> The deterministic scaffold below is a STARTING POINT. Author **\`${join53(run2, "CONTEXT.md")}\`**`);
+  L.push(`> The deterministic scaffold below is a STARTING POINT. Author **\`${join55(run2, "CONTEXT.md")}\`**`);
   L.push(`> describing the project's purpose, trust model, auth/authorization scheme, and any`);
   L.push(`> framework-provided protections. ultrasec injects CONTEXT.md into every \`dossier\` and the`);
   L.push(`> \`verify\` worklist, so later stages reason WITH your threat model. CONTEXT.md is **additive`);
@@ -36598,10 +38415,10 @@ function compactContextDoc(doc) {
   return kept.length ? kept : void 0;
 }
 function loadContextDoc(run2) {
-  const p = join53(run2, "CONTEXT.md");
-  if (!existsSync25(p)) return void 0;
+  const p = join55(run2, "CONTEXT.md");
+  if (!existsSync27(p)) return void 0;
   try {
-    const s = readFileSync29(p, "utf8").trim();
+    const s = readFileSync31(p, "utf8").trim();
     return s.length ? s : void 0;
   } catch {
     return void 0;
@@ -36709,8 +38526,8 @@ function contradictedClaims(repo, claims, opts = {}) {
 }
 
 // src/reachability.ts
-import { existsSync as existsSync26, readFileSync as readFileSync30 } from "fs";
-import { join as join54 } from "path";
+import { existsSync as existsSync28, readFileSync as readFileSync32 } from "fs";
+import { join as join56 } from "path";
 var NPM_LOCKFILES2 = ["package-lock.json", "npm-shrinkwrap.json"];
 function packageNameFromLockKey(key) {
   const at = key.lastIndexOf("node_modules/");
@@ -36724,11 +38541,11 @@ function devOnlyPackages(repo) {
   const sources = [];
   for (const dir of findManifestDirs(repo, NPM_LOCKFILES2)) {
     for (const file of NPM_LOCKFILES2) {
-      const path = join54(dir, file);
-      if (!existsSync26(path)) continue;
+      const path = join56(dir, file);
+      if (!existsSync28(path)) continue;
       let lock;
       try {
-        lock = JSON.parse(readFileSync30(path, "utf8"));
+        lock = JSON.parse(readFileSync32(path, "utf8"));
       } catch {
         continue;
       }
@@ -36747,7 +38564,7 @@ function devOnlyPackages(repo) {
   for (const dir of manifestDirs2) {
     let pkg;
     try {
-      pkg = JSON.parse(readFileSync30(join54(dir, "package.json"), "utf8"));
+      pkg = JSON.parse(readFileSync32(join56(dir, "package.json"), "utf8"));
     } catch {
       continue;
     }
@@ -36827,7 +38644,7 @@ async function runScan2(args2) {
     const relOut = relative13(repo, out2);
     const changed = relOut && relOut !== "." && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
-    if (existsSync27(join55(out2, "graph.json"))) {
+    if (existsSync29(join57(out2, "graph.json"))) {
       try {
         targets = reverseDependents(loadDossier(out2).graph, changed, REVDEP_DEPTH);
         const downstream = targets.length - changed.length;
@@ -36895,6 +38712,9 @@ async function runScan2(args2) {
   const agenticFindings = auditAgenticWorkflows(repo, prune, tree);
   const webConfigFindings = auditWebConfig(repo, prune, tree);
   const authTokenFindings = auditAuthTokens(repo, prune, tree);
+  const frameworks = detectFrameworks(repo, prune, tree);
+  const classAudit = auditWeaknessClasses(repo, prune, tree, frameworks);
+  const classCells = classCoverage(frameworks);
   const cloudFindings = auditCloud(repo, prune, tree);
   const credentialFindings = auditSecrets(repo, prune, tree);
   const scopedScan = !!(effectiveScope && effectiveScope.length || include2?.length || exclude2?.length || diffRef);
@@ -36945,6 +38765,7 @@ async function runScan2(args2) {
     ...agenticFindings,
     ...webConfigFindings,
     ...authTokenFindings,
+    ...classAudit.findings,
     ...cloudFindings,
     ...credentialFindings,
     ...tool.findings
@@ -36998,12 +38819,14 @@ async function runScan2(args2) {
     ...reachabilitySources.length ? { reachability: { toolchain: toolchainCount, sources: reachabilitySources } } : {},
     ...truncation ? { truncation } : {},
     ...recordedScopes.length ? { scopes: recordedScopes } : {},
-    ...sbomResult?.path ? { sbom: "sbom.cdx.json" } : {}
+    ...sbomResult?.path ? { sbom: "sbom.cdx.json" } : {},
+    ...frameworks.length ? { frameworks } : {},
+    ...classCells.length ? { weaknessClasses: classCells } : {}
   };
   const nextDossier = { manifest, findings, graph };
   let final = nextDossier;
   let mergedNote = "";
-  if (flagBool(args2, "merge") && existsSync27(join55(out2, "findings.json"))) {
+  if (flagBool(args2, "merge") && existsSync29(join57(out2, "findings.json"))) {
     try {
       const prev = loadDossier(out2);
       final = mergeDossier(prev, nextDossier);
@@ -37072,6 +38895,15 @@ async function runScan2(args2) {
     );
     if (nb.note) println(`  \u26A0\uFE0F  ${nb.note}`);
   }
+  if (fm.frameworks?.length)
+    println(`  frameworks: ${fm.frameworks.map((f) => `${f.title}${f.version ? ` ${f.version}` : ""}${f.dir ? ` (${f.dir})` : ""}`).join(", ")}`);
+  if (fm.weaknessClasses?.length) {
+    const cells = fm.weaknessClasses;
+    const hunt = cells.filter(needsHunt).length;
+    println(
+      `  weakness classes: ${cells.filter((c2) => c2.state === "deterministic" && !c2.degraded).length} class \xD7 framework cell(s) matched by a pack \xB7 ${cells.filter((c2) => c2.state === "not-applicable").length} n/a \xB7 ${hunt} degraded or uncovered${hunt ? " \u2014 `investigate` hunts them" : ""}`
+    );
+  }
   if (diffNote) println(`  ${diffNote}`);
   if (toolsAutoSkipped) {
     println(`  external scanners skipped in scoped mode \u2014 pass \`--tools auto\` to run them.`);
@@ -37110,7 +38942,7 @@ async function runScan2(args2) {
 
 // src/commands/context.ts
 import { mkdirSync as mkdirSync14, writeFileSync as writeFileSync15 } from "fs";
-import { join as join56, resolve as resolve18 } from "path";
+import { join as join58, resolve as resolve18 } from "path";
 function runContext(args2) {
   const repo = resolve18(flagStr(args2, "repo") ?? ".");
   const out2 = resolve18(flagStr(args2, "out") ?? ".ultrasec");
@@ -37139,24 +38971,24 @@ function runContext(args2) {
   const shown = scaffold.entryPoints.length;
   const entryNote = shown < totalSources ? `${shown} file(s) shown of ${totalSources} site(s)` : `${shown}`;
   mkdirSync14(out2, { recursive: true });
-  writeFileSync15(join56(out2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
-  writeFileSync15(join56(out2, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out2, scaffold));
+  writeFileSync15(join58(out2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
+  writeFileSync15(join58(out2, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out2, scaffold));
   if (flagBool(args2, "json")) {
     println(JSON.stringify(scaffold, null, 2));
     return 0;
   }
   println(`ultrasec context \u2192 ${out2}`);
-  println(`  ${join56(out2, "CONTEXT.scaffold.json")}  \xB7  ${join56(out2, "CONTEXT.todo.md")}`);
+  println(`  ${join58(out2, "CONTEXT.scaffold.json")}  \xB7  ${join58(out2, "CONTEXT.todo.md")}`);
   println(
     `  frameworks: ${scaffold.frameworks.join(", ") || "\u2014"}  \xB7  entry points: ${entryNote}  \xB7  auth sites: ${scaffold.authMiddleware.length}  \xB7  sanitizers: ${scaffold.sanitizers.length}`
   );
-  println(`  next: author ${join56(out2, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` \u2014 it's injected into every dossier.`);
+  println(`  next: author ${join58(out2, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` \u2014 it's injected into every dossier.`);
   return 0;
 }
 
 // src/commands/import.ts
-import { resolve as resolve19, join as join57 } from "path";
-import { existsSync as existsSync28, readFileSync as readFileSync31 } from "fs";
+import { resolve as resolve19, join as join59 } from "path";
+import { existsSync as existsSync30, readFileSync as readFileSync33 } from "fs";
 
 // src/tools/deepsec.ts
 function slugToCategory(slug) {
@@ -37235,7 +39067,7 @@ async function runImport(args2) {
   }
   let raw;
   try {
-    raw = readFileSync31(resolve19(file), "utf8");
+    raw = readFileSync33(resolve19(file), "utf8");
   } catch (e) {
     eprintln(`ultrasec import: cannot read ${file} (${e instanceof Error ? e.message : String(e)}).`);
     return 2;
@@ -37246,7 +39078,7 @@ async function runImport(args2) {
     return 1;
   }
   let prev;
-  if (existsSync28(join57(run2, "findings.json"))) {
+  if (existsSync30(join59(run2, "findings.json"))) {
     try {
       prev = loadDossier(run2);
     } catch (e) {
@@ -37294,8 +39126,8 @@ async function runImport(args2) {
 }
 
 // src/commands/logs.ts
-import { resolve as resolve20, join as join58, dirname as dirname13, extname as extname5, sep as sep10 } from "path";
-import { existsSync as existsSync29, statSync as statSync16, readdirSync as readdirSync5, mkdirSync as mkdirSync15, writeFileSync as writeFileSync16, openSync, readSync, closeSync } from "fs";
+import { resolve as resolve20, join as join60, dirname as dirname13, extname as extname5, sep as sep10 } from "path";
+import { existsSync as existsSync31, statSync as statSync16, readdirSync as readdirSync5, mkdirSync as mkdirSync15, writeFileSync as writeFileSync16, openSync, readSync, closeSync } from "fs";
 
 // src/logs/analyze.ts
 import { createReadStream, statSync as statSync15 } from "fs";
@@ -38262,13 +40094,13 @@ async function runLogs(args2) {
   };
   writeDossier(out2, { manifest, findings, graph });
   mkdirSync15(out2, { recursive: true });
-  writeFileSync16(join58(out2, "LOGSTATS.json"), JSON.stringify(stats, null, 2));
+  writeFileSync16(join60(out2, "LOGSTATS.json"), JSON.stringify(stats, null, 2));
   const sigmaOn = flagBool(args2, "sigma");
   let sigmaPath;
   if (sigmaOn) {
     const rules = renderSigmaRules();
     if (rules) {
-      sigmaPath = join58(out2, "ultrasec-logs.sigma.yml");
+      sigmaPath = join60(out2, "ultrasec-logs.sigma.yml");
       writeFileSync16(sigmaPath, rules);
     }
   }
@@ -38311,7 +40143,7 @@ async function runLogs(args2) {
     if (truncation.length > 10) println(`    - \u2026and ${truncation.length - 10} more`);
   }
   if (sigmaPath) println(`  sigma rules \u2192 ${sigmaPath}  (import into your SIEM; thresholds/correlation are the SIEM's job)`);
-  println(`  next: read ${join58(out2, "DOSSIER.md")}; triage with the log-forensics playbook; verify with \`ultrasec verify --run ${out2}\`.`);
+  println(`  next: read ${join60(out2, "DOSSIER.md")}; triage with the log-forensics playbook; verify with \`ultrasec verify --run ${out2}\`.`);
   return 0;
 }
 var LOG_EXTENSIONS = /* @__PURE__ */ new Set([".log", ".jsonl", ".txt"]);
@@ -38336,11 +40168,11 @@ function expandInputs(inputs) {
   const out2 = /* @__PURE__ */ new Set();
   for (const raw of inputs) {
     const p = resolve20(raw);
-    if (!existsSync29(p)) throw new Error(`path not found: ${raw}`);
+    if (!existsSync31(p)) throw new Error(`path not found: ${raw}`);
     const st = statSync16(p);
     if (st.isDirectory()) {
       for (const entry2 of readdirSync5(p).sort(byStr)) {
-        const full = join58(p, entry2);
+        const full = join60(p, entry2);
         let est;
         try {
           est = statSync16(full);
@@ -38384,11 +40216,11 @@ function computeBase(absFiles) {
 import { resolve as resolve21 } from "path";
 
 // src/dossier.ts
-import { extname as extname6, join as join59 } from "path";
+import { extname as extname6, join as join61 } from "path";
 var CTX = 12;
 var MAX_ENCLOSING = 80;
 function fileLines(repo, file) {
-  return readText2(join59(repo, file)).split(/\r?\n/);
+  return readText2(join61(repo, file)).split(/\r?\n/);
 }
 function numbered(lines5, from, to, mark) {
   const out2 = [];
@@ -38463,7 +40295,7 @@ function reachability(repo, graph, f) {
   if (entry2) {
     let routes = [];
     try {
-      routes = findRouteEntryPoints(entry2.file, readText2(join59(repo, entry2.file)));
+      routes = findRouteEntryPoints(entry2.file, readText2(join61(repo, entry2.file)));
     } catch {
     }
     if (routes.length) {
@@ -38496,10 +40328,10 @@ function reachability(repo, graph, f) {
       said = true;
     }
     try {
-      const text = readText2(join59(repo, entry2.file));
-      const hit5 = text.split(/\r?\n/).findIndex((l) => AUTH_MARKER.test(l));
+      const text = readText2(join61(repo, entry2.file));
+      const hit6 = text.split(/\r?\n/).findIndex((l) => AUTH_MARKER.test(l));
       L.push(
-        hit5 >= 0 ? `- **auth marker in this file**: \`${entry2.file}:${hit5 + 1}\` \u2014 a CANDIDATE guard; confirm it runs before the object is touched, on this path.` : `- **auth marker in this file**: NONE. Not proof the route is public \u2014 the guard may be middleware, a proxy or the platform \u2014 but nothing in this file authenticates the caller.`
+        hit6 >= 0 ? `- **auth marker in this file**: \`${entry2.file}:${hit6 + 1}\` \u2014 a CANDIDATE guard; confirm it runs before the object is touched, on this path.` : `- **auth marker in this file**: NONE. Not proof the route is public \u2014 the guard may be middleware, a proxy or the platform \u2014 but nothing in this file authenticates the caller.`
       );
       const thr = text.split(/\r?\n/).findIndex((l) => THROTTLE_MARKER.test(l));
       if (thr < 0) L.push(`- **rate limit in this file**: NONE \u2014 relevant if the sink is expensive or the flow is an oracle.`);
@@ -38641,16 +40473,16 @@ function runDossier(args2) {
 import { resolve as resolve24 } from "path";
 
 // src/stage.ts
-import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync17, readFileSync as readFileSync32, readdirSync as readdirSync6, statSync as statSync17 } from "fs";
-import { join as join60, resolve as resolve22 } from "path";
+import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync17, readFileSync as readFileSync34, readdirSync as readdirSync6, statSync as statSync17 } from "fs";
+import { join as join62, resolve as resolve22 } from "path";
 function stageFiles(stem2) {
   return { todo: `${stem2}.todo.json`, md: `${stem2}.md` };
 }
 function emitWorklist(run2, files, items, md) {
   mkdirSync16(run2, { recursive: true });
-  const todoPath = join60(run2, files.todo);
+  const todoPath = join62(run2, files.todo);
   writeFileSync17(todoPath, JSON.stringify(items, null, 2));
-  writeFileSync17(join60(run2, files.md), md);
+  writeFileSync17(join62(run2, files.md), md);
   return todoPath;
 }
 function collectApplyFiles(applyPath, dirRegex) {
@@ -38662,7 +40494,7 @@ function collectApplyFiles(applyPath, dirRegex) {
   } catch {
   }
   if (isDir) {
-    const matches = readdirSync6(abs).filter((n) => dirRegex.test(n)).sort().map((n) => join60(abs, n));
+    const matches = readdirSync6(abs).filter((n) => dirRegex.test(n)).sort().map((n) => join62(abs, n));
     if (matches.length === 0) throw new Error(`${abs}: no apply file matching ${dirRegex} in this directory \u2014 nothing to fold (fail-closed)`);
     return matches;
   }
@@ -38672,7 +40504,7 @@ function readApply(applyPath, dirRegex, parse) {
   if (applyPath === "-") {
     let raw;
     try {
-      raw = readFileSync32(0, "utf8");
+      raw = readFileSync34(0, "utf8");
     } catch (e) {
       throw new Error(`<stdin>: ${e.message}`);
     }
@@ -38689,7 +40521,7 @@ function readApply(applyPath, dirRegex, parse) {
   for (const f of files) {
     let parsed2;
     try {
-      parsed2 = parse(readFileSync32(f, "utf8"));
+      parsed2 = parse(readFileSync34(f, "utf8"));
     } catch (e) {
       throw new Error(`${f}: ${e.message}`);
     }
@@ -39131,11 +40963,11 @@ function parseTriage(raw) {
 }
 
 // src/orchestrate.ts
-import { existsSync as existsSync30, mkdirSync as mkdirSync17, readFileSync as readFileSync33, writeFileSync as writeFileSync18 } from "fs";
-import { join as join62, resolve as resolve23 } from "path";
+import { existsSync as existsSync32, mkdirSync as mkdirSync17, readFileSync as readFileSync35, writeFileSync as writeFileSync18 } from "fs";
+import { join as join64, resolve as resolve23 } from "path";
 
 // src/orchestrate-templates.ts
-import { join as join61 } from "path";
+import { join as join63 } from "path";
 
 // src/revalidate.ts
 var REVALIDATION_VERDICTS = ["still-valid", "fixed", "false-positive", "uncertain"];
@@ -39357,10 +41189,31 @@ var INVESTIGATE_SCHEMA = {
               required: ["file", "line", "why"],
               properties: { file: { type: "string" }, line: { type: "integer" }, why: { type: "string" } }
             }
-          }
+          },
+          hunt: { type: "string", description: "the weakness-class hunt id this discovery answers, when it came from one" }
         }
       }
-    }
+    },
+    idioms: {
+      type: "array",
+      description: "weakness-class hunts only: each unsafe call and guard you recognized, as this repo writes it",
+      items: {
+        type: "object",
+        required: ["class", "framework", "kind", "pattern", "file", "line"],
+        properties: {
+          hunt: { type: "string" },
+          class: { type: "string" },
+          framework: { type: "string" },
+          kind: { enum: ["unsafe", "guard"] },
+          pattern: { type: "string", description: "the idiom as it reads in the code" },
+          regex: { type: "string", description: "optional proposed matcher (must compile)" },
+          file: { type: "string" },
+          line: { type: "integer" },
+          note: { type: "string" }
+        }
+      }
+    },
+    hunted: { type: "array", items: { type: "string" }, description: "weakness-class hunt ids you worked, including those with no finding" }
   }
 };
 var PHASE_SPECS = {
@@ -39369,32 +41222,32 @@ var PHASE_SPECS = {
     title: "Adjudicate",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adjudicate the ${n} open candidate(s) of an ultrasec audit from dossier evidence (analyzer fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run2) => `node ${engine} verify --apply ${join61(run2, "orchestration", "out", "adjudicate", "verdicts.json")} --run ${run2}`,
-    fragmentFile: (run2) => join61(run2, "orchestration", "out", "adjudicate", "verdicts.json")
+    applyHint: (engine, _worklist, run2) => `node ${engine} verify --apply ${join63(run2, "orchestration", "out", "adjudicate", "verdicts.json")} --run ${run2}`,
+    fragmentFile: (run2) => join63(run2, "orchestration", "out", "adjudicate", "verdicts.json")
   },
   verify: {
     role: "skeptic",
     title: "Verify",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adversarially verify the ${n} pending finding(s) of an ultrasec audit (skeptic fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run2) => `node ${engine} verify --apply ${join61(run2, "orchestration", "out", "verify", "verdicts.json")} --run ${run2}`,
-    fragmentFile: (run2) => join61(run2, "orchestration", "out", "verify", "verdicts.json")
+    applyHint: (engine, _worklist, run2) => `node ${engine} verify --apply ${join63(run2, "orchestration", "out", "verify", "verdicts.json")} --run ${run2}`,
+    fragmentFile: (run2) => join63(run2, "orchestration", "out", "verify", "verdicts.json")
   },
   revalidate: {
     role: "revalidator",
     title: "Revalidate",
     schema: REVALIDATE_SCHEMA,
     description: (n) => `Revalidate the ${n} confirmed/needs-human finding(s) against git history (false-positive cut, conservative fold)`,
-    applyHint: (engine, _worklist, run2) => `node ${engine} revalidate --apply ${join61(run2, "orchestration", "out", "revalidate", "REVALIDATE.json")} --run ${run2}`,
-    fragmentFile: (run2) => join61(run2, "orchestration", "out", "revalidate", "REVALIDATE.json")
+    applyHint: (engine, _worklist, run2) => `node ${engine} revalidate --apply ${join63(run2, "orchestration", "out", "revalidate", "REVALIDATE.json")} --run ${run2}`,
+    fragmentFile: (run2) => join63(run2, "orchestration", "out", "revalidate", "REVALIDATE.json")
   },
   investigate: {
     role: "hunter",
     title: "Investigate",
     schema: INVESTIGATE_SCHEMA,
     description: (n) => `Hunt authz/IDOR, business-logic and multi-hop bugs across ${n} attack-surface region(s) (hunter fan-out, citation-checked ingest)`,
-    applyHint: (engine, _worklist, run2) => `node ${engine} investigate --apply ${join61(run2, "orchestration", "out", "investigate", "INVESTIGATE.json")} --run ${run2}`,
-    fragmentFile: (run2) => join61(run2, "orchestration", "out", "investigate", "INVESTIGATE.json")
+    applyHint: (engine, _worklist, run2) => `node ${engine} investigate --apply ${join63(run2, "orchestration", "out", "investigate", "INVESTIGATE.json")} --run ${run2}`,
+    fragmentFile: (run2) => join63(run2, "orchestration", "out", "investigate", "INVESTIGATE.json")
   }
 };
 function phaseSpec(name2) {
@@ -39412,7 +41265,7 @@ function oneLine(s) {
 }
 function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize) {
   const spec = phaseSpec(ph.name);
-  const scriptPath2 = join61(runAbs, "orchestration", `${ph.name}.workflow.mjs`);
+  const scriptPath2 = join63(runAbs, "orchestration", `${ph.name}.workflow.mjs`);
   const meta = { name: `ultrasec-${ph.name}`, description: spec.description(ph.items), phases: [{ title: spec.title }] };
   const fragmentKey = ph.name === "investigate" ? "discoveries" : "verdicts";
   return [
@@ -39444,7 +41297,7 @@ function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize) {
     `  agent(contract('${spec.role}', 'ITEMS=' + batch.join(',')), { label: '${ph.name}:' + (i + 1), phase: ${JSON.stringify(spec.title)}, agentType: 'general-purpose', schema: SCHEMA }))`,
     ``,
     `// One-writer rule: this workflow only COLLECTS ${fragmentKey} fragments. The main agent merges`,
-    `// the returned \`${fragmentKey}\` arrays into ${oneLine(spec.fragmentFile(runAbs))}, then runs the conservative fold:`,
+    `// the returned \`${fragmentKey}\` arrays into ${oneLine(spec.fragmentFile(runAbs))}${ph.name === "investigate" ? " (and the `idioms`/`hunted` arrays of weakness-class hunts under the same keys)" : ""}, then runs the conservative fold:`,
     `//   ${oneLine(spec.applyHint(engineAbs, ph.worklist, runAbs))}`,
     `return { phase: ${JSON.stringify(ph.name)}, worklist: WORKLIST, results: results.filter(Boolean) }`,
     ``
@@ -39457,7 +41310,7 @@ function agentContracts(runAbs, engineAbs, repoAbs) {
 
 You are auditing ONE batch of candidates of an ultrasec security review \u2014 the OPEN candidates the deterministic engine enumerated. They are recall-oriented: many are false positives by design; you decide, from the real code.
 
-Worklist: \`${join61(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Worklist: \`${join63(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your candidate ids:
 
@@ -39477,7 +41330,7 @@ ${footer}`,
 
 You are an adversarial skeptic verifying the pending findings of an ultrasec audit. Assume each claim is wrong until the source proves it \u2014 try to REFUTE it.
 
-Worklist: \`${join61(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Worklist: \`${join63(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 
@@ -39496,7 +41349,7 @@ ${footer}`,
 
 You revalidate findings already ranked real (confirmed / needs-human) against git history \u2014 the false-positive cut.
 
-Worklist: \`${join61(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Worklist: \`${join63(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 
@@ -39515,7 +41368,7 @@ ${footer}`,
 
 You hunt the bugs the deterministic engine can't enumerate \u2014 missing/incorrect **authz** & **IDOR**, **business-logic** flaws, and multi-hop taint \u2014 one attack-surface region at a time.
 
-Worklist: \`${join61(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,\u2026>\`). If an \`ITEMS\` region is no longer in the worklist, skip it and say so in your note.
+Worklist: \`${join63(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,\u2026>\`). If an \`ITEMS\` region is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your regions:
 
@@ -39524,7 +41377,9 @@ For EACH of your regions:
 3. Only report what you can exploit \u2014 a concrete attacker scenario (who \xB7 what they send \xB7 what they get), not "potentially". A defense-in-depth gap another layer already prevents is a hardening note, not a Discovery.
 4. Every citation must resolve: the ingest REJECTS a Discovery whose \`[file:line]\` doesn't exist, and a Discovery at an existing finding's location folds into its \`sources\` (no duplicate). Discoveries land as \`ultrasec-ai\` **open** candidates and are adjudicated like any other \u2014 an uncertain high-severity one stays needs-human downstream, never dropped \u2014 so ground every claim, then don't fear reporting it.
 
-Return (structured output): \`{ "discoveries": [{ "title", "category", "severity", "cwe", "message", "file", "line", "path" }] }\` \u2014 your ITEMS' regions only.
+5. An item whose \`region\` starts with \`hunt:\` is a **weakness-class hunt**, not a region: its \`hunt\` object carries the class invariant, a valid guard, examples, and the framework/version no pack covers. Find how THIS repo writes the class: every break is a Discovery with \`"hunt": "<id>"\`; every unsafe call and guard you recognize goes to \`idioms[]\` (\`{hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}\`, citation-checked); list the hunt id in \`hunted[]\` even when you found nothing.
+
+Return (structured output): \`{ "discoveries": [{ "title", "category", "severity", "cwe", "message", "file", "line", "path", "hunt"? }], "idioms": [...], "hunted": [...] }\` \u2014 your ITEMS only.
 
 > **Merge before you fold (orchestrator).** Regions overlap, so two hunters routinely report ONE bug from two angles \u2014 the same missing check cited at the guard and at the call it fails to protect. The mechanical dedup on ingest only collapses an EXACT \`category + cwe/title + file:line\` match, so a same-bug-different-line pair survives as two findings and the report reads as twice the problem. Merge near-duplicates into one Discovery (keep the most precise citation, put the others in \`path\`) BEFORE running \`--apply\`, and do it before any false-positive pass: a de-duplication that runs after adjudication has already inflated the count it was meant to fix.
 ${footer}`
@@ -39533,7 +41388,7 @@ ${footer}`
 function runbookMd(phases, runAbs, engineAbs, repoAbs) {
   const status = phases.map((p) => `| ${p.name} | \`${p.worklist}\` | ${p.ready ? `ready (${p.items} item(s))` : "not ready"} | \`${p.prerequisite}\` |`).join("\n");
   const engine = `node ${engineAbs}`;
-  const agents = (role) => join61(runAbs, "orchestration", "agents", `${role}.md`);
+  const agents = (role) => join63(runAbs, "orchestration", "agents", `${role}.md`);
   const frag = (name2) => phaseSpec(name2).fragmentFile(runAbs);
   return `# ultrasec \u2014 sequential RUNBOOK (eco / no-subagent fallback)
 
@@ -39551,15 +41406,15 @@ ${status}
 
 ## The loop (play every role yourself, one item at a time)
 
-1. **Scan** (if not done): \`${engine} scan --repo ${repoAbs} --out ${runAbs}\` \u2192 \`${join61(runAbs, "findings.json")}\` (+ optionally prime \`${engine} context\`).
-2. **Investigate the attack surface** (discovery) \u2014 \`${engine} investigate --run ${runAbs}\` writes \`${join61(runAbs, "INVESTIGATE.todo.json")}\`. For EVERY region, apply \`${agents("hunter")}\` yourself; merge the grounded Discovery[] into \`${frag("investigate")}\`. Then ingest (citation-checked): \`${phaseSpec("investigate").applyHint(engineAbs, "", runAbs)}\`.
-3. **Adjudicate the open candidates** \u2014 the worklist is \`${join61(runAbs, "findings.json")}\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`${agents("analyzer")}\` yourself (\`${engine} dossier <id> --run ${runAbs}\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`${frag("adjudicate")}\`. Then fold, conservatively: \`${phaseSpec("adjudicate").applyHint(engineAbs, "", runAbs)}\`.
-4. **Verify adversarially** \u2014 \`${engine} verify --run ${runAbs}\` writes \`${join61(runAbs, "VERIFY.todo.json")}\` (the still-pending findings). For EVERY entry, apply \`${agents("skeptic")}\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`${frag("verify")}\`. Then: \`${phaseSpec("verify").applyHint(engineAbs, "", runAbs)}\`.
-5. **Revalidate against git history** \u2014 \`${engine} revalidate --run ${runAbs}\` writes \`${join61(runAbs, "REVALIDATE.todo.json")}\`. For EVERY entry, apply \`${agents("revalidator")}\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`${frag("revalidate")}\`. Then: \`${phaseSpec("revalidate").applyHint(engineAbs, "", runAbs)}\`.
+1. **Scan** (if not done): \`${engine} scan --repo ${repoAbs} --out ${runAbs}\` \u2192 \`${join63(runAbs, "findings.json")}\` (+ optionally prime \`${engine} context\`).
+2. **Investigate the attack surface** (discovery) \u2014 \`${engine} investigate --run ${runAbs}\` writes \`${join63(runAbs, "INVESTIGATE.todo.json")}\`. For EVERY region, apply \`${agents("hunter")}\` yourself; merge the grounded Discovery[] into \`${frag("investigate")}\`. Then ingest (citation-checked): \`${phaseSpec("investigate").applyHint(engineAbs, "", runAbs)}\`.
+3. **Adjudicate the open candidates** \u2014 the worklist is \`${join63(runAbs, "findings.json")}\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`${agents("analyzer")}\` yourself (\`${engine} dossier <id> --run ${runAbs}\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`${frag("adjudicate")}\`. Then fold, conservatively: \`${phaseSpec("adjudicate").applyHint(engineAbs, "", runAbs)}\`.
+4. **Verify adversarially** \u2014 \`${engine} verify --run ${runAbs}\` writes \`${join63(runAbs, "VERIFY.todo.json")}\` (the still-pending findings). For EVERY entry, apply \`${agents("skeptic")}\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`${frag("verify")}\`. Then: \`${phaseSpec("verify").applyHint(engineAbs, "", runAbs)}\`.
+5. **Revalidate against git history** \u2014 \`${engine} revalidate --run ${runAbs}\` writes \`${join63(runAbs, "REVALIDATE.todo.json")}\`. For EVERY entry, apply \`${agents("revalidator")}\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`${frag("revalidate")}\`. Then: \`${phaseSpec("revalidate").applyHint(engineAbs, "", runAbs)}\`.
 6. **Gate**: \`${engine} check --run ${runAbs} --semantic\` must exit 0 before presenting anything.
 7. **Render**: \`${engine} render --run ${runAbs}\` (optionally author the narrative first: \`${engine} narrative --run ${runAbs}\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
 
-With subagents available, prefer the emitted workflows instead: \`orchestrate --run ${runAbs} --phase <p>\` then \`Workflow({ scriptPath: "${join61(runAbs, "orchestration", "<p>.workflow.mjs")}" })\` \u2014 you stay the sole writer either way.
+With subagents available, prefer the emitted workflows instead: \`orchestrate --run ${runAbs} --phase <p>\` then \`Workflow({ scriptPath: "${join63(runAbs, "orchestration", "<p>.workflow.mjs")}" })\` \u2014 you stay the sole writer either way.
 `;
 }
 
@@ -39600,9 +41455,9 @@ var PHASES = ["adjudicate", "verify", "revalidate", "investigate"];
 var SMALL_WORKLIST = 3;
 var BATCH_SIZE = 8;
 function readIds(path, id) {
-  if (!existsSync30(path)) return null;
+  if (!existsSync32(path)) return null;
   try {
-    const items = JSON.parse(readFileSync33(path, "utf8"));
+    const items = JSON.parse(readFileSync35(path, "utf8"));
     if (!Array.isArray(items)) return null;
     return items.map((i2) => String(id(i2)));
   } catch {
@@ -39612,21 +41467,21 @@ function readIds(path, id) {
 var SURFACE_FILTERS = [...SURFACES, "all"];
 function listPhases(runDir, engineAbs, surface = "all") {
   const run2 = resolve23(runDir);
-  const findingsPath = join62(run2, "findings.json");
+  const findingsPath = join64(run2, "findings.json");
   const allIds = readIds(findingsPath, (f) => f.id);
   let adjIds = [];
   if (allIds !== null) {
     try {
-      const findings = JSON.parse(readFileSync33(findingsPath, "utf8"));
+      const findings = JSON.parse(readFileSync35(findingsPath, "utf8"));
       adjIds = findings.filter((f) => f.status === "open" && (surface === "all" || surfaceOf(f) === surface)).map((f) => f.id);
     } catch {
     }
   }
-  const verPath = join62(run2, "VERIFY.todo.json");
+  const verPath = join64(run2, "VERIFY.todo.json");
   const verIds = readIds(verPath, (i2) => i2.id);
-  const revPath = join62(run2, "REVALIDATE.todo.json");
+  const revPath = join64(run2, "REVALIDATE.todo.json");
   const revIds = readIds(revPath, (i2) => i2.id);
-  const invPath = join62(run2, "INVESTIGATE.todo.json");
+  const invPath = join64(run2, "INVESTIGATE.todo.json");
   const invIds = readIds(invPath, (r) => r.region);
   return [
     {
@@ -39666,7 +41521,7 @@ function listPhases(runDir, engineAbs, surface = "all") {
 }
 function repoOf(run2) {
   try {
-    const m = JSON.parse(readFileSync33(join62(run2, "manifest.json"), "utf8"));
+    const m = JSON.parse(readFileSync35(join64(run2, "manifest.json"), "utf8"));
     if (typeof m.repo === "string" && m.repo) return m.repo;
   } catch {
   }
@@ -39674,7 +41529,7 @@ function repoOf(run2) {
 }
 function orchestrateRun(runDir, engineAbs, opts = {}) {
   const run2 = resolve23(runDir);
-  if (!existsSync30(run2)) {
+  if (!existsSync32(run2)) {
     return { exitCode: 2, written: [], notices: [], errors: [`run dir not found: ${run2}`], phases: [] };
   }
   const phases = listPhases(run2, engineAbs, opts.surface ?? "all");
@@ -39702,14 +41557,14 @@ function orchestrateRun(runDir, engineAbs, opts = {}) {
     selected = [ph];
   }
   const repoAbs = repoOf(run2);
-  const orchDir = join62(run2, "orchestration");
-  const agentsDir = join62(orchDir, "agents");
-  for (const p of PHASES) mkdirSync17(join62(orchDir, "out", p), { recursive: true });
+  const orchDir = join64(run2, "orchestration");
+  const agentsDir = join64(orchDir, "agents");
+  for (const p of PHASES) mkdirSync17(join64(orchDir, "out", p), { recursive: true });
   mkdirSync17(agentsDir, { recursive: true });
   const written = [];
   const notices = [];
   for (const [name2, content] of Object.entries(agentContracts(run2, engineAbs, repoAbs))) {
-    const p = join62(agentsDir, `${name2}.md`);
+    const p = join64(agentsDir, `${name2}.md`);
     writeFileSync18(p, content);
     written.push(p);
   }
@@ -39722,12 +41577,12 @@ function orchestrateRun(runDir, engineAbs, opts = {}) {
       if (ph.items <= SMALL_WORKLIST) {
         notices.push(`phase "${ph.name}": only ${ph.items} item(s) \u2014 the sequential --eco path is equivalent and cheaper.`);
       }
-      const p = join62(orchDir, `${ph.name}.workflow.mjs`);
+      const p = join64(orchDir, `${ph.name}.workflow.mjs`);
       writeFileSync18(p, phaseWorkflowScript(ph, run2, engineAbs, BATCH_SIZE));
       written.push(p);
     }
   }
-  const rb = join62(orchDir, "RUNBOOK.md");
+  const rb = join64(orchDir, "RUNBOOK.md");
   writeFileSync18(rb, runbookMd(phases, run2, engineAbs, repoAbs));
   written.push(rb);
   return { exitCode: 0, written, notices, errors: [], phases };
@@ -39791,12 +41646,12 @@ function runTriage(args2) {
 }
 
 // src/commands/investigate.ts
-import { readFileSync as readFileSync34 } from "fs";
-import { join as join65, resolve as resolve26 } from "path";
+import { readFileSync as readFileSync37 } from "fs";
+import { join as join68, resolve as resolve26 } from "path";
 
 // src/check.ts
-import { existsSync as existsSync31, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
-import { join as join63, resolve as resolve25, sep as sep11 } from "path";
+import { existsSync as existsSync33, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
+import { join as join65, resolve as resolve25, sep as sep11 } from "path";
 function insideRepo(repo, file) {
   const base = resolve25(repo);
   const abs = resolve25(base, file);
@@ -39815,8 +41670,8 @@ function countNewlines(fd, chunkBytes = LINE_COUNT_CHUNK_BYTES) {
 }
 function lineCountDetailed(repo, file) {
   if (!insideRepo(repo, file)) return { status: "missing" };
-  const abs = join63(repo, file);
-  if (!existsSync31(abs)) return { status: "missing" };
+  const abs = join65(repo, file);
+  if (!existsSync33(abs)) return { status: "missing" };
   let fd;
   try {
     fd = openSync2(abs, "r");
@@ -39944,14 +41799,14 @@ function contradicted(repo, run2) {
 }
 
 // src/assumptions.ts
-import { join as join64 } from "path";
+import { join as join66 } from "path";
 var MAX_UNITS = 120;
 function buildAssumptionWorklist(scan2) {
   const items = [];
   for (const f of scan2.files) {
     const lang = langForFile(f.rel);
     if (!lang) continue;
-    const text = readText2(join64(scan2.repo, f.rel));
+    const text = readText2(join66(scan2.repo, f.rel));
     const sources = findSources(lang, text).length;
     const sinks = findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols), text.split(/\r?\n/)).length;
     if (!sources && !sinks) continue;
@@ -40100,6 +41955,183 @@ function leadsForRegion(leads, region, files) {
   return leads.filter((l) => inRegion(l.at)).map((l) => `${l.at}: ${l.claim}`);
 }
 
+// src/classes/hunt.ts
+import { existsSync as existsSync34, readFileSync as readFileSync36, writeFileSync as writeFileSync19 } from "fs";
+import { join as join67 } from "path";
+
+// src/classes/types.ts
+var CLASS_IDS = [
+  "timing-unsafe-secret-compare",
+  "csv-formula-injection",
+  "client-ip-first-xff",
+  "unbounded-public-export",
+  "security-headers-absent",
+  "session-cookie-chunks-on-logout",
+  "env-bool-coercion"
+];
+
+// src/classes/hunt.ts
+var ECOSYSTEM_LANGUAGE = { node: "javascript", python: "python", java: "java", go: "go", ruby: "ruby", php: "php" };
+var MAX_HUNT_FILES = 8;
+var MAX_EXAMPLES = 3;
+function huntPrompt(h) {
+  return `Weakness class \`${h.class}\` (${h.cwe}) on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""} \u2014 ${h.reason}. INVARIANT: ${CLASSES[h.class].invariant} A VALID GUARD: ${CLASSES[h.class].guard} Find how THIS repository writes the class with ${h.framework} \u2014 its own helpers, middlewares, config and wrappers \u2014 and check every place the invariant can break. Each break is a Discovery (cite a resolvable [file:line], set "hunt": "${h.id}"). Each idiom you recognize \u2014 the unsafe call AND the guard the code relies on \u2014 goes to \`idioms[]\` ({hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}) so a maintainer can turn it into pack data. Looked and found nothing? Put "${h.id}" in \`hunted[]\` \u2014 an empty result is a result.`;
+}
+function buildClassHunts(manifest, surface) {
+  const cells = (manifest.weaknessClasses ?? []).filter(needsHunt);
+  const out2 = [];
+  for (const cell of cells) {
+    const cls = CLASSES[cell.class];
+    const fw = manifest.frameworks?.find((f) => f.id === cell.framework && f.dir === cell.dir);
+    const lang = ECOSYSTEM_LANGUAGE[cell.ecosystem];
+    const examples = [...cls.examples].sort((a, b) => Number(b.language === lang) - Number(a.language === lang)).slice(0, MAX_EXAMPLES);
+    const prefix = cell.dir ? `${cell.dir}/` : "";
+    const files = [...fw ? [fw.evidence.replace(/:\d+$/, "")] : [], ...(surface?.byFile ?? []).map((f) => f.file).filter((f) => f.startsWith(prefix))];
+    const hunt = {
+      id: huntId(cell),
+      class: cell.class,
+      title: cls.title,
+      cwe: cls.cwe,
+      framework: cell.framework,
+      ecosystem: cell.ecosystem,
+      ...cell.version ? { version: cell.version } : {},
+      dir: cell.dir,
+      reason: cell.degraded ?? "no pack covers this class here",
+      packsApplied: cell.packs,
+      invariant: cls.invariant,
+      guard: cls.guard,
+      rubric: cls.rubric,
+      examples
+    };
+    out2.push({
+      region: hunt.id,
+      score: 0,
+      sinks: 0,
+      sources: 0,
+      files: [...new Set(files)].slice(0, MAX_HUNT_FILES),
+      neighbors: [],
+      prompt: huntPrompt(hunt),
+      hunt
+    });
+  }
+  return out2;
+}
+var HUNT_ID = /^hunt:[a-z-]+:[\w.-]+(?:@.+)?$/;
+var IDIOM_KINDS = ["unsafe", "guard"];
+function parseIdiom(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { reason: badField("idiom", raw, "an object") };
+  const d = raw;
+  const bad = [];
+  if (!CLASS_IDS.includes(d.class)) bad.push(notInVocabulary("class", d.class, CLASS_IDS));
+  if (!IDIOM_KINDS.includes(d.kind)) bad.push(notInVocabulary("kind", d.kind, IDIOM_KINDS));
+  for (const field of ["framework", "pattern", "file"]) {
+    if (typeof d[field] !== "string" || !d[field].trim()) bad.push(badField(field, d[field], "a non-empty string"));
+  }
+  if (!Number.isInteger(d.line) || d.line < 1) bad.push(badField("line", d.line, "an integer \u2265 1"));
+  if (d.hunt !== void 0 && (typeof d.hunt !== "string" || !HUNT_ID.test(d.hunt)))
+    bad.push(badField("hunt", d.hunt, "a worklist hunt id (hunt:<class>:<framework>[@dir])"));
+  if (d.regex !== void 0) {
+    if (typeof d.regex !== "string") bad.push(badField("regex", d.regex, "a string"));
+    else
+      try {
+        new RegExp(d.regex);
+      } catch {
+        bad.push(`regex ${describeValue(d.regex)} does not compile`);
+      }
+  }
+  if (bad.length) return { reason: bad.join(", ") };
+  return {
+    row: {
+      ...typeof d.hunt === "string" ? { hunt: d.hunt } : {},
+      class: d.class,
+      framework: d.framework.trim(),
+      kind: d.kind,
+      ...typeof d.language === "string" ? { language: d.language } : {},
+      pattern: d.pattern.trim(),
+      ...typeof d.regex === "string" ? { regex: d.regex } : {},
+      file: d.file,
+      line: d.line,
+      ...typeof d.note === "string" ? { note: d.note } : {}
+    }
+  };
+}
+function parseHuntResults(raw) {
+  const data = JSON.parse(raw);
+  const out2 = { idioms: [], hunted: [], dropped: [] };
+  if (!data || typeof data !== "object") return out2;
+  const obj = data;
+  const discoveries = Array.isArray(data) ? data : Array.isArray(obj.discoveries) ? obj.discoveries : [];
+  for (const d of discoveries) {
+    const h = d?.hunt;
+    if (typeof h === "string" && HUNT_ID.test(h)) out2.hunted.push(h);
+  }
+  if (Array.isArray(data)) return out2;
+  for (const h of Array.isArray(obj.hunted) ? obj.hunted : []) if (typeof h === "string" && HUNT_ID.test(h)) out2.hunted.push(h);
+  for (const [index, row] of (Array.isArray(obj.idioms) ? obj.idioms : []).entries()) {
+    const p = parseIdiom(row);
+    if (p.row) {
+      out2.idioms.push(p.row);
+      if (p.row.hunt) out2.hunted.push(p.row.hunt);
+    } else out2.dropped.push({ index, reason: `idioms[${index}]: ${p.reason}` });
+  }
+  return out2;
+}
+function isHuntOnlyPayload(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const o = data;
+  return !Array.isArray(o.discoveries) && (Array.isArray(o.idioms) || Array.isArray(o.hunted));
+}
+var SUGGESTIONS_NOTE = "Proposals recognized by the AI hunt. The engine NEVER applies them: a maintainer promotes one by adding it to a pack in src/classes/packs with a vulnerable and a fixed fixture and a recall-matrix cell \u2014 see docs/weakness-classes.md.";
+function recordHuntResults(run2, repo, manifest, results, packIds) {
+  const path = join67(run2, PACK_SUGGESTIONS_FILE);
+  const rejected = [];
+  const fresh3 = [];
+  const hunted = /* @__PURE__ */ new Set();
+  for (const r of results) {
+    for (const h of r.hunted) hunted.add(h);
+    for (const idiom of r.idioms) {
+      const problem = citationProblem(repo, { file: idiom.file, line: idiom.line });
+      if (problem) {
+        rejected.push({ idiom, reason: problem });
+        continue;
+      }
+      const text = readFileSync36(join67(repo, idiom.file), "utf8").split(/\r?\n/)[idiom.line - 1] ?? "";
+      const fw = manifest.frameworks?.find((f) => f.id === idiom.framework);
+      fresh3.push({
+        ...idiom,
+        evidence: text.trim().slice(0, 200),
+        ...fw?.version ? { seenOn: `${fw.id} ${fw.version}` } : {},
+        pack: packIds.includes(idiom.framework) ? idiom.framework : `new pack: ${idiom.framework}`
+      });
+    }
+  }
+  if (!fresh3.length && !hunted.size) return { accepted: 0, rejected, hunted: [] };
+  let prior = { schema: 1, note: SUGGESTIONS_NOTE, hunted: [], suggestions: [] };
+  if (existsSync34(path)) {
+    try {
+      const p = JSON.parse(readFileSync36(path, "utf8"));
+      prior = { ...prior, hunted: p.hunted ?? [], suggestions: p.suggestions ?? [] };
+    } catch {
+    }
+  }
+  const key = (s) => [s.class, s.framework, s.kind, s.pattern, s.file, s.line].join("\0");
+  const merged = new Map(prior.suggestions.map((s) => [key(s), s]));
+  let accepted = 0;
+  for (const s of fresh3)
+    if (!merged.has(key(s))) {
+      merged.set(key(s), s);
+      accepted++;
+    }
+  const file = {
+    schema: 1,
+    note: SUGGESTIONS_NOTE,
+    hunted: [.../* @__PURE__ */ new Set([...prior.hunted, ...hunted])].sort(byStr),
+    suggestions: [...merged.values()].sort((a, b) => byStr(a.class, b.class) || byStr(a.framework, b.framework) || byStr(a.file, b.file) || a.line - b.line)
+  };
+  writeFileSync19(path, JSON.stringify(file, null, 2) + "\n");
+  return { accepted, rejected, hunted: [...hunted].sort(byStr), path };
+}
+
 // src/investigate.ts
 var MAX_FILES_PER_REGION = 8;
 var MAX_NEIGHBORS_PER_REGION = 12;
@@ -40113,7 +42145,7 @@ var LENSES = {
   privacy: "Personal data: where it goes (a third-party processor, a log, an analytics beacon), how long it stays, and whether a control named 'anonymisation' actually prevents re-identification. See references/privacy-and-data-protection.md.",
   cloud: "Cloud / container reachability, the half the IaC scan can't decide: can any user-controlled URL reach the instance-metadata endpoint (169.254.169.254 / metadata.google.internal) \u2014 SSRF to short-lived credentials? Is a wildcard/over-broad IAM role actually assumed on this path? Are instance/CI secrets read from env or a mounted file that a compromised container can exfiltrate? Does a container escape (privileged/hostPath/hostNetwork) turn a bug into node takeover? See references/frameworks.md \xA7Cloud."
 };
-function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens) {
+function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens, classHunts = []) {
   const filesByRegion = /* @__PURE__ */ new Map();
   for (const fs2 of surface.byFile) {
     const arr = filesByRegion.get(fs2.region) ?? filesByRegion.set(fs2.region, []).get(fs2.region);
@@ -40142,11 +42174,15 @@ LENS \u2014 ${lens}: ${LENSES[lens]}` : ""),
       ...leads.length ? { leads } : {}
     });
   }
-  return regions;
+  return [...regions, ...classHunts];
 }
-function renderInvestigateMd(regions, context) {
+function renderInvestigateMd(items, context) {
+  const regions = items.filter((r) => !r.hunt);
+  const hunts = items.filter((r) => r.hunt);
   const L = [];
-  L.push(`# ultrasec investigation worklist (${regions.length} region${regions.length === 1 ? "" : "s"})`);
+  L.push(
+    `# ultrasec investigation worklist (${regions.length} region${regions.length === 1 ? "" : "s"}${hunts.length ? ` \xB7 ${hunts.length} weakness-class hunt${hunts.length === 1 ? "" : "s"}` : ""})`
+  );
   L.push("");
   L.push(`Investigate each region for issues the deterministic engine can't enumerate, and emit`);
   L.push(`grounded **Discovery[]** as INVESTIGATE.json (array of`);
@@ -40175,7 +42211,36 @@ function renderInvestigateMd(regions, context) {
     }
     L.push("");
   }
+  if (hunts.length) L.push(...renderHuntsMd(hunts));
   return L.join("\n") + "\n";
+}
+function renderHuntsMd(hunts) {
+  const L = [];
+  L.push(`## Weakness-class hunts`);
+  L.push("");
+  L.push(`Each hunt is a weakness class on a framework no pack settles (no pack for it, or a version`);
+  L.push(`outside the range the pack was validated on). Find how THIS repository writes the class and`);
+  L.push(`return, in the same INVESTIGATE.json \u2014 \`{ "discoveries": [...], "idioms": [...], "hunted": [...] }\`:`);
+  L.push(`- **discoveries** \u2014 every place the invariant breaks, with \`"hunt": "<hunt id>"\` (ingested like any discovery);`);
+  L.push(`- **idioms** \u2014 each unsafe call and each guard you recognized: \`{hunt, class, framework, kind: "unsafe"|"guard", pattern,`);
+  L.push(`  regex?, file, line, note}\`, citation checked, written to \`PACK-SUGGESTIONS.json\` (proposals \u2014 never applied);`);
+  L.push(`- **hunted** \u2014 the hunt ids you worked, including those where you found nothing.`);
+  L.push("");
+  for (const r of hunts) {
+    const h = r.hunt;
+    L.push(`### \`${h.id}\` \u2014 ${h.title} (${h.cwe}) on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""}`);
+    L.push(`- why: ${h.reason}${h.packsApplied.length ? ` (rules already run as a floor: ${h.packsApplied.join(", ")})` : ""}`);
+    L.push(`- invariant: ${h.invariant}`);
+    L.push(`- a valid guard: ${h.guard}`);
+    L.push(`- severity: ${h.rubric}`);
+    if (r.files.length) L.push(`- start in: ${r.files.map((f) => `\`${f}\``).join(", ")}`);
+    for (const e of h.examples) {
+      L.push(`- example (${e.language}) \u2014 vulnerable: \`${e.vulnerable.replace(/\n/g, " \u23CE ")}\``);
+      L.push(`  fixed: \`${e.fixed.replace(/\n/g, " \u23CE ")}\``);
+    }
+    L.push("");
+  }
+  return L;
 }
 function locOf(f) {
   if (f.sink) return `${f.sink.file}:${f.sink.line}`;
@@ -40246,7 +42311,8 @@ function ingestDiscoveries(dossier, discoveries, repo, opts = {}) {
   return { findings, ingested, folded, rejected };
 }
 function parseDiscoveries(raw) {
-  const arr = coerceRows(JSON.parse(raw), ["discoveries"], "discoveries");
+  const data = JSON.parse(raw);
+  const arr = isHuntOnlyPayload(data) ? [] : coerceRows(data, ["discoveries"], "discoveries");
   const rows = [];
   const dropped = [];
   const normalized = [];
@@ -40282,8 +42348,13 @@ function runInvestigate(args2) {
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
+    const huntResults = [];
     try {
-      parsed2 = readApply(applyPath, /(investigat|discover).*\.json$/i, parseDiscoveries);
+      parsed2 = readApply(applyPath, /(investigat|discover).*\.json$/i, (raw) => {
+        const rows = parseDiscoveries(raw);
+        huntResults.push(parseHuntResults(raw));
+        return rows;
+      });
     } catch (e) {
       eprintln(`ultrasec investigate: cannot read discoveries at ${e.message}`);
       return 2;
@@ -40291,6 +42362,15 @@ function runInvestigate(args2) {
     const strict = flagBool(args2, "strict");
     const res = ingestDiscoveries(dossier, parsed2.rows, repo, { context: loadContextDoc(run2) });
     persistFindings(run2, dossier, res.findings);
+    const idiomDrops = huntResults.flatMap((h) => h.dropped);
+    const rec = recordHuntResults(
+      run2,
+      repo,
+      dossier.manifest,
+      huntResults,
+      PACKS.flatMap((p) => p.framework ? [p.framework] : [])
+    );
+    const idiomRefusals = idiomDrops.length + rec.rejected.length;
     if (flagBool(args2, "json")) {
       println(
         JSON.stringify(
@@ -40299,13 +42379,19 @@ function runInvestigate(args2) {
             folded: res.folded,
             normalized: parsed2.normalized ?? [],
             rejected: res.rejected.map((r) => ({ title: r.discovery.title, reason: r.reason })),
-            dropped: parsed2.dropped
+            dropped: parsed2.dropped,
+            idioms: {
+              accepted: rec.accepted,
+              rejected: rec.rejected.map((r) => ({ pattern: r.idiom.pattern, reason: r.reason })),
+              dropped: idiomDrops
+            },
+            hunted: rec.hunted
           },
           null,
           2
         )
       );
-      return strict && (parsed2.dropped.length > 0 || res.rejected.length > 0) ? 1 : 0;
+      return strict && (parsed2.dropped.length > 0 || res.rejected.length > 0 || idiomRefusals > 0) ? 1 : 0;
     }
     println(`ultrasec investigate --apply \u2192 updated ${run2}/findings.json`);
     println(
@@ -40313,9 +42399,16 @@ function runInvestigate(args2) {
     );
     for (const line2 of formatNormalized(parsed2.normalized ?? [])) println(line2);
     for (const r of res.rejected) println(`  \u2717 rejected "${r.discovery.title}": ${r.reason}`);
+    if (rec.path)
+      println(
+        `  pack suggestions: ${rec.accepted} new idiom(s) \xB7 ${rec.hunted.length} hunt(s) recorded \u2192 ${rec.path} (proposals \u2014 the engine never applies them)`
+      );
+    for (const d of idiomDrops) println(`  \u2717 dropped ${d.reason}`);
+    for (const r of rec.rejected) println(`  \u2717 rejected idiom "${r.idiom.pattern.slice(0, 60)}": ${r.reason}`);
     if (strict && res.rejected.length > 0)
       println(`  --strict: ${res.rejected.length} discovery(ies) refused by the citation gate \u2014 failing so the loss isn't absorbed silently.`);
-    const code = surfaceDropped(parsed2.dropped, strict, println);
+    if (strict && idiomRefusals > 0) println(`  --strict: ${idiomRefusals} idiom(s) refused \u2014 failing so the loss isn't absorbed silently.`);
+    const code = surfaceDropped(parsed2.dropped, strict, println) || (strict && idiomRefusals > 0 ? 1 : 0);
     const submitted = parsed2.rows.length + parsed2.dropped.length;
     if (parsed2.dropped.length > 0 && parsed2.dropped.length * 2 >= submitted)
       println(
@@ -40333,7 +42426,7 @@ function runInvestigate(args2) {
   };
   let leads = [];
   try {
-    leads = JSON.parse(readFileSync34(join65(run2, LEADS_FILE), "utf8"));
+    leads = JSON.parse(readFileSync37(join68(run2, LEADS_FILE), "utf8"));
     if (!Array.isArray(leads)) leads = [];
   } catch {
     leads = [];
@@ -40345,7 +42438,8 @@ function runInvestigate(args2) {
   }
   let regions;
   try {
-    regions = buildInvestigateWorklist(buildAttackSurface(scanRepo2(repo, scanOpts)), dossier.graph, leads, lens);
+    const surface = buildAttackSurface(scanRepo2(repo, scanOpts));
+    regions = buildInvestigateWorklist(surface, dossier.graph, leads, lens, buildClassHunts(dossier.manifest, surface));
   } catch (e) {
     eprintln(`ultrasec investigate: ${e.message}`);
     return 2;
@@ -40355,7 +42449,11 @@ function runInvestigate(args2) {
     println(JSON.stringify(regions, null, 2));
     return 0;
   }
-  println(`ultrasec investigate \u2192 ${todoPath} (${regions.length} region${regions.length === 1 ? "" : "s"})`);
+  const hunts = regions.filter((r) => r.hunt).length;
+  const areas = regions.length - hunts;
+  println(
+    `ultrasec investigate \u2192 ${todoPath} (${areas} region${areas === 1 ? "" : "s"}${hunts ? ` \xB7 ${hunts} weakness-class hunt${hunts === 1 ? "" : "s"}` : ""})`
+  );
   if (!regions.length) {
     println(`  no attack-surface regions detected \u2014 try \`map\` or widen the scope.`);
   } else {
@@ -40441,7 +42539,7 @@ function runPaths(args2) {
 }
 
 // src/commands/verify.ts
-import { join as join66, resolve as resolve28 } from "path";
+import { join as join69, resolve as resolve28 } from "path";
 function runVerify(args2) {
   const run2 = resolve28(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
@@ -40509,7 +42607,7 @@ function applyMode(run2, dossier, applyPath, args2) {
     );
     return strict && (parsed2.dropped.length > 0 || res.reVerdicted.length > 0 && !reVerdictOk) ? 1 : 0;
   }
-  println(`ultrasec verify --apply \u2192 updated ${join66(run2, "findings.json")}`);
+  println(`ultrasec verify --apply \u2192 updated ${join69(run2, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
   if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
   if (res.keptForHuman.length) {
@@ -40606,8 +42704,8 @@ function runRevalidate(args2) {
 }
 
 // src/commands/variants.ts
-import { writeFileSync as writeFileSync19 } from "fs";
-import { join as join67, resolve as resolve30 } from "path";
+import { writeFileSync as writeFileSync20 } from "fs";
+import { join as join70, resolve as resolve30 } from "path";
 
 // src/variants.ts
 function sinkOf(f) {
@@ -40795,8 +42893,8 @@ function runVariants(args2) {
     const res = ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run2) });
     persistFindings(run2, dossier, res.findings);
     const rules = renderRegressionRules(parsed2.rows);
-    const rulePath = join67(run2, "ultrasec-variants.yaml");
-    if (rules) writeFileSync19(rulePath, rules);
+    const rulePath = join70(run2, "ultrasec-variants.yaml");
+    if (rules) writeFileSync20(rulePath, rules);
     if (flagBool(args2, "json")) {
       println(
         JSON.stringify(
@@ -40837,7 +42935,7 @@ function runVariants(args2) {
 import { resolve as resolve31 } from "path";
 
 // src/guards.ts
-import { join as join68 } from "path";
+import { join as join71 } from "path";
 var REQUEST_KINDS = /* @__PURE__ */ new Set(["http", "ws"]);
 var MODULE_SCOPE = "(module scope)";
 var GUARD_LENSES = ["auth", "throttle"];
@@ -40958,7 +43056,7 @@ function buildGuardMatrix(scan2, lens = "auth", extraMarkers = [], opts = {}) {
     const lang = langForFile(file.rel);
     if (!lang) continue;
     if (!opts.includeTests && isTestPath(file.rel)) continue;
-    const text = readText2(join68(scan2.repo, file.rel));
+    const text = readText2(join71(scan2.repo, file.rel));
     const sources = findSources(lang, text, file.rel).filter((s) => REQUEST_KINDS.has(s.kind));
     if (!sources.length) continue;
     const lines5 = text.split(/\r?\n/);
@@ -41295,8 +43393,8 @@ function runGuards(args2) {
 }
 
 // src/commands/assumptions.ts
-import { writeFileSync as writeFileSync20 } from "fs";
-import { join as join69, resolve as resolve32 } from "path";
+import { writeFileSync as writeFileSync21 } from "fs";
+import { join as join72, resolve as resolve32 } from "path";
 function runAssumptions(args2) {
   const run2 = resolve32(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
@@ -41318,10 +43416,10 @@ function runAssumptions(args2) {
     }
     const strict = flagBool(args2, "strict");
     const leads = unenforced(parsed2.rows);
-    const mapPath = join69(run2, "ASSUMPTIONS.md");
-    writeFileSync20(mapPath, renderAssumptionMap(parsed2.rows));
-    const leadsPath = join69(run2, LEADS_FILE);
-    writeFileSync20(leadsPath, JSON.stringify(leads, null, 2));
+    const mapPath = join72(run2, "ASSUMPTIONS.md");
+    writeFileSync21(mapPath, renderAssumptionMap(parsed2.rows));
+    const leadsPath = join72(run2, LEADS_FILE);
+    writeFileSync21(leadsPath, JSON.stringify(leads, null, 2));
     if (flagBool(args2, "json")) {
       println(JSON.stringify({ units: parsed2.rows.length, unenforced: leads.length, map: mapPath, leads: leadsPath, dropped: parsed2.dropped }, null, 2));
       return strict && parsed2.dropped.length > 0 ? 1 : 0;
@@ -41361,8 +43459,8 @@ function runAssumptions(args2) {
 }
 
 // src/commands/coverage.ts
-import { writeFileSync as writeFileSync21 } from "fs";
-import { join as join70, resolve as resolve33 } from "path";
+import { writeFileSync as writeFileSync22 } from "fs";
+import { join as join73, resolve as resolve33 } from "path";
 
 // src/coverage.ts
 var ASVS_CATEGORIES = [
@@ -41761,7 +43859,7 @@ function buildCoverage(dossier, enumeratedKinds = [], standardId = DEFAULT_STAND
     return { id: c2.id, title: c2.title, state, hits, judgment: !!c2.judgment, hint };
   });
 }
-var MARK = {
+var MARK2 = {
   engine: "\u{1F50E} enumerated",
   examined: "\u2705 examined",
   unexamined: "\u2B1C **not examined**"
@@ -41779,7 +43877,7 @@ function failedToolLines(dossier) {
     ""
   ];
 }
-function renderCoverageMd(rows, standardTitle = "OWASP ASVS", dossier) {
+function renderCoverageMd(rows, standardTitle = "OWASP ASVS", dossier, classCells = dossier?.manifest.weaknessClasses ?? []) {
   const unexamined = rows.filter((r) => r.state === "unexamined");
   const judgment = rows.filter((r) => r.judgment && r.state !== "examined");
   const L = [`## Coverage (${standardTitle})`, ""];
@@ -41789,7 +43887,7 @@ function renderCoverageMd(rows, standardTitle = "OWASP ASVS", dossier) {
   L.push(...failedToolLines(dossier));
   L.push(`| | category | state | findings |`);
   L.push(`|---|---|---|---|`);
-  for (const r of rows) L.push(`| ${r.id} | ${r.title} | ${MARK[r.state]} | ${r.hits || "\u2014"} |`);
+  for (const r of rows) L.push(`| ${r.id} | ${r.title} | ${MARK2[r.state]} | ${r.hits || "\u2014"} |`);
   L.push("");
   if (unexamined.length) {
     L.push(`### Not examined (${unexamined.length})`);
@@ -41807,6 +43905,8 @@ function renderCoverageMd(rows, standardTitle = "OWASP ASVS", dossier) {
     for (const r of judgment) L.push(`- **${r.id} ${r.title}** \u2014 ${r.hint}`);
     L.push("");
   }
+  const classes = renderClassCoverageMd(classCells);
+  if (classes) L.push(classes, "");
   return L.join("\n") + "\n";
 }
 
@@ -41827,14 +43927,15 @@ function runCoverage(args2) {
   }
   const enumerated = enumeratedKindsOf(dossier.findings);
   const rows = buildCoverage(dossier, enumerated, standardId);
-  const md = renderCoverageMd(rows, STANDARDS[standardId].title, dossier);
+  const classCells = withHuntProgress(dossier.manifest.weaknessClasses ?? [], run2);
+  const md = renderCoverageMd(rows, STANDARDS[standardId].title, dossier, classCells);
   if (flagBool(args2, "json")) {
-    println(JSON.stringify(rows, null, 2));
+    println(JSON.stringify(flagBool(args2, "classes") ? classCells : rows, null, 2));
     return 0;
   }
   if (flagBool(args2, "write")) {
-    const p = join70(run2, "COVERAGE.md");
-    writeFileSync21(p, md);
+    const p = join73(run2, "COVERAGE.md");
+    writeFileSync22(p, md);
     println(`ultrasec coverage \u2192 ${p}`);
   }
   println(md);
@@ -42050,13 +44151,13 @@ function runNarrative(args2) {
 import { resolve as resolve35 } from "path";
 
 // src/implement.ts
-import { existsSync as existsSync32, readFileSync as readFileSync35 } from "fs";
-import { join as join71 } from "path";
+import { existsSync as existsSync35, readFileSync as readFileSync38 } from "fs";
+import { join as join74 } from "path";
 function loadNarrative(run2, dossier, file) {
-  const p = file ?? join71(run2, "NARRATIVE.json");
-  if (!existsSync32(p)) return void 0;
+  const p = file ?? join74(run2, "NARRATIVE.json");
+  if (!existsSync35(p)) return void 0;
   try {
-    const merged = mergeNarrative(parseNarrative(readFileSync35(p, "utf8")), dossier);
+    const merged = mergeNarrative(parseNarrative(readFileSync38(p, "utf8")), dossier);
     return hasNarrativeContent(merged) ? merged : void 0;
   } catch {
     return void 0;
@@ -42278,11 +44379,11 @@ function runCheck(args2) {
 }
 
 // src/commands/render.ts
-import { readFileSync as readFileSync36, writeFileSync as writeFileSync22 } from "fs";
-import { join as join72, resolve as resolve37 } from "path";
+import { readFileSync as readFileSync39, writeFileSync as writeFileSync23 } from "fs";
+import { join as join75, resolve as resolve37 } from "path";
 
 // src/render/mermaid.ts
-function esc(s) {
+function esc2(s) {
   return s.replace(/"/g, "'").replace(/[\n\r]/g, " ");
 }
 function pathMermaid(f) {
@@ -42290,8 +44391,8 @@ function pathMermaid(f) {
   const L = ["flowchart LR"];
   f.path.forEach((p, i2) => {
     const tag = i2 === 0 ? "SOURCE" : i2 === f.path.length - 1 ? "SINK" : "hop";
-    const sym = p.symbol ? `<br/>${esc(p.symbol)}()` : "";
-    L.push(`  n${i2}["${tag}<br/>${esc(p.file)}:${p.line}${sym}"]`);
+    const sym = p.symbol ? `<br/>${esc2(p.symbol)}()` : "";
+    L.push(`  n${i2}["${tag}<br/>${esc2(p.file)}:${p.line}${sym}"]`);
   });
   for (let i2 = 0; i2 < f.path.length - 1; i2++) L.push(`  n${i2} --> n${i2 + 1}`);
   L.push(`  classDef src fill:#fde68a,stroke:#b45309;`);
@@ -42299,94 +44400,6 @@ function pathMermaid(f) {
   L.push(`  class n0 src;`);
   L.push(`  class n${f.path.length - 1} snk;`);
   return L.join("\n");
-}
-
-// src/deps.ts
-function fixedVersionOf(f) {
-  if (f.fixedVersion) return f.fixedVersion;
-  const m = /\(fixed in ([^)]+)\)/i.exec(f.message ?? "");
-  return m ? m[1].trim() : void 0;
-}
-var REACH_RANK = { runtime: 0, unproven: 1, toolchain: 2 };
-function worseReachability(a, b) {
-  if (!a) return b;
-  if (!b) return a;
-  return REACH_RANK[a] <= REACH_RANK[b] ? a : b;
-}
-function worseSeverity(a, b) {
-  return SEVERITIES2.indexOf(a) <= SEVERITIES2.indexOf(b) ? a : b;
-}
-function locationsOf2(f) {
-  if (f.locations?.length) return f.locations;
-  if (f.sink) return [{ file: f.sink.file, line: f.sink.line, ...f.version ? { version: f.version } : {} }];
-  return [];
-}
-var UNGROUPED = "\0";
-function keyOf3(f) {
-  return f.pkg?.trim() || UNGROUPED + f.id;
-}
-function compareVersions(a, b) {
-  const split = (v) => {
-    const at = v.search(/[-+]/);
-    const core = (at === -1 ? v : v.slice(0, at)).split(".").map((x) => Number.parseInt(x, 10));
-    return { core, pre: at === -1 ? "" : v.slice(at + 1) };
-  };
-  const va = split(a);
-  const vb = split(b);
-  for (let i2 = 0; i2 < Math.max(va.core.length, vb.core.length); i2++) {
-    const na = va.core[i2] ?? 0;
-    const nb = vb.core[i2] ?? 0;
-    if (!Number.isFinite(na) || !Number.isFinite(nb)) {
-      const c2 = byStr(String(va.core[i2] ?? ""), String(vb.core[i2] ?? ""));
-      if (c2) return c2;
-      continue;
-    }
-    if (na !== nb) return na - nb;
-  }
-  if (va.pre === vb.pre) return 0;
-  if (!va.pre) return 1;
-  if (!vb.pre) return -1;
-  return byStr(va.pre, vb.pre);
-}
-function groupAdvisoriesByPackage(findings) {
-  const byPkg = /* @__PURE__ */ new Map();
-  for (const f of findings) {
-    const k = keyOf3(f);
-    const list = byPkg.get(k);
-    if (list) list.push(f);
-    else byPkg.set(k, [f]);
-  }
-  const rows = [];
-  for (const [key, group] of byPkg) {
-    const advisories = group.slice().sort(compareWithinStatus);
-    const lead = advisories[0];
-    const versions = [...new Set(group.flatMap((f) => [f.version, ...locationsOf2(f).map((l) => l.version)]).filter((v) => Boolean(v)))].sort(
-      byStr
-    );
-    const locByKey = /* @__PURE__ */ new Map();
-    for (const f of group) for (const l of locationsOf2(f)) locByKey.set(`${l.version ?? ""}|${l.file}|${l.line ?? ""}`, l);
-    const epss = group.map((f) => f.epss).filter((e) => typeof e === "number");
-    const fixes = [...new Set(group.map(fixedVersionOf).filter((v) => Boolean(v)))];
-    const reach = group.map((f) => f.reachability).reduce(worseReachability, void 0);
-    rows.push({
-      pkg: key.startsWith(UNGROUPED) ? lead.pkg ?? lead.title : key,
-      versions,
-      worst: group.reduce((s, f) => worseSeverity(s, f.severity), "info"),
-      worstRisk: Math.max(...group.map(rankScore)),
-      count: group.length,
-      kev: group.filter((f) => f.kev).length,
-      ...epss.length ? { maxEpss: Math.max(...epss) } : {},
-      // Several advisories on one package name several fixed versions; the
-      // highest is the one upgrade that clears them all.
-      ...fixes.length ? { fixedVersion: fixes.reduce((a, b) => compareVersions(a, b) >= 0 ? a : b) } : {},
-      ...reach ? { reachability: reach } : {},
-      locations: [...locByKey.entries()].sort((a, b) => byStr(a[0], b[0])).map(([, l]) => l),
-      advisories
-    });
-  }
-  return rows.sort(
-    (a, b) => b.worstRisk - a.worstRisk || SEVERITIES2.indexOf(a.worst) - SEVERITIES2.indexOf(b.worst) || b.count - a.count || byStr(a.pkg, b.pkg)
-  );
 }
 
 // src/render/report.ts
@@ -42772,7 +44785,7 @@ function renderReport(d, narrative) {
 
 // src/render/html.ts
 var MISSING = "\u2014";
-function esc2(s) {
+function esc3(s) {
   if (s === void 0 || s === null) return MISSING;
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
@@ -42792,11 +44805,11 @@ function sevLabel(s) {
   return s ? String(s).toUpperCase() : MISSING;
 }
 function pathHtml(f) {
-  if (!f.path?.length) return f.sink ? `<p class="anchor"><code>${esc2(f.sink.file)}:${f.sink.line}</code></p>` : "";
+  if (!f.path?.length) return f.sink ? `<p class="anchor"><code>${esc3(f.sink.file)}:${f.sink.line}</code></p>` : "";
   const nodes = f.path.map((p, i2) => {
     const tag = i2 === 0 ? "source" : i2 === f.path.length - 1 ? "sink" : "hop";
-    const sym = p.symbol ? `<div class="sym">${esc2(p.symbol)}()</div>` : "";
-    return `<div class="node ${tag}"><div class="loc">${esc2(p.file)}:${p.line}</div>${sym}<div class="why">${esc2(p.why)}</div></div>`;
+    const sym = p.symbol ? `<div class="sym">${esc3(p.symbol)}()</div>` : "";
+    return `<div class="node ${tag}"><div class="loc">${esc3(p.file)}:${p.line}</div>${sym}<div class="why">${esc3(p.why)}</div></div>`;
   }).join('<div class="arrow">\u2192</div>');
   return `<div class="flow">${nodes}</div>`;
 }
@@ -42804,45 +44817,45 @@ function chipsHtml(f) {
   const out2 = [];
   if (typeof f.risk === "number") out2.push(`<span class="chip risk">risk ${f.risk}</span>`);
   if (typeof f.epss === "number") out2.push(`<span class="chip">EPSS ${(f.epss * 100).toFixed(1)}%</span>`);
-  if (f.kev) out2.push(`<span class="chip kev">CISA KEV${f.kevDateAdded ? ` ${esc2(f.kevDateAdded)}` : ""}</span>`);
+  if (f.kev) out2.push(`<span class="chip kev">CISA KEV${f.kevDateAdded ? ` ${esc3(f.kevDateAdded)}` : ""}</span>`);
   if (f.verified) out2.push(`<span class="chip kev">verified secret</span>`);
-  if (f.reachability && f.reachability !== "runtime") out2.push(`<span class="chip reach">${esc2(f.reachability)}</span>`);
-  if (f.noise) out2.push(`<span class="chip">de-prioritized: ${esc2(f.noise)}</span>`);
+  if (f.reachability && f.reachability !== "runtime") out2.push(`<span class="chip reach">${esc3(f.reachability)}</span>`);
+  if (f.noise) out2.push(`<span class="chip">de-prioritized: ${esc3(f.noise)}</span>`);
   return out2.length ? `<div class="chips">${out2.join("")}</div>` : "";
 }
 function sourcesHtml(f) {
   const s = f.sources && f.sources.length ? f.sources : f.tool !== "ultrasec" ? [f.tool] : [];
-  if (s.length > 1) return ` \xB7 agreed by ${esc2(s.join(", "))}`;
-  return f.tool !== "ultrasec" ? ` \xB7 via ${esc2(f.tool)}` : "";
+  if (s.length > 1) return ` \xB7 agreed by ${esc3(s.join(", "))}`;
+  return f.tool !== "ultrasec" ? ` \xB7 via ${esc3(f.tool)}` : "";
 }
 function fixHtml(r) {
   if (!r) return "";
-  const patch = r.patch ? `<pre class="ai-patch"><code>${esc2(r.patch)}</code></pre>` : "";
-  return `<div class="ai-fix"><strong>Suggested fix (AI):</strong> ${esc2(r.fix)}${r.owner ? ` \xB7 owner ${esc2(r.owner)}` : ""}${patch}</div>`;
+  const patch = r.patch ? `<pre class="ai-patch"><code>${esc3(r.patch)}</code></pre>` : "";
+  return `<div class="ai-fix"><strong>Suggested fix (AI):</strong> ${esc3(r.fix)}${r.owner ? ` \xB7 owner ${esc3(r.owner)}` : ""}${patch}</div>`;
 }
 function scenarioHtml(f) {
   if (!f.exploitPath) return "";
-  return `<div class="scenario"><div class="s-label">Attack scenario</div><p>${esc2(f.exploitPath)}</p></div>`;
+  return `<div class="scenario"><div class="s-label">Attack scenario</div><p>${esc3(f.exploitPath)}</p></div>`;
 }
 function refsHtml(f) {
   const refs = (f.references ?? []).slice(0, 5).map((r) => {
-    const label = esc2(String(r).replace(/^https?:\/\//, ""));
+    const label = esc3(String(r).replace(/^https?:\/\//, ""));
     const href = safeHref(String(r));
-    return href ? `<a href="${esc2(href)}" rel="noreferrer noopener">${label}</a>` : `<span class="ref-text">${label}</span>`;
+    return href ? `<a href="${esc3(href)}" rel="noreferrer noopener">${label}</a>` : `<span class="ref-text">${label}</span>`;
   }).join(" \xB7 ");
   return refs ? `<p class="refs">${refs}</p>` : "";
 }
 function metaHtml(f) {
-  return `<div class="meta"><code>${esc2(f.id)}</code>${f.cwe ? ` \xB7 ${esc2(f.cwe)}` : ""} \xB7 ${esc2(f.vulnClass ?? f.category)} \xB7 ${esc2(f.status ?? MISSING)}${f.verdict ? ` \xB7 ${esc2(f.verdict)}` : ""} \xB7 confidence ${esc2(f.confidence)}${sourcesHtml(f)}</div>`;
+  return `<div class="meta"><code>${esc3(f.id)}</code>${f.cwe ? ` \xB7 ${esc3(f.cwe)}` : ""} \xB7 ${esc3(f.vulnClass ?? f.category)} \xB7 ${esc3(f.status ?? MISSING)}${f.verdict ? ` \xB7 ${esc3(f.verdict)}` : ""} \xB7 confidence ${esc3(f.confidence)}${sourcesHtml(f)}</div>`;
 }
 function findingHtml(f, rem, extra = "") {
   return `
-      <article class="find ${sevClass(f.severity)}" id="${esc2(f.id)}">
-        <div class="find-top"><span class="pill">${esc2(sevLabel(f.severity))}</span><h3>${esc2(f.title)}</h3></div>
+      <article class="find ${sevClass(f.severity)}" id="${esc3(f.id)}">
+        <div class="find-top"><span class="pill">${esc3(sevLabel(f.severity))}</span><h3>${esc3(f.title)}</h3></div>
         ${metaHtml(f)}
         ${chipsHtml(f)}
         ${pathHtml(f)}
-        <p class="msg">${esc2(f.message)}</p>
+        <p class="msg">${esc3(f.message)}</p>
         ${scenarioHtml(f)}
         ${fixHtml(rem)}
         ${extra}
@@ -42860,19 +44873,19 @@ function atOf(f) {
   return loc ? `${loc.file}:${loc.line}` : MISSING;
 }
 function familyHtml(fam, rem) {
-  const rows = fam.members.map((m) => `<tr><td><code>${esc2(m.id)}</code></td><td class="at">${esc2(atOf(m))}</td><td>${esc2(sevLabel(m.severity))}</td></tr>`).join("");
-  const extra = `<details class="members"><summary>${fam.members.length} occurrence(s), same root <code>${esc2(fam.root)}</code>, same adjudication</summary>
+  const rows = fam.members.map((m) => `<tr><td><code>${esc3(m.id)}</code></td><td class="at">${esc3(atOf(m))}</td><td>${esc3(sevLabel(m.severity))}</td></tr>`).join("");
+  const extra = `<details class="members"><summary>${fam.members.length} occurrence(s), same root <code>${esc3(fam.root)}</code>, same adjudication</summary>
           <div class="tw"><table><thead><tr><th>id</th><th>location</th><th>severity</th></tr></thead><tbody>${rows}</tbody></table></div>
         </details>`;
   return findingHtml(fam.lead, rem, extra);
 }
 function tableRowHtml(f, count2 = 1, members = []) {
-  const ground = f.brocard ? `<strong>${esc2(f.brocard)}</strong>` : f.verdict ? esc2(f.verdict) : "";
+  const ground = f.brocard ? `<strong>${esc3(f.brocard)}</strong>` : f.verdict ? esc3(f.verdict) : "";
   const note = stageNotes(f.message);
-  const why = [ground, note ? esc2(note) : ""].filter(Boolean).join(" \u2014 ") || MISSING;
+  const why = [ground, note ? esc3(note) : ""].filter(Boolean).join(" \u2014 ") || MISSING;
   const tally = count2 > 1 ? ` <span class="chip">&times;${count2}</span>` : "";
-  const where = count2 > 1 ? `<details class="members"><summary>${count2} location(s) under <code>${esc2(atOf(f))}</code></summary><ul>${members.map((m) => `<li>${esc2(atOf(m))} <code>${esc2(m.id)}</code></li>`).join("")}</ul></details>` : esc2(atOf(f));
-  return `<tr><td><span class="dot ${sevClass(f.severity)}"></span>${esc2(sevLabel(f.severity))}</td><td>${esc2(f.title)}${tally} <code>${esc2(
+  const where = count2 > 1 ? `<details class="members"><summary>${count2} location(s) under <code>${esc3(atOf(f))}</code></summary><ul>${members.map((m) => `<li>${esc3(atOf(m))} <code>${esc3(m.id)}</code></li>`).join("")}</ul></details>` : esc3(atOf(f));
+  return `<tr><td><span class="dot ${sevClass(f.severity)}"></span>${esc3(sevLabel(f.severity))}</td><td>${esc3(f.title)}${tally} <code>${esc3(
     f.id
   )}</code></td><td class="at">${where}</td><td class="prose">${why}</td></tr>`;
 }
@@ -42902,7 +44915,7 @@ function bannerHtml(unread) {
   return `
   <section id="incomplete"><div class="banner">
     <h2>Incomplete audit &mdash; ${unread.length} source-code candidate(s) were never read</h2>
-    <p class="prose">${esc2(tally)} candidate(s) in this repository's own code still have no verdict. Nobody opened the files and followed the flows, so
+    <p class="prose">${esc3(tally)} candidate(s) in this repository's own code still have no verdict. Nobody opened the files and followed the flows, so
       this document is engine output, not an audit: absence of confirmed findings below means <em>undecided</em>, not <em>safe</em>.</p>
     <p class="prose">Dependency advisories are worked as a ranked list and may legitimately stay open. Source-code candidates are read one at a time.</p>
     <p class="next">ultrasec paths --run &lt;run&gt; --surface code &nbsp;&rarr;&nbsp; ultrasec dossier &lt;id&gt; --run &lt;run&gt; &nbsp;&rarr;&nbsp; ultrasec verify --apply verdicts.json --run &lt;run&gt;</p>
@@ -42926,8 +44939,8 @@ function statusLine(fs2) {
 function surfacesHtml(groups) {
   const card = (sf, lead, sub) => {
     const fs2 = groups[sf];
-    return `<div class="sf${lead ? " lead" : ""}"><div class="sf-h"><span class="t">${esc2(SURFACE_TITLE[sf])}</span><span class="n">${fs2.length}</span></div>
-      ${barHtml(fs2)}<div class="sf-sub">${esc2(statusLine(fs2))}</div><div class="sf-sub">${esc2(sub)}</div></div>`;
+    return `<div class="sf${lead ? " lead" : ""}"><div class="sf-h"><span class="t">${esc3(SURFACE_TITLE[sf])}</span><span class="n">${fs2.length}</span></div>
+      ${barHtml(fs2)}<div class="sf-sub">${esc3(statusLine(fs2))}</div><div class="sf-sub">${esc3(sub)}</div></div>`;
   };
   return `<div class="surfaces">
     ${card("code", true, "cross-file flows, missing guards, unsafe sinks - read one at a time")}
@@ -42950,7 +44963,7 @@ function entryPointsHtml(code) {
   }
   const rows = [...byEntry.entries()].map(([file, fs2]) => ({ file, fs: fs2, top: fs2.slice().sort(compareWithinStatus)[0] })).sort((a, b) => compareWithinStatus(a.top, b.top) || b.fs.length - a.fs.length).map(({ file, fs: fs2, top }) => {
     const classes = [...new Set(fs2.map(classOf))].sort();
-    return `<tr><td><span class="dot ${sevClass(top.severity)}"></span>${esc2(sevLabel(top.severity))}</td><td class="at">${esc2(file)}</td><td class="num">${fs2.length}</td><td>${classes.map((c2) => `<span class="chip">${esc2(c2)}</span>`).join(" ")}</td></tr>`;
+    return `<tr><td><span class="dot ${sevClass(top.severity)}"></span>${esc3(sevLabel(top.severity))}</td><td class="at">${esc3(file)}</td><td class="num">${fs2.length}</td><td>${classes.map((c2) => `<span class="chip">${esc3(c2)}</span>`).join(" ")}</td></tr>`;
   }).join("");
   return `<details open><summary>Attack surface &mdash; ${byEntry.size} entry point(s) reaching a dangerous sink</summary>
     <div class="tw"><table><thead><tr><th>worst</th><th>entry point</th><th>flows</th><th>classes</th></tr></thead><tbody>${rows}</tbody></table></div>
@@ -42965,42 +44978,42 @@ function depsHtml(deps) {
       typeof r.maxEpss === "number" ? `EPSS ${(r.maxEpss * 100).toFixed(1)}%` : "",
       r.reachability === "toolchain" ? `<span class="tc">dev/toolchain</span>` : ""
     ].filter(Boolean).join(" \xB7 ");
-    const advisories = `<details class="members"><summary>${r.count} advisor${r.count === 1 ? "y" : "ies"}</summary><ul>${r.advisories.map((a) => `<li>${esc2(sevLabel(a.severity))} &mdash; ${esc2(a.title)} <code>${esc2(a.cve ?? a.id)}</code></li>`).join("")}</ul></details>`;
+    const advisories = `<details class="members"><summary>${r.count} advisor${r.count === 1 ? "y" : "ies"}</summary><ul>${r.advisories.map((a) => `<li>${esc3(sevLabel(a.severity))} &mdash; ${esc3(a.title)} <code>${esc3(a.cve ?? a.id)}</code></li>`).join("")}</ul></details>`;
     const locLabel = (l) => `${l.version ? `v${l.version} ` : ""}${l.file}${l.line !== void 0 ? `:${l.line}` : ""}`;
-    const where = !r.locations.length ? MISSING : r.locations.length <= 2 ? esc2(r.locations.map(locLabel).join(" \xB7 ")) : `<details class="members"><summary>${r.locations.length} location(s)</summary><ul>${r.locations.map((l) => `<li>${esc2(locLabel(l))}</li>`).join("")}</ul></details>`;
-    return `<tr><td><span class="dot ${sevClass(r.worst)}"></span>${esc2(sevLabel(r.worst))}</td><td class="pkg">${esc2(r.pkg)}</td><td class="num">${esc2(
+    const where = !r.locations.length ? MISSING : r.locations.length <= 2 ? esc3(r.locations.map(locLabel).join(" \xB7 ")) : `<details class="members"><summary>${r.locations.length} location(s)</summary><ul>${r.locations.map((l) => `<li>${esc3(locLabel(l))}</li>`).join("")}</ul></details>`;
+    return `<tr><td><span class="dot ${sevClass(r.worst)}"></span>${esc3(sevLabel(r.worst))}</td><td class="pkg">${esc3(r.pkg)}</td><td class="num">${esc3(
       versions
-    )}</td><td>${advisories}</td><td class="num">${r.fixedVersion ? esc2(r.fixedVersion) : "<em>no fix published</em>"}</td><td class="sig">${sig || MISSING}</td><td class="at">${where}</td></tr>`;
+    )}</td><td>${advisories}</td><td class="num">${r.fixedVersion ? esc3(r.fixedVersion) : "<em>no fix published</em>"}</td><td class="sig">${sig || MISSING}</td><td class="at">${where}</td></tr>`;
   }).join("");
   return `<div class="tw"><table><thead><tr><th>worst</th><th>package</th><th>installed</th><th>advisories</th><th>upgrade to</th><th>signals</th><th>where</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 function aiSectionHtml(title, items) {
   return `
-  <section class="ai-narrative"><h2>${esc2(title)} <span class="ai-tag">AI</span></h2><p class="ai-note">${esc2(AI_DISCLAIMER)}</p>${items}</section>`;
+  <section class="ai-narrative"><h2>${esc3(title)} <span class="ai-tag">AI</span></h2><p class="ai-note">${esc3(AI_DISCLAIMER)}</p>${items}</section>`;
 }
 function execSummaryHtml(n) {
-  return n?.executiveSummary ? aiSectionHtml("Executive summary", `<p>${esc2(n.executiveSummary)}</p>`) : "";
+  return n?.executiveSummary ? aiSectionHtml("Executive summary", `<p>${esc3(n.executiveSummary)}</p>`) : "";
 }
 function positivePatternsHtml(n) {
-  return n?.positivePatterns ? aiSectionHtml("What the codebase does well", `<p>${esc2(n.positivePatterns)}</p>`) : "";
+  return n?.positivePatterns ? aiSectionHtml("What the codebase does well", `<p>${esc3(n.positivePatterns)}</p>`) : "";
 }
 function hardeningNotesHtml(n) {
   if (!n?.hardeningNotes?.length) return "";
-  const items = `<p class="ai-note">Defense-in-depth suggestions \u2014 not findings; excluded from the severity counts.</p><ul>${n.hardeningNotes.map((h) => `<li>${esc2(h)}</li>`).join("")}</ul>`;
+  const items = `<p class="ai-note">Defense-in-depth suggestions \u2014 not findings; excluded from the severity counts.</p><ul>${n.hardeningNotes.map((h) => `<li>${esc3(h)}</li>`).join("")}</ul>`;
   return aiSectionHtml("Hardening notes", items);
 }
 function chainsHtml(n) {
   if (!n?.attackChains?.length) return "";
   const items = n.attackChains.map(
-    (c2) => `<div class="chain"><h3>${esc2(c2.title)}</h3><div class="meta">${c2.findingIds.map((id) => `<a href="#${esc2(id)}"><code>${esc2(id)}</code></a>`).join(" \u2192 ")}</div><p>${esc2(c2.narrative)}</p></div>`
+    (c2) => `<div class="chain"><h3>${esc3(c2.title)}</h3><div class="meta">${c2.findingIds.map((id) => `<a href="#${esc3(id)}"><code>${esc3(id)}</code></a>`).join(" \u2192 ")}</div><p>${esc3(c2.narrative)}</p></div>`
   ).join("");
   return `
-  <section id="chains"><h2>Attack chains <span class="ai-tag">AI</span></h2><p class="ai-note">${esc2(AI_DISCLAIMER)}</p>${items}</section>`;
+  <section id="chains"><h2>Attack chains <span class="ai-tag">AI</span></h2><p class="ai-note">${esc3(AI_DISCLAIMER)}</p>${items}</section>`;
 }
 function rootCausesHtml(n) {
   if (!n?.rootCauses?.length) return "";
   const items = n.rootCauses.map(
-    (g) => `<div class="ai-block"><h3>${esc2(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<a href="#${esc2(id)}"><code>${esc2(id)}</code></a>`).join(", ")}</div><p>${esc2(g.note)}</p></div>`
+    (g) => `<div class="ai-block"><h3>${esc3(g.cause)}</h3><div class="meta">${g.findingIds.map((id) => `<a href="#${esc3(id)}"><code>${esc3(id)}</code></a>`).join(", ")}</div><p>${esc3(g.note)}</p></div>`
   ).join("");
   return aiSectionHtml("Root-cause groups", items);
 }
@@ -43013,10 +45026,10 @@ function coverageHtml(d) {
   const rows = buildCoverage(d, enumeratedKindsOf(d.findings));
   const failed2 = (d.manifest.toolStatus ?? []).filter((s) => s.status === "failed");
   const body2 = rows.map(
-    (r) => `<tr class="${r.state}"><td class="at">${esc2(r.id)}</td><td>${esc2(r.title)}</td><td>${esc2(COVERAGE_MARK[r.state])}</td><td>${r.hits || MISSING}</td></tr>`
+    (r) => `<tr class="${r.state}"><td class="at">${esc3(r.id)}</td><td>${esc3(r.title)}</td><td>${esc3(COVERAGE_MARK[r.state])}</td><td>${r.hits || MISSING}</td></tr>`
   ).join("");
   const failedBlock = failed2.length ? `<div class="warn"><strong>${failed2.length} scanner(s) failed</strong> \u2014 each is a hole in the table above, not a category with nothing in it.
-       <ul>${failed2.map((s) => `<li><code>${esc2(s.name)}</code> \u2014 ${esc2(s.note ?? "run failed")}</li>`).join("")}</ul></div>` : "";
+       <ul>${failed2.map((s) => `<li><code>${esc3(s.name)}</code> \u2014 ${esc3(s.note ?? "run failed")}</li>`).join("")}</ul></div>` : "";
   return `
   <section id="coverage">
     <h2>Coverage \u2014 what was not looked at</h2>
@@ -43027,8 +45040,8 @@ function coverageHtml(d) {
 }
 function railHtml(sections, actionable) {
   if (!sections.length && !actionable.length) return "";
-  const nav = sections.map((x) => `<li><a href="#${esc2(x.id)}"><span class="rt">${esc2(x.label)}</span></a></li>`).join("");
-  const items = actionable.map((f) => `<li><a href="#${esc2(f.id)}"><span class="dot ${sevClass(f.severity)}"></span><span class="rt">${esc2(f.title)}</span></a></li>`).join("");
+  const nav = sections.map((x) => `<li><a href="#${esc3(x.id)}"><span class="rt">${esc3(x.label)}</span></a></li>`).join("");
+  const items = actionable.map((f) => `<li><a href="#${esc3(f.id)}"><span class="dot ${sevClass(f.severity)}"></span><span class="rt">${esc3(f.title)}</span></a></li>`).join("");
   const registry = items ? `<div class="rail-title">Registry</div><ol>${items}</ol>` : "";
   return `<nav class="rail" aria-label="Report navigation"><div class="rail-title">Sections</div><ol>${nav}</ol>${registry}</nav>`;
 }
@@ -43205,11 +45218,11 @@ function renderHtml(d, narrative) {
   ];
   const tiles = SEVERITIES2.map((sev) => `<div class="tile ${SEV_KEY[sev]}"><span class="n">${c2[sev] ?? 0}</span><span class="k">${sev}</span></div>`).join("");
   const section = (id, title, sub, body2) => body2 ? `
-  <section id="${id}"><h2>${esc2(title)}</h2>${sub ? `<p class="msg prose">${esc2(sub)}</p>` : ""}${body2}</section>` : "";
-  const foldedTable = (label, fs2) => fs2.length ? `<details><summary>${esc2(label)} (${fs2.length})</summary>${tableHtml(fs2)}</details>` : "";
+  <section id="${id}"><h2>${esc3(title)}</h2>${sub ? `<p class="msg prose">${esc3(sub)}</p>` : ""}${body2}</section>` : "";
+  const foldedTable = (label, fs2) => fs2.length ? `<details><summary>${esc3(label)} (${fs2.length})</summary>${tableHtml(fs2)}</details>` : "";
   const codeBody = undecided.code.length ? entryPointsHtml(undecided.code) + tierHtml(loud(undecided.code), rem) + foldedTable("Lower-severity candidates", quiet(undecided.code)) : "";
   const supplyBody = undecided.supply.length ? tableHtml(loud(undecided.supply)) + foldedTable("Lower-severity findings", quiet(undecided.supply)) : "";
-  const depsFold = (fs2, label) => fs2.length ? `<details><summary>${fs2.length} dependency advisor${fs2.length === 1 ? "y" : "ies"} ${esc2(label)}, rolled up per package</summary>
+  const depsFold = (fs2, label) => fs2.length ? `<details><summary>${fs2.length} dependency advisor${fs2.length === 1 ? "y" : "ies"} ${esc3(label)}, rolled up per package</summary>
       <p class="msg prose">Worked as a ranked upgrade list, not read as a flow. One row per package &mdash; the unit you actually bump.</p>
       ${depsHtml(fs2)}</details>` : "";
   const depsBody = undecided.deps.length ? `<details><summary>Show ${undecided.deps.length} advisor${undecided.deps.length === 1 ? "y" : "ies"}, rolled up per package</summary>
@@ -43226,8 +45239,8 @@ function renderHtml(d, narrative) {
 <body>
 <div class="wrap">
   <header class="masthead">
-    <div class="eyebrow">Security audit \xB7 ultrasec ${esc2(d.manifest.version)}</div>
-    <h1>${esc2(d.manifest.repo)}</h1>
+    <div class="eyebrow">Security audit \xB7 ultrasec ${esc3(d.manifest.version)}</div>
+    <h1>${esc3(d.manifest.repo)}</h1>
     <div class="meta-line">
       <span>${d.manifest.counts.findings} candidate(s)</span>
       <span>${confirmed.length} confirmed</span>
@@ -43235,11 +45248,11 @@ function renderHtml(d, narrative) {
       <span>${open.length} unadjudicated</span>
       <span>${dismissed.length} refuted</span>
     </div>
-    <div class="meta-line"><span>tools: ${esc2(tools)}</span></div>
+    <div class="meta-line"><span>tools: ${esc3(tools)}</span></div>
   </header>
   <div class="cols${rail ? "" : " norail"}">
   ${rail}
-  <main>${d.manifest.scannerPolicy && !d.manifest.scannerPolicy.complete ? `<section class="banner"><h2>Required scanners incomplete</h2><p>${esc2(d.manifest.scannerPolicy.incomplete.join(", "))} did not complete this pass. No findings does not mean secure. Re-run the required scanners.</p></section>` : ""}${bannerHtml(unread)}
+  <main>${d.manifest.scannerPolicy && !d.manifest.scannerPolicy.complete ? `<section class="banner"><h2>Required scanners incomplete</h2><p>${esc3(d.manifest.scannerPolicy.incomplete.join(", "))} did not complete this pass. No findings does not mean secure. Re-run the required scanners.</p></section>` : ""}${bannerHtml(unread)}
     <section id="summary">
       <h2>Summary</h2>
       ${surfacesHtml(undecided)}
@@ -43271,7 +45284,7 @@ function renderHtml(d, narrative) {
       ${tableHtml(dismissed)}</details></section>` : ""}${rootCausesHtml(narrative)}${hardeningNotesHtml(narrative)}
     ${coverageHtml(d)}
     <footer>
-      <span>ultrasec ${esc2(d.manifest.version)} \xB7 ${esc2(d.manifest.generatedNote)}</span>
+      <span>ultrasec ${esc3(d.manifest.version)} \xB7 ${esc3(d.manifest.generatedNote)}</span>
       <span>Every finding cites a resolvable file:line \u2014 \`ultrasec check\` fails the audit otherwise.</span>
     </footer>
   </main>
@@ -43297,7 +45310,7 @@ function runRender(args2) {
   if (narrativePath) {
     let parsed2;
     try {
-      parsed2 = parseNarrative(readFileSync36(resolve37(narrativePath), "utf8"));
+      parsed2 = parseNarrative(readFileSync39(resolve37(narrativePath), "utf8"));
     } catch (e) {
       eprintln(`ultrasec render: cannot read narrative at ${narrativePath}: ${e.message}`);
       return 2;
@@ -43311,9 +45324,9 @@ function runRender(args2) {
     ["REPORT.md", renderReport(dossier, narrative)],
     ["index.html", renderHtml(dossier, narrative)]
   ];
-  for (const [name2, body2] of outputs) writeFileSync22(join72(run2, name2), body2);
+  for (const [name2, body2] of outputs) writeFileSync23(join75(run2, name2), body2);
   println(`ultrasec render \u2192 ${run2}`);
-  for (const [name2] of outputs) println(`  ${join72(run2, name2)}`);
+  for (const [name2] of outputs) println(`  ${join75(run2, name2)}`);
   if (narrativeNote) println(narrativeNote);
   const unread = unadjudicatedCode(dossier.findings);
   const scannerPolicy = dossier.manifest.scannerPolicy;
@@ -43338,8 +45351,8 @@ function runRender(args2) {
 
 // src/commands/clean.ts
 import { execFileSync as execFileSync9 } from "child_process";
-import { existsSync as existsSync33, rmSync as rmSync10, readdirSync as readdirSync7 } from "fs";
-import { join as join73, resolve as resolve38 } from "path";
+import { existsSync as existsSync36, rmSync as rmSync10, readdirSync as readdirSync7 } from "fs";
+import { join as join76, resolve as resolve38 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
 var DELIVERABLES = /* @__PURE__ */ new Set(["SUMMARY.md", "REPORT.md", "index.html", "findings.json", JOURNAL_FILE]);
@@ -43370,7 +45383,7 @@ function runClean(args2) {
   const all = flagBool(args2, "all");
   const removed = [];
   const kept = [];
-  if (!keepOutput && existsSync33(run2)) {
+  if (!keepOutput && existsSync36(run2)) {
     if (all) {
       if (!dry) rmSync10(run2, { recursive: true, force: true });
       removed.push(`output  ${run2}`);
@@ -43379,11 +45392,11 @@ function runClean(args2) {
       for (const entry2 of readdirSync7(run2)) {
         if (DELIVERABLES.has(entry2)) {
           preservedAny = true;
-          kept.push(`deliverable  ${join73(run2, entry2)}`);
+          kept.push(`deliverable  ${join76(run2, entry2)}`);
           continue;
         }
-        if (!dry) rmSync10(join73(run2, entry2), { recursive: true, force: true });
-        removed.push(`intermediate  ${join73(run2, entry2)}`);
+        if (!dry) rmSync10(join76(run2, entry2), { recursive: true, force: true });
+        removed.push(`intermediate  ${join76(run2, entry2)}`);
       }
       if (!preservedAny) {
         if (!dry) rmSync10(run2, { recursive: true, force: true });
@@ -43425,12 +45438,12 @@ function runClean(args2) {
 }
 
 // src/commands/run.ts
-import { existsSync as existsSync35 } from "fs";
-import { join as join75, resolve as resolve39 } from "path";
+import { existsSync as existsSync38 } from "fs";
+import { join as join78, resolve as resolve39 } from "path";
 
 // src/powered/agent.ts
 import { spawnSync as spawnSync3 } from "child_process";
-import { existsSync as existsSync34, statSync as statSync18 } from "fs";
+import { existsSync as existsSync37, statSync as statSync18 } from "fs";
 var BUILTINS2 = {
   claude: { name: "claude", argv: (p) => ["claude", "-p", p] },
   codex: { name: "codex", argv: (p) => ["codex", "exec", p] }
@@ -43454,7 +45467,7 @@ var defaultSpawn = (cmd, args2, cwd) => {
 };
 function nonEmptyFile(p) {
   try {
-    return existsSync34(p) && statSync18(p).size > 0;
+    return existsSync37(p) && statSync18(p).size > 0;
   } catch {
     return false;
   }
@@ -43478,8 +45491,8 @@ var CliAgentRunner = class {
 };
 
 // src/powered/pipeline.ts
-import { readFileSync as readFileSync37, writeFileSync as writeFileSync23 } from "fs";
-import { join as join74 } from "path";
+import { readFileSync as readFileSync40, writeFileSync as writeFileSync24 } from "fs";
+import { join as join77 } from "path";
 var ALL_STAGES = [
   "context",
   "assumptions",
@@ -43505,9 +45518,9 @@ var STAGES = {
     emit(repo, run2) {
       const scan2 = scanRepo2(repo);
       const scaffold = buildContextScaffold(repo, scan2, buildAttackSurface(scan2));
-      writeFileSync23(join74(run2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
-      const wl = join74(run2, "CONTEXT.todo.md");
-      writeFileSync23(wl, renderContextScaffoldMd(repo, run2, scaffold));
+      writeFileSync24(join77(run2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
+      const wl = join77(run2, "CONTEXT.todo.md");
+      writeFileSync24(wl, renderContextScaffoldMd(repo, run2, scaffold));
       return { worklist: wl, outName: "CONTEXT.md" };
     },
     instruction: (repo, run2, worklist, outPath) => `Security audit of ${repo}. Read the project-context scaffold at ${worklist} and author a concise CONTEXT.md (purpose, trust model, auth/authorization scheme, framework protections) at ${outPath}. ${UNTRUSTED}`
@@ -43518,7 +45531,7 @@ var STAGES = {
       const items = buildAssumptionWorklist(scanRepo2(repo));
       const f = stageFiles("ASSUMPTIONS");
       emitWorklist(run2, f, items, renderAssumptionsMd(items, loadContextDoc(run2)));
-      return { worklist: join74(run2, f.md), outName: "ASSUMPTIONS.json" };
+      return { worklist: join77(run2, f.md), outName: "ASSUMPTIONS.json" };
     },
     // Deliberately no `applyPure`: this stage produces UNDERSTANDING, not
     // findings. Its output is the map plus the leads that `investigate` picks up
@@ -43526,8 +45539,8 @@ var STAGES = {
     // severity rubric exists to prevent.
     afterApply(run2, raw) {
       const rows = rowsOf("assumptions", parseAssumptionResults(raw));
-      writeFileSync23(join74(run2, "ASSUMPTIONS.md"), renderAssumptionMap(rows));
-      writeFileSync23(join74(run2, LEADS_FILE), JSON.stringify(unenforced(rows), null, 2));
+      writeFileSync24(join77(run2, "ASSUMPTIONS.md"), renderAssumptionMap(rows));
+      writeFileSync24(join77(run2, LEADS_FILE), JSON.stringify(unenforced(rows), null, 2));
     },
     instruction: (repo, run2, worklist, outPath) => `Read the assumption worklist at ${worklist}. Per unit record what it GUARANTEES (each with the line that establishes it) and what it ASSUMES without verifying \u2014 set enforcedAt to the file:line that enforces it, or to the literal "nothing-found" when nothing does. Write a JSON array of {at, guarantees, assumptions, calls, openQuestions} to ${outPath}. No severities, no findings: this stage builds understanding. ${UNTRUSTED}`
   },
@@ -43537,7 +45550,7 @@ var STAGES = {
       const items = buildTriageWorklist(dossier);
       const f = stageFiles("TRIAGE");
       emitWorklist(run2, f, items, renderTriageMd(items, loadContextDoc(run2)));
-      return { worklist: join74(run2, f.md), outName: "TRIAGE.json" };
+      return { worklist: join77(run2, f.md), outName: "TRIAGE.json" };
     },
     applyPure: (_repo, _run, dossier, raw) => applyTriage(dossier, rowsOf("triage", parseTriage(raw))).findings,
     instruction: (repo, run2, worklist, outPath) => `Read the triage worklist at ${worklist}. For each OPEN candidate decide noise|keep and write a JSON array of {id, verdict} to ${outPath}. 'noise' only for clear false positives. ${UNTRUSTED}`
@@ -43552,7 +45565,7 @@ var STAGES = {
       const rows = buildGuardMatrix(scanRepo2(repo));
       const f = stageFiles("GUARDS");
       emitWorklist(run2, f, rows, renderGuardsMd(rows, loadContextDoc(run2)));
-      return { worklist: join74(run2, f.md), outName: "GUARDS.json" };
+      return { worklist: join77(run2, f.md), outName: "GUARDS.json" };
     },
     applyPure: (repo, run2, dossier, raw) => {
       const byId = new Map(buildGuardMatrix(scanRepo2(repo)).map((r) => [r.id, r]));
@@ -43573,7 +45586,7 @@ var STAGES = {
       const rows = buildGuardMatrix(scanRepo2(repo), "throttle");
       const f = stageFiles(LENSES2.throttle.stem);
       emitWorklist(run2, f, rows, renderGuardsMd(rows, loadContextDoc(run2), "throttle"));
-      return { worklist: join74(run2, f.md), outName: "THROTTLE.json" };
+      return { worklist: join77(run2, f.md), outName: "THROTTLE.json" };
     },
     applyPure: (repo, run2, dossier, raw) => {
       const byId = new Map(buildGuardMatrix(scanRepo2(repo), "throttle").map((r) => [r.id, r]));
@@ -43588,12 +45601,24 @@ var STAGES = {
   investigate: {
     crossCheckable: false,
     emit(repo, run2, dossier) {
-      const regions = buildInvestigateWorklist(buildAttackSurface(scanRepo2(repo)), dossier.graph);
+      const surface = buildAttackSurface(scanRepo2(repo));
+      const regions = buildInvestigateWorklist(surface, dossier.graph, [], void 0, buildClassHunts(dossier.manifest, surface));
       const f = stageFiles("INVESTIGATE");
       emitWorklist(run2, f, regions, renderInvestigateMd(regions, loadContextDoc(run2)));
-      return { worklist: join74(run2, f.md), outName: "INVESTIGATE.json" };
+      return { worklist: join77(run2, f.md), outName: "INVESTIGATE.json" };
     },
     applyPure: (repo, run2, dossier, raw) => ingestDiscoveries(dossier, rowsOf("investigate", parseDiscoveries(raw)), repo, { context: loadContextDoc(run2) }).findings,
+    // Idioms recognized by a weakness-class hunt are proposals, not findings.
+    afterApply(run2, raw) {
+      const dossier = loadDossier(run2);
+      recordHuntResults(
+        run2,
+        dossier.manifest.repo,
+        dossier.manifest,
+        [parseHuntResults(raw)],
+        PACKS.flatMap((p) => p.framework ? [p.framework] : [])
+      );
+    },
     instruction: (repo, run2, worklist, outPath) => `Read the investigation worklist at ${worklist}. Find issues the deterministic engine can't (authz/IDOR, business logic, multi-hop) and write grounded Discovery[] {title,category,severity,cwe?,message,file,line,path?} to ${outPath}. Cite resolvable [file:line]. ${UNTRUSTED}`
   },
   verify: {
@@ -43602,7 +45627,7 @@ var STAGES = {
       const items = buildWorklist(dossier);
       const f = stageFiles("VERIFY");
       emitWorklist(run2, f, items, renderWorklistMd(items, loadContextDoc(run2)));
-      return { worklist: join74(run2, f.md), outName: "verdicts.json" };
+      return { worklist: join77(run2, f.md), outName: "verdicts.json" };
     },
     applyPure: (_repo, _run, dossier, raw) => applyVerdicts(dossier, rowsOf("verify", parseVerdicts(raw))).findings,
     instruction: (repo, run2, worklist, outPath) => `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node <ultrasec> dossier <id> --run ${run2}\`) and write a verdicts.json array of {id, verdict, note, exploitPath} to ${outPath}. Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`
@@ -43613,7 +45638,7 @@ var STAGES = {
       const items = buildRevalidateWorklist(dossier, repo);
       const f = stageFiles("REVALIDATE");
       emitWorklist(run2, f, items, renderRevalidateMd(items, loadContextDoc(run2)));
-      return { worklist: join74(run2, f.md), outName: "REVALIDATE.json" };
+      return { worklist: join77(run2, f.md), outName: "REVALIDATE.json" };
     },
     applyPure: (repo, _run, dossier, raw) => applyRevalidations(dossier, rowsOf("revalidate", parseRevalidations(raw)), revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo))).findings,
     instruction: (repo, run2, worklist, outPath) => `Read the revalidation worklist at ${worklist}. Using the git facts, decide still-valid|fixed|false-positive|uncertain per finding and write a JSON array of {id, verdict, fixedIn?, note?} to ${outPath}. ${UNTRUSTED}`
@@ -43624,7 +45649,7 @@ var STAGES = {
       const items = buildVariantWorklist(dossier);
       const f = stageFiles("VARIANTS");
       emitWorklist(run2, f, items, renderVariantsMd(items, loadContextDoc(run2)));
-      return { worklist: join74(run2, f.md), outName: "VARIANTS.json" };
+      return { worklist: join77(run2, f.md), outName: "VARIANTS.json" };
     },
     applyPure: (repo, run2, dossier, raw) => ingestDiscoveries(
       dossier,
@@ -43634,7 +45659,7 @@ var STAGES = {
     ).findings,
     afterApply(run2, raw) {
       const rules = renderRegressionRules(rowsOf("variants", parseVariantResults(raw)));
-      if (rules) writeFileSync23(join74(run2, "ultrasec-variants.yaml"), rules);
+      if (rules) writeFileSync24(join77(run2, "ultrasec-variants.yaml"), rules);
     },
     instruction: (repo, run2, worklist, outPath) => `Read the variant worklist at ${worklist}. For each CONFIRMED seed, state the root cause (the why, not the what), build an EXACT match that finds the known instance \u2014 zero results means you have misunderstood the bug \u2014 then generalize ONE dimension at a time, stopping when over half the matches are false. Write a JSON array of {seedId, rootCause, patterns, variants: Discovery[], regressionRule} to ${outPath}. Cite resolvable [file:line]. ${UNTRUSTED}`
   },
@@ -43644,7 +45669,7 @@ var STAGES = {
       const wl = buildNarrativeWorklist(dossier);
       const f = stageFiles("NARRATIVE");
       emitWorklist(run2, f, wl, renderNarrativeWorklistMd(wl, loadContextDoc(run2)));
-      return { worklist: join74(run2, f.md), outName: "NARRATIVE.json" };
+      return { worklist: join77(run2, f.md), outName: "NARRATIVE.json" };
     },
     instruction: (repo, run2, worklist, outPath) => `Read the narrative worklist at ${worklist}. Author NARRATIVE.json (executiveSummary, remediations, attackChains, rootCauses) citing only confirmed finding ids, and write it to ${outPath}. ${UNTRUSTED}`
   },
@@ -43655,7 +45680,7 @@ var STAGES = {
       const wl = buildImplementWorklist(dossier, narrative);
       const f = stageFiles("IMPLEMENT");
       emitWorklist(run2, f, wl, renderImplementMd(wl, loadContextDoc(run2)));
-      return { worklist: join74(run2, f.md), outName: "REMEDIATION_PRD.md" };
+      return { worklist: join77(run2, f.md), outName: "REMEDIATION_PRD.md" };
     },
     instruction: (repo, run2, worklist, outPath) => `Read the remediation-PRD draft at ${worklist}. Author a complete remediation PRD in to-prd format (Problem Statement, Solution, User Stories, Implementation Decisions, Testing Decisions, Out of Scope) and write it as a LOCAL file at ${outPath} \u2014 do NOT publish to any tracker. Cite only the finding ids in the draft; never invent findings or change any finding's status. ${UNTRUSTED}`
   }
@@ -43708,7 +45733,7 @@ function runPipeline(opts) {
     actions.push(`emit:${name2}`);
     emitted.push({ stage: name2, worklist, outName });
     if (!opts.powered) continue;
-    const outPath = join74(opts.run, outName);
+    const outPath = join77(opts.run, outName);
     const instruction = `${stage.instruction(opts.repo, opts.run, worklist, outPath)} ${SOLE_OUTPUT(outPath)}`;
     const r = opts.runner.fill({ stage: name2, run: opts.run, worklist, outPath, instruction });
     externalCalls++;
@@ -43719,7 +45744,7 @@ function runPipeline(opts) {
     }
     if (stage.afterApply) {
       try {
-        stage.afterApply(opts.run, readFileSync37(outPath, "utf8"));
+        stage.afterApply(opts.run, readFileSync40(outPath, "utf8"));
         actions.push(`write:${name2}`);
       } catch (e) {
         errors.push(`${name2}: ${e.message}`);
@@ -43727,14 +45752,14 @@ function runPipeline(opts) {
     }
     if (!stage.applyPure) continue;
     const after = loadDossier(opts.run);
-    const primary = stage.applyPure(opts.repo, opts.run, after, readFileSync37(outPath, "utf8"));
+    const primary = stage.applyPure(opts.repo, opts.run, after, readFileSync40(outPath, "utf8"));
     if (opts.crossRunner && stage.crossCheckable) {
-      const crossPath = join74(opts.run, `${outName}.cross.json`);
+      const crossPath = join77(opts.run, `${outName}.cross.json`);
       const crossInstr = `${stage.instruction(opts.repo, opts.run, worklist, crossPath)} ${SOLE_OUTPUT(crossPath)}`;
       const cr = opts.crossRunner.fill({ stage: `${name2}:cross`, run: opts.run, worklist, outPath: crossPath, instruction: crossInstr });
       externalCalls++;
       if (cr.ok) {
-        const cross = stage.applyPure(opts.repo, opts.run, after, readFileSync37(crossPath, "utf8"));
+        const cross = stage.applyPure(opts.repo, opts.run, after, readFileSync40(crossPath, "utf8"));
         const rec = reconcileCrossCheck(primary, cross);
         escalated.push(...rec.escalated);
         persistFindings(opts.run, after, rec.findings);
@@ -43758,17 +45783,17 @@ function runPipeline(opts) {
   }
   actions.push("check");
   let narrative;
-  const narrPath = join74(opts.run, "NARRATIVE.json");
+  const narrPath = join77(opts.run, "NARRATIVE.json");
   if (opts.powered && opts.stages.includes("narrative")) {
     try {
-      const merged = mergeNarrative(parseNarrative(readFileSync37(narrPath, "utf8")), dossier);
+      const merged = mergeNarrative(parseNarrative(readFileSync40(narrPath, "utf8")), dossier);
       if (hasNarrativeContent(merged)) narrative = merged;
     } catch {
     }
   }
-  writeFileSync23(join74(opts.run, "SUMMARY.md"), renderSummary(dossier, narrative));
-  writeFileSync23(join74(opts.run, "REPORT.md"), renderReport(dossier, narrative));
-  writeFileSync23(join74(opts.run, "index.html"), renderHtml(dossier, narrative));
+  writeFileSync24(join77(opts.run, "SUMMARY.md"), renderSummary(dossier, narrative));
+  writeFileSync24(join77(opts.run, "REPORT.md"), renderReport(dossier, narrative));
+  writeFileSync24(join77(opts.run, "index.html"), renderHtml(dossier, narrative));
   actions.push("render");
   return { actions, emitted, externalCalls, escalated, errors, notices };
 }
@@ -43788,7 +45813,7 @@ function runRun(args2) {
     }
   }
   const stages = ALL_STAGES.filter((s) => !requested || requested.includes(s));
-  if (noScan && !existsSync35(join75(run2, "findings.json"))) {
+  if (noScan && !existsSync38(join78(run2, "findings.json"))) {
     eprintln(`ultrasec run: --no-scan but no dossier at ${run2} \u2014 run \`scan\` first or drop --no-scan.`);
     return 2;
   }
@@ -43834,7 +45859,7 @@ function runRun(args2) {
     for (const e of res.emitted) {
       const noApply = e.outName === "CONTEXT.md" || e.outName === "NARRATIVE.json" || e.outName === "REMEDIATION_PRD.md";
       const apply = noApply ? "" : ` \u2192 \`ultrasec ${e.stage} --apply ${e.outName} --run ${run2}\``;
-      println(`    - ${e.stage}: read ${e.worklist}, write ${join75(run2, e.outName)}${apply}`);
+      println(`    - ${e.stage}: read ${e.worklist}, write ${join78(run2, e.outName)}${apply}`);
     }
     println(`  then: ultrasec render${stages.includes("narrative") ? " --narrative NARRATIVE.json" : ""} --run ${run2}`);
     return 0;
@@ -43844,13 +45869,13 @@ function runRun(args2) {
   if (res.escalated.length) println(`  \u26A0\uFE0F  cross-check escalated ${res.escalated.length} finding(s) to needs-human: ${res.escalated.join(", ")}`);
   printNotices();
   for (const err2 of res.errors) println(`  \u2717 ${err2}`);
-  println(`  report: ${join75(run2, "REPORT.md")} \xB7 ${join75(run2, "index.html")}`);
+  println(`  report: ${join78(run2, "REPORT.md")} \xB7 ${join78(run2, "index.html")}`);
   return res.errors.length ? 1 : 0;
 }
 
 // src/commands/orchestrate.ts
-import { existsSync as existsSync36, realpathSync as realpathSync8 } from "fs";
-import { join as join76 } from "path";
+import { existsSync as existsSync39, realpathSync as realpathSync8 } from "fs";
+import { join as join79 } from "path";
 import { fileURLToPath as fileURLToPath3 } from "url";
 function runOrchestrate(args2) {
   const runFlag = flagStr(args2, "run");
@@ -43866,7 +45891,7 @@ function runOrchestrate(args2) {
   }
   const surface = surfaceFlag ?? "all";
   if (flagBool(args2, "list")) {
-    if (!existsSync36(runFlag)) {
+    if (!existsSync39(runFlag)) {
       eprintln(`ultrasec orchestrate: run dir not found: ${runFlag}.`);
       return 2;
     }
@@ -43891,7 +45916,7 @@ function runOrchestrate(args2) {
     for (const w of workflows) println(`Launch: Workflow({ scriptPath: ${JSON.stringify(w)} })`);
     println("Then merge the returned fragments into one apply file and run the `--apply` fold shown at the end of each workflow (you stay the sole writer).");
   } else {
-    println(`Follow ${join76(runFlag, "orchestration", "RUNBOOK.md")} sequentially (the eco path).`);
+    println(`Follow ${join79(runFlag, "orchestration", "RUNBOOK.md")} sequentially (the eco path).`);
   }
   if (flagStr(args2, "phase") === void 0 && workflows.length === 0 && !flagBool(args2, "eco")) {
     eprintln(`ultrasec orchestrate: no ready phase \u2014 phases are ${PHASES.join(", ")} (see --list).`);
@@ -43900,8 +45925,8 @@ function runOrchestrate(args2) {
 }
 
 // src/commands/probe.ts
-import { mkdirSync as mkdirSync18, writeFileSync as writeFileSync24 } from "fs";
-import { join as join77, resolve as resolve40 } from "path";
+import { mkdirSync as mkdirSync18, writeFileSync as writeFileSync25 } from "fs";
+import { join as join80, resolve as resolve40 } from "path";
 import { request as httpsRequest } from "https";
 import { request as httpRequest } from "http";
 import { lookup } from "dns/promises";
@@ -44311,15 +46336,15 @@ async function runProbe(args2, deps = {}) {
     findings: ctx.findings
   };
   mkdirSync18(out2, { recursive: true });
-  writeFileSync24(join77(out2, "PROBE.json"), `${JSON.stringify(report, null, 2)}
+  writeFileSync25(join80(out2, "PROBE.json"), `${JSON.stringify(report, null, 2)}
 `);
-  writeFileSync24(join77(out2, "PROBE.md"), renderProbeMd(report));
+  writeFileSync25(join80(out2, "PROBE.md"), renderProbeMd(report));
   const counts = {};
   for (const f of report.findings) counts[f.severity] = (counts[f.severity] ?? 0) + 1;
   if (flagBool(args2, "json")) {
     println(JSON.stringify(report, null, 2));
   } else {
-    println(`ultrasec probe \u2192 ${join77(out2, "PROBE.md")} (+ PROBE.json)`);
+    println(`ultrasec probe \u2192 ${join80(out2, "PROBE.md")} (+ PROBE.json)`);
     println(`  target: ${report.target}  \xB7  status ${main2.status}  \xB7  TLS ${main2.tlsProtocol ?? "\u2014"}  \xB7  ${ctx.made} request(s)`);
     println(
       `  posture findings: ${report.findings.length}  (crit ${counts.critical ?? 0} \xB7 high ${counts.high ?? 0} \xB7 med ${counts.medium ?? 0} \xB7 low ${counts.low ?? 0})`
@@ -44332,8 +46357,8 @@ async function runProbe(args2, deps = {}) {
 }
 
 // src/commands/route.ts
-import { mkdirSync as mkdirSync19, writeFileSync as writeFileSync25 } from "fs";
-import { join as join78, resolve as resolve41 } from "path";
+import { mkdirSync as mkdirSync19, writeFileSync as writeFileSync26 } from "fs";
+import { join as join81, resolve as resolve41 } from "path";
 var ROUTE_TABLE = [
   {
     id: "android-apk",
@@ -44502,7 +46527,7 @@ var SOURCE_EXTS = /* @__PURE__ */ new Set([
   "json"
 ]);
 var SOURCE_BASENAMES = /* @__PURE__ */ new Set(["dockerfile", "makefile", "jenkinsfile", "procfile"]);
-function extOf6(target) {
+function extOf7(target) {
   const base = target.split(/[\\/]/).pop() ?? target;
   const i2 = base.lastIndexOf(".");
   return i2 <= 0 ? "" : base.slice(i2 + 1).toLowerCase();
@@ -44512,7 +46537,7 @@ function baseNameOf(target) {
 }
 function classifyTarget(target) {
   if (/^https?:\/\//i.test(target)) return { kind: "probe", url: target };
-  const ext = extOf6(target);
+  const ext = extOf7(target);
   if (ext === "" || SOURCE_EXTS.has(ext) || SOURCE_BASENAMES.has(baseNameOf(target))) return { kind: "scan" };
   const entry2 = ROUTE_TABLE.find((e) => e.exts.includes(ext));
   if (entry2) return { kind: "external", entry: entry2 };
@@ -44596,8 +46621,8 @@ function runRoute(args2) {
   if (flagStr(args2, "out") !== void 0 || flagBool(args2, "write")) {
     const out2 = resolve41(flagStr(args2, "out") ?? ".");
     mkdirSync19(out2, { recursive: true });
-    const p = join78(out2, "ROUTE.md");
-    writeFileSync25(p, renderMd(result));
+    const p = join81(out2, "ROUTE.md");
+    writeFileSync26(p, renderMd(result));
     if (!flagBool(args2, "json")) println(`ultrasec route \u2192 ${p}`);
   }
   if (flagBool(args2, "json")) {
@@ -44656,8 +46681,8 @@ var COMMAND_HANDLERS = {
 import { createInterface as createInterface3 } from "readline";
 
 // src/mcp/handlers.ts
-import { existsSync as existsSync37, readFileSync as readFileSync38, realpathSync as realpathSync9, statSync as statSync19 } from "fs";
-import { isAbsolute as isAbsolute12, join as join79, resolve as resolve42, sep as sep12 } from "path";
+import { existsSync as existsSync40, readFileSync as readFileSync41, realpathSync as realpathSync9, statSync as statSync19 } from "fs";
+import { isAbsolute as isAbsolute12, join as join82, resolve as resolve42, sep as sep12 } from "path";
 
 // src/run-lock.ts
 var chains = /* @__PURE__ */ new Map();
@@ -44732,10 +46757,10 @@ function resolveRun(args2, repo) {
     if (!isAbsolute12(explicit)) throw new ToolError("`run` must be an absolute path.");
     return resolve42(explicit);
   }
-  return join79(repo, ".ultrasec");
+  return join82(repo, ".ultrasec");
 }
 function requireRun(run2) {
-  if (!existsSync37(join79(run2, "dossier.json")) && !existsSync37(join79(run2, "findings.json"))) {
+  if (!existsSync40(join82(run2, "dossier.json")) && !existsSync40(join82(run2, "findings.json"))) {
     throw new ToolError(`no audit run at ${run2} \u2014 scan the repo first with ultrasec_scan (it writes there). If the run lives elsewhere, pass \`run\`.`);
   }
 }
@@ -44878,18 +46903,18 @@ function outcome2(name2, result) {
 function artifactFor(name2, flags2) {
   const run2 = typeof flags2.run === "string" ? flags2.run : typeof flags2.out === "string" ? flags2.out : void 0;
   if (!run2) return void 0;
-  if (name2 === "ultrasec_map") return join79(run2, "MAP.md");
-  if (name2 === "ultrasec_scan") return join79(run2, "findings.json");
-  if (name2 === "ultrasec_triage") return join79(run2, "TRIAGE.todo.json");
-  if (name2 === "ultrasec_guards") return join79(run2, flags2.lens === "throttle" ? "THROTTLE.todo.json" : "GUARDS.todo.json");
-  if (name2 === "ultrasec_verify") return join79(run2, "VERIFY.todo.json");
-  if (name2 === "ultrasec_investigate") return join79(run2, "INVESTIGATE.todo.json");
+  if (name2 === "ultrasec_map") return join82(run2, "MAP.md");
+  if (name2 === "ultrasec_scan") return join82(run2, "findings.json");
+  if (name2 === "ultrasec_triage") return join82(run2, "TRIAGE.todo.json");
+  if (name2 === "ultrasec_guards") return join82(run2, flags2.lens === "throttle" ? "THROTTLE.todo.json" : "GUARDS.todo.json");
+  if (name2 === "ultrasec_verify") return join82(run2, "VERIFY.todo.json");
+  if (name2 === "ultrasec_investigate") return join82(run2, "INVESTIGATE.todo.json");
   return void 0;
 }
 function handleRead(args2, repo, run2) {
   const raw = str2(args2.path);
   if (!raw) throw new ToolError("`path` is required \u2014 a repo-relative path, or an absolute path inside the repo or its run.");
-  const target = isAbsolute12(raw) ? raw : join79(repo, raw);
+  const target = isAbsolute12(raw) ? raw : join82(repo, raw);
   let real;
   try {
     real = realpathSync9(target);
@@ -44909,7 +46934,7 @@ function handleRead(args2, repo, run2) {
   const st = statSync19(real);
   if (!st.isFile()) throw new ToolError(`not a file: ${raw}`);
   if (st.size > MAX_READ_BYTES) throw new ToolError(`file is too large to read (${st.size} bytes): ${raw}`);
-  const lines5 = readFileSync38(real, "utf8").split("\n");
+  const lines5 = readFileSync41(real, "utf8").split("\n");
   const total = lines5.length;
   const start2 = Math.max(1, Math.floor(num2(args2.start_line) ?? 1));
   if (start2 > total) throw new ToolError(`start_line ${start2} is past the end of the file (${total} lines).`);
@@ -45397,25 +47422,25 @@ function str3(v) {
 var DECLARED = new Set([...TOOLS3, ...WRITE_TOOLS].map((t) => t.name));
 
 // src/mcp/resources.ts
-import { existsSync as existsSync38, readdirSync as readdirSync8, readFileSync as readFileSync39, realpathSync as realpathSync10, statSync as statSync20 } from "fs";
-import { basename as basename6, dirname as dirname14, join as join80, resolve as resolve43, sep as sep13 } from "path";
+import { existsSync as existsSync41, readdirSync as readdirSync8, readFileSync as readFileSync42, realpathSync as realpathSync10, statSync as statSync20 } from "fs";
+import { basename as basename6, dirname as dirname14, join as join83, resolve as resolve43, sep as sep13 } from "path";
 import { fileURLToPath as fileURLToPath4 } from "url";
 var SKILL_NAME = "ultrasec";
 var URI_SCHEME = "skill://";
 function resolveSkillRoot(moduleDir) {
   const here = moduleDir ?? dirname14(fileURLToPath4(import.meta.url));
   const candidates = [resolve43(here, ".."), resolve43(here, "..", "skills", SKILL_NAME), resolve43(here, "..", "..", "skills", SKILL_NAME)];
-  return candidates.find((dir) => existsSync38(join80(dir, "SKILL.md")));
+  return candidates.find((dir) => existsSync41(join83(dir, "SKILL.md")));
 }
 function listResources(moduleDir) {
   const root = resolveSkillRoot(moduleDir);
   if (!root) return [];
   const out2 = [describe(root, "SKILL.md", `${SKILL_NAME}: the skill`)];
-  const refDir = join80(root, "references");
-  if (!existsSync38(refDir)) return out2;
+  const refDir = join83(root, "references");
+  if (!existsSync41(refDir)) return out2;
   for (const file of readdirSync8(refDir).sort()) {
     if (!file.endsWith(".md")) continue;
-    out2.push(describe(root, join80("references", file), `${SKILL_NAME} reference: ${basename6(file, ".md")}`));
+    out2.push(describe(root, join83("references", file), `${SKILL_NAME} reference: ${basename6(file, ".md")}`));
   }
   return out2;
 }
@@ -45439,7 +47464,7 @@ function readResource(uri, moduleDir) {
     throw new ResourceError(`resource path escapes the skill root: ${uri}`);
   }
   if (!statSync20(targetReal).isFile()) throw new ResourceError(`not a file: ${uri}`);
-  return { uri, mimeType: "text/markdown", text: readFileSync39(targetReal, "utf8") };
+  return { uri, mimeType: "text/markdown", text: readFileSync42(targetReal, "utf8") };
 }
 var ResourceError = class extends Error {
 };
@@ -45450,14 +47475,14 @@ function describe(root, rel2, fallbackTitle) {
     title: fallbackTitle,
     mimeType: "text/markdown"
   };
-  const summary = firstProse(join80(root, rel2));
+  const summary = firstProse(join83(root, rel2));
   if (summary) decl.description = summary;
   return decl;
 }
 function firstProse(file) {
   let text;
   try {
-    text = readFileSync39(file, "utf8");
+    text = readFileSync42(file, "utf8");
   } catch {
     return void 0;
   }
@@ -46037,9 +48062,12 @@ COMMANDS
              there, in what I looked at" \u2014 this separates the two, and names the
              categories no deterministic signal can cover so you answer them
              explicitly. --standard scores against ASVS (default), the OWASP
-             Top 10, the OWASP API Top 10, MASVS or the CWE Top 25. Read-only.
-             Flags: --run \xB7 --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25 \xB7
-             --write (COVERAGE.md) \xB7 --json.
+             Top 10, the OWASP API Top 10, MASVS or the CWE Top 25. Also the
+             weakness-class \xD7 framework matrix: matched by a pack, degraded
+             (no pack, version outside testedWith), AI-hunted, or not covered.
+             Read-only. Flags: --run \xB7
+             --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25 \xB7
+             --write (COVERAGE.md) \xB7 --json (--classes: the class matrix).
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
              READ-ONLY \u2014 it writes nothing and changes no status; --semantic ALSO
              fails when a candidate is still unadjudicated. Exit 0 ok \xB7 1 gate
