@@ -23,6 +23,7 @@ describe("detectFrameworks", () => {
       "services/java:spring",
       "services/kotlin:spring",
       "services/laravel:laravel",
+      "services/mvc:spring",
       "services/py:django",
       "services/rails:rails",
     ]);
@@ -44,6 +45,12 @@ describe("detectFrameworks", () => {
     expect(by("django")[0]).toMatchObject({ version: "4.2.7", versionSource: "declared" });
     expect(found.find((f) => f.dir === "services/java")).toMatchObject({ version: "3.2.5" });
     expect(found.find((f) => f.dir === "services/kotlin")).toMatchObject({ version: "3.3.0" });
+  });
+
+  it("versions `spring` as Spring Boot: plain Spring MVC gets no version, not Spring Framework's", () => {
+    const mvc = found.find((f) => f.dir === "services/mvc")!;
+    expect(mvc.version).toBeUndefined();
+    expect(mvc.evidence).toBe("services/mvc/pom.xml:5");
   });
 
   it("dates Go's net/http by the toolchain the module declares", () => {

@@ -35704,7 +35704,8 @@ function readPom(text) {
     const m = /<artifactId>\s*([^<\s]+)\s*<\/artifactId>/.exec(l);
     if (!m) return;
     const own2 = lines5.slice(i2, i2 + 4).join("\n").match(/<version>\s*([^<\s$]+)\s*<\/version>/)?.[1];
-    out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: own2 ?? parent ?? bootProp });
+    const boot = m[1].startsWith("spring-boot");
+    out2.push({ name: m[1].toLowerCase(), line: i2 + 1, spec: (boot ? own2 : void 0) ?? parent ?? bootProp });
   });
   return out2;
 }
@@ -35713,7 +35714,8 @@ function readGradle(text) {
   const plugin = /id\s*\(?\s*["']org\.springframework\.boot["']\s*\)?\s*version\s*["']([^"']+)["']/.exec(text)?.[1];
   const out2 = [];
   lines5.forEach((l, i2) => {
-    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([\w.-]+))?["']/g)) out2.push({ name: m[2].toLowerCase(), line: i2 + 1, spec: m[3] ?? plugin });
+    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([\w.-]+))?["']/g))
+      out2.push({ name: m[2].toLowerCase(), line: i2 + 1, spec: (m[2].startsWith("spring-boot") ? m[3] : void 0) ?? plugin });
   });
   return out2;
 }

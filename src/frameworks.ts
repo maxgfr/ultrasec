@@ -171,7 +171,11 @@ function readPom(text: string): Declared[] {
       .slice(i, i + 4)
       .join("\n")
       .match(/<version>\s*([^<\s$]+)\s*<\/version>/)?.[1];
-    out.push({ name: m[1]!.toLowerCase(), line: i + 1, spec: own ?? parent ?? bootProp });
+    // The `spring` framework is versioned as Spring Boot (what `testedWith`
+    // means): a non-Boot artifact's own version is Spring Framework's, so it
+    // only inherits the Boot parent/property, never its own number.
+    const boot = m[1]!.startsWith("spring-boot");
+    out.push({ name: m[1]!.toLowerCase(), line: i + 1, spec: (boot ? own : undefined) ?? parent ?? bootProp });
   });
   return out;
 }
@@ -181,7 +185,8 @@ function readGradle(text: string): Declared[] {
   const plugin = /id\s*\(?\s*["']org\.springframework\.boot["']\s*\)?\s*version\s*["']([^"']+)["']/.exec(text)?.[1];
   const out: Declared[] = [];
   lines.forEach((l, i) => {
-    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([\w.-]+))?["']/g)) out.push({ name: m[2]!.toLowerCase(), line: i + 1, spec: m[3] ?? plugin });
+    for (const m of l.matchAll(/["']([\w.-]+):([\w.-]+)(?::([\w.-]+))?["']/g))
+      out.push({ name: m[2]!.toLowerCase(), line: i + 1, spec: (m[2]!.startsWith("spring-boot") ? m[3] : undefined) ?? plugin });
   });
   return out;
 }
