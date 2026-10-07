@@ -172,6 +172,10 @@ export const DJANGO_PACK: Pack = {
   framework: "django",
   testedWith: ">=3.2 <7",
   sources: ["https://docs.djangoproject.com/en/stable/ref/middleware/", "https://docs.djangoproject.com/en/stable/ref/settings/"],
+  markers: {
+    global: { auth: { words: ["login_required", "permission_required"] } },
+    detected: { auth: { words: ["LoginRequiredMixin", "PermissionRequiredMixin", "user_passes_test", "permission_classes"] } },
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -265,6 +269,7 @@ export const FLASK_PACK: Pack = {
   framework: "flask",
   testedWith: ">=2 <4",
   sources: ["https://flask.palletsprojects.com/en/stable/web-security/"],
+  markers: { detected: { auth: { words: ["jwt_required", "roles_required", "fresh_login_required"] }, throttle: { patterns: [/\bLimiter\s*\(/] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -344,6 +349,13 @@ export const FASTAPI_PACK: Pack = {
   framework: "fastapi",
   testedWith: ">=0.100 <1",
   sources: ["https://fastapi.tiangolo.com/advanced/middleware/"],
+  // A dependency that resolves the caller IS FastAPI's guard.
+  markers: {
+    detected: {
+      auth: { patterns: [/\bDepends\s*\(\s*\w*(?:current_user|auth|token|verify|security)\w*/i, /\bSecurity\s*\(/] },
+      throttle: { patterns: [/\bLimiter\s*\(/] },
+    },
+  },
   classes: {
     "security-headers-absent": {
       rules: [

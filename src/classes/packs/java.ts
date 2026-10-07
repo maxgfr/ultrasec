@@ -82,6 +82,10 @@ export const SPRING_PACK: Pack = {
   framework: "spring",
   testedWith: ">=2.7 <5",
   sources: ["https://docs.spring.io/spring-security/reference/servlet/exploits/headers.html"],
+  markers: {
+    global: { auth: { annotations: ["PreAuthorize", "Secured", "RolesAllowed"] } },
+    detected: { auth: { patterns: [/\.authenticated\s*\(\s*\)/, /\.hasAuthority\s*\(/] }, throttle: { patterns: [/\bBucket4j\b|\bBandwidth\s*\./] } },
+  },
   classes: {
     "security-headers-absent": {
       rules: [

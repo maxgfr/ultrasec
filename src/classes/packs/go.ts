@@ -31,6 +31,8 @@ const GO_SETS_HEADERS = new RegExp(`secure\\.New\\s*\\(|unrolled/secure|${SETS_S
 export const GO_PACK: Pack = {
   id: "go",
   ecosystem: "go",
+  // The usual Go limiters: golang.org/x/time/rate, tollbooth, go-chi/httprate.
+  markers: { global: { throttle: { patterns: [/\brate\.NewLimiter\s*\(|\btollbooth\.|\bhttprate\./] } } },
   classes: {
     "timing-unsafe-secret-compare": {
       rules: [

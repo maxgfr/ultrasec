@@ -231,6 +231,29 @@ export type Rule = LineRule | FileRule | RouteQueryRule | AbsentRule | CallRule;
  */
 export type ClassCoverage = { rules: Rule[] } | { notApplicable: string } | { hunt: string };
 
+/** Names that mark an authentication or rate-limiting check in code. */
+export interface MarkerVocabulary {
+  /** Whole-word names, as regex source (`passport\\.authenticate`). */
+  words?: string[];
+  /** Annotation / decorator names, matched after `@`. */
+  annotations?: string[];
+  /** Anything a name cannot say (`await auth()`, `->middleware('auth')`). */
+  patterns?: RegExp[];
+}
+
+/**
+ * The guard vocabulary a pack contributes to the guard matrix and the context
+ * brief, on top of the generic floor (`src/classes/markers.ts`). `global` names
+ * no other stack uses and are matched in every repository — that is how the
+ * vocabulary behaved before packs carried it. `detected` names are too generic
+ * to trust anywhere else (`auth()`, `Depends(get_current_user)`) and are only
+ * matched when the pack's framework or library is detected.
+ */
+export interface PackMarkers {
+  global?: { auth?: MarkerVocabulary; throttle?: MarkerVocabulary };
+  detected?: { auth?: MarkerVocabulary; throttle?: MarkerVocabulary };
+}
+
 export interface Pack {
   /** Unique pack id (`node`, `express`, `django`, …). */
   id: string;
@@ -255,4 +278,6 @@ export interface Pack {
   /** Documentation the defaults encoded here were checked against. */
   sources?: string[];
   classes: Partial<Record<ClassId, ClassCoverage>>;
+  /** Auth / throttle marker names this stack writes its guards with. */
+  markers?: PackMarkers;
 }

@@ -96,6 +96,13 @@ export const RAILS_PACK: Pack = {
   framework: "rails",
   testedWith: ">=6 <9",
   sources: ["https://guides.rubyonrails.org/security.html"],
+  markers: {
+    global: { auth: { words: ["before_action", "authenticate_user!", "current_user"] } },
+    detected: {
+      auth: { words: ["authenticate_or_request_with_http_token", "authenticate_or_request_with_http_basic", "require_login"] },
+      throttle: { patterns: [/\bRack::Attack\b/] },
+    },
+  },
   classes: {
     "security-headers-absent": {
       rules: [

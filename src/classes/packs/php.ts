@@ -115,6 +115,18 @@ export const LARAVEL_PACK: Pack = {
   framework: "laravel",
   testedWith: ">=9 <14",
   sources: ["https://laravel.com/docs/12.x/requests"],
+  // Route middleware is Laravel's guard, named in a string.
+  markers: {
+    detected: {
+      auth: {
+        patterns: [
+          /->middleware\(\s*\[?[^)\]]*['"](?:auth(?::[\w,]+)?|can:[^'"]+|verified)['"]/,
+          /\bAuth::(?:check|user|guard)\s*\(/,
+          /\bauth\(\)\s*->\s*(?:check|user)\s*\(/,
+        ],
+      },
+    },
+  },
   classes: {
     "security-headers-absent": {
       rules: [

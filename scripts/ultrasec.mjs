@@ -34469,6 +34469,12 @@ var NEXT_AUTH_PACK = {
   library: "next-auth",
   testedWith: ">=4 <6",
   sources: ["https://github.com/nextauthjs/next-auth"],
+  // `getServerSession` (v4) is NextAuth's alone; v5's `auth()` and `getToken`
+  // are names any codebase might use, so they count only where NextAuth is declared.
+  markers: {
+    global: { auth: { words: ["getServerSession"] } },
+    detected: { auth: { patterns: [/\bawait\s+auth\s*\(\s*\)/, /\bgetToken\s*\(/] } }
+  },
   classes: {
     "session-cookie-chunks-on-logout": {
       rules: [
@@ -34559,6 +34565,7 @@ var EXPRESS_PACK = {
   framework: "express",
   testedWith: ">=4 <6",
   sources: ["https://expressjs.com/en/advanced/best-practice-security.html"],
+  markers: { global: { auth: { words: ["passport\\.authenticate"] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -34602,6 +34609,7 @@ var NESTJS_PACK = {
   framework: "nestjs",
   testedWith: ">=9 <13",
   sources: ["https://docs.nestjs.com/security/helmet"],
+  markers: { global: { auth: { annotations: ["UseGuards"] } }, detected: { auth: { words: ["AuthGuard"] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -34727,7 +34735,27 @@ var KOA_PACK = (() => {
 })();
 var HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
 var ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
-var NODE_PACKS = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK, NEXT_AUTH_PACK];
+var TRPC_PACK = {
+  id: "trpc",
+  ecosystem: "node",
+  library: "trpc",
+  testedWith: ">=10 <12",
+  sources: ["https://trpc.io/docs/server/authorization"],
+  markers: { detected: { auth: { words: ["protectedProcedure", "authedProcedure", "adminProcedure", "privateProcedure"] } } },
+  classes: {}
+};
+var NODE_PACKS = [
+  NODE_PACK,
+  NEXTJS_PACK,
+  EXPRESS_PACK,
+  NESTJS_PACK,
+  FASTIFY_PACK,
+  KOA_PACK,
+  HONO_PACK,
+  ELYSIA_PACK,
+  NEXT_AUTH_PACK,
+  TRPC_PACK
+];
 
 // src/classes/packs/python.ts
 var PY3 = ["python"];
@@ -34867,6 +34895,10 @@ var DJANGO_PACK = {
   framework: "django",
   testedWith: ">=3.2 <7",
   sources: ["https://docs.djangoproject.com/en/stable/ref/middleware/", "https://docs.djangoproject.com/en/stable/ref/settings/"],
+  markers: {
+    global: { auth: { words: ["login_required", "permission_required"] } },
+    detected: { auth: { words: ["LoginRequiredMixin", "PermissionRequiredMixin", "user_passes_test", "permission_classes"] } }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -34953,6 +34985,7 @@ var FLASK_PACK = {
   framework: "flask",
   testedWith: ">=2 <4",
   sources: ["https://flask.palletsprojects.com/en/stable/web-security/"],
+  markers: { detected: { auth: { words: ["jwt_required", "roles_required", "fresh_login_required"] }, throttle: { patterns: [/\bLimiter\s*\(/] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -35027,6 +35060,13 @@ var FASTAPI_PACK = {
   framework: "fastapi",
   testedWith: ">=0.100 <1",
   sources: ["https://fastapi.tiangolo.com/advanced/middleware/"],
+  // A dependency that resolves the caller IS FastAPI's guard.
+  markers: {
+    detected: {
+      auth: { patterns: [/\bDepends\s*\(\s*\w*(?:current_user|auth|token|verify|security)\w*/i, /\bSecurity\s*\(/] },
+      throttle: { patterns: [/\bLimiter\s*\(/] }
+    }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -35147,6 +35187,10 @@ var SPRING_PACK = {
   framework: "spring",
   testedWith: ">=2.7 <5",
   sources: ["https://docs.spring.io/spring-security/reference/servlet/exploits/headers.html"],
+  markers: {
+    global: { auth: { annotations: ["PreAuthorize", "Secured", "RolesAllowed"] } },
+    detected: { auth: { patterns: [/\.authenticated\s*\(\s*\)/, /\.hasAuthority\s*\(/] }, throttle: { patterns: [/\bBucket4j\b|\bBandwidth\s*\./] } }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -35284,6 +35328,8 @@ var GO_SETS_HEADERS = new RegExp(`secure\\.New\\s*\\(|unrolled/secure|${SETS_SEC
 var GO_PACK = {
   id: "go",
   ecosystem: "go",
+  // The usual Go limiters: golang.org/x/time/rate, tollbooth, go-chi/httprate.
+  markers: { global: { throttle: { patterns: [/\brate\.NewLimiter\s*\(|\btollbooth\.|\bhttprate\./] } } },
   classes: {
     "timing-unsafe-secret-compare": {
       rules: [
@@ -35575,6 +35621,13 @@ var RAILS_PACK = {
   framework: "rails",
   testedWith: ">=6 <9",
   sources: ["https://guides.rubyonrails.org/security.html"],
+  markers: {
+    global: { auth: { words: ["before_action", "authenticate_user!", "current_user"] } },
+    detected: {
+      auth: { words: ["authenticate_or_request_with_http_token", "authenticate_or_request_with_http_basic", "require_login"] },
+      throttle: { patterns: [/\bRack::Attack\b/] }
+    }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -35775,6 +35828,18 @@ var LARAVEL_PACK = {
   framework: "laravel",
   testedWith: ">=9 <14",
   sources: ["https://laravel.com/docs/12.x/requests"],
+  // Route middleware is Laravel's guard, named in a string.
+  markers: {
+    detected: {
+      auth: {
+        patterns: [
+          /->middleware\(\s*\[?[^)\]]*['"](?:auth(?::[\w,]+)?|can:[^'"]+|verified)['"]/,
+          /\bAuth::(?:check|user|guard)\s*\(/,
+          /\bauth\(\)\s*->\s*(?:check|user)\s*\(/
+        ]
+      }
+    }
+  },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -39064,12 +39129,71 @@ var ADAPTERS = [
 // src/context.ts
 import { existsSync as existsSync27, readFileSync as readFileSync31 } from "fs";
 import { join as join55 } from "path";
+
+// src/classes/markers.ts
+var AUTH_FLOOR = {
+  words: [
+    "requireAuth",
+    "requiresAuth",
+    "isAuthenticated",
+    "ensureAuthenticated",
+    "ensureLoggedIn",
+    "ensureLogin",
+    "requireLogin",
+    "checkAuth",
+    "verifyToken",
+    "verifyJwt",
+    "jwtVerify",
+    "authenticateToken",
+    "authMiddleware",
+    "requireRole",
+    "requireAdmin",
+    "hasRole",
+    "hasPermission",
+    "checkPermission",
+    "authorize",
+    "authorization"
+  ]
+};
+var THROTTLE_FLOOR = {
+  patterns: [
+    /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/
+  ]
+};
+var FLOOR = { auth: AUTH_FLOOR, throttle: THROTTLE_FLOOR };
+var packActive = (p, detected2) => !p.framework && !p.library || detected2.has(p.framework ?? "") || detected2.has(p.library ?? "");
+function markerFor(lens, detected2 = [], packs = PACKS) {
+  const on = new Set(detected2);
+  const parts2 = [FLOOR[lens]];
+  for (const p of packs) {
+    const g = p.markers?.global?.[lens];
+    if (g) parts2.push(g);
+  }
+  for (const p of packs) {
+    const d = p.markers?.detected?.[lens];
+    if (d && packActive(p, on)) parts2.push(d);
+  }
+  const words = parts2.flatMap((v) => v.words ?? []);
+  const annotations = parts2.flatMap((v) => v.annotations ?? []);
+  const patterns = parts2.flatMap((v) => v.patterns ?? []);
+  const alts = [];
+  if (words.length) alts.push(`\\b(${words.join("|")})\\b`);
+  if (annotations.length) alts.push(`(?<![\\w@])@(?:${annotations.join("|")})\\b`);
+  for (const re of patterns) alts.push(re.source);
+  return new RegExp(alts.join("|"));
+}
+function detectedIds(stack) {
+  return (stack ?? []).map((f) => f.id);
+}
+
+// src/context.ts
 var MAX_SCAFFOLD = 40;
 var MAX_SCAFFOLD_ENTRIES = 80;
-var AUTH_MARKER = /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|getServerSession|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
-var THROTTLE_MARKER = /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
-function detectStackLabels(repo) {
-  return stackLabels(detectFrameworks(repo));
+var AUTH_MARKER = markerFor("auth");
+var THROTTLE_MARKER = markerFor("throttle");
+function detectStack(repo) {
+  const stack = detectFrameworks(repo);
+  return { labels: stackLabels(stack), ids: stack.map((f) => f.id) };
 }
 function appliesTo2(languages, langId) {
   return languages.includes("*") || languages.includes(langId);
@@ -39127,7 +39251,9 @@ function capBySite(items, weight, bySite) {
   return spread.slice(0, MAX_SCAFFOLD).sort(bySite);
 }
 function buildContextScaffold(repo, scan2, surface) {
-  const frameworks = detectStackLabels(repo);
+  const stack = detectStack(repo);
+  const frameworks = stack.labels;
+  const authMarker = markerFor("auth", stack.ids);
   const rank2 = new Map(surface.byFile.map((f) => [f.file, f.score]));
   const perFile = /* @__PURE__ */ new Map();
   for (const g of surface.entryPoints) {
@@ -39162,7 +39288,7 @@ function buildContextScaffold(repo, scan2, surface) {
     const lines5 = readText2(join55(repo, fileScan.rel)).split(/\r?\n/);
     for (let i2 = 0; i2 < lines5.length; i2++) {
       const line2 = lines5[i2];
-      const am = AUTH_MARKER.exec(line2);
+      const am = authMarker.exec(line2);
       if (am) authMiddleware.push({ file: fileScan.rel, line: i2 + 1, hint: am[0] });
       for (const rule2 of SANITIZERS) {
         if (!appliesTo2(rule2.languages, spec.id)) continue;
@@ -43888,7 +44014,7 @@ function withProjectMarkers(base, names) {
 }
 function buildGuardMatrix(scan2, lens = "auth", extraMarkers = [], opts = {}) {
   const spec = LENSES2[lens];
-  const marker = withProjectMarkers(spec.marker, extraMarkers);
+  const marker = withProjectMarkers(opts.detected ? markerFor(lens, opts.detected) : spec.marker, extraMarkers);
   const rows = [];
   for (const file of scan2.files) {
     const lang = langForFile(file.rel);
@@ -44160,7 +44286,7 @@ function runGuards(args2) {
   }
   const repo = resolve30(flagStr(args2, "repo") ?? dossier.manifest.repo);
   const markers = [.../* @__PURE__ */ new Set([...contextMarkers(loadContextDoc(run2), lens), ...markerFlags(args2)])];
-  const matrixOpts = { includeTests: dossier.manifest.passes?.includeTests === true };
+  const matrixOpts = { includeTests: dossier.manifest.passes?.includeTests === true, detected: detectedIds(dossier.manifest.frameworks) };
   const applyPath = flagStr(args2, "apply");
   if (applyPath) {
     let parsed2;
@@ -46331,6 +46457,13 @@ var CliAgentRunner = class {
 // src/powered/pipeline.ts
 import { readFileSync as readFileSync40, writeFileSync as writeFileSync24 } from "fs";
 import { join as join77 } from "path";
+function runStack(run2) {
+  try {
+    return detectedIds(loadDossier(run2).manifest.frameworks);
+  } catch {
+    return [];
+  }
+}
 var ALL_STAGES = [
   "context",
   "assumptions",
@@ -46400,13 +46533,13 @@ var STAGES = {
   guards: {
     crossCheckable: false,
     emit(repo, run2) {
-      const rows = buildGuardMatrix(scanRepo2(repo));
+      const rows = buildGuardMatrix(scanRepo2(repo), "auth", [], { detected: runStack(run2) });
       const f = stageFiles("GUARDS");
       emitWorklist(run2, f, rows, renderGuardsMd(rows, loadContextDoc(run2)));
       return { worklist: join77(run2, f.md), outName: "GUARDS.json" };
     },
     applyPure: (repo, run2, dossier, raw) => {
-      const byId = new Map(buildGuardMatrix(scanRepo2(repo)).map((r) => [r.id, r]));
+      const byId = new Map(buildGuardMatrix(scanRepo2(repo), "auth", [], { detected: detectedIds(dossier.manifest.frameworks) }).map((r) => [r.id, r]));
       const discoveries = rowsOf("guards", parseGuardVerdicts(raw)).filter((r) => r.verdict === "unguarded").map((r) => {
         const at = byId.get(r.id);
         return at ? guardDiscovery(at, r.note) : void 0;
@@ -46421,13 +46554,13 @@ var STAGES = {
   throttle: {
     crossCheckable: false,
     emit(repo, run2) {
-      const rows = buildGuardMatrix(scanRepo2(repo), "throttle");
+      const rows = buildGuardMatrix(scanRepo2(repo), "throttle", [], { detected: runStack(run2) });
       const f = stageFiles(LENSES2.throttle.stem);
       emitWorklist(run2, f, rows, renderGuardsMd(rows, loadContextDoc(run2), "throttle"));
       return { worklist: join77(run2, f.md), outName: "THROTTLE.json" };
     },
     applyPure: (repo, run2, dossier, raw) => {
-      const byId = new Map(buildGuardMatrix(scanRepo2(repo), "throttle").map((r) => [r.id, r]));
+      const byId = new Map(buildGuardMatrix(scanRepo2(repo), "throttle", [], { detected: detectedIds(dossier.manifest.frameworks) }).map((r) => [r.id, r]));
       const discoveries = rowsOf("throttle", parseGuardVerdicts(raw, "throttle")).filter((r) => r.verdict === "unthrottled").map((r) => {
         const at = byId.get(r.id);
         return at ? guardDiscovery(at, r.note, "throttle") : void 0;

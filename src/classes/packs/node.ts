@@ -170,6 +170,12 @@ export const NEXT_AUTH_PACK: Pack = {
   library: "next-auth",
   testedWith: ">=4 <6",
   sources: ["https://github.com/nextauthjs/next-auth"],
+  // `getServerSession` (v4) is NextAuth's alone; v5's `auth()` and `getToken`
+  // are names any codebase might use, so they count only where NextAuth is declared.
+  markers: {
+    global: { auth: { words: ["getServerSession"] } },
+    detected: { auth: { patterns: [/\bawait\s+auth\s*\(\s*\)/, /\bgetToken\s*\(/] } },
+  },
   classes: {
     "session-cookie-chunks-on-logout": {
       rules: [
@@ -271,6 +277,7 @@ export const EXPRESS_PACK: Pack = {
   framework: "express",
   testedWith: ">=4 <6",
   sources: ["https://expressjs.com/en/advanced/best-practice-security.html"],
+  markers: { global: { auth: { words: ["passport\\.authenticate"] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -319,6 +326,7 @@ export const NESTJS_PACK: Pack = {
   framework: "nestjs",
   testedWith: ">=9 <13",
   sources: ["https://docs.nestjs.com/security/helmet"],
+  markers: { global: { auth: { annotations: ["UseGuards"] } }, detected: { auth: { words: ["AuthGuard"] } } },
   classes: {
     "security-headers-absent": {
       rules: [
@@ -458,4 +466,30 @@ export const KOA_PACK: Pack = (() => {
 export const HONO_PACK = ctorPack("hono", /\bnew\s+Hono\s*\(/, ">=3 <5");
 export const ELYSIA_PACK = ctorPack("elysia", /\bnew\s+Elysia\s*\(/, ">=0.7 <2");
 
-export const NODE_PACKS: Pack[] = [NODE_PACK, NEXTJS_PACK, EXPRESS_PACK, NESTJS_PACK, FASTIFY_PACK, KOA_PACK, HONO_PACK, ELYSIA_PACK, NEXT_AUTH_PACK];
+// ── tRPC — a library's guard vocabulary ────────────────────────────────────
+// A procedure built from an authenticated base is the guard: the middleware
+// that checks the session runs before every procedure derived from it. The
+// names are conventions of the tRPC docs and templates, so they count only
+// where tRPC is declared. Source: https://trpc.io/docs/server/authorization
+export const TRPC_PACK: Pack = {
+  id: "trpc",
+  ecosystem: "node",
+  library: "trpc",
+  testedWith: ">=10 <12",
+  sources: ["https://trpc.io/docs/server/authorization"],
+  markers: { detected: { auth: { words: ["protectedProcedure", "authedProcedure", "adminProcedure", "privateProcedure"] } } },
+  classes: {},
+};
+
+export const NODE_PACKS: Pack[] = [
+  NODE_PACK,
+  NEXTJS_PACK,
+  EXPRESS_PACK,
+  NESTJS_PACK,
+  FASTIFY_PACK,
+  KOA_PACK,
+  HONO_PACK,
+  ELYSIA_PACK,
+  NEXT_AUTH_PACK,
+  TRPC_PACK,
+];

@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { buildPruneMatcher, readText, walk } from "./walk.js";
 import { isTestPath } from "./vendor/codeindex-engine.mjs";
 import { detectFrameworks, stackLabels } from "./frameworks.js";
+import { markerFor } from "./classes/markers.js";
 import { langForFile, type LangSpec } from "./lang.js";
 import { SANITIZERS, findSinks, findTextSinks } from "./catalog.js";
 import type { RepoScan } from "./scan.js";
@@ -26,42 +27,20 @@ import { byStr } from "./util.js";
 const MAX_SCAFFOLD = 40;
 const MAX_SCAFFOLD_ENTRIES = 80;
 
-// Auth / authorization markers, across ecosystems. Recall-oriented: a match is a
-// CANDIDATE protection site for the agent to confirm, not proof a route is guarded.
+// Auth / authorization and rate-limiting markers. Recall-oriented: a match is
+// a CANDIDATE protection site for the agent to confirm, not proof a route is
+// guarded.
 //
-// Exported as `AUTH_MARKER` because the guard matrix (`guards.ts`) asks the other
-// half of the same question — which of these markers is in scope for which entry
-// point. Two copies of this vocabulary would let the context brief and the matrix
-// disagree about what a protection even looks like.
-//
-// The annotations sit in their own alternative, outside the leading `\b`. Inside
-// it they could never match where they are written: `\b` before `@` needs a word
-// character on its left, and an annotation is preceded by indentation or nothing.
-// `@Secured("ROLE_ADMIN")` — the whole guard, with no call-site twin in the body —
-// was invisible to both the brief and the matrix.
-//
-// `getServerSession` is NextAuth's server-side session read — the canonical
-// first line of a guarded Route Handler or Server Action, and the only thing
-// that tells one from an open one. NextAuth v5's `auth()` is the same check under
-// a name too generic to match on.
-export const AUTH_MARKER =
-  /\b(requireAuth|requiresAuth|isAuthenticated|ensureAuthenticated|ensureLoggedIn|ensureLogin|requireLogin|checkAuth|verifyToken|verifyJwt|jwtVerify|authenticateToken|authMiddleware|requireRole|requireAdmin|hasRole|hasPermission|checkPermission|authorize|authorization|passport\.authenticate|getServerSession|login_required|permission_required|before_action|authenticate_user!|current_user)\b|(?<![\w@])@(?:UseGuards|PreAuthorize|Secured|RolesAllowed)\b/;
-
-// Rate-limiting / throttling markers, the same shape of vocabulary for the other
-// absence the matrix can enumerate.
-//
-// "No throttling anywhere" is a FACT about an application, and a real audit
-// established it with `grep -E 'rate|429'` returning nothing — then wrote it up
-// as one medium finding, correctly. Nothing in the engine could produce that
-// fact, so the coverage matrix carried "missing rate limiting" as advice in a
-// hint string and no run ever answered it.
-//
-// `429` earns its place: a repo that answers `TooManyRequests` anywhere has a
-// limiter, whatever it is called. It is matched as a bare number only next to a
-// status-shaped context, since a bare 429 in a fixture or a phone number would
-// otherwise read as a protection.
-export const THROTTLE_MARKER =
-  /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/;
+// The vocabulary lives in src/classes/markers.ts: a generic floor plus the
+// names each pack contributes for its framework or library. These two exports
+// are the vocabulary EVERY repository gets (floor + the packs' unambiguous
+// names) — the guard matrix (`guards.ts`) and the dossier read the same one, so
+// the brief and the matrix cannot disagree about what a protection looks like.
+// Where the stack is known, `markerFor(lens, detected)` adds the names that
+// only mean something for that stack (NextAuth v5's `auth()`, tRPC's
+// `protectedProcedure`, a Laravel `->middleware('auth')`).
+export const AUTH_MARKER = markerFor("auth");
+export const THROTTLE_MARKER = markerFor("throttle");
 
 /**
  * The stack the brief names: every web framework and library of the one stack
@@ -71,8 +50,9 @@ export const THROTTLE_MARKER =
  * dependencies in the workspace packages, not the root, which is why the whole
  * tree is read.
  */
-function detectStackLabels(repo: string): string[] {
-  return stackLabels(detectFrameworks(repo));
+function detectStack(repo: string): { labels: string[]; ids: string[] } {
+  const stack = detectFrameworks(repo);
+  return { labels: stackLabels(stack), ids: stack.map((f) => f.id) };
 }
 
 function appliesTo(languages: string[], langId: string): boolean {
@@ -169,7 +149,9 @@ function capBySite<T extends { file: string; line: number; kind?: string }>(item
 }
 
 export function buildContextScaffold(repo: string, scan: RepoScan, surface: AttackSurface): ContextScaffold {
-  const frameworks = detectStackLabels(repo);
+  const stack = detectStack(repo);
+  const frameworks = stack.labels;
+  const authMarker = markerFor("auth", stack.ids);
 
   // ONE entry point per (file, kind), selected by rank, presented by path.
   //
@@ -227,7 +209,7 @@ export function buildContextScaffold(repo: string, scan: RepoScan, surface: Atta
     const lines = readText(join(repo, fileScan.rel)).split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i]!;
-      const am = AUTH_MARKER.exec(line);
+      const am = authMarker.exec(line);
       if (am) authMiddleware.push({ file: fileScan.rel, line: i + 1, hint: am[0] });
       for (const rule of SANITIZERS) {
         if (!appliesTo(rule.languages, spec.id)) continue;
