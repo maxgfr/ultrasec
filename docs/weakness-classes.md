@@ -204,7 +204,7 @@ The auditor answers in the same `INVESTIGATE.json`:
 
 Discoveries go through the usual ingest (citation checked, duplicates folded, then
 `verify`/`check`). Idioms are citation checked the same way and merged into the run's
-`PACK-SUGGESTIONS.json`:
+`.work/PACK-SUGGESTIONS.json`:
 
 ```json
 {

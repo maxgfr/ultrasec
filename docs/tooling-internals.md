@@ -39,7 +39,7 @@ which knows nothing of the scan flags. Likewise the three passes that match call
 catalog (`enumerateTaint`, `enumerateSinkCandidates`, `enumerateSensitiveLogCandidates`) accept a
 shared `FileFacts` (`createFileFacts(scan)`) so file contents, line tables and sink hits are computed
 once per run; each builds a private one when none is passed. Per-stage wall-clock is written to
-`<run>/cache/timings.json` and echoed on stderr for stages over a second — never into the manifest
+`<run>/.work/cache/timings.json` and echoed on stderr for stages over a second — never into the manifest
 or stdout, both of which are byte-compared.
 
 
@@ -53,7 +53,7 @@ order, whatever order the processes finished in. `onProgress` fires as things ha
 the start/done lines interleave; `detect()` (the `--version` probe) is memoized per process and
 reset at the top of every `scan` and after `tools --upgrade`.
 
-Under `--resume`, an adapter that declares `cacheable` is replayed from `<run>/cache/tools-cache.json`
+Under `--resume`, an adapter that declares `cacheable` is replayed from `<run>/.work/cache/tools-cache.json`
 when its key matches: adapter name, detected version, exact argv, `git rev-parse HEAD`, the walk
 digest (every file's path, size and mtime) and the prune flags. A hit carries `· cached (--resume)`
 in its note, visible in `toolStatus`. Only the scanners whose output is a pure function of the tree
@@ -65,8 +65,8 @@ either: the image is a rolling `latest`.
 ## Supply-chain audit: SBOM (syft) + package-checker
 
 When `syft` is installed, `scan` generates a CycloneDX SBOM (`sbom.cdx.json`)
-before running the adapters — a dossier deliverable in its own right (linked
-from `DOSSIER.md`), and faster input for the two adapters that can consume it
+before running the adapters — an artifact in its own right (named in the
+`DOSSIER.md` index header; `clean` removes it, so copy it out), and faster input for the two adapters that can consume it
 instead of re-walking the tree themselves: grype switches its `argv` to
 `sbom:<path>` mode, and package-checker appends it as an extra `--source`
 alongside its default GHSA/OSV feed. Absence is the normal path — most hosts

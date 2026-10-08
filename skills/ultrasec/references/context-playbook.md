@@ -15,8 +15,9 @@ ultrasec context --repo . --out .ultrasec
 ```
 
 Writes `CONTEXT.scaffold.json` (frameworks, entry points, auth-middleware candidates, sanitizers,
-inferred trust boundaries — shape in [schemas.md](schemas.md)) and `CONTEXT.todo.md`. The
-scaffold is deterministic pattern-matching: it tells you where to look, not what's true.
+inferred trust boundaries — shape in [schemas.md](schemas.md)) and prints the `CONTEXT.md`
+outline to fill (`CONTEXT.todo.md` only with `--md`). The scaffold is deterministic
+pattern-matching: it tells you where to look, not what's true.
 
 `entryPoints` is a **capped brief**, not the surface: one line per file, ranked by attack surface
 (HTTP and cross-origin kinds before env/CLI reads, which presume a much narrower attacker). The CLI

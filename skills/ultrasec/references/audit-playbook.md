@@ -4,22 +4,54 @@ The everyday workflow: narrow the repo to a handful of evidence-backed candidate
 each from the real code, gate, and report. Commands are shown as `ultrasec …`; run the engine by
 its absolute path (see [SKILL.md](../SKILL.md)).
 
+## 0. One command, one report
+
+```
+ultrasec audit --repo . --out .ultrasec               # → .ultrasec/REPORT.md + a status line
+ultrasec audit --repo . --out .ultrasec --keep-work   # keep the worklists to adjudicate
+```
+
+`audit` runs the real `scan`, `check`, and writes the report, then removes every intermediate:
+what is left is `REPORT.md` (or `REPORT.html` with `--html`), `findings.json` and
+`manifest.json`. It calls no agent and no model. With nothing adjudicated, the report opens with
+a DRAFT banner and the status line says why — it is the keyless baseline, not an audit.
+
+To adjudicate, pass `--keep-work` (`.work/` stays and every stage's JSON worklist is emitted),
+work steps 4–8 below on those worklists, then:
+
+```
+ultrasec render --run .ultrasec    # the same single report, now with your verdicts
+ultrasec clean --run .ultrasec     # back to the deliverables only
+```
+
+Re-running `audit` on the same `--out` merges, so applied verdicts survive (`--fresh` starts
+over). The step-by-step commands below are what `audit` sequences, for when you drive each stage.
+
+### Token economy
+
+Never open `findings.json`, `.work/graph.json` or a dossier in bulk: on one monorepo the findings
+were 2 MB, the graph 2.7 MB, the full dossier 1.2 MB. `DOSSIER.md` is now an index — read it as
+one. List with `paths`, read one candidate with `dossier <id> --brief`, and fill
+each `*.todo.json` directly — its shape is in [schemas.md](schemas.md). The `.md` briefs (`--md`)
+and the report are for humans.
+
 > **What did this run cover?** Every command that names a run directory appends to
-> `<run>/JOURNAL.md` — command, headline result, refused `--apply` rows, exit code. Read it
+> `<run>/.work/JOURNAL.md` — command, headline result, refused `--apply` rows, exit code. Read it
 > before you trust a run you didn't watch, and pass `--report <file>` to archive any single
-> command's output. Both are additive; `--no-journal` opts out.
+> command's output. Both are additive; `--no-journal` opts out. `clean`, and `audit` without
+> `--keep-work`, remove `.work/`, journal included.
 
 > **Optional stages, all additive.** `context` (trust model), `triage` (cheap noise cut),
 > `investigate` (the classes the engine can't enumerate), `revalidate` (git-history FP cut),
 > `narrative` + `implement` (report and remediation plan). A quick audit can skip all of them;
-> `run` sequences them all. For a thorough one, escalate to
+> `run` and `audit` sequence them all. For a thorough one, escalate to
 > [deep-audit-playbook.md](deep-audit-playbook.md); for a repo too big to scan whole, start at
 > [scale-audit-playbook.md](scale-audit-playbook.md).
 
 ## 1. Prime the context (highest leverage)
 
 ```
-ultrasec context --repo . --out .ultrasec     # → CONTEXT.scaffold.json + CONTEXT.todo.md
+ultrasec context --repo . --out .ultrasec     # → CONTEXT.scaffold.json + the outline on stdout
 # author .ultrasec/CONTEXT.md
 ```
 
@@ -152,7 +184,7 @@ editing bypasses the citation gate and breaks the content-derived `id` that make
 ## 7. Verify and gate
 
 ```
-ultrasec verify --run .ultrasec                        # → VERIFY.todo.json + VERIFY.md
+ultrasec verify --run .ultrasec                        # → VERIFY.todo.json (--md adds VERIFY.md)
 # write verdicts.json — shape in references/schemas.md
 ultrasec verify --apply verdicts.json --run .ultrasec
 ```
@@ -186,29 +218,36 @@ and fix it, or drop the finding.
 ## 10. Narrate, render and present
 
 ```
-ultrasec narrative --run .ultrasec                                # → author NARRATIVE.json
-ultrasec render --run .ultrasec --narrative NARRATIVE.json        # SUMMARY/REPORT.md + index.html
+ultrasec narrative --run .ultrasec    # → author .ultrasec/NARRATIVE.json
+ultrasec render --run .ultrasec       # → REPORT.md (folds NARRATIVE.json); --html for REPORT.html
 ```
 
-The report is organised by the same three surfaces as step 5, in the order a reader needs them:
+One file, in the order a reader needs it — status line (and DRAFT banner with its reasons), then:
 
-1. **Incomplete-audit banner**, if any HIGH/CRITICAL code candidate is unread.
-2. **Summary** — one card per surface with its severity bar and adjudication state.
-3. **Confirmed** and **Needs human review** — full cards, every surface together, because these
-   are already decided and there are few of them.
-4. **Your source code** — the entry-point table first (one row per `path[0]`, so the attacker's
-   view opens the section), then a card with its source→sink diagram per HIGH/CRITICAL family,
-   then the lower severities in a fold.
-5. **Secrets & configuration**, then **Dependency advisories** in a closed fold, per package.
-6. **Refuted**, the AI narrative sections, and the coverage matrix.
+- §1 **Executive summary** · §2 **Dashboard** (severity × decision state, surface table, by
+  area) · §3 **Attack chains** · §4 **Follow-up vs previous audit** (fixed / still present /
+  escalated / new).
+- §5 **Detailed findings** — code surface, by severity then area, one card per family: CWE, OWASP
+  item, priority P0–P3, effort, verdict, sources, first 10 locations, attacker scenario, fix and
+  patch, evidence. Then the undecided source-code candidates (top 20 HIGH+, then by shape).
+- §6 **Secrets & history** (locations, never values) · §7 **CI/CD & infrastructure** ·
+  §8 **Dependencies**, one row per package, capped at 100.
+- §9 **Hardening notes** · §10 **Coverage & limits** · §11 **Remediation plan** (root causes,
+  then P0…P3 checklists).
+- Annexes: **A** dismissals, *summarised* by ground, producer and shape · **B** needs-human, one
+  line each · **C** engines & usage · **D** revalidation table (`--full` only).
 
-**`render` exits 1 while a HIGH/CRITICAL code candidate has no verdict.** It writes SUMMARY.md,
-REPORT.md and index.html anyway and stamps the same warning into all three — an exit code is gone
-the moment the terminal scrolls, and the HTML is what gets shared. Go back to step 5, or pass
-`--draft` if an incomplete audit is genuinely what you meant, and say so when you present it.
+`--full` restores the exhaustive annexes; `--legacy` the previous three-file, per-surface report.
+Priorities and the exact columns are in [commands.md](commands.md#render---run-dir).
 
-Present the SUMMARY counts, each confirmed finding with its cross-file and exploit path, the
-needs-human list, the coverage caveats from step 3, and the run folder. Writing guidance:
+**`render` exits 1 while a HIGH/CRITICAL code candidate has no verdict.** It writes the report
+anyway, with the same warning as a DRAFT banner — an exit code is gone the moment the terminal
+scrolls, and the file is what gets shared. Go back to step 5, or pass `--draft` if an incomplete
+audit is genuinely what you meant, and say so when you present it.
+
+Present the status line and dashboard counts, each confirmed finding with its cross-file and exploit path, the
+needs-human list, the coverage caveats from step 3, and the report path. Then
+`ultrasec clean --run .ultrasec` leaves only the deliverables. Writing guidance:
 [narrative-playbook.md](narrative-playbook.md); citation contract:
 [citation-format.md](citation-format.md).
 

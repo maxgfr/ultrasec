@@ -63,6 +63,9 @@ gate failed · **2** usage/runtime error. Full flags, defaults and artifacts:
 ## Cheat sheet
 
 ```bash
+ultrasec audit   --repo . --out .ultrasec       # ONE command → .ultrasec/REPORT.md, nothing else kept
+  # --html (REPORT.html) · --full (exhaustive annexes) · --keep-work (keep the JSON worklists)
+  # --powered <cli> / --council "<reviewer:model,…>" (opt-in agent calls) · scan flags pass through
 ultrasec tools                                  # which scanners are installed (+ --upgrade)
 ultrasec map     --repo . --out .ultrasec       # cheap attack-surface recon; no taint, no network
 ultrasec context --repo . --out .ultrasec       # scaffold → you author .ultrasec/CONTEXT.md
@@ -93,17 +96,17 @@ ultrasec coverage --run .ultrasec               # standards matrix: what was NOT
   # standard: --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25   (default asvs)
 ultrasec check   --run .ultrasec --semantic     # THE GATE: grounded + adjudicated (--min-severity)
 ultrasec narrative --run .ultrasec              # → you author NARRATIVE.json
-ultrasec render  --run .ultrasec --narrative NARRATIVE.json  # SUMMARY/REPORT.md + index.html
-  # exits 1 while a HIGH/CRITICAL CODE candidate is unread (files still written); --draft to accept it
+ultrasec render  --run .ultrasec                # THE report: REPORT.md (--html), folds NARRATIVE.json
+  # exits 1 while a HIGH/CRITICAL CODE candidate is unread (DRAFT banner written); --draft to accept it
 ultrasec implement --run .ultrasec              # remediation-PRD draft → the `to-prd` skill
 ultrasec run     --repo . --out .ultrasec       # sequence every stage (ZERO external calls)
 ultrasec orchestrate --run .ultrasec --phase verify   # emit the multi-agent fan-out (--surface code)
 ultrasec council --run .ultrasec                # other model families review a HEAD snapshot (--models, --apply)
 ultrasec logs    ./var/log --out .ultrasec-logs # blue team: forensics over EXISTING log files
   # detections: --sigma → ultrasec-logs.sigma.yml (SIEM pack, like variants→semgrep)
-  # anywhere: --report out.md|html|json (archive this output)  --no-journal (skip JOURNAL.md)
+  # anywhere: --report out.md|html|json (archive this output)  --no-journal  --md (worklist briefs)
 ultrasec import  findings.json --run .ultrasec  # ingest a deepsec export as candidates
-ultrasec clean   --run .ultrasec                # keeps REPORT/SUMMARY/index.html/findings/JOURNAL
+ultrasec clean   --run .ultrasec                # keeps REPORT, findings, manifest, CONTEXT, NARRATIVE
 ultrasec probe   https://you-own-this --i-own-this   # DYNAMIC live-site posture → PROBE.json (isolated)
   # probe: --allow-private (localhost)  --graphql  --deep (exposed files)  --timeout ms  --strict
 ultrasec route   app.apk | ./bin/x.so | https://host # OUT-OF-SCOPE triage → methodology + tools (advisory)
@@ -112,8 +115,8 @@ ultrasec route   app.apk | ./bin/x.so | https://host # OUT-OF-SCOPE triage → m
 
 ## Route by situation
 
-1. **"Audit this repo"** — the standard single pass: `context` → `scan` → adjudicate → `verify` →
-   `check` → report. [references/audit-playbook.md](references/audit-playbook.md).
+1. **"Audit this repo"** — `audit --keep-work`, adjudicate the JSON worklists, `render`, `clean`:
+   one REPORT.md. [references/audit-playbook.md](references/audit-playbook.md).
 2. **"Be thorough" / high-assurance** — decompose by class and entry point, fan out analyzer +
    skeptic subagents, loop until dry:
    [references/deep-audit-playbook.md](references/deep-audit-playbook.md).
@@ -147,7 +150,7 @@ ultrasec route   app.apk | ./bin/x.so | https://host # OUT-OF-SCOPE triage → m
 
 ## Workflow (standard audit)
 
-You are invoked to return a grounded, cited audit — don't hand back control mid-run. Every stage
+Return a grounded, cited audit — don't hand back control mid-run. Every stage
 is additive; use the subset the task needs. Each has the same shape: the engine **emits** a
 worklist → you **fill** it → `--apply` folds it back under a conservative rule. Exact JSON for
 each: [references/schemas.md](references/schemas.md).
@@ -164,9 +167,8 @@ each: [references/schemas.md](references/schemas.md).
    highest-leverage); with the user's consent, `tools --upgrade` (`--dry-run` previews).
 
 3. **Check the run is real** — before reading a single finding, open `<run>/manifest.json`:
-   - `extraction.ast: false` ⇒ tree-sitter was unavailable and the **regex** extractors ran. On a
-     69-file TypeScript repo that is 27 taint candidates instead of 66, with every critical
-     cross-file command-injection candidate missing. Re-run with the grammars, or say so.
+   - `extraction.ast: false` ⇒ tree-sitter was unavailable and the **regex** extractors ran —
+     less than half the cross-file flows. Re-run with the grammars, or say so.
    - `truncation` non-zero ⇒ a cap was hit; raise `--max-candidates` or narrow `--scope`.
    - `toolStatus` ⇒ which scanners ran, which were skipped (a coverage hole), which failed.
    - `weaknessClasses` ⇒ a `degraded`/`not-covered` cell is a gap `investigate` hunts;
@@ -174,8 +176,9 @@ each: [references/schemas.md](references/schemas.md).
 
    A degraded run must never be reported as a complete one.
 
-4. **Read the dossier.** Open `<run>/DOSSIER.md` — candidates ordered by risk, each with its
-   cross-file path. Don't bulk-load `graph.json`.
+4. **Read the index, not the data.** `<run>/DOSSIER.md` is one ranked line per candidate. Never
+   open `findings.json` or `.work/graph.json` whole: use `paths`, `dossier <id> --brief`, and
+   fill the `*.todo.json` worklists directly (`--md` adds human briefs nobody else needs).
 
 5. **Triage (optional).** `triage --run <run>`, mark `noise|keep`, `triage --apply`. Clears only
    low/medium/info; a high/critical `noise` is **ignored** and goes to full verify.
@@ -232,14 +235,13 @@ each: [references/schemas.md](references/schemas.md).
    and what it did not. A short report reads as "nothing there" when it means "nothing there, in
    what I looked at"; the matrix separates the two. Folded into REPORT.md automatically.
 
-11. **Narrate & render.** `narrative --run <run>`, author `NARRATIVE.json` (executive summary,
-    `positivePatterns`, fixes, attack chains, root causes, `hardeningNotes`), then `render --run
-    <run> --narrative NARRATIVE.json`. The report is organised by surface: your code first with
-    its entry-point table, then secrets/CI/IaC, then advisories folded one row per package.
-    **It exits 1 while a HIGH/CRITICAL code candidate is unread** — files still written, reason
-    stamped in them — so go back to step 6, or pass `--draft` and say so. Present the SUMMARY, the
-    confirmed findings with their exploit paths, the needs-human list and the run folder.
-    [references/narrative-playbook.md](references/narrative-playbook.md).
+11. **Narrate & render.** `narrative --run <run>`, author `<run>/NARRATIVE.json` (summary,
+    fixes with `effort`, chains, root causes, `hardeningNotes`), then `render --run <run>` →
+    ONE `REPORT.md` (`--html`): findings by severity and area with scenario · fix · priority,
+    dependencies one row per package, a P0–P3 plan; dismissals summarised (`--full` for all).
+    **It exits 1 while a HIGH/CRITICAL code candidate is unread** — DRAFT banner written — so go
+    back to step 6, or pass `--draft` and say so. Then `clean`. Present the report path, the
+    confirmed findings and the needs-human list. [references/narrative-playbook.md](references/narrative-playbook.md).
 
 12. **Plan the fixes (optional).** `implement --run <run>` → `IMPLEMENT.md`, a remediation-PRD
     draft grouped by root cause. Feed it to the `to-prd` skill or an implementer.
@@ -258,9 +260,9 @@ ultrasec orchestrate --run <dir> [--phase adjudicate|verify|revalidate|investiga
 
 | Your harness | How to run each judgment phase |
 |---|---|
-| Claude Code exposes Workflow | `orchestrate --run <run> --phase <p>`, then `Workflow({ scriptPath: "<run>/orchestration/<p>.workflow.mjs" })`. Subagents RETURN verdict/discovery fragments; merge them into one apply file yourself, then run the `--apply` fold shown at the end of the workflow. |
-| Codex/other host has subagents | Same `orchestrate`; dispatch one subagent per batch following `<run>/orchestration/agents/<role>.md` (the workflow script shows batches + prompts). One writer: you merge and fold. |
-| Eco mode, or no subagents | `orchestrate --run <run> --eco` → follow `<run>/orchestration/RUNBOOK.md` sequentially, playing each role yourself. Correctness-identical; only wall-clock differs. |
+| Claude Code exposes Workflow | `orchestrate --run <run> --phase <p>`, then `Workflow({ scriptPath: "<run>/.work/orchestration/<p>.workflow.mjs" })`. Subagents RETURN verdict/discovery fragments; merge them into one apply file yourself, then run the `--apply` fold shown at the end of the workflow. |
+| Codex/other host has subagents | Same `orchestrate`; dispatch one subagent per batch following `<run>/.work/orchestration/agents/<role>.md` (the workflow script shows batches + prompts). One writer: you merge and fold. |
+| Eco mode, or no subagents | `orchestrate --run <run> --eco` → follow `<run>/.work/orchestration/RUNBOOK.md` sequentially, playing each role yourself. Correctness-identical; only wall-clock differs. |
 
 Fan-out is an optimization, never a requirement — every phase has a sequential fallback with
 identical artifacts. Subagents never write: the contracts end with the one-writer rule (read-only
@@ -274,7 +276,7 @@ idempotent); `--phase <p>` before its worklist exists fails and names the comman
 |---|---|
 | `scan` found 0 candidates | Check `manifest.extraction.ast` (regex tier?) and `languages` — an unsupported stack yields no graph. Try `--sinks`, and hunt manually with `investigate`. |
 | Far fewer candidates than expected | Same, plus `truncation` (a cap was hit) and `--scope`/`--gitignore` pruning more than you meant. |
-| `toolStatus` shows everything skipped | No scanners installed — `tools` for install hints, or `scan --docker`. The taint core is unaffected. |
+| `toolStatus` shows everything skipped | No scanners installed — `tools` for hints, or `scan --docker`. |
 | `check` keeps failing | A cited `[file:line]` doesn't resolve: the file moved, the line is out of range, or it was invented. Reopen `dossier <id>`, fix the citation, or drop the finding. |
 | `check --semantic` fails | Candidates are still `open`. Adjudicate them, or clear the obvious ones with `triage`. |
 | `--apply` exits 2 | Fail-closed: malformed file, or no id in it matches the dossier (stale fragments). Re-emit the worklist and refill. |
@@ -299,11 +301,9 @@ idempotent); `--phase <p>` before its worklist exists fails and names the comman
 8. **Skipping `context`.** Without a trust model you are rating in the abstract.
 9. **Hunting only what the engine listed.** It finds PATTERNS, not ABSENCES — run `guards`, both
    lenses. A FAILED scanner is the same trap: a hole that reads like an empty result.
-10. **Rendering a dump, or spending the audit on the CVE list.** One run went `scan` → `guards`
-   → `render` and shipped 882 candidates, none adjudicated, every *why* cell a dash, under "No
-   confirmed issues" — which reads as a clean bill of health and meant nobody had looked. The
-   advisories were most of that count and the least of its value: they come ranked, the flows do
-   not. Read the code first; don't reach for `--draft` to silence the gate.
+10. **Rendering a dump, or spending the audit on the CVE list.** One run shipped 882 candidates,
+   none adjudicated, under "No confirmed issues" — nobody had looked. Advisories come ranked, the
+   flows do not: read the code first; don't reach for `--draft` to silence the gate.
 
 ## Do not
 

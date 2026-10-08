@@ -23,11 +23,11 @@ what the ranking is for.
 
 ### The report already groups them
 
-`render` rolls the advisories up **one row per package** — the unit you actually upgrade — with
-the installed versions, the advisory count, the highest fixed version across the cluster, the
-KEV/EPSS/dev-only signals, and every lockfile the correlator merged. `minimatch` with seven
-advisories is one row and one upgrade, not seven decisions. Open the row's fold for the individual
-CVEs; `findings.json` still holds each one under its own id.
+`render` rolls the advisories up **one row per package** in §8 of `REPORT.md` — the unit you
+actually upgrade — with its priority, worst severity, installed versions, advisory count, main
+advisory, the version to upgrade to, runtime or not, target and status, capped at 100 rows.
+`minimatch` with seven advisories is one row and one upgrade, not seven decisions. The individual
+CVEs stay in `findings.json` under their own ids; list them with `paths --surface deps`.
 
 The render gate does not count an `open` tail: it only fires on unread HIGH/CRITICAL candidates
 in code you wrote. `check --semantic` does count it, so adjudicate the tail per package from a
@@ -206,10 +206,11 @@ statement about what it exposes is a checklist item, not a finding.
 
 ## SBOM
 
-With `syft` installed, `scan` emits `sbom.cdx.json` (CycloneDX) as a dossier deliverable and
+With `syft` installed, `scan` emits `sbom.cdx.json` (CycloneDX) into the run directory and
 feeds it to grype (`sbom:` mode) and package-checker (`--source`) instead of re-walking the tree.
 Beyond speed, it is the artifact that answers "were we affected?" the next time a Log4Shell-class
-advisory lands — attach it to the report.
+advisory lands — attach it to the report. It is an intermediate to `clean` and to `audit` without
+`--keep-work`, so copy it out first.
 
 ## Per-tool false-positive profiles
 

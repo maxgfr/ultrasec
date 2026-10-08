@@ -21,34 +21,40 @@ Pipeline:
 
 ```
 ultrasec scan       --repo examples/vuln-express --out run --tools none --offline
-ultrasec verify     --run run                      # → VERIFY.todo.json + VERIFY.md
+ultrasec verify     --run run                      # → VERIFY.todo.json (JSON only; --md adds VERIFY.md)
 #   (the AI adjudicates each candidate → verdicts.json)
 ultrasec verify     --apply verdicts.json --run run
 ultrasec revalidate --run run                      # git facts per promoted finding
 ultrasec revalidate --apply REVALIDATE.json --run run
 ultrasec check      --run run --semantic           # exit gate: grounded + adjudicated
 ultrasec narrative  --run run                      # → author NARRATIVE.json
-ultrasec render     --run run --narrative NARRATIVE.json
+ultrasec render     --run run --narrative NARRATIVE.json --md --html   # one format is the default; both shown here
 ultrasec implement  --run run --narrative NARRATIVE.json
 ```
+
+The same run in one command is `ultrasec audit --repo examples/vuln-express --out run
+--keep-work` (then the authored files above, `--apply`, and `render`); without
+`--keep-work` the run ends with only the report, `findings.json` and `manifest.json`.
 
 | file | what |
 |------|------|
 | `CONTEXT.md` | **authored** — the project-context primer (trust model, framework protections), injected into every dossier + worklist |
 | `manifest.json` | run metadata, severity counts, and the extraction tier the scan actually used |
-| `DOSSIER.md` | the always-loadable index of candidates the AI reads first |
+| `DOSSIER.md` | the compact ranked index of candidates — one line each; open one with `ultrasec dossier <id>` |
 | `findings.json` | every finding, after verdicts applied |
-| `graph.json` | the cross-file link-graph |
-| `VERIFY.todo.json` / `VERIFY.md` | the adversarial worklist |
+| `VERIFY.todo.json` | the adversarial worklist |
 | `verdicts.json` | **authored** — the adjudication |
-| `REVALIDATE.todo.json` / `REVALIDATE.md` | per-finding git facts for the false-positive cut |
+| `REVALIDATE.todo.json` | per-finding git facts for the false-positive cut |
 | `REVALIDATE.json` | **authored** — the revalidation verdicts |
-| `NARRATIVE.todo.json` / `NARRATIVE.md` | the report-narrative worklist |
+| `NARRATIVE.todo.json` | the report-narrative worklist (reportable ids + a scaffold) |
 | `NARRATIVE.json` | **authored** — exec summary, positive patterns, fixes, attack chain, root causes, hardening notes |
-| `SUMMARY.md` / `REPORT.md` | the tiered report (AI sections clearly marked) |
-| `index.html` | self-contained report (open in a browser) |
+| `REPORT.md` | **the report** — summary, dashboard, chains, follow-up, findings (scenario · fix · effort · priority), secrets, CI/CD, dependencies, hardening, coverage, remediation plan, annexes |
+| `REPORT.html` | the same report as one self-contained page (open in a browser) |
 | `IMPLEMENT.md` | the remediation-PRD draft — feed to the `to-prd` skill |
 | `IMPLEMENT.todo.json` | the structured remediation worklist |
+
+The link-graph and the rest of the engine's own state live under the run's `.work/`
+folder and are not part of the example.
 
 ## What the example demonstrates
 

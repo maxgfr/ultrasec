@@ -33,7 +33,7 @@ an **optimization, not a requirement**:
   artifacts; only wall-clock differs.
 
 > `ultrasec orchestrate --run <run>` now EMITS this fan-out ready to launch — the
-> analyzer/skeptic contracts below (as `<run>/orchestration/agents/analyzer.md` /
+> analyzer/skeptic contracts below (as `<run>/.work/orchestration/agents/analyzer.md` /
 > `skeptic.md`, plus revalidator + hunter), one `<phase>.workflow.mjs` per ready
 > worklist with the real item ids batched in, and a sequential `RUNBOOK.md` fallback
 > (`--eco`). Subagents return fragments; every `--apply` fold stays with you.
@@ -47,6 +47,7 @@ an **optimization, not a requirement**:
 
 1. **Scan once.** `scan --repo <dir> --out <run> --tools auto`. This builds the
    shared link-graph + the candidate dossier + the tool findings everyone reuses.
+   (`audit --repo <dir> --out <run> --keep-work` does the same and also emits every worklist.)
    `map` first (even when scanning whole) is a fast way to see the entry-point and
    sink clusters before decomposing.
 
@@ -62,7 +63,7 @@ an **optimization, not a requirement**:
      which files each touches.
 
 3. **Fan out — one analyzer per facet.** `orchestrate --run <run> --phase adjudicate` emits the
-   analyzer contract (`<run>/orchestration/agents/analyzer.md`) with the real ids batched and
+   analyzer contract (`<run>/.work/orchestration/agents/analyzer.md`) with the real ids batched and
    absolute paths baked in — **dispatch that**, don't hand-write a prompt. The emitted contract
    is generated from the same source as the apply parser, so its response schema can't drift out
    of sync with what `--apply` accepts; a hand-written one silently can.
@@ -94,9 +95,9 @@ an **optimization, not a requirement**:
    **same** run, then re-verify only the new claims. Stop when a round surfaces
    nothing new.
 
-8. **Render & present.** `render --run <run>` → `index.html` + tiered Markdown.
-   Present the SUMMARY, confirmed findings with exploit paths, and the needs-human
-   list.
+8. **Render & present.** `render --run <run>` → `<run>/REPORT.md` (`--html` for
+   `REPORT.html`). Present the status line and dashboard, confirmed findings with exploit paths,
+   and the needs-human list; then `clean --run <run>` leaves only the deliverables.
 
 ## Mapping to a workflow primitive
 

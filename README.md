@@ -96,6 +96,22 @@ External scanners are optional and auto-detected (see [Docker](#analysis-tools-v
 
 ## Quick start
 
+One command, one report:
+
+```bash
+node scripts/ultrasec.mjs audit --repo . --out .ultrasec               # → .ultrasec/REPORT.md + a status line; zero agent calls
+node scripts/ultrasec.mjs audit --repo . --out .ultrasec --html        # REPORT.html instead (self-contained, light/dark)
+node scripts/ultrasec.mjs audit --repo . --out .ultrasec --keep-work   # keep the JSON worklists to adjudicate, then render + clean
+```
+
+`audit` runs the real `scan` (every scan flag passes through), `check`, writes the report and
+removes the intermediates — what is left is `REPORT.md` (or `REPORT.html`), `findings.json` and
+`manifest.json`. Line 1 of its output is the report path, line 2 the status: `adjudicated &
+grounded`, or `DRAFT` with the reasons when candidates were never read. Re-running on the same
+`--out` merges, so applied verdicts survive (`--fresh` starts over).
+
+Step by step:
+
 ```bash
 node scripts/ultrasec.mjs tools                       # installed scanners + how to get the rest
 node scripts/ultrasec.mjs context --repo . --out .ultrasec   # project-context primer → author CONTEXT.md
@@ -108,7 +124,7 @@ node scripts/ultrasec.mjs verify --apply verdicts.json --run .ultrasec
 node scripts/ultrasec.mjs revalidate --run .ultrasec  # git-history false-positive cut (apply: REVALIDATE.json)
 node scripts/ultrasec.mjs check --run .ultrasec --semantic   # exit gate: grounded + adjudicated
 node scripts/ultrasec.mjs narrative --run .ultrasec   # author NARRATIVE.json (exec summary, fixes, chains)
-node scripts/ultrasec.mjs render --run .ultrasec --narrative NARRATIVE.json   # SUMMARY/REPORT.md + index.html
+node scripts/ultrasec.mjs render --run .ultrasec      # REPORT.md, folding NARRATIVE.json (--html: REPORT.html)
 node scripts/ultrasec.mjs implement --run .ultrasec   # remediation-PRD draft (IMPLEMENT.md) → feed to the to-prd skill
 node scripts/ultrasec.mjs coverage --run .ultrasec --standard owasp-top10   # what was NOT looked at
 node scripts/ultrasec.mjs probe https://you-own-this --i-own-this   # live-site posture → PROBE.json (isolated)
@@ -122,6 +138,7 @@ CLI to fill the worklists), use `run`:
 ```bash
 node scripts/ultrasec.mjs run --repo . --out .ultrasec    # emits every worklist + a TODO; ZERO external calls
 node scripts/ultrasec.mjs run --repo . --powered --agent claude --cross-check codex   # autonomous (keys live in the CLI)
+node scripts/ultrasec.mjs audit --repo . --powered <cli>   # the same, end to end, down to one REPORT.md
 node scripts/ultrasec.mjs council --run .ultrasec     # second opinion from other model families: plan only, ZERO calls
 node scripts/ultrasec.mjs council --run .ultrasec --models "<reviewer>:<provider>/<model>,…"   # blind reviewers on a HEAD snapshot
 ```
@@ -141,7 +158,7 @@ automatic bonus, normalized into one finding model, **de-duplicated across
 tools**, and **risk-ranked** (EPSS exploit-probability + CISA KEV + CVSS). Risk
 scoring uses cached, offline-friendly feeds — add `--no-enrich`/`--offline` to
 skip the network and rank by severity alone. When `syft` is installed, `scan`
-also emits a CycloneDX SBOM (`sbom.cdx.json`) as a dossier deliverable, fed
+also emits a CycloneDX SBOM (`sbom.cdx.json`) into the run directory, fed
 straight into grype (`sbom:` mode) and package-checker (`--source`).
 
 See [`assets/example-audit/`](assets/example-audit/) for a complete, committed run —
@@ -221,7 +238,7 @@ Twelve read tools. `ultrasec_map` is the cheap way in:
 | `ultrasec_investigate` | Where to look for authz/IDOR, business logic, crypto, races |
 | `ultrasec_revalidate` | Still valid / fixed / false positive, against current code |
 | `ultrasec_check` | The anti-hallucination gate: every `[file:line]` must resolve |
-| `ultrasec_render` | SUMMARY.md (one screen) + REPORT.md + a navigable, self-contained HTML report |
+| `ultrasec_render` | REPORT.md (or REPORT.html) — one file |
 | `ultrasec_tools` | Which external scanners are installed on this machine |
 | `ultrasec_read` | A file, or a line range, from the repo or the run |
 
@@ -528,7 +545,7 @@ ultrasec never installs anything globally, and you can remove everything it
 created — straight from the script — when you're done:
 
 ```bash
-node scripts/ultrasec.mjs clean --run .ultrasec            # remove the audit dossier
+node scripts/ultrasec.mjs clean --run .ultrasec            # keep REPORT.*, findings.json, manifest.json, CONTEXT.md, NARRATIVE.json; drop the rest
 node scripts/ultrasec.mjs clean --run .ultrasec --docker   # + pulled scanner images, toolbox image, trivy cache volume
 node scripts/ultrasec.mjs clean --docker --dry-run         # preview what would be removed
 ```
@@ -585,7 +602,7 @@ fixtures.
 | scan | engine | walk repo → cross-file/function link-graph (~15 langs) → enumerate candidate source→sink taint paths → run installed scanners → correlate across tools → EPSS/KEV/CVSS risk-rank → evidence packets |
 | adjudicate | **AI** | read the real code along each path; confirm reachability + exploitability; find authz/business-logic bugs the tools miss |
 | verify | **AI** + engine | adversarial worklist, conservative gate (uncertain high-severity → `needs-human`, never auto-dropped) |
-| report | engine | grounded, cited, tiered Markdown + self-contained HTML |
+| report | engine | one grounded, cited report — `REPORT.md`, or self-contained `REPORT.html` |
 
 ## Development
 

@@ -14,7 +14,7 @@ like everything else.
 ultrasec investigate --run .ultrasec
 ```
 
-Writes `INVESTIGATE.todo.json` + `INVESTIGATE.md`. Each region lists its files,
+Writes `INVESTIGATE.todo.json` (`--md` adds `INVESTIGATE.md`). Each region lists its files,
 graph neighbours, and a hunt prompt. Work the highest-attack-surface regions first.
 
 A **region** is a workspace package when the repo is a workspace (npm/pnpm/lerna/nx/cargo/go/
@@ -93,7 +93,7 @@ busiest files), and check every place the invariant can break.
   Report the guard even when it is applied correctly: a pack needs both halves.
 - List the hunt id in **`hunted`** when you worked it, including when you found nothing.
 
-Idioms land in `PACK-SUGGESTIONS.json` as proposals for a maintainer; nothing you suggest changes
+Idioms land in `<run>/.work/PACK-SUGGESTIONS.json` as proposals for a maintainer; nothing you suggest changes
 what the engine matches until it is promoted with fixtures. Format:
 [schemas.md](schemas.md#weakness-class-hunts-and-pack-suggestionsjson).
 

@@ -40,7 +40,7 @@ ultrasec logs <path…> [--out .ultrasec-logs] [--format F] [--budget quick|stan
 
 - `<path…>` — one or more log files and/or directories (directories expand to
   the `*.log`/`*.jsonl`/`*.txt`/text-looking files directly inside them).
-- Writes a **standard dossier** (`manifest.json`, `findings.json`, `graph.json`
+- Writes a **standard dossier** (`manifest.json`, `findings.json`, `.work/graph.json`
   — intentionally empty, `DOSSIER.md`) at `--out` (default `.ultrasec-logs`),
   plus **`LOGSTATS.json`**: per-file line counts/formats, top IPs, top request
   paths, HTTP status distribution, the run's first/last timestamps,
@@ -60,8 +60,9 @@ ultrasec logs <path…> [--out .ultrasec-logs] [--format F] [--budget quick|stan
   AWS keys, JWTs, `Authorization:` headers, query-string passwords/tokens,
   emails, Luhn-valid card numbers — become `‹REDACTED:<kind>›`). Pass
   `--no-redact` only in a trusted, throwaway environment.
-- Start with `<out>/DOSSIER.md`, then drill into individual lines from the
-  original file when you need full context (`sed -n '<line>,<line+5>p' <file>`).
+- Start with the `<out>/DOSSIER.md` index (`dossier <id>` for one finding), then
+  drill into individual lines from the original file when you need full context
+  (`sed -n '<line>,<line+5>p' <file>`).
 
 ## 3. Triage discipline, per family
 

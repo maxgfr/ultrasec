@@ -16,7 +16,7 @@ Run it *after* `verify --apply`, before the final `render`.
 ultrasec revalidate --run .ultrasec
 ```
 
-Writes `REVALIDATE.todo.json` + `REVALIDATE.md`. Per finding you get:
+Writes `REVALIDATE.todo.json` (`--md` adds `REVALIDATE.md`). Per finding you get:
 
 - `at` — the cited `file:line`.
 - `fileExists` — does the file still exist at HEAD?

@@ -1,14 +1,25 @@
 # Narrative playbook (writing the report)
 
-`render` alone produces a correct, cited, tiered report that reads like a list. `NARRATIVE.json`
+`render` alone produces a correct, cited report that reads like a list. `NARRATIVE.json`
 is what makes it a report someone acts on: what it means, what to fix, what's already good, and
 what isn't a finding at all.
 
 ```
-ultrasec narrative --run .ultrasec          # → NARRATIVE.todo.json + NARRATIVE.md
+ultrasec narrative --run .ultrasec          # → NARRATIVE.todo.json (--md adds NARRATIVE.md)
 # author <run>/NARRATIVE.json
-ultrasec render --run .ultrasec --narrative NARRATIVE.json
+ultrasec render --run .ultrasec             # folds <run>/NARRATIVE.json automatically
 ```
+
+`--narrative <file>` points `render` at a file elsewhere. Where each field lands in `REPORT.md`:
+
+| field | lands in |
+|---|---|
+| `executiveSummary` | §1 Executive summary |
+| `attackChains` | §3 Attack chains |
+| `remediations` | the **Fix** (and patch) of each finding's card in §5–§7, its **effort**, and its item in §11 Remediation plan |
+| `rootCauses` | §11 Remediation plan, before the P0…P3 checklists |
+| `positivePatterns`, `hardeningNotes` | §9 Hardening notes |
+
 
 Emit-only: nothing here changes a finding's status, severity, or the set of findings. Full field
 shape and a filled example are in [schemas.md](schemas.md).
@@ -27,9 +38,11 @@ calibrates trust in the findings you *did* report, and it stops a team reading a
 a shallow one. "Every write path outside these two goes through the parameterizing builder" tells
 a reader the two are anomalies, not the tip of an iceberg.
 
-**`remediations`** — one per confirmed finding: `{id, fix, patch?, owner?}`. The `fix` is a
-sentence a developer can act on without re-reading the finding. `patch` is a diff sketch when the
-change is small and unambiguous.
+**`remediations`** — one per confirmed finding: `{id, fix, patch?, owner?, effort?}`. The `fix`
+is a sentence a developer can act on without re-reading the finding. `patch` is a diff sketch when
+the change is small and unambiguous. `effort` is `S` (an hour, one place), `M` (a day, a few
+places) or `L` (a design change); leave it out rather than guess — the report prints "—", and a
+wrong estimate reorders the plan as surely as a wrong severity.
 
 > **Check every remediation against its CWE before you submit.** The grounding gate verifies the
 > id is confirmed; it does **not** verify the fix matches the vulnerability. A command-injection

@@ -3,6 +3,10 @@
 Every file the engine writes for you to read, and every file you write for `--apply` to fold in.
 Each entry: what produces it, the fields, and a **complete filled example** you can copy.
 
+**Worklists are JSON only.** Fill each `*.todo.json` directly from the shapes below; the `.md`
+brief that used to sit beside it (`VERIFY.md`, `TRIAGE.md`, …) is written only with `--md` (or
+`ULTRASEC_MD=1`) and is for a human reader — it repeats the same rows.
+
 Two rules apply to everything below:
 
 - **Every `--apply` parser is fail-closed on shape.** A row missing `id`, or carrying a verdict
@@ -122,7 +126,8 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   "extraction": { "tier": "cache", "ast": true },
   "passes": { "sinks": false, "logHygiene": true, "blame": false },
   "downgraded": [{ "reason": "encrypted-at-rest", "count": 41 }],
-  "sbom": "sbom.cdx.json"
+  "sbom": "sbom.cdx.json",
+  "dossier": "full"
 }
 ```
 
@@ -183,6 +188,8 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   both report zero logging findings. `coverage` reads it so it never advises you to enable an
   option you already enabled. Absent on dossiers written before schema 8 — `undefined` means
   **unknown**, never "off".
+- **`dossier?: "full"`** — set by `scan --dossier full`: `DOSSIER.md` carries the full
+  per-candidate packets instead of the default index, and every `--apply` rewrite keeps it so.
 - **`duplicateIds`** — `[{id, dropped, differing}]`, present only when `findings.json` carried the
   same id on more than one row. Every reader collapses them to one row per id (an adjudicated row
   wins over an open one), prints `✗ dropped … duplicate finding row(s)` on stderr and records it
@@ -274,7 +281,7 @@ than N identical verdicts.
 
 `verify --run <dir>` emits every finding still `open` **or `needs-human`** (a re-verify picks up
 what an earlier pass escalated). `--shards n --shard i` writes `VERIFY.todo.<i>.json` instead;
-the `.md` brief always describes the full worklist.
+the `--md` brief, when asked for, describes the full worklist.
 
 ```json
 [ { "id": "7e51071c4783", "severity": "high", "cwe": "CWE-89", "category": "taint",
@@ -368,7 +375,7 @@ in the same file, as an object:
 
 `kind` is `unsafe` (breaks the invariant) or `guard` (establishes it); `class` must be a registry
 id or `taint-catalog`. An idiom whose `file:line` does not resolve is rejected like a discovery. Accepted ones are
-merged into `<run>/PACK-SUGGESTIONS.json` — `{ schema: 1, note, hunted[], suggestions[] }`, each
+merged into `<run>/.work/PACK-SUGGESTIONS.json` — `{ schema: 1, note, hunted[], suggestions[] }`, each
 suggestion the idiom plus `evidence` (the cited line), `seenOn` (framework version) and `pack` (the
 pack it would extend). **The engine never applies a suggestion**; a maintainer promotes it into
 pack data with fixtures. `hunted` marks a hunt worked even when it found nothing.
@@ -399,8 +406,9 @@ directory/comma-list apply, same fail-closed-on-all-stale behaviour as `verify`.
 
 ## `NARRATIVE.todo.json` → `NARRATIVE.json`
 
-`narrative --run <dir>` emits the reportable findings plus a scaffold. You author the prose;
-`render --narrative` and `implement` fold it in.
+`narrative --run <dir>` emits the reportable findings plus a scaffold. You author the prose in
+`<run>/NARRATIVE.json`; `render` and `implement` fold it in automatically (`--narrative <file>`
+points elsewhere).
 
 ```json
 {
@@ -409,7 +417,7 @@ directory/comma-list apply, same fail-closed-on-all-stale behaviour as `verify`.
   "remediations": [
     { "id": "7e51071c4783", "fix": "Bind the id: conn.query('SELECT * FROM users WHERE id = ?', [id]).",
       "patch": "- const sql = \"SELECT * FROM users WHERE id = \" + id;\n+ return runQuery(\"SELECT * FROM users WHERE id = ?\", [id]);",
-      "owner": "@platform" }
+      "owner": "@platform", "effort": "S" }
   ],
   "attackChains": [
     { "title": "Unauthenticated read of any user record", "findingIds": ["7e51071c4783"],
@@ -424,6 +432,11 @@ directory/comma-list apply, same fail-closed-on-all-stale behaviour as `verify`.
   ]
 }
 ```
+
+`effort` is optional: `"S"` (an hour, one place), `"M"` (a day, a few places) or `"L"` (a design
+change). It fills the effort line of the finding's card and its item in the remediation plan.
+Anything else is dropped and the report prints "—": a wrong estimate reorders a plan as surely as
+a wrong severity does, so it is authored, never inferred.
 
 Grounding: sections that cite finding ids (`remediations`, `attackChains`, `rootCauses`) are
 checked and **dropped** if the id is unknown or not `confirmed`. The advisory prose
@@ -449,7 +462,8 @@ it never changes a status.
 
 ## `CONTEXT.scaffold.json` → `CONTEXT.md`
 
-`context --repo <dir>` emits the scaffold; **you** author `CONTEXT.md` as prose (there is no
+`context --repo <dir>` emits the scaffold and prints the `CONTEXT.md` outline (`CONTEXT.todo.md`
+only with `--md`); **you** author `CONTEXT.md` as prose (there is no
 `--apply` — it is additive evidence, injected into every later dossier and worklist, and it
 never gates a verdict).
 

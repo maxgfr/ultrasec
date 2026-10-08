@@ -16,17 +16,80 @@ Run the engine by its absolute path — see the `<skill-dir>` note in
 |---|---|
 | `--json` | machine-readable output (all but `render`/`dossier`) |
 | `--report <path>` | ALSO write this command's output to `<path>`. The extension picks the format — `.md`, `.html` (self-contained, no external assets), `.json` (the structured transcript), `.txt`/`.log`. **stdout is unchanged**; the archive is additive. An unsupported extension exits **2 before the command runs**, so a ten-minute scan never ends in an unwritable report. |
-| `--no-journal` | skip the `JOURNAL.md` entry (see below). |
+| `--no-journal` | skip the `.work/JOURNAL.md` entry (see below). |
+| `--md` | also write each worklist's human `.md` brief (`VERIFY.md`, `TRIAGE.md`, …); env `ULTRASEC_MD=1` does the same for a session. Default: worklists are JSON only. |
 
-**`<run>/JOURNAL.md`** — every command that names a run directory (`--run`, or `--out` for
+**`<run>/.work/JOURNAL.md`** — every command that names a run directory (`--run`, or `--out` for
 `scan`) appends one timestamped entry to it: the command line, its headline result, any refused
-`--apply` rows, and the exit code. Append-only, created on first use, and kept by `clean`
-alongside the other deliverables. It answers "what did this audit actually cover?" an hour later,
-when the scrollback is gone. Best-effort: a journal write never fails a command.
+`--apply` rows, and the exit code. Append-only, created on first use. It answers "what did this
+audit actually cover?" an hour later, when the scrollback is gone. Best-effort: a journal write
+never fails a command.
 
 The read-only commands — `dossier`, `graph`, `paths`, `check`, `tools` — never journal, so
 `check` keeps writing nothing and a fan-out subagent running `dossier` stays a non-writer.
-`--report` still works for them; it writes where you pointed, not into the run.
+`--report` still works for them; it writes where you pointed, not into the run. `clean`, and
+`audit` without `--keep-work`, are not journaled either: their last act is removing `.work/`, and
+a journal entry would recreate it.
+
+**Worklists are JSON only.** Each emitting command writes `<STAGE>.todo.json` and prints the
+instructions plus "fill X.todo.json directly — field-by-field format in
+[schemas.md](schemas.md)". The `.md` twin (`VERIFY.md`, `TRIAGE.md`, `GUARDS.md`, `THROTTLE.md`,
+`INVESTIGATE.md`, `REVALIDATE.md`, `NARRATIVE.md`, `VARIANTS.md`, the emit-time `ASSUMPTIONS.md`,
+`CONTEXT.todo.md`) repeated the same rows for a human reader and doubled what an agent opened; it
+is written only with `--md`. Not twins, always written: `IMPLEMENT.md` (the PRD draft), the
+`ASSUMPTIONS.md` map written by `assumptions --apply`, and the `--apply` outputs of `guards`.
+
+### Run directory layout
+
+| where | what |
+|---|---|
+| `<run>/` | `REPORT.md` / `REPORT.html`, `findings.json`, `manifest.json`, `CONTEXT.md`, `NARRATIVE.json`, `DOSSIER.md`, the `*.todo.json` worklists, `council/` |
+| `<run>/.work/` | `graph.json`, `cache/` (`scan-cache.json`, `tools-cache.json`, `timings.json`), `JOURNAL.md`, `PACK-SUGGESTIONS.json`, `orchestration/` |
+
+Internal state moved under `.work/` so the top level reads as the deliverable. An older run with
+`graph.json`, `cache/`, `JOURNAL.md`, `PACK-SUGGESTIONS.json` or `orchestration/` at the top is
+still read (new path first, legacy fallback); the next write moves the graph under `.work/` and
+deletes the top-level copy. A cleaned run (no graph) still loads and re-renders.
+
+## Audit
+
+### `audit --repo <dir>`
+**The main entry: one command, one report.** Runs the real `scan` (every scan flag passes
+through — `--offline`, `--tools`, `--scope`, `--budget`, …), then the same stage pipeline as
+`run`, then `check`, then writes the report, then removes the intermediates. What is left:
+`REPORT.md` (or `REPORT.html`), `findings.json`, `manifest.json`, plus `CONTEXT.md` /
+`NARRATIVE.json` when present.
+
+```bash
+ultrasec audit --repo . --out .ultrasec                  # keyless: REPORT.md, nothing else
+ultrasec audit --repo . --out .ultrasec --keep-work      # keep .work/ + JSON worklists to adjudicate
+ultrasec audit --repo . --out .ultrasec --powered mycli  # drive that CLI per worklist
+```
+
+`--repo` · `--out` (default `.ultrasec`) · `--html` · `--md` · `--full` · `--keep-work` ·
+`--powered <cli>` (also `--powered=<cli>` or `--powered --agent <cli>`; a bare `--powered` exits
+2) · `--cross-check <cli>` · `--council "<reviewer:model,…>"` · `--stages a,b` · `--fresh` ·
+`--strict` · `--json` · the scan flags.
+
+Why: getting a report used to take ten commands and left thirty-odd artifacts — on a
+1,245-candidate monorepo, 2.7 MB of graph, 2 MB of findings, a 1.2 MB dossier, a 746 KB report
+and every worklist twice. The reader wanted one file; the agent burned tokens opening the rest.
+
+- **Zero agent or model calls** unless `--powered` or `--council`. The scanners' network use is
+  what `scan` does; `--offline` removes it.
+- **Stages run only with `--powered` or `--keep-work`.** Keyless and not keeping the work, a
+  worklist would be deleted a moment after being written, so none is emitted.
+- **Re-running on the same `--out` merges** (`scan --merge`): verdicts already applied survive
+  and the new report reflects them. `--fresh` starts over.
+- **`--council`** runs the council's blind phase; its candidates stay a worklist, and its
+  usage, cost and rejections land in the report's annex C.
+- **`--keep-work`** keeps `.work/` and the worklists: fill each `*.todo.json`, `--apply` it,
+  then `render` and `clean`.
+
+Stdout is two lines: the report path, then the status — `adjudicated & grounded — N confirmed ·
+…` or `DRAFT — <reasons> (…)`. **Exit 0** even on a DRAFT (the banner travels with the file) ·
+**1** when a citation does not resolve, a powered stage errored, or `--strict` and DRAFT · **2**
+usage.
 
 ## Recon
 
@@ -50,8 +113,8 @@ worklist. Additive evidence only — it never gates a verdict, and there is no `
 `--repo` (default `.`) · `--out` (default `.ultrasec`) · `--scope` · `--include` · `--exclude` ·
 `--max-files` · `--gitignore` · `--json`
 
-Writes `CONTEXT.scaffold.json` + `CONTEXT.todo.md`. See
-[context-playbook.md](context-playbook.md).
+Writes `CONTEXT.scaffold.json` and prints the `CONTEXT.md` outline (`CONTEXT.todo.md` only with
+`--md`). See [context-playbook.md](context-playbook.md).
 
 ## Scan
 
@@ -150,12 +213,19 @@ apart when you write the finding.
 Ranking is severity → scope → `unlinked` last → proximity → cross-file. A `file`-scoped or
 `unlinked` candidate is worth less of your attention, not zero: read the dossier before dropping it.
 
-Writes `manifest.json`, `findings.json`, `graph.json`, `DOSSIER.md`; plus `sbom.cdx.json` when
-`syft` is installed, `cache/timings.json` (per-stage wall-clock, never in the manifest), and under
-`--resume` both `cache/scan-cache.json` (the engine's extraction, keyed by content hash) and
-`cache/tools-cache.json` (the last result of every scanner whose output is a pure function of the
-tree — bandit, gosec, checkov, hadolint, cppcheck, kingfisher, gitleaks — replayed with a
-`· cached (--resume)` note when the tree, HEAD, tool version and argv are unchanged).
+Writes `manifest.json`, `findings.json`, `.work/graph.json`, `DOSSIER.md`; plus `sbom.cdx.json`
+when `syft` is installed, `.work/cache/timings.json` (per-stage wall-clock, never in the
+manifest), and under `--resume` both `.work/cache/scan-cache.json` (the engine's extraction, keyed
+by content hash) and `.work/cache/tools-cache.json` (the last result of every scanner whose output
+is a pure function of the tree — bandit, gosec, checkov, hadolint, cppcheck, kingfisher, gitleaks —
+replayed with a `· cached (--resume)` note when the tree, HEAD, tool version and argv are
+unchanged).
+
+**`DOSSIER.md` is an index** by default (`--dossier index`): a header (repo, tools, status,
+truncation/scope banners, de-noised families), then one ranked line per live candidate, capped at
+200, each pointing at `ultrasec dossier <id>`; dismissed candidates are only counted. The
+per-candidate packets inline made a 1.2 MB file nobody should open whole. `--dossier full`
+restores them; it is recorded as `manifest.dossier: "full"` and survives every `--apply` rewrite.
 
 | budget | max depth | max candidates |
 |---|---|---|
@@ -203,7 +273,7 @@ dossier. Never touches the code-scan pipeline. See
 nginx-combined|common|json-lines|syslog|generic|raw|auto` · `--budget quick|standard|thorough` ·
 `--max-lines` · `--window <sec>` (default 60) · `--no-redact` · `--json`
 
-Writes a standard dossier (`graph.json` is intentionally empty) plus `LOGSTATS.json`. Budgets cap
+Writes a standard dossier (`.work/graph.json` is intentionally empty) plus `LOGSTATS.json`. Budgets cap
 total lines for the **whole run**, not per file: `quick` 200k · `standard` 2M · `thorough` 10M.
 Each detector family caps at 50 findings per run (25 per file for secrets/PII) — fixed, and
 truncation-reported. Directory arguments expand **non-recursively** to the `.log`/`.jsonl`/`.txt`
@@ -222,7 +292,7 @@ failures are printed, not fatal.
 
 ### `graph <file|symbol>`
 The cross-file links into and out of a node. `--depth n` (default 1) · `--run` (read
-`<run>/graph.json`) · `--repo` (live re-scan when no `--run`) · `--json`. Exit 2 on a missing
+`<run>/.work/graph.json`) · `--repo` (live re-scan when no `--run`) · `--json`. Exit 2 on a missing
 target, an ambiguous symbol, or an unknown node.
 
 ### `paths`
@@ -243,7 +313,7 @@ connect to a source — never appears here. `--kind X` printing nothing therefor
 there is no X, and some classes live almost entirely as orphans: the real CWE-407 finding this
 catalog was built from is one `fuzz.extract` sink with no proven path to it. When a kind has
 findings it could not list, `paths` now says how many rather than leaving the silence to be read
-as absence — then go to `DOSSIER.md` or `findings.json`.
+as absence — then go to the `DOSSIER.md` index and `dossier <id>`.
 
 ### `dossier <finding-id>`
 The grounding packet for one finding. **The id may be a unique prefix** (`dossier 7e51071c`).
@@ -271,18 +341,19 @@ the whole document. `--no-context` still drops it entirely.
 
 ## Adjudicate
 
-Each of these emits a worklist, you fill it, `--apply` folds it back under a conservative rule.
-The verdict→status table and every JSON shape live in [schemas.md](schemas.md).
+Each of these emits a JSON worklist (`--md` adds the `.md` brief), you fill it, `--apply` folds it
+back under a conservative rule. The verdict→status table and every JSON shape live in
+[schemas.md](schemas.md).
 
 | command | emits | you write | apply rule |
 |---|---|---|---|
-| `triage --run <d>` | `TRIAGE.todo.json` + `.md` | `noise\|keep` | `noise` clears only low/med/info; on high/critical it is **ignored** |
-| `guards --run <d>` | `GUARDS.todo.json` + `.md` | `guarded\|unguarded\|intentionally-public\|not-a-handler` | `unguarded` becomes a cited `authz` finding (CWE-306); the matrix is re-derived from the code, so a stale row is refused |
+| `triage --run <d>` | `TRIAGE.todo.json` | `noise\|keep` | `noise` clears only low/med/info; on high/critical it is **ignored** |
+| `guards --run <d>` | `GUARDS.todo.json` | `guarded\|unguarded\|intentionally-public\|not-a-handler` | `unguarded` becomes a cited `authz` finding (CWE-306); the matrix is re-derived from the code, so a stale row is refused |
 | `guards --marker <name>[,…]` | same | same | adds the project's own guard helpers to the lens vocabulary (whole, possibly dotted names); `Auth markers:` / `Throttle markers:` lines in `CONTEXT.md` do the same for every run |
-| `guards --lens throttle --run <d>` | `THROTTLE.todo.json` + `.md` | `throttled\|unthrottled\|not-abusable\|not-a-handler` | `unthrottled` becomes a cited `other` finding — **CWE-307 + CWE-204** on an auth-shaped handler, CWE-770 otherwise |
-| `verify --run <d>` | `VERIFY.todo.json` + `.md` | `supported\|partial\|unsupported\|refuted` | `partial` → needs-human at any severity; `unsupported` → needs-human on high/critical |
-| `investigate --run <d>` | `INVESTIGATE.todo.json` + `.md` | `Discovery[]`, or `{discoveries, idioms, hunted}` | citations checked **before** ingest; a bad one is rejected, not folded. Weakness-class hunts (`region: hunt:…`) take `idioms[]` too, citation-checked into `PACK-SUGGESTIONS.json` — proposals, never applied; `--strict` counts refused idioms |
-| `revalidate --run <d>` | `REVALIDATE.todo.json` + `.md` | `still-valid\|fixed\|false-positive\|uncertain` | `fixed` → dismissed + `fixedIn`; high/critical `false-positive` → needs-human |
+| `guards --lens throttle --run <d>` | `THROTTLE.todo.json` | `throttled\|unthrottled\|not-abusable\|not-a-handler` | `unthrottled` becomes a cited `other` finding — **CWE-307 + CWE-204** on an auth-shaped handler, CWE-770 otherwise |
+| `verify --run <d>` | `VERIFY.todo.json` | `supported\|partial\|unsupported\|refuted` | `partial` → needs-human at any severity; `unsupported` → needs-human on high/critical |
+| `investigate --run <d>` | `INVESTIGATE.todo.json` | `Discovery[]`, or `{discoveries, idioms, hunted}` | citations checked **before** ingest; a bad one is rejected, not folded. Weakness-class hunts (`region: hunt:…`) take `idioms[]` too, citation-checked into `.work/PACK-SUGGESTIONS.json` — proposals, never applied; `--strict` counts refused idioms |
+| `revalidate --run <d>` | `REVALIDATE.todo.json` | `still-valid\|fixed\|false-positive\|uncertain` | `fixed` → dismissed + `fixedIn`; high/critical `false-positive` → needs-human |
 
 Shared `--apply` behaviour: the argument may be **a file, a comma-separated list, or a
 directory**. From a directory each stage picks up its own pattern, sorted for determinism —
@@ -299,7 +370,7 @@ when anything was refused, so CI can decline a partial fold. A file where **noth
 still exits 2, listing every rejection at once.
 
 `verify` additionally takes `--shards n --shard i`, which writes `VERIFY.todo.<i>.json` (the
-`.md` brief always covers the full worklist). Never let a subagent run `verify --shards` — each
+`--md` brief, when asked for, covers the full worklist). Never let a subagent run `verify --shards` — each
 shard invocation **writes** into the run dir, and the orchestrator must stay the only writer.
 `verify` emits a **delta**: `open` findings, plus any `needs-human` one that carries no verdict
 (escalated by another stage, never actually ruled on). A `needs-human` finding an earlier pass
@@ -319,7 +390,8 @@ CHANGED an already-adjudicated finding`). Re-applying the same verdict is a sile
 ## Report
 
 ### `narrative --run <dir>`
-Emits `NARRATIVE.todo.json` + `NARRATIVE.md`; you author `NARRATIVE.json`. Emit-only.
+Emits `NARRATIVE.todo.json` (+ `NARRATIVE.md` with `--md`); you author `<run>/NARRATIVE.json`,
+which `render` folds automatically. Emit-only.
 See [narrative-playbook.md](narrative-playbook.md).
 
 ### `implement --run <dir>`
@@ -329,21 +401,53 @@ present, or an explicit `--narrative <file>`. **Emit-only — never changes a st
 nothing.** See [implement-playbook.md](implement-playbook.md).
 
 ### `render --run <dir>`
-Writes `SUMMARY.md`, `REPORT.md` and a self-contained `index.html`. `--narrative <file>` folds in
-the AI-authored sections, clearly marked; sections citing unknown or non-confirmed ids are
-dropped. `--draft` accepts an incomplete audit. No `--json`. Without `--narrative` the output is
-byte-identical to a plain render.
+Writes **one report**: `<run>/REPORT.md`, or a self-contained `REPORT.html` with `--html` (light
+and dark, no script, no external asset), both with `--html --md`. A stale report of the other
+format, and an older run's `SUMMARY.md` / `index.html`, are removed so one report remains.
 
-All three artifacts are organised by **surface** — your code (opening with an entry-point table,
-then a card per HIGH/CRITICAL family with its source→sink diagram), then secrets/CI/IaC, then the
-dependency advisories in a closed fold rolled up **one row per package**: installed versions,
-advisory count, highest fixed version, KEV/EPSS/dev-only signals, every merged lockfile location.
+`--run` · `--html` · `--md` · `--full` · `--narrative <file>` · `--draft` · `--legacy`. No `--json`.
 
-**Exit codes: 0** ok · **1** a HIGH/CRITICAL candidate in code you wrote has no verdict · **2**
-unreadable run. On exit 1 the files are still written and carry the same warning as a banner —
-refusing to produce them would trade a misleading report for no report, and the exit code is gone
-the moment the terminal scrolls while the HTML is what gets shared. Open dependency advisories
-never trigger it: triaging the ranked list and stopping at the bar is the prescribed outcome
+- **Narrative** — `<run>/NARRATIVE.json` is folded automatically when `--narrative` is not given,
+  grounding-checked: a section citing an unknown or non-confirmed id is dropped.
+- **Citations** — `render` runs `check` itself when the audited repo is present; otherwise the
+  status line says "citations not checked".
+- **`--full`** restores the exhaustive annexes (every dismissal, the revalidation table).
+- **`--legacy`** writes the previous `SUMMARY.md` + tiered `REPORT.md` + `index.html`.
+
+Why one file: the previous three-artifact, per-surface report reached 746 KB on a real monorepo
+and listed every dismissal and every repeat of a family. On a synthetic 1,245-candidate run the
+default report is ~57 KB, against ~376 KB for the legacy one.
+
+Sections, in order — a status line (and a DRAFT banner with its reasons), contents, then:
+
+| § | section | what is in it |
+|---|---|---|
+| 1 | Executive summary | the narrative's (marked as authored), then counts, the five most urgent, degraded/capped warnings |
+| 2 | Dashboard | severity × confirmed / needs-human / undecided / dismissed; surface table; by area (the workspace dirs from `manifest.frameworks`, else the first two path segments) |
+| 3 | Attack chains | the narrative's `attackChains` |
+| 4 | Follow-up vs previous audit | fixed / still present / escalated / new, from the revalidation notes |
+| 5 | Detailed findings | code surface, by severity then area. A card per family: id, area, CWE, OWASP Top 10 item, priority, effort, status/verdict, found by, where (first 10 locations + "and N more"), attacker scenario (`exploitPath`), fix (+ patch), notes, evidence. Then **Undecided source-code candidates**: the top 20 HIGH+ and a by-shape table |
+| 6 | Secrets & history | one row per detector class, locations only — never values; cards for decided ones |
+| 7 | CI/CD & infrastructure exposure | class table + cards |
+| 8 | Dependencies | one row per package: priority, worst, package, installed, advisories, main advisory, upgrade to, runtime?, target, status — capped at 100 rows |
+| 9 | Hardening notes | `positivePatterns` + `hardeningNotes` |
+| 10 | Coverage & limits | the limits, the ASVS matrix, the weakness-class matrix |
+| 11 | Remediation plan | root causes, then P0…P3 checklists |
+| A | Dismissed | **summarised**: by ground/brocard, by producer, by shape, the top 15 HIGH/CRITICAL dismissals with a one-line ground (`--full` lists all) |
+| B | Needs human review | one line each, capped at 150 |
+| C | Engines & usage | engine, extraction, stack, passes; scanner table; council reviewers' usage, cost and rejections (`council/COUNCIL.json`) |
+| D | Revalidation table | `--full` only |
+
+**Priority**: confirmed critical → P0; confirmed high → P1 (P0 if KEV or a verified secret);
+medium → P2; low/info → P3; needs-human high+ → P1, else P2. Packages: KEV + runtime → P0,
+high/critical runtime → P1, else P2/P3. **Effort** comes from the narrative's remediations
+(`effort: "S"|"M"|"L"`), else "—": a guessed effort would reorder the plan.
+
+**Exit codes: 0** ok · **1** a HIGH/CRITICAL candidate in code you wrote was never read · **2**
+unreadable run. On exit 1 the file is still written, with a DRAFT banner — refusing to produce it
+would trade a misleading report for no report, and the exit code is gone the moment the terminal
+scrolls while the file is what gets shared. Open dependency advisories never trigger it: triaging
+the ranked list and stopping at the bar is the prescribed outcome
 ([supply-chain.md](supply-chain.md)). `--draft` acknowledges the state and exits 0.
 
 ### `coverage --run <dir>`
@@ -387,12 +491,14 @@ token are not evidence that the token is there.
 ## Housekeeping
 
 ### `clean --run <dir>`
-By default removes the intermediate artifacts and **preserves the deliverables** —
-`SUMMARY.md`, `REPORT.md`, `index.html`, `findings.json`, `JOURNAL.md`. Everything else counts as an
-intermediate ultrasec can regenerate, **including files you authored**: `CONTEXT.md`, `MAP.md`,
-`NARRATIVE.json`, `IMPLEMENT.md`, `sbom.cdx.json`, `LOGSTATS.json`, `orchestration/`. Copy those
-out first if you want them. A run that was never rendered has no deliverables, so it is removed
-whole even without `--all`.
+By default removes the intermediates and **keeps the deliverables** — `REPORT.md`,
+`REPORT.html`, `findings.json`, `manifest.json`, `CONTEXT.md`, `NARRATIVE.json` (and an older
+run's `SUMMARY.md`, `index.html` and top-level `JOURNAL.md`). Everything else goes: `.work/`, the
+worklists, `DOSSIER.md`, `council/`, `sbom.cdx.json`, `IMPLEMENT.md`, `MAP.md`,
+`ultrasec-variants.yaml`, … — copy out what you want first. `findings.json` + `manifest.json` are
+what `render` re-renders from, and the two authored documents cannot be regenerated by a re-scan.
+A run that was never scanned has no deliverables, so it is removed whole even without `--all`.
+Not journaled (a journal entry would recreate `.work/`).
 
 `--all` (wipe the run dir; it is no longer `check`-able afterwards) · `--keep-output` ·
 `--docker` (also remove ultrasec's scanner images, the toolbox image, and the trivy cache
@@ -401,19 +507,21 @@ volume — nothing else of yours) · `--dry-run` · `--json`. Always exits 0.
 ## Orchestrate
 
 ### `run --repo <dir>`
-Sequences the AI stages, then always `check` + `render`.
+Sequences the AI stages, then always `check` + the report (exactly as `render`). `audit` is the
+same pipeline plus the cleanup; `run` keeps every intermediate.
 
 `--repo` (default `.`) · `--out` (default `.ultrasec`) · `--powered` · `--agent <name|tpl>`
-(default `claude`) · `--cross-check <name|tpl>` · `--stages <a,b,c>` · `--no-scan` · the focus
-flags · `--json`
+(default `claude`) · `--cross-check <name|tpl>` · `--stages <a,b,c>` · `--no-scan` · `--html` ·
+`--md` · `--full` · the focus flags · `--json`
 
-The **default (no `--powered`)** scans, emits every worklist and prints the agent TODO, making
-**zero external calls**. `--powered` drives your own agent CLI per worklist (the keys live in
-that CLI). `--stages` selects a subset of the **seven** stage names —
-`context, triage, investigate, verify, revalidate, narrative, implement` — kept in canonical
-order. `check` and `render` are unconditional post-steps and are **not** valid `--stages` tokens
-(`--stages check` exits 2). Exit 0; 1 when a powered stage errored; 2 on an unknown stage or
-`--no-scan` without an existing dossier. See [powered-mode.md](powered-mode.md).
+The **default (no `--powered`)** scans, emits every worklist (JSON; `--md` adds the briefs) and
+prints the agent TODO, making **zero external calls**. `--powered` drives your own agent CLI per
+worklist (the keys live in that CLI). `--stages` selects a subset of the eleven stage names —
+`context, assumptions, triage, guards, throttle, investigate, verify, revalidate, variants,
+narrative, implement` — kept in canonical order. `check` and `render` are unconditional
+post-steps and are **not** valid `--stages` tokens (`--stages check` exits 2). Exit 0; 1 when a
+powered stage errored; 2 on an unknown stage or `--no-scan` without an existing dossier. See
+[powered-mode.md](powered-mode.md).
 
 ### `council --run <dir>`
 A second opinion from **other model families**, driven through their own agent CLIs (the keys
@@ -522,7 +630,7 @@ Default `all`, and the narrowing is the difference between a usable fan-out and 
 one monorepo the open tier was 882 candidates — 111 subagents at 8 per batch — of which 190 were
 dependency advisories a `dossier` read cannot help with. An unknown value exits 2.
 
-Writes into `<run>/orchestration/`: one `<phase>.workflow.mjs` per ready phase (real ids batched
+Writes into `<run>/.work/orchestration/`: one `<phase>.workflow.mjs` per ready phase (real ids batched
 **8 per agent**, absolute paths baked in), the dispatch contracts
 `agents/{analyzer,skeptic,revalidator,hunter}.md`, a sequential `RUNBOOK.md` fallback, and empty
 `out/{adjudicate,verify,revalidate,investigate}/` directories for subagent fragments. Emission is
@@ -534,12 +642,13 @@ worklist exists exits 2 and names the command that produces it.
 | variable | effect |
 |---|---|
 | `ULTRASEC_CACHE_DIR` | where EPSS/KEV feeds and the package-checker script are cached (default `~/.cache/ultrasec`; feed TTL 24 h) |
+| `ULTRASEC_MD=1` | write the human `.md` twin of every worklist, as `--md` does |
 | `ULTRASEC_PACKAGE_CHECKER_PINNED=1` | force the vendored, sha256-pinned package-checker instead of resolving upstream's latest |
 | `CODEINDEX_NO_GRAMMARS_PULL=1` | skip the tree-sitter grammar download — the scan then runs on the **regex** extraction tier (thinner: `manifest.extraction.ast: false`) |
 | `CODEINDEX_GRAMMARS_DIR` / `_URL` | point the grammar cache at a local directory or an internal mirror |
 
 **First run on a cold machine downloads ~22 MB of tree-sitter grammars** for the commands that
-walk the repo (`scan`, `run`, `graph`, `map`, `context`, `investigate`, `logs`). `--offline` does
+walk the repo (`audit`, `scan`, `run`, `graph`, `map`, `context`, `investigate`, `logs`). `--offline` does
 **not** suppress it — it governs advisory feeds and scanner adapters, not the extractors. Offline
 without a warm cache is still a successful run, on the regex tier, announced on stderr. Prewarm
 with any `map` run, or point `CODEINDEX_GRAMMARS_DIR` at a shared cache.

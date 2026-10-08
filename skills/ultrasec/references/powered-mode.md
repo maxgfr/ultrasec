@@ -1,11 +1,23 @@
 # Powered mode (opt-in autonomy)
 
 `run` sequences the eleven AI stages — `context → assumptions → triage → guards → throttle → investigate → verify → revalidate → variants →
-narrative → implement` — and then always runs `check` + `render`. By default it is **keyless and
+narrative → implement` — and then always runs `check` + the report (`REPORT.md`, as `render`). By default it is **keyless and
 network-free**: it scans deterministically, emits every worklist, and prints a TODO
 list — **zero external calls**. Powered mode is a thin automation layer that drives
 *your* agent CLI to fill those worklists; it calls the **same** emit/apply functions
 as the manual path (no duplicated logic).
+
+**One command:** `audit --powered <cli>` is the autonomous path end to end — scan, every stage
+driven through that CLI, `check`, `REPORT.md`, then the intermediates removed (`--keep-work` keeps
+them). `audit` without `--powered` (or `--council`) calls nothing and emits no worklists.
+
+```
+ultrasec audit --repo . --out .ultrasec --powered mycli
+ultrasec audit --repo . --out .ultrasec --powered mycli --cross-check othercli --keep-work
+```
+
+`--powered` must name the CLI (`--powered <cli>`, `--powered=<cli>` or `--powered --agent <cli>`);
+a bare `--powered` exits 2.
 
 ## Default (no keys, no calls)
 
@@ -13,9 +25,10 @@ as the manual path (no duplicated logic).
 ultrasec run --repo . --out .ultrasec
 ```
 
-Scans (deterministic taint, no external tools), emits `CONTEXT.todo.md`,
-`TRIAGE.*`, `INVESTIGATE.*`, `VERIFY.*`, `REVALIDATE.*`, `NARRATIVE.*`, `IMPLEMENT.*`, runs the
-grounding `check`, and renders the report. Then fill each worklist yourself (or hand
+Scans (deterministic taint, no external tools), writes `CONTEXT.scaffold.json` and every
+stage's JSON worklist (`TRIAGE.todo.json`, `INVESTIGATE.todo.json`, `VERIFY.todo.json`, …;
+`--md` adds the human `.md` briefs), plus `IMPLEMENT.md`, runs the grounding `check`, and writes
+`REPORT.md`. Then fill each worklist yourself (or hand
 them to any agent) and `--apply`, exactly as in the manual workflow.
 
 ## Powered (drive an external agent CLI)
@@ -28,8 +41,8 @@ ultrasec run --repo . --powered --agent "mytool exec {prompt} --cwd {run}"
 
 - `--agent` is a built-in name (`claude`, `codex`) or a generic argv template where
   `{prompt}` / `{run}` are substituted **per token** (each becomes one argv element).
-- For each stage, ultrasec invokes the CLI with an instruction to read the worklist
-  file and write the stage's output file, then applies the result through the normal
+- For each stage, ultrasec invokes the CLI with an instruction to read the JSON worklist
+  (`*.todo.json`) and write the stage's output file, then applies the result through the normal
   conservative apply.
 - `--cross-check <cli>` (verify + revalidate only) runs a **second** agent over the
   same worklist. Any **high/critical** finding the two land on a different status is
@@ -37,8 +50,9 @@ ultrasec run --repo . --powered --agent "mytool exec {prompt} --cwd {run}"
   review), never downgrade. Pick a genuinely different model or vendor for the second agent;
   two runs of the same model agree with themselves and buy you nothing. A high disagreement rate
   is a signal about the *worklist* (ambiguous claims, thin evidence), not just about the models.
-- `--stages a,b,c` runs a subset, kept in canonical order. The legal tokens are exactly the seven
-  stage names — `context, triage, investigate, verify, revalidate, narrative, implement`.
+- `--stages a,b,c` runs a subset, kept in canonical order. The legal tokens are exactly the eleven
+  stage names — `context, assumptions, triage, guards, throttle, investigate, verify, revalidate,
+  variants, narrative, implement`.
   `check` and `render` are unconditional post-steps and are **not** selectable; `--stages check`
   exits 2.
 - `--no-scan` reuses an existing dossier (e.g. one produced by a full `scan` with external
@@ -72,7 +86,7 @@ stay in the default keyless mode and adjudicate yourself.
 - **Argv-only invocation.** The CLI is spawned with an **argv array, never a shell
   string** — a branch/file name can't inject a command (cf. the 2026 Codex
   branch-name injection).
-- **Worklists are passed as file paths, not interpolated.** The worklist `.md`
+- **Worklists are passed as file paths, not interpolated.** The worklist (`*.todo.json`)
   contains code excerpts that may be **attacker-influenced** (it's the code under
   audit). Its content is never placed on the command line; the agent reads the file.
   The instruction tells the agent to treat that code as **untrusted data, not
