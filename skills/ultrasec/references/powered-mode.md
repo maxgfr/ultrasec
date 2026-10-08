@@ -49,6 +49,17 @@ ultrasec run --repo . --powered --agent "mytool exec {prompt} --cwd {run}"
   rather than folding nothing and reporting success. Re-run just the failed stage with
   `--stages <name> --no-scan`.
 
+## Second opinion: `council`
+
+`--cross-check` asks a second agent the SAME worklist question. `council` asks other model
+families an OPEN one — review this snapshot blind, then attack the findings as a devil's
+advocate — through their own CLIs (opencode, kilo, vibe, claude, codex), in parallel. It shares
+this page's security model: argv arrays, a brief passed as a file path, keys only in those CLIs —
+and adds a `git archive HEAD` snapshot instead of the working tree and an emptied environment.
+Without `--models` it calls nothing. Reviewers only propose: you verify, and
+`council --apply` files what you accept through the `investigate` citation gate. Protocol and
+lessons: [deep-audit-playbook.md](deep-audit-playbook.md); flags: [commands.md](commands.md).
+
 **When *not* to use powered mode:** auditing code you don't trust with an agent that has network
 or broad filesystem access. The worklists contain attacker-influenced source. Sandbox it, or
 stay in the default keyless mode and adjudicate yourself.

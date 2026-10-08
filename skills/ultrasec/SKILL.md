@@ -98,6 +98,7 @@ ultrasec render  --run .ultrasec --narrative NARRATIVE.json  # SUMMARY/REPORT.md
 ultrasec implement --run .ultrasec              # remediation-PRD draft → the `to-prd` skill
 ultrasec run     --repo . --out .ultrasec       # sequence every stage (ZERO external calls)
 ultrasec orchestrate --run .ultrasec --phase verify   # emit the multi-agent fan-out (--surface code)
+ultrasec council --run .ultrasec                # other model families review a HEAD snapshot (--models, --apply)
 ultrasec logs    ./var/log --out .ultrasec-logs # blue team: forensics over EXISTING log files
   # detections: --sigma → ultrasec-logs.sigma.yml (SIEM pack, like variants→semgrep)
   # anywhere: --report out.md|html|json (archive this output)  --no-journal (skip JOURNAL.md)
@@ -140,6 +141,9 @@ ultrasec route   app.apk | ./bin/x.so | https://host # OUT-OF-SCOPE triage → m
    dossier: [references/log-forensics-playbook.md](references/log-forensics-playbook.md).
 9. **"Run it autonomously"** — let an external agent CLI fill the worklists (opt-in, keys live in
    that CLI): [references/powered-mode.md](references/powered-mode.md).
+10. **"Get a second opinion" / other models** — `council`: blind reviewers on a snapshot, then a
+   devil's advocate; you verify, `--apply` gates citations:
+   [references/deep-audit-playbook.md](references/deep-audit-playbook.md).
 
 ## Workflow (standard audit)
 

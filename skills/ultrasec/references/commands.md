@@ -415,6 +415,70 @@ order. `check` and `render` are unconditional post-steps and are **not** valid `
 (`--stages check` exits 2). Exit 0; 1 when a powered stage errored; 2 on an unknown stage or
 `--no-scan` without an existing dossier. See [powered-mode.md](powered-mode.md).
 
+### `council --run <dir>`
+A second opinion from **other model families**, driven through their own CLIs (the keys live in
+those CLIs, never in ultrasec). Four steps, one per invocation:
+
+```bash
+ultrasec council --run .ultrasec                       # the plan: which CLIs are on PATH — ZERO calls
+ultrasec council --run .ultrasec --models "kilo:moonshotai/kimi-k3,opencode:zai-coding-plan/glm-5.3,vibe:mistral-large-4"
+ultrasec council --run .ultrasec --parse               # re-parse the reports → COUNCIL.todo.json + COUNCIL.md
+ultrasec council --run .ultrasec --resume kilo         # one closing turn for a reviewer that was cut
+ultrasec council --run .ultrasec --apply decisions.json
+```
+
+`--models "cli:model,…"` (CLIs: `opencode`, `kilo`, `vibe`, `claude`, `codex`; split on the first
+colon, so `kilo:…:free` works) · `--phase blind|devil` (default `blind`) · `--focus
+"name=area;…"` (per reviewer) · `--fallback "cli:model,…"` · `--timeout-min` (default 60) ·
+`--max-cost <usd>` · `--lang en|fr` · `--repo` · `--strict` (apply) · `--json`.
+
+What every reviewer gets, and why:
+
+- **A snapshot, not the repo.** `git archive HEAD` into `<run>/council/snapshot/`: tracked files
+  only, HEAD's line numbers, no untracked `.env`. It is deleted when the command ends — a source
+  copy inside the run dir would be shared with it, and indexed by a later `scan` — and recreated
+  from the recorded commit when `--parse`/`--resume` need it. The brief says so — no history, no network, no
+  advisory database — and every claim about CVE status or history is flagged for the engine to
+  check (osv/trivy/`revalidate`) rather than trusted.
+- **An emptied environment**: `HOME`, `PATH`, `TERM=dumb`, nothing else. Agent allow-lists include
+  `printenv`; the shell that launches an audit holds tokens.
+- **A read-only agent and a short argv.** opencode runs `--agent plan --pure` (a user plugin once
+  replaced the default agent and stalled the run); kilo `--agent plan --auto`; vibe `--agent plan
+  --trust`; claude `--allowedTools Read,Grep,Glob`; codex `--sandbox read-only`. The brief is a file
+  inside the snapshot (`_COUNCIL_BRIEF.<phase>.<reviewer>.md`) and argv only points at it — a
+  60 KB prompt as one argv element hung opencode at init for eleven minutes.
+
+Reviewers run in parallel, each with its own timeout, logging to
+`<run>/council/<phase>/<reviewer>/{brief.md,events.jsonl,err.log,out.md}` — **redacted** on the way in
+(modular-crypt hashes, `NAME=value` secrets, quoted secret fields, JWTs, long tokens). Tokens and
+cost come from the `step_finish` events and land in `COUNCIL.json`; vibe and codex record
+"usage not exposed".
+
+**A run cut before its report is resumed, not lost.** Our timeout, `--max-cost`, or progress notes
+with no report → the **same session, same model**, one turn: "stop exploring, no tools, write the
+report now". A quota (`Usage limit reached … reset at …`), a credit stop
+(`usage_limit_exceeded`) or an upstream 504 → the `--fallback` list for that CLI, resuming the
+session when there is one; a 504 just hands the turn to the next entry. A quota's reset time is
+recorded and printed; `--resume <reviewer>` runs the closing turn later.
+
+**Parsing is deterministic.** One `### <ID> — <title>` block per finding; severity, CWE and every
+`path:line[-end]` (also `path#L12`) are extracted. Each citation is resolved against the snapshot:
+`ok`, or `unresolved` with the reason (missing file, line out of range, ambiguous basename — a bare
+`index.ts` resolves only when exactly one file has that name). `host:port` strings are not
+citations. A claim leaning on a masking placeholder (`SECRETGATE_…`, `REDACTED`, `***`) is flagged as
+an artefact of how the code was shown: on a real audit a reviewer "found" that a prod JWT secret had
+been replaced by such a placeholder — the orchestrator's own masking hook.
+
+**Grouping is a prior, not a verdict.** Claims citing the same file within ±3 lines, in the same CWE
+family, become one candidate with `sources[]`. A candidate landing on a finding the run already holds
+(same location and family, or the same CVE) is reported against that finding's id instead.
+
+Exit **0** when every reviewer produced a report · **1** when one did not (its record says why) ·
+**2** on a usage error (unknown CLI, bad `--phase`, no git commit to snapshot, `--phase devil`
+without a dossier). `--apply` exits 0, or 1 under `--strict` when any row was refused, dropped or
+stopped by the citation gate. Without `--models` it never spawns anything — the PATH probe is a
+filesystem check. Shapes: [schemas.md](schemas.md#council--counciltodojson--decisions--counciljson).
+
 ### `orchestrate --run <dir>`
 Emits the run's multi-agent fan-out from its **current** worklists.
 

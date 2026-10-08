@@ -143,29 +143,50 @@ that neither the engine nor the first manual pass had seen — a module-level `d
 across server-rendered requests — and four confident claims that were false. Both outcomes are
 the reason for the protocol below.
 
-1. **Give them a snapshot, not the repo.** `git archive <sha> | tar -x -C <scratch>/snapshot`:
-   same line numbers, no untracked `.env`, nothing they can write back into the working tree.
-   Start the CLI with an emptied environment (`env -i HOME=$HOME PATH=$PATH …`) — agent
-   allow-lists often include `printenv`, and your shell holds tokens. Use the CLI's read-only
-   agent (`plan` / `ask`) and no auto-approve flag.
-2. **Blind pass first.** Same prompt to every model: the trust model, the areas to cover, and an
-   output contract of one block per finding with `path:line`, attacker scenario (who · sends what
-   · gets what), quoted evidence and fix, then hardening notes and areas not reviewed. Do **not**
-   show your findings yet: a model that has read them returns them.
+`ultrasec council` runs this protocol; the steps below are what it does and why
+([commands.md](commands.md) has every flag, [schemas.md](schemas.md) every file).
+
+```bash
+ultrasec council --run .ultrasec                    # the plan: which CLIs are installed — ZERO calls
+ultrasec council --run .ultrasec --models "kilo:<model>,opencode:<provider/model>,vibe:<model>" --focus "kilo=src/api;opencode=src/web"
+ultrasec council --run .ultrasec --apply decisions.json          # after YOU verified each candidate
+ultrasec council --run .ultrasec --phase devil --models "vibe:<model>"   # after verify
+```
+
+1. **A snapshot, not the repo.** Reviewers work on `git archive HEAD` under `<run>/council/`:
+   same line numbers, no untracked `.env`, nothing they can write back into the working tree. Each
+   CLI starts with an emptied environment (`HOME`, `PATH`, `TERM=dumb`) — agent allow-lists often
+   include `printenv`, and your shell holds tokens — on its read-only agent (`plan` / `--sandbox
+   read-only`). opencode always gets `--pure`: a user plugin once replaced its default agent with
+   one that delegated to a model that did not exist, and the run stalled without an error.
+2. **Blind pass first.** The same brief to every model — the trust model from `CONTEXT.md`, the
+   area to cover, and an output contract of one block per finding with `path:line`, attacker
+   scenario (who · sends what · gets what), quoted evidence and fix, then what to verify and what
+   was not reviewed. The brief is a file in the snapshot and argv only points at it (a 60 KB argv
+   prompt hung opencode for eleven minutes). Your findings are **not** shown: a model that has
+   read them returns them.
 3. **Cap the spend, and plan for the cap.** A budget stop before the final answer loses the whole
-   run — one reviewer was cut at its cap with nothing but progress notes. Watch the cost from the
-   CLI's JSON events and stop it yourself; then **resume the same session for one turn** with
-   "stop exploring, write the report now, no tools" (`kilo run -s <session>`, `vibe --resume <id>
-   --max-turns 1 --disabled-tools 're:.*'`). The context is already paid for; the report cost
-   cents. Do not rely on a CLI's own price cap until you have seen it stop a run.
-4. **Devil's advocate second.** Hand one model (the one with budget to spare) and one fresh
-   read-only subagent the consolidated list: attack every item — wrong line, mitigated by another
-   layer, wrong severity — and find what is missing. The subagent can read `node_modules` and run
-   a library in isolation; the external CLIs on the snapshot cannot, so they reason about library
-   behaviour from memory.
-5. **Nothing enters the run unverified.** Open every cited line yourself, reproduce what can be
-   reproduced locally, and file survivors through `investigate --apply` so the citation gate runs.
-   Record who found each one; corroboration across families is signal, not proof.
+   run — one reviewer was cut at its cap with nothing but progress notes. `--max-cost` and
+   `--timeout-min` stop a reviewer from its own JSON events, then `council` **resumes the same
+   session for one turn**: "stop exploring, no tools, write the report now". The context is already
+   paid for; the report costs cents. A quota or credit stop goes to `--fallback` instead (kilo's
+   free models — one of which answered 504 "Upstream idle timeout", so the next one gets the turn),
+   and `--resume <reviewer>` finishes it after the printed reset time. Do not rely on a CLI's own
+   price cap (`vibe --max-price`) until you have seen it stop a run.
+4. **Parse, don't read raw.** Every `path:line` is resolved against the snapshot — `ok` or
+   `unresolved` with the reason — claims are grouped across reviewers by location and CWE family,
+   and a claim landing on a finding the run already holds is reported against that id. Secrets in
+   reports and event logs are redacted before anything is written.
+5. **Nothing enters the run unverified.** Open every cited line in `COUNCIL.md` yourself, reproduce
+   what can be reproduced locally, then `council --apply` your decisions: an accepted candidate goes
+   in through the `investigate` citation gate as an `open` `ultrasec-ai` candidate, a rejected one
+   is recorded with its reason. Corroboration across families is signal, not proof.
+6. **Devil's advocate second.** `--phase devil` hands a model (the one with budget to spare) the
+   run's confirmed and needs-human findings — id, severity, status, title, first citations; never a
+   message or an evidence line — plus what was rejected and why. Its contestations come back as a
+   worklist for `verify`, never applied. Pair it with one fresh read-only subagent: the subagent can
+   read `node_modules` and run a library in isolation; the external CLIs on the snapshot cannot, so
+   they reason about library behaviour from memory.
 
 What the external reviewers got wrong on that audit, so you know where to look first:
 

@@ -170,9 +170,16 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
   //                 ground unless step 3 says otherwise. One clause in each step; the format,
   //                 the method and the promotion path went to references/schemas.md,
   //                 references/investigate-playbook.md and docs/weakness-classes.md.
+  //   3345 -> 3380: the `council` command — a second opinion from other model families,
+  //                 which until now existed only as prose in deep-audit-playbook.md and was
+  //                 run by hand (three CLIs on a snapshot, one-turn resumes after a budget
+  //                 cut, claims re-checked line by line). A command the body never names is a
+  //                 command nobody runs: one cheat-sheet line and one "Route by situation"
+  //                 entry. The protocol, the CLI quirks and the file shapes went to
+  //                 references/deep-audit-playbook.md, commands.md and schemas.md.
   it("keeps the SKILL.md body within its word budget", () => {
     const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
-    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(3345);
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(3380);
   });
 
   // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits
