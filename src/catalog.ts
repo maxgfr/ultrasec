@@ -713,6 +713,33 @@ export const SINKS: SinkRule[] = [
     note: "Tainted data used as an open-uri URL. Verify the destination is allow-listed (no internal/metadata endpoints) — and that a `file://` scheme cannot reach it.",
   },
   {
+    // BEFORE the generic `path` rule. In JavaScript `open` is a filesystem call
+    // only as `fs.open` / `fs/promises` `open`; everywhere else it is a modal, a
+    // dialog, a popover or a hook (`modal.open()`, `open(Trigger.EXIT_INTENT)`),
+    // which the generic rule filed as path traversal at HIGH.
+    kind: "path",
+    cwe: "CWE-22",
+    severity: "high",
+    languages: ["javascript"],
+    callees: ["open"],
+    receivers: ["fs", "fsp", "fsPromises", "promises", "fse", "gracefulFs"],
+    requireModule: ["fs", "fs-extra", "graceful-fs", "memfs"],
+    title: "Path traversal / archive extraction (zip-slip)",
+    note: "Tainted data used as a filesystem path, or an archive extracted without validating entry names (zip-slip). Confine to a base dir (basename/realpath + allow-list) and reject entries that escape it.",
+  },
+  {
+    // JavaScript's `open` is handled by the rule above; a `*` rule would claim it
+    // again for every modal and hook.
+    kind: "path",
+    cwe: "CWE-22",
+    severity: "high",
+    languages: ["*"],
+    exceptLanguages: ["javascript"],
+    callees: ["open"],
+    title: "Path traversal / archive extraction (zip-slip)",
+    note: "Tainted data used as a filesystem path, or an archive extracted without validating entry names (zip-slip). Confine to a base dir (basename/realpath + allow-list) and reject entries that escape it.",
+  },
+  {
     kind: "path",
     cwe: "CWE-22",
     severity: "high",
@@ -726,7 +753,6 @@ export const SINKS: SinkRule[] = [
       "createWriteStream",
       "sendFile",
       "unlink",
-      "open",
       "readdir",
       "appendFile",
       "extractall",
@@ -1308,10 +1334,38 @@ export const SINKS: SinkRule[] = [
     cwe: "CWE-1321",
     severity: "high",
     languages: ["javascript"],
-    callees: ["merge", "mergeWith", "extend", "defaultsDeep", "setWith", "set"],
+    callees: ["merge", "mergeWith", "extend", "defaultsDeep"],
     receivers: ["_", "lodash", "$", "jQuery", "angular", "Object", "util"],
     title: "Prototype pollution",
     note: "Tainted keys deep-merged into an object can reach Object.prototype (__proto__/constructor/prototype). Reject those keys or use a null-prototype target / Map.",
+  },
+  {
+    // `set` is the most common state-setter name in front-end code: zustand's
+    // `set(produce((s) => …))`, React's `setX`, Map#set. On one Next.js app it
+    // produced 200 high "prototype pollution" candidates, none a path setter.
+    // Only a deep-path setter (`_.set(obj, "a.b", v)`) walks a key string onto
+    // the prototype chain, so the import of one is what makes this a sink.
+    kind: "proto",
+    cwe: "CWE-1321",
+    severity: "high",
+    languages: ["javascript"],
+    callees: ["set", "setWith"],
+    receivers: ["_", "lodash", "dotProp", "objectPath", "dottie"],
+    requireModule: [
+      "lodash",
+      "underscore",
+      "set-value",
+      "dot-prop",
+      "object-path",
+      "dottie",
+      "dset",
+      "just-safe-set",
+      "@hapi/hoek",
+      "nested-property",
+      "deep-set",
+    ],
+    title: "Prototype pollution",
+    note: "A tainted key path written with a deep-path setter can reach Object.prototype (__proto__/constructor/prototype). Reject those segments or use a null-prototype target / Map.",
   },
   {
     kind: "buffer",
