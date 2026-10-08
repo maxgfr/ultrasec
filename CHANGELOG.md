@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.63.0](https://github.com/maxgfr/ultrasec/compare/v1.62.0...v1.63.0) (2026-10-08)
+
+
+### Features
+
+* **audit:** one command, one report ([ea93c6d](https://github.com/maxgfr/ultrasec/commit/ea93c6d9c62751f1c27834cb65ce2f1d3750d2b1))
+* **report:** one report file with size discipline ([c1d5271](https://github.com/maxgfr/ultrasec/commit/c1d527183b92fb8868ff607a07aeba906d094de0)), closes [hi#severity](https://github.com/hi/issues/severity)
+
 # [1.62.0](https://github.com/maxgfr/ultrasec/compare/v1.61.5...v1.62.0) (2026-10-08)
 
 
