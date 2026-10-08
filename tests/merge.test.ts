@@ -144,9 +144,9 @@ describe("mergeDossier", () => {
 
     it("redacts a carried note written before notes were redacted", () => {
       // The second leak of the same run: the revalidator quoted the cited line.
-      const prev = dossier([finding("a", { status: "confirmed", message: `old\n\nRevalidation (still-valid): line is ('admin', '${argon}', 'super')` })]);
+      const prev = dossier([finding("a", { status: "confirmed", message: `old\n\nRevalidation (still-valid): line is ('admin', '${argon}', 'owner')` })]);
       const a = mergeDossier(prev, dossier([finding("a", { message: "fresh" })])).findings[0]!;
-      expect(a.message).toBe(`fresh\n\nRevalidation (still-valid): line is ('admin', '${masked}', 'super')`);
+      expect(a.message).toBe(`fresh\n\nRevalidation (still-valid): line is ('admin', '${masked}', 'owner')`);
     });
 
     it("carries a triage dismissal, which is not a labelled stage block", () => {
@@ -177,7 +177,7 @@ describe("scan --merge, end to end", () => {
     const digest = "ZGlnZXN0ZGlnZXN0ZGlnZXN0ZGlnZXN0";
     const argon = ["$argon2id", "v=19", "m=65536,t=3,p=4", "c2FsdHNhbHRzYWx0", digest].join("$");
     const repo = mkdtempSync(join(tmpdir(), "ultrasec-merge-hash-"));
-    writeFileSync(join(repo, "seed.sql"), `INSERT INTO auth.users VALUES ('admin@example.org', '${argon}', 'super');\n`);
+    writeFileSync(join(repo, "seed.sql"), `INSERT INTO users VALUES ('admin@example.org', '${argon}', 'owner');\n`);
     const out = join(repo, ".ultrasec");
     const scan = (...extra: string[]) => runScan(parseArgs(["scan", "--repo", repo, "--out", out, "--no-enrich", "--no-tools", ...extra]));
 

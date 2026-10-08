@@ -1,3 +1,4 @@
+import { placeholderHits } from "../placeholders.js";
 import { redactSecrets } from "../redact.js";
 
 // Everything a council reviewer says passes through here before it is written
@@ -21,19 +22,20 @@ import { redactSecrets } from "../redact.js";
  * material (`"key-material"`, see `BareRuns` in `../redact.ts` for why notes
  * are not held to it). The mask (`Sup3…`) is deliberately none of the shapes
  * `placeholderArtefacts` flags, so re-parsing an `out.md` this module already
- * redacted never takes our own marker for a masking placeholder.
+ * redacted never takes our own marker for a masking placeholder. `placeholders`
+ * adds shapes to the default ones, which are never masked.
  */
-export function redactReviewerText(text: string): string {
-  return redactSecrets(text, { bareRuns: "key-material" });
+export function redactReviewerText(text: string, placeholders: readonly RegExp[] = []): string {
+  return redactSecrets(text, { bareRuns: "key-material", placeholders });
 }
 
 /** Deep-redact every string inside a parsed JSON value. */
-function redactValue(v: unknown): unknown {
-  if (typeof v === "string") return redactReviewerText(v);
-  if (Array.isArray(v)) return v.map(redactValue);
+function redactValue(v: unknown, ph: readonly RegExp[]): unknown {
+  if (typeof v === "string") return redactReviewerText(v, ph);
+  if (Array.isArray(v)) return v.map((x) => redactValue(x, ph));
   if (v && typeof v === "object") {
     const o: Record<string, unknown> = {};
-    for (const [k, val] of Object.entries(v)) o[k] = redactValue(val);
+    for (const [k, val] of Object.entries(v)) o[k] = redactValue(val, ph);
     return o;
   }
   return v;
@@ -48,29 +50,24 @@ function redactValue(v: unknown): unknown {
  * into something no later `--parse` can read. A line that is not JSON is
  * redacted as text.
  */
-export function redactJsonLine(line: string): string {
+export function redactJsonLine(line: string, placeholders: readonly RegExp[] = []): string {
   try {
-    return JSON.stringify(redactValue(JSON.parse(line)));
+    return JSON.stringify(redactValue(JSON.parse(line), placeholders));
   } catch {
-    return redactReviewerText(line);
+    return redactReviewerText(line, placeholders);
   }
 }
 
 /**
- * Secret-MASKING placeholders a claim mentions.
+ * Secret-MASKING placeholders a claim mentions (see `../placeholders.ts`).
  *
  * On a real audit a reviewer reported, as a finding, that a production JWT
- * secret had been "replaced by a SECRETGATE placeholder". It had — by the
- * orchestrator's own secret-masking hook, on the way into the reviewer's
- * context. A placeholder is an artefact of how the code was SHOWN, never a fact
- * about the code, so a claim built on one is flagged for the orchestrator to
- * discard rather than verify.
+ * secret had been "replaced by a placeholder". It had — by the orchestrator's
+ * own secret-masking hook, on the way into the reviewer's context. A
+ * placeholder is an artefact of how the code was SHOWN, never a fact about the
+ * code, so a claim built on one is flagged for the orchestrator to discard
+ * rather than verify.
  */
-export function placeholderArtefacts(text: string): string[] {
-  const hits = new Set<string>();
-  for (const m of text.matchAll(/\bSECRETGATE_[0-9a-f]+\b/gi)) hits.add(`${m[0].slice(0, 16)}…`);
-  if (/\bREDACTED\b/.test(text)) hits.add("REDACTED");
-  // `***` as a VALUE (`= ***`, `"***"`), not markdown bold-italic around a word.
-  if (/(?<![*\w])\*{3,}(?![*\w])/.test(text)) hits.add("***");
-  return [...hits].sort();
+export function placeholderArtefacts(text: string, extra: readonly RegExp[] = []): string[] {
+  return placeholderHits(text, extra);
 }

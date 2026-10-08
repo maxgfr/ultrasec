@@ -16,8 +16,8 @@ import { headCommit } from "../git.js";
 // where the reviewer must not.)
 //
 // The price is stated in the brief: no git history, no advisory database. On the
-// audit this came from, reviewers asserted CVE status ("tar-fs 2.1.2 is the
-// fixed version") and history facts from memory, and were wrong.
+// audit this came from, reviewers asserted CVE status ("<package> <version> is
+// the fixed version") and history facts from memory, and were wrong.
 
 /** Brief files live at the snapshot root under this prefix, and are never a citation target. */
 export const BRIEF_PREFIX = "_COUNCIL_BRIEF";

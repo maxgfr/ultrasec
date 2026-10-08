@@ -89,7 +89,8 @@ export interface Candidate {
   /** `sources.length` — a prior for reading order, never a verdict. */
   corroboration: number;
   claims: ClaimRef[];
-  citations: { at: string; citation: Citation["citation"]; reason?: string }[];
+  /** `at` is the resolved `path:line`; `raw` is how the reviewer wrote it, when that differs. */
+  citations: { at: string; raw?: string; citation: Citation["citation"]; reason?: string }[];
   primary?: Loc;
   scenario?: string;
   fix?: string;
@@ -175,7 +176,8 @@ function toCandidate(members: Claim[]): Candidate {
   for (const c of claims) {
     for (const x of c.citations) {
       const key = x.citation === "ok" ? at(x) : x.raw;
-      if (!cites.has(key)) cites.set(key, { at: key, citation: x.citation, ...(x.reason ? { reason: x.reason } : {}) });
+      if (!cites.has(key))
+        cites.set(key, { at: key, ...(x.raw !== key ? { raw: x.raw } : {}), citation: x.citation, ...(x.reason ? { reason: x.reason } : {}) });
     }
   }
   const p = claims.map((c) => okCites(c)[0]).find(Boolean);

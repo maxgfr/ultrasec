@@ -1,11 +1,12 @@
 import type { Finding } from "./types.js";
 import { SECRET_PATTERNS } from "./logs/secrets.js";
+import { isPlaceholder } from "./placeholders.js";
 
 // ── Redaction of credentials in text the dossier echoes ─────────────────────
 // Every string folded into findings.json is echoed again into DOSSIER.md and
 // the rendered REPORT.md/index.html — documents written to be passed around.
-// The engine's own evidence was the first leak (two argon2id hashes of a `super`
-// account in a real report); the second was the auditor's prose. A revalidation
+// The engine's own evidence was the first leak (two password hashes of a seed
+// admin account in a real report); the second was the auditor's prose. A revalidation
 // note quoted the cited line from REVALIDATE.todo.json, the line was a seed
 // row, and the full hash went into the report the detector had just been fixed
 // to keep it out of. Whoever writes the text, it goes through here first.
@@ -21,12 +22,13 @@ import { SECRET_PATTERNS } from "./logs/secrets.js";
 // A masked value keeps a short prefix and ends in `…` (`Sup3…`, `eyJh…`,
 // `$argon2id$v=19$m=65536,t=3,p=4$…`, `postgres://app:…@db`):
 //  - a reviewer can still tell two values apart, or see that a cited value is
-//    the `AgB…` of a SealedSecret or the `sk_l…` of a live Stripe key;
+//    the ciphertext of an encrypted-secret manifest or a provider's live-key
+//    prefix;
 //  - `…` is outside every value alphabet below, so a masked value is never
 //    re-matched and redaction is idempotent (an apply that runs twice, a merge
 //    that re-redacts the notes it carries, all leave the text byte-identical);
-//  - it is NOT one of the shapes the council's `placeholderArtefacts` flags
-//    (`SECRETGATE_<hex>`, `REDACTED`, `***`). A reviewer's report is redacted
+//  - it is NOT one of the masking-placeholder shapes (`../placeholders.ts`:
+//    `NAME_<hex>`, `REDACTED`, `***`, `xxxx`). A reviewer's report is redacted
 //    on the way into `out.md` and parsed again later; a marker the parser read
 //    as "a placeholder the code was shown with" would get every redacted claim
 //    discarded. That is why a URI password is `…`, not `****`.
@@ -35,8 +37,9 @@ import { SECRET_PATTERNS } from "./logs/secrets.js";
  * A password hash with its salt and digest masked: the algorithm and its cost
  * parameters stay — they are what the finding is about — the crackable part
  * does not. The evidence line is echoed into findings.json, DOSSIER.md and the
- * rendered REPORT.md/index.html; on a real audit that put two complete argon2id
- * hashes of a `super` account into a report written to be passed around.
+ * rendered REPORT.md/index.html; on a real audit that put two complete
+ * password hashes of a seed admin account into a report written to be passed
+ * around.
  */
 export function redactPasswordHashes(text: string): string {
   // The literal's own alphabet (base64, cost lists like `m=65536,t=3,p=4`), so a
@@ -81,7 +84,7 @@ const URI_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)([^\s:@/]*):([^\s@/]+)@/gi;
 const NAMED_VALUE =
   /(["'`]?)\b([\w.-]*(?:secret|token|passwd|password|api[_-]?key|private[_-]?key|access[_-]?key|client[_-]?key)[\w.-]*)\1(\s*(?::|=(?![=>]))\s*)(?:(["'`])([^"'`\n]+)\4|(["'`]?)([^\s"'`,;)}\]]+))/gi;
 
-// Env-file / shell style `STRIPE_KEY=…`, `KEY=…`: a bare KEY word is too common
+// Env-file / shell style `SERVICE_KEY=…`, `KEY=…`: a bare KEY word is too common
 // in code (`sortKey`, `keyboard`) to key on case-insensitively, but an
 // upper-case `_KEY` variable assigned with `=` is a credential in practice.
 const ENV_KEY = /\b((?:[A-Z][A-Z0-9]*_)*KEY(?:_[A-Z0-9]+)*)=(?![=>])(["'`]?)([^\s"'`,;)}\]]+)/g;
@@ -93,13 +96,14 @@ const ENV_KEY = /\b((?:[A-Z][A-Z0-9]*_)*KEY(?:_[A-Z0-9]+)*)=(?![=>])(["'`]?)([^\
 // refutation note makes ("the key is read from the environment").
 const NOT_A_VALUE = new Set(["none", "null", "nil", "undefined", "true", "false", "empty", "unset", "required", "optional", "redacted", "masked"]);
 
-function isReference(value: string): boolean {
+function isReference(value: string, placeholders: readonly RegExp[]): boolean {
   if (/[…*]/.test(value) || NOT_A_VALUE.has(value.toLowerCase())) return true;
-  // A marker, ours or another tool's: `‹redacted›` (what the council wrote before
-  // this module was shared), `‹REDACTED:jwt›` (the log analyzer), and a
-  // `SECRETGATE_<hex>` placeholder — an artefact of how the code was SHOWN,
-  // which the council's claim parser must still be able to see and flag.
-  if (/^(?:‹|SECRETGATE_)/i.test(value)) return true;
+  // A marker of ours: `‹redacted›` (what the council wrote before this module
+  // was shared), `‹REDACTED:jwt›` (the log analyzer).
+  if (value.startsWith("‹")) return true;
+  // A masking placeholder (`../placeholders.ts`) — an artefact of how the code
+  // was SHOWN, which the council's claim parser must still be able to see and flag.
+  if (isPlaceholder(value, placeholders)) return true;
   // A password hash: `redactPasswordHashes` already masked it and kept its cost
   // list, which a comma cuts this capture short of.
   if (/^\$(?:argon2|2[abxy]\$|scrypt|pbkdf2)/.test(value)) return true;
@@ -128,8 +132,8 @@ const AUTH_HEADER = /(Authorization:\s*(?:Bearer|Basic)\s+)([^\s"'`]+)/gi;
 //  "keep"          Notes and prose folded into the dossier (stage notes, exploit
 //                  paths, investigate write-ups). They carry evidence the engine
 //                  needs whole: `fixed in <40-hex sha>` (revalidate writes it),
-//                  finding ids, digests, the ciphertext a SealedSecret citation
-//                  quotes. A credential in a note nearly always has a name or a
+//                  finding ids, digests, the ciphertext an encrypted-secret
+//                  manifest citation quotes. A credential in a note nearly always has a name or a
 //                  shape, which the rules above catch.
 //  "key-material"  A reviewer's report and event stream (council). The reviewer
 //                  quotes the files it read, verbatim, from a snapshot with no
@@ -140,7 +144,7 @@ const AUTH_HEADER = /(Authorization:\s*(?:Bearer|Basic)\s+)([^\s"'`]+)/gi;
 //                  The line IS the secret: any run of 20+ characters mixing
 //                  digits and letters is masked, slashes and UUIDs included.
 //
-// `SECRETGATE_<hex>` is never masked at any level: the claim parser must see it.
+// A masking placeholder is never masked at any level: the claim parser must see it.
 export type BareRuns = "keep" | "key-material" | "opaque";
 
 /** Slashes excluded on purpose — they are what make a long path look like base64. */
@@ -150,8 +154,8 @@ const OPAQUE_RUN = /[A-Za-z0-9+/=_-]{20,}/g;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function looksLikeKeyMaterial(token: string): boolean {
-  if (/^SECRETGATE_/i.test(token)) return false;
+function looksLikeKeyMaterial(token: string, placeholders: readonly RegExp[]): boolean {
+  if (isPlaceholder(token, placeholders)) return false;
   if (UUID.test(token)) return false;
   if (/^[0-9a-f]{32,}$/i.test(token)) return true; // hex digest / key
   const digits = (token.match(/[0-9]/g) ?? []).length;
@@ -161,11 +165,11 @@ function looksLikeKeyMaterial(token: string): boolean {
   return digits >= 4 && letters >= 4;
 }
 
-function maskBareRuns(text: string, level: BareRuns): string {
-  if (level === "key-material") return text.replace(KEY_MATERIAL_RUN, (run) => (looksLikeKeyMaterial(run) ? maskValue(run) : run));
+function maskBareRuns(text: string, level: BareRuns, placeholders: readonly RegExp[]): string {
+  if (level === "key-material") return text.replace(KEY_MATERIAL_RUN, (run) => (looksLikeKeyMaterial(run, placeholders) ? maskValue(run) : run));
   if (level === "opaque") {
     // A long CONSTANT_NAME or a path segment has no digit.
-    return text.replace(OPAQUE_RUN, (run) => (!/^SECRETGATE_/i.test(run) && /\d/.test(run) && /[A-Za-z]/.test(run) ? maskValue(run) : run));
+    return text.replace(OPAQUE_RUN, (run) => (!isPlaceholder(run, placeholders) && /\d/.test(run) && /[A-Za-z]/.test(run) ? maskValue(run) : run));
   }
   return text;
 }
@@ -173,6 +177,8 @@ function maskBareRuns(text: string, level: BareRuns): string {
 export interface RedactOptions {
   /** How far to trust a bare opaque run to be a secret. Default `"keep"`. */
   bareRuns?: BareRuns;
+  /** Masking-placeholder shapes beyond the defaults (`--placeholder-pattern`); never masked. */
+  placeholders?: readonly RegExp[];
 }
 
 /**
@@ -189,19 +195,22 @@ export interface RedactOptions {
  */
 export function redactSecrets(text: string, opts: RedactOptions = {}): string {
   if (!text) return text;
+  const ph = opts.placeholders ?? [];
   const out = redactPasswordHashes(text)
     .replace(PEM_KEY, (_m, begin: string, end: string) => `${begin}…${end}`)
     .replace(URI_USERINFO, (_m, scheme: string, user: string) => `${scheme}${user}:…@`)
     .replace(NAMED_VALUE, (match, q1: string, name: string, sep: string, ...v: (string | undefined)[]) => {
       const [closed, quoted, open = "", bare] = v;
       const value = quoted ?? bare ?? "";
-      if (value.length < 4 || isReference(value)) return match;
+      if (value.length < 4 || isReference(value, ph)) return match;
       return quoted !== undefined ? `${q1}${name}${q1}${sep}${closed}${maskValue(value)}${closed}` : `${q1}${name}${q1}${sep}${open}${maskValue(value)}`;
     })
-    .replace(ENV_KEY, (match, name: string, q: string, value: string) => (value.length < 4 || isReference(value) ? match : `${name}=${q}${maskValue(value)}`))
+    .replace(ENV_KEY, (match, name: string, q: string, value: string) =>
+      value.length < 4 || isReference(value, ph) ? match : `${name}=${q}${maskValue(value)}`,
+    )
     .replace(AUTH_HEADER, (match, head: string, value: string) => (/[…*]/.test(value) ? match : `${head}${maskValue(value)}`));
   const shaped = PROVIDER_TOKENS.reduce((acc, re) => acc.replace(re, (token) => maskValue(token)), out);
-  return maskBareRuns(shaped, opts.bareRuns ?? "keep");
+  return maskBareRuns(shaped, opts.bareRuns ?? "keep", ph);
 }
 
 /**

@@ -1,4 +1,5 @@
-import type { EventFormat } from "./adapters.js";
+import { finalTextFrom, type ReviewerSpec } from "./reviewers.js";
+import { COVERAGE_HEADING } from "./locale.js";
 
 // Reading what a reviewer CLI printed: its report, its session, what it cost,
 // and — above all — WHY it stopped when it stopped without a report.
@@ -7,22 +8,27 @@ import type { EventFormat } from "./adapters.js";
 // by our own budget or timeout is resumed on the SAME model for one closing
 // turn: the context is already paid for and the report costs cents. A quota or
 // credit stop cannot be resumed on the same model until the quota resets, so it
-// goes to the `--fallback` list. A 504 from a free model's upstream is neither:
-// the next fallback simply gets a turn. On the audit this was built from, one
-// reviewer was cut at its cap holding nothing but progress notes, and the
-// whole run would have been lost without the one-turn resume.
+// goes to the `--fallback` list. A transient error (a gateway 504, a reset
+// connection) is neither: the next fallback simply gets a turn. On the audit
+// this was built from, one reviewer was cut at its cap holding nothing but
+// progress notes, and the whole run would have been lost without the one-turn
+// resume.
+//
+// Everything CLI-specific — where the session id, the usage and the text sit in
+// an event, which phrases a provider uses for its stops — comes from the
+// reviewer's spec (`reviewers.ts`). What is here is generic.
 
-export type FailureKind = "quota" | "credit" | "upstream" | "error";
+export type FailureKind = "quota" | "credit" | "transient" | "error";
 
 export interface Failure {
   kind: FailureKind;
   message: string;
-  /** When the provider said the quota resets, verbatim (`2026-10-09 01:52:02`). */
+  /** A reset time the provider announced, verbatim (`2026-10-09 01:52:02`). */
   resetAt?: string;
 }
 
 export interface Usage {
-  /** False when the CLI does not print usage at all (vibe, codex). */
+  /** False when the CLI does not print usage at all. */
   exposed: boolean;
   input: number;
   output: number;
@@ -60,115 +66,177 @@ export function addUsage(a: Usage, b: Usage): Usage {
   };
 }
 
-// Order matters: kilo's credit exhaustion is spelled `usage_limit_exceeded`,
-// which the quota pattern would otherwise claim — and a credit stop is not cured
-// by waiting.
-const CREDIT = /usage_limit_exceeded|low credit|insufficient (?:credit|balance|funds)|out of credits?|payment required|\b402\b/i;
-const QUOTA = /usage limit reached|limit will reset|rate[ _-]?limit|quota|too many requests|\b1308\b|\b429\b/i;
-const UPSTREAM = /upstream idle timeout|gateway time-?out|bad gateway|service unavailable|overloaded|\b50[234]\b/i;
-const RESET_AT = /reset (?:at|on)\s+(\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(?::\d{2})?)/i;
+// ── Stop detection ─────────────────────────────────────────────────────────
 
-/** Classify an error text. Every string here came from a real run. */
-export function classifyFailure(message: string): Failure {
+/**
+ * Generic phrasings of provider stops. `[ _-]` separators so a snake_case
+ * error code (`insufficient_quota`) reads like its prose. Credit is checked
+ * before quota: "insufficient quota" is money, not a rate, and a credit stop is
+ * not cured by waiting.
+ */
+const CREDIT =
+  /insufficient[ _-](?:credits?|balance|funds|quota)|out[ _-]of[ _-]credits?|\b(?:low|no)[ _-]credits?\b|credits?[ _-](?:exhausted|depleted)|balance[ _-](?:exhausted|too[ _-]low)|payment[ _-]required/i;
+const QUOTA = /usage[ _-]limit|rate[ _-]?limit|quota|too[ _-]many[ _-]requests|limit (?:will )?resets?\b/i;
+const TRANSIENT =
+  /time[ _-]?d?[ _-]?out|gateway|service[ _-]unavailable|temporarily[ _-]unavailable|overloaded|ECONNRESET|ETIMEDOUT|ECONNREFUSED|EAI_AGAIN|socket hang up/i;
+/** HTTP statuses — read only in a STRUCTURED error (an error event, a failed exit), never in prose. */
+const CODES: readonly [FailureKind, RegExp][] = [
+  ["credit", /\b402\b/],
+  ["quota", /\b429\b/],
+  ["transient", /\b(?:50[234]|529)\b/],
+];
+/**
+ * What is worth stopping a run for in an UNSTRUCTURED stream (a text CLI's
+ * stderr, which can echo the transcript): explicit stop phrases only. A review
+ * of a login form talks about rate limits; a quoted `429` is a line number.
+ */
+const STOP_PHRASES =
+  /usage[ _-]limit[ _-](?:reached|exceeded)|quota[ _-](?:exceeded|reached|exhausted)|limit will reset|insufficient[ _-](?:credits?|balance|funds|quota)|out[ _-]of[ _-]credits?|payment[ _-]required/i;
+/** A date-time anywhere in a stop message: the reset the provider announced. */
+const DATE_TIME = /\b\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?(?:\.\d+)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/;
+
+export interface Detector {
+  credit: RegExp[];
+  quota: RegExp[];
+  transient: RegExp[];
+}
+
+const compile = (ps: readonly string[] | undefined): RegExp[] => (ps ?? []).map((p) => new RegExp(p, "i"));
+
+/** A reviewer's own phrasings, checked before the generic ones. */
+export function detectorFor(spec: Pick<ReviewerSpec, "creditPatterns" | "quotaPatterns" | "transientPatterns"> | undefined): Detector {
+  return { credit: compile(spec?.creditPatterns), quota: compile(spec?.quotaPatterns), transient: compile(spec?.transientPatterns) };
+}
+
+/**
+ * Classify an error text. `structured` is true when the text is known to be an
+ * error (an error event, the output of a failed exit) — only then do bare HTTP
+ * statuses count.
+ */
+export function classifyFailure(message: string, detector: Detector = detectorFor(undefined), structured = true): Failure {
   const m = message.slice(0, 2000);
-  const resetAt = m.match(RESET_AT)?.[1];
-  const kind: FailureKind = CREDIT.test(m) ? "credit" : QUOTA.test(m) ? "quota" : UPSTREAM.test(m) ? "upstream" : "error";
+  const tiers: [FailureKind, RegExp[]][] = [
+    ["credit", detector.credit],
+    ["quota", detector.quota],
+    ["transient", detector.transient],
+    ["credit", [CREDIT]],
+    ["quota", [QUOTA]],
+    ["transient", [TRANSIENT]],
+    ...(structured ? CODES.map(([k, re]): [FailureKind, RegExp[]] => [k, [re]]) : []),
+  ];
+  const kind = tiers.find(([, res]) => res.some((re) => re.test(m)))?.[0] ?? "error";
+  const resetAt = kind === "quota" || kind === "credit" ? m.match(DATE_TIME)?.[0] : undefined;
   return { kind, message: m.replace(/\s+/g, " ").trim().slice(0, 300), ...(resetAt ? { resetAt } : {}) };
+}
+
+/** Is this unstructured line a provider stop? Generic phrases, or the reviewer's own patterns. */
+function isStopLine(line: string, d: Detector): boolean {
+  return STOP_PHRASES.test(line) || [...d.credit, ...d.quota].some((re) => re.test(line));
+}
+
+// ── JSON paths ─────────────────────────────────────────────────────────────
+
+/** Read a dotted path (`part.tokens.cache.read`) from a parsed JSON value. */
+export function getPath(obj: unknown, path: string | undefined): unknown {
+  if (!path) return undefined;
+  let cur: unknown = obj;
+  for (const key of path.split(".")) {
+    if (!cur || typeof cur !== "object" || !Object.hasOwn(cur, key)) return undefined;
+    cur = (cur as Record<string, unknown>)[key];
+  }
+  return cur;
 }
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 const str = (v: unknown): string | undefined => (typeof v === "string" && v ? v : undefined);
 
-/** The error carried by one opencode/kilo event line, if any, as text. */
-function eventError(ev: Record<string, unknown>): string | undefined {
-  if (ev.type === "error") return JSON.stringify(ev.error ?? ev.part ?? ev);
-  const part = ev.part as Record<string, unknown> | undefined;
-  if (part?.error) return JSON.stringify(part.error);
-  return undefined;
+function parseLine(line: string): Record<string, unknown> | undefined {
+  try {
+    const v = JSON.parse(line) as unknown;
+    return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined; // a stray log line is not an event
+  }
 }
 
-/** Provider stops spelled out in prose — the only stderr lines of a text CLI
- *  worth stopping a run for. Deliberately narrower than QUOTA: a bare `429` on a
- *  report line is a line number, not a rate limit. */
-const PROSE_STOP = /usage limit reached|limit will reset|usage_limit_exceeded|low credit|insufficient (?:credit|balance|funds)/i;
+/** The error an event carries, as text, if any. */
+function eventError(spec: ReviewerSpec, ev: Record<string, unknown>): string | undefined {
+  const p = spec.eventPaths ?? {};
+  const payload = (p.errors ?? []).map((path) => getPath(ev, path)).find((v) => v !== undefined && v !== null && v !== false);
+  if (p.errorType && getPath(ev, p.type ?? "type") === p.errorType) return JSON.stringify(payload ?? ev);
+  return payload !== undefined ? JSON.stringify(payload) : undefined;
+}
+
+const sessionOf = (spec: ReviewerSpec, ev: unknown): string | undefined =>
+  (spec.sessionIdPath ?? []).map((p) => str(getPath(ev, p))).find((s): s is string => !!s);
+
+function readUsage(spec: ReviewerSpec, ev: unknown, into: Usage): void {
+  const u = spec.usagePaths ?? {};
+  into.input += num(getPath(ev, u.input));
+  into.output += num(getPath(ev, u.output));
+  into.reasoning += num(getPath(ev, u.reasoning));
+  into.cacheRead += num(getPath(ev, u.cacheRead));
+  into.cacheWrite += num(getPath(ev, u.cacheWrite));
+  into.cost = Math.round((into.cost + num(getPath(ev, u.cost))) * 1e6) / 1e6;
+  into.steps += u.steps ? num(getPath(ev, u.steps)) : 1;
+}
 
 /**
  * Inspect one output line as it arrives: what the watcher needs to decide to
- * stop. Event CLIs are read on stdout (their error events); text CLIs only on
- * stderr — their stdout is the report, and a report quoting "429" must not be
- * mistaken for a rate limit.
+ * stop. JSON-event CLIs are read on stdout (their error and step events); text
+ * CLIs only on stderr — their stdout is the report, and a report quoting "429"
+ * must not be mistaken for a rate limit.
  */
-export function watchLine(format: EventFormat, stream: "stdout" | "stderr", line: string): { cost?: number; failure?: Failure } {
-  if (format === "opencode-json") {
+export function watchLine(spec: ReviewerSpec, stream: "stdout" | "stderr", line: string): { cost?: number; failure?: Failure } {
+  const d = detectorFor(spec);
+  if (spec.events === "jsonl-steps" || spec.events === "jsonl") {
     if (stream !== "stdout") return {};
-    let ev: Record<string, unknown>;
-    try {
-      ev = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      return {};
-    }
-    const err = eventError(ev);
-    if (err) return { failure: classifyFailure(err) };
-    if (ev.type === "step_finish") return { cost: num((ev.part as Record<string, unknown> | undefined)?.cost) };
+    const ev = parseLine(line);
+    if (!ev) return {};
+    const err = eventError(spec, ev);
+    if (err) return { failure: classifyFailure(err, d) };
+    const p = spec.eventPaths ?? {};
+    if (spec.events === "jsonl-steps" && p.stepType && getPath(ev, p.type ?? "type") === p.stepType) return { cost: num(getPath(ev, spec.usagePaths?.cost)) };
     return {};
   }
-  if (stream === "stderr" && PROSE_STOP.test(line)) return { failure: classifyFailure(line) };
+  if (stream === "stderr" && isStopLine(line, d)) return { failure: classifyFailure(line, d, false) };
   return {};
 }
 
 /**
- * Digest an opencode/kilo `--format json` stream: one JSON event per line, with
- * `type` among step_start / step_finish / text / tool_use / error.
- *
- * The report is the text of the LAST message that produced text. Text parts of
- * earlier messages are the agent narrating its exploration ("let me read the
- * router…"), and concatenating them buried the report on every real run.
+ * Digest a `jsonl-steps` stream. The report is the text of the LAST message
+ * that produced text: text parts of earlier messages are the agent narrating
+ * its exploration ("let me read the router…"), and concatenating them buried
+ * the report on every real run.
  */
-export function digestOpencode(raw: string): Digest {
+function digestSteps(spec: ReviewerSpec, raw: string): Digest {
+  const p = spec.eventPaths ?? {};
+  const typeOf = (ev: unknown): unknown => getPath(ev, p.type ?? "type");
   const usage = emptyUsage(true);
   let session: string | undefined;
   let failure: Failure | undefined;
   let toolCalls = 0;
   const textByMessage = new Map<string, string[]>();
   let lastTextMessage: string | undefined;
+  const d = detectorFor(spec);
 
   for (const line of raw.split("\n")) {
     if (!line.trim()) continue;
-    let ev: Record<string, unknown>;
-    try {
-      ev = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue; // a stray log line is not an event
-    }
-    const part = (ev.part ?? {}) as Record<string, unknown>;
-    session ??= str(ev.sessionID) ?? str(part.sessionID);
-    const err = eventError(ev);
-    if (err) failure = classifyFailure(err);
-    switch (ev.type) {
-      case "step_finish": {
-        const t = (part.tokens ?? {}) as Record<string, unknown>;
-        const cache = (t.cache ?? {}) as Record<string, unknown>;
-        usage.input += num(t.input);
-        usage.output += num(t.output);
-        usage.reasoning += num(t.reasoning);
-        usage.cacheRead += num(cache.read);
-        usage.cacheWrite += num(cache.write);
-        usage.cost = Math.round((usage.cost + num(part.cost)) * 1e6) / 1e6;
-        usage.steps++;
-        break;
-      }
-      case "text": {
-        const text = str(part.text);
-        if (!text) break;
-        const msg = str(part.messageID) ?? "_";
-        const arr = textByMessage.get(msg) ?? textByMessage.set(msg, []).get(msg)!;
-        arr.push(text);
-        lastTextMessage = msg;
-        break;
-      }
-      case "tool_use":
-        toolCalls++;
-        break;
+    const ev = parseLine(line);
+    if (!ev) continue;
+    session ??= sessionOf(spec, ev);
+    const err = eventError(spec, ev);
+    if (err) failure = classifyFailure(err, d);
+    const type = typeOf(ev);
+    if (p.stepType && type === p.stepType) readUsage(spec, ev, usage);
+    else if (p.toolType && type === p.toolType) toolCalls++;
+    else if (p.textType && type === p.textType) {
+      const text = str(getPath(ev, p.text));
+      if (!text) continue;
+      const msg = str(getPath(ev, p.messageId)) ?? "_";
+      const arr = textByMessage.get(msg) ?? textByMessage.set(msg, []).get(msg)!;
+      arr.push(text);
+      lastTextMessage = msg;
     }
   }
   const text = lastTextMessage ? (textByMessage.get(lastTextMessage) ?? []).join("\n") : "";
@@ -177,62 +245,52 @@ export function digestOpencode(raw: string): Digest {
   return { ...(session ? { session } : {}), usage, text, ...(failed ? { failure: failed } : {}), toolCalls };
 }
 
-/** Digest `claude -p --output-format json`: one result object, last on stdout. */
-export function digestClaude(raw: string): Digest {
+/** Digest a `jsonl` CLI: one result object, the last JSON line on stdout. */
+function digestResult(spec: ReviewerSpec, raw: string): Digest {
   const usage = emptyUsage(true);
-  const lines = raw.trim().split("\n").reverse();
-  for (const line of lines) {
-    let obj: Record<string, unknown>;
-    try {
-      obj = JSON.parse(line) as Record<string, unknown>;
-    } catch {
-      continue;
-    }
-    const u = (obj.usage ?? {}) as Record<string, unknown>;
-    usage.input = num(u.input_tokens);
-    usage.output = num(u.output_tokens);
-    usage.cacheRead = num(u.cache_read_input_tokens);
-    usage.cacheWrite = num(u.cache_creation_input_tokens);
-    usage.cost = num(obj.total_cost_usd);
-    usage.steps = num(obj.num_turns);
-    const text = str(obj.result) ?? "";
-    const session = str(obj.session_id);
-    const failure = obj.is_error === true ? classifyFailure(text || String(obj.subtype ?? "error")) : undefined;
+  const p = spec.eventPaths ?? {};
+  for (const line of raw.trim().split("\n").reverse()) {
+    const obj = parseLine(line);
+    if (!obj) continue;
+    readUsage(spec, obj, usage);
+    const text = str(getPath(obj, p.text)) ?? "";
+    const session = sessionOf(spec, obj);
+    const failure = getPath(obj, p.errorFlag) === true ? classifyFailure(text || JSON.stringify(obj), detectorFor(spec)) : undefined;
     return { ...(session ? { session } : {}), usage, text: failure ? "" : text, ...(failure ? { failure } : {}), toolCalls: 0 };
   }
   return { usage, text: "", toolCalls: 0 };
 }
 
-/** Digest a text CLI: stdout IS the report; usage is not exposed. */
-export function digestText(stdout: string, stderr: string, exitCode: number | null): Digest {
-  const failure =
-    exitCode !== 0
-      ? classifyFailure(stderr || stdout || `exit ${exitCode}`)
-      : !isContractShaped(stdout) && PROSE_STOP.test(stderr)
-        ? classifyFailure(stderr)
-        : undefined;
-  return { usage: emptyUsage(false), text: stdout.trim(), ...(failure ? { failure } : {}), toolCalls: 0 };
-}
+/**
+ * Digest one invocation. `fileText` is what the CLI wrote to `{outFile}`, for
+ * a reviewer whose report is read from a file.
+ */
+export function digest(spec: ReviewerSpec, stdout: string, stderr: string, exitCode: number | null, fileText?: string): Digest {
+  const d = detectorFor(spec);
+  const exposed = !!spec.usagePaths && Object.keys(spec.usagePaths).length > 0;
+  let out: Digest;
+  if (spec.events === "jsonl-steps") out = digestSteps(spec, stdout);
+  else if (spec.events === "jsonl") out = digestResult(spec, stdout);
+  else out = { usage: emptyUsage(false), text: "", toolCalls: 0 };
+  out.usage.exposed = exposed;
 
-export function digest(format: EventFormat, stdout: string, stderr: string, exitCode: number | null): Digest {
-  if (format === "opencode-json") {
-    const d = digestOpencode(stdout);
-    if (!d.failure && exitCode !== 0 && !isContractShaped(d.text)) d.failure = classifyFailure(stderr || `exit ${exitCode}`);
-    return d;
+  const from = finalTextFrom(spec);
+  if (from === "stdout") out.text = stdout.trim();
+  else if (from === "file") out.text = (fileText ?? "").trim();
+
+  if (!out.failure) {
+    if (exitCode !== 0 && !isContractShaped(out.text)) out.failure = classifyFailure(stderr || (spec.events === "text" ? stdout : "") || `exit ${exitCode}`, d);
+    else if (exitCode === 0 && !isContractShaped(out.text) && isStopLine(stderr, d)) out.failure = classifyFailure(stderr, d, false);
   }
-  if (format === "claude-json") {
-    const d = digestClaude(stdout);
-    if (!d.failure && exitCode !== 0 && !d.text) d.failure = classifyFailure(stderr || `exit ${exitCode}`);
-    return d;
-  }
-  return digestText(stdout, stderr, exitCode);
+  return out;
 }
 
 /**
  * Does this text look like the report the brief asked for — at least one
- * `### <ID> — <title>` block, or a coverage section? A clean "nothing found"
- * report still has the coverage section, so it counts; progress notes do not.
+ * `### <ID> — <title>` block, or a coverage section (in any locale)? A clean
+ * "nothing found" report still has the coverage section, so it counts;
+ * progress notes do not.
  */
 export function isContractShaped(text: string): boolean {
-  return /^###\s+\S+/m.test(text) || /^##\s+(?:C\.\s*)?(?:Coverage|Couverture)\b/im.test(text);
+  return /^###\s+\S+/m.test(text) || COVERAGE_HEADING.test(text);
 }

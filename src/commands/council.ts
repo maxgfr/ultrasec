@@ -7,17 +7,6 @@ import { loadDossier, type Dossier } from "../store.js";
 import { persistFindings, readApply } from "../stage.js";
 import type { Finding } from "../types.js";
 import { eprintln, flagBool, flagStr, numFlag, println, type ParsedArgs } from "../util.js";
-import {
-  ADAPTERS,
-  COUNCIL_CLIS,
-  onPath,
-  parseFocus,
-  parseModelList,
-  reviewersFrom,
-  type CouncilCli,
-  type ModelSpec,
-  type Reviewer,
-} from "../council/adapters.js";
 import { applyCouncil, mergeDecisions, parseDecisions } from "../council/apply.js";
 import { briefName, buildDevilList, LANGS, PHASES, renderBrief, type Lang, type Phase } from "../council/brief.js";
 import { indexTree, parseReport, type Claim } from "../council/claims.js";
@@ -37,30 +26,46 @@ import {
   type Ledger,
   type ReviewerRecord,
 } from "../council/ledger.js";
+import {
+  defaultConfigPath,
+  loadRegistry,
+  onPath,
+  parseFocus,
+  parseModelList,
+  reviewersFrom,
+  usageExposed,
+  type ModelSpec,
+  type Reviewer,
+  type ReviewerRegistry,
+} from "../council/reviewers.js";
 import { defaultSpawner, runReviewer, type CouncilSpawner, type RunnerContext } from "../council/runner.js";
 import { ensureSnapshot, snapshotFiles } from "../council/snapshot.js";
+import { compilePlaceholderPatterns } from "../placeholders.js";
 
-// `ultrasec council --run <dir> [--repo .] [--phase blind|devil] --models "cli:model,…"
-//     [--focus "name=area;…"] [--fallback "cli:model,…"] [--timeout-min 60] [--max-cost <usd>]
-//     [--lang en|fr] [--json]`
+// `ultrasec council --run <dir> [--repo .] [--phase blind|devil] --models "<reviewer>:<model>,…"
+//     [--focus "name=area;…"] [--fallback "<reviewer>:<model>,…"] [--timeout-min 60] [--max-cost <usd>]
+//     [--lang en|fr] [--reviewer-config <file.json>] [--placeholder-pattern <regex>]… [--json]`
 // `ultrasec council --run <dir> --parse`             re-parse reviewer outputs → COUNCIL.todo.json/COUNCIL.md
 // `ultrasec council --run <dir> --resume <reviewer>` one-turn finalisation of a cut reviewer
 // `ultrasec council --run <dir> --apply <decisions>` fold the orchestrator's decisions
 //
 // A second opinion from other model families, made a command instead of a
-// paragraph of advice. On one Next.js audit, three external reviewers produced
-// the run's only HIGH that neither the engine nor the first manual pass had
-// seen — and four confident claims that were false. Both outcomes shape this:
-// reviewers propose on a snapshot, the orchestrator verifies, and nothing
-// enters the run except through the citation gate.
+// paragraph of advice. On one web-application audit, three external reviewers
+// produced the run's only HIGH that neither the engine nor the first manual
+// pass had seen — and four confident claims that were false. Both outcomes
+// shape this: reviewers propose on a snapshot, the orchestrator verifies, and
+// nothing enters the run except through the citation gate.
+//
+// A reviewer is any agent CLI described as data (`council/reviewers.ts`):
+// built-in presets, or entries of a `--reviewer-config` file.
 //
 // Without `--models` it prints the plan and calls NOTHING: which reviewer CLIs
 // are on PATH (a filesystem probe, not a spawn) and the commands it would run.
 
 export interface CouncilDeps {
   spawner?: CouncilSpawner;
-  /** Test seam: replace a CLI's binary with an argv prefix (a fake CLI). */
-  commands?: Partial<Record<CouncilCli, string[]>>;
+  /** Test seam: replace a reviewer's binary with an argv prefix (a fake CLI). */
+  commands?: Record<string, string[]>;
   baseEnv?: NodeJS.ProcessEnv;
 }
 
@@ -69,6 +74,13 @@ const DEFAULT_MAX_TURNS = 100;
 
 export function runCouncil(args: ParsedArgs): Promise<number> {
   return runCouncilWith(args, {});
+}
+
+/** Every string value of a repeatable flag, verbatim (no comma split: a regex may hold one). */
+function rawFlagValues(args: ParsedArgs, name: string): string[] {
+  const v = args.flags[name];
+  if (v === undefined) return [];
+  return (Array.isArray(v) ? v : [v]).filter((x): x is string => typeof x === "string");
 }
 
 function fail(msg: string): number {
@@ -96,13 +108,19 @@ function dropSnapshot(run: string): void {
 }
 
 /** Re-parse every recorded report against the snapshot and rewrite the worklist. */
-export function reparse(run: string, repo: string, ledger: Ledger, findings: readonly Finding[]): { todo: CouncilTodo; claims: Claim[] } {
+export function reparse(
+  run: string,
+  repo: string,
+  ledger: Ledger,
+  findings: readonly Finding[],
+  placeholders: readonly RegExp[] = [],
+): { todo: CouncilTodo; claims: Claim[] } {
   const snap = ensureSnapshot(repo, snapshotDir(run), ledger.commit, ledger.commit);
   const idx = indexTree(snap.dir, snapshotFiles(snap.dir));
   const claims: Claim[] = [];
   for (const r of ledger.reviewers) {
     if (!r.report || !existsSync(join(run, r.report))) continue;
-    claims.push(...parseReport(readFileSync(join(run, r.report), "utf8"), { reviewer: r.name, phase: r.phase }, idx));
+    claims.push(...parseReport(readFileSync(join(run, r.report), "utf8"), { reviewer: r.name, phase: r.phase }, idx, { placeholders }));
   }
   const todo = consolidate(claims, findings, ledger.commit);
   writeFileSync(join(councilDir(run), TODO), JSON.stringify(todo, null, 2));
@@ -129,7 +147,19 @@ export async function runCouncilWith(args: ParsedArgs, deps: CouncilDeps): Promi
   const parseOnly = flagBool(args, "parse");
   const modes = [applyPath, parseOnly || undefined, flagBool(args, "resume") || resumeName ? true : undefined, modelsRaw].filter((m) => m !== undefined);
   if (modes.length > 1) return fail("--models, --parse, --resume and --apply are separate steps — pass one.");
-  if (flagBool(args, "resume") && !resumeName) return fail("--resume needs a reviewer name (e.g. `--resume kilo`).");
+  if (flagBool(args, "resume") && !resumeName) return fail("--resume needs a reviewer name (e.g. `--resume <reviewer>`).");
+
+  // Reviewers and placeholder shapes: presets, then the user's config (never
+  // the audited repo's — see `defaultConfigPath`), then the flags.
+  let registry: ReviewerRegistry;
+  try {
+    const extra = compilePlaceholderPatterns(rawFlagValues(args, "placeholder-pattern"), "--placeholder-pattern");
+    const configPath = flagStr(args, "reviewer-config");
+    registry = loadRegistry({ ...(configPath ? { configPath } : {}), env: deps.baseEnv ?? process.env, extraPlaceholders: extra });
+  } catch (e) {
+    return fail((e as Error).message);
+  }
+  const placeholders = registry.placeholderPatterns;
 
   const lang = (flagStr(args, "lang") ?? ledger?.lang ?? "en") as Lang;
   if (!LANGS.includes(lang)) return fail(`unknown --lang "${lang}" (expected ${LANGS.join("|")}).`);
@@ -142,7 +172,7 @@ export async function runCouncilWith(args: ParsedArgs, deps: CouncilDeps): Promi
   let fallbacks: ModelSpec[] = [];
   try {
     const fb = flagStr(args, "fallback");
-    if (fb) fallbacks = parseModelList(fb, "--fallback");
+    if (fb) fallbacks = parseModelList(fb, "--fallback", registry);
   } catch (e) {
     return fail((e as Error).message);
   }
@@ -152,7 +182,7 @@ export async function runCouncilWith(args: ParsedArgs, deps: CouncilDeps): Promi
   if (parseOnly) {
     if (!ledger) return fail(`no council at ${councilDir(run)} — run \`council --models …\` first.`);
     try {
-      const { todo } = reparse(run, repo, ledger, dossier?.findings ?? []);
+      const { todo } = reparse(run, repo, ledger, dossier?.findings ?? [], placeholders);
       return printParse(run, ledger, todo, json);
     } catch (e) {
       return fail((e as Error).message);
@@ -168,6 +198,8 @@ export async function runCouncilWith(args: ParsedArgs, deps: CouncilDeps): Promi
     ...(maxCost !== undefined ? { maxCost } : {}),
     maxTurns: DEFAULT_MAX_TURNS,
     fallbacks,
+    registry,
+    placeholders,
     spawner: deps.spawner ?? defaultSpawner,
     ...(deps.commands ? { commands: deps.commands } : {}),
     ...(deps.baseEnv ? { baseEnv: deps.baseEnv } : {}),
@@ -181,6 +213,10 @@ export async function runCouncilWith(args: ParsedArgs, deps: CouncilDeps): Promi
       return fail(
         `no reviewer "${resumeName}"${phaseRaw ? ` in phase ${phaseRaw}` : ""} (known: ${[...new Set(ledger.reviewers.map((r) => r.name))].join(", ") || "none"}).`,
       );
+    if (!registry.specs.has(rec.cli))
+      return fail(
+        `reviewer "${rec.name}" ran as "${rec.cli}", which is neither a preset nor in the reviewer config — pass the --reviewer-config that defined it.`,
+      );
     if (rec.resetAt) println(`  ⏳ ${rec.name}: the provider said the quota resets at ${rec.resetAt} — resuming anyway.`);
     try {
       return await resumeMode(run, repo, ledger, rec, ctxBase, dossier, json);
@@ -189,7 +225,7 @@ export async function runCouncilWith(args: ParsedArgs, deps: CouncilDeps): Promi
     }
   }
 
-  if (!modelsRaw) return printPlan(run, repo, json, deps.baseEnv);
+  if (!modelsRaw) return printPlan(run, repo, json, registry, deps.baseEnv);
   try {
     return await modelsMode(run, repo, ledger, modelsRaw, flagStr(args, "focus"), (phaseRaw ?? "blind") as Phase, lang, ctxBase, dossier, json);
   } finally {
@@ -223,7 +259,7 @@ async function resumeMode(
   const next = await runReviewer(ctx, reviewer, rec);
   upsertReviewer(ledger, next);
   saveLedger(run, ledger);
-  const { todo } = reparse(run, repo, ledger, dossier?.findings ?? []);
+  const { todo } = reparse(run, repo, ledger, dossier?.findings ?? [], ctxBase.placeholders);
   if (json) println(JSON.stringify({ reviewer: next, candidates: todo.candidates.length }, null, 2));
   else {
     println(`ultrasec council --resume ${rec.name} (${rec.phase}) → ${next.status}`);
@@ -247,7 +283,7 @@ async function modelsMode(
   let ledger = prior;
   let reviewers: Reviewer[];
   try {
-    reviewers = reviewersFrom(parseModelList(modelsRaw, "--models"), parseFocus(focusRaw));
+    reviewers = reviewersFrom(parseModelList(modelsRaw, "--models", ctxBase.registry), parseFocus(focusRaw));
   } catch (e) {
     return fail((e as Error).message);
   }
@@ -271,7 +307,7 @@ async function modelsMode(
   const records = await Promise.all(reviewers.map((r) => runReviewer(ctx, r)));
   for (const rec of records) upsertReviewer(ledger, rec);
   saveLedger(run, ledger);
-  const { todo } = reparse(run, repo, ledger, dossier?.findings ?? []);
+  const { todo } = reparse(run, repo, ledger, dossier?.findings ?? [], ctxBase.placeholders);
 
   if (json)
     println(
@@ -347,25 +383,42 @@ function printParse(run: string, ledger: Ledger, todo: CouncilTodo, json: boolea
   return 0;
 }
 
-function printPlan(run: string, repo: string, json: boolean, baseEnv?: NodeJS.ProcessEnv): number {
+function printPlan(run: string, repo: string, json: boolean, registry: ReviewerRegistry, baseEnv?: NodeJS.ProcessEnv): number {
   const path = (baseEnv ?? process.env).PATH ?? "";
-  const clis = COUNCIL_CLIS.map((cli) => {
-    const at = onPath(ADAPTERS[cli].bin, path);
-    const usage = ADAPTERS[cli].usageExposed;
-    return { cli, installed: !!at, ...(at ? { path: at } : {}), usage };
+  const clis = [...registry.specs.values()].map((spec) => {
+    const at = onPath(spec.bin, path);
+    return {
+      reviewer: spec.name,
+      bin: spec.bin,
+      source: registry.fromConfig.has(spec.name) ? "config" : "preset",
+      installed: !!at,
+      ...(at ? { path: at } : {}),
+      usage: usageExposed(spec),
+      resume: !!spec.resumeArgs,
+      readOnly: spec.readOnly,
+    };
   });
   const commit = headCommit(repo);
+  const config = registry.source ?? null;
   if (json) {
-    println(JSON.stringify({ run, repo, commit, externalCalls: 0, clis }, null, 2));
+    println(
+      JSON.stringify({ run, repo, commit, externalCalls: 0, config, configDefault: defaultConfigPath(baseEnv ?? process.env), reviewers: clis }, null, 2),
+    );
     return 0;
   }
   println(`ultrasec council → ${councilDir(run)} (no --models: plan only, ZERO external calls)`);
   println(`  repo: ${repo} @ ${commit ? commit.slice(0, 12) : "not a git checkout — council needs a commit to snapshot"}`);
-  println(`  reviewer CLIs on PATH:`);
+  println(
+    `  reviewer config: ${config ?? `none (presets only; add reviewers in ${defaultConfigPath(baseEnv ?? process.env)} or --reviewer-config <file.json>)`}`,
+  );
+  println(`  reviewers:`);
+  const w = Math.max(9, ...clis.map((c) => c.reviewer.length + 1));
   for (const c of clis)
-    println(`    ${c.installed ? "✓" : "✗"} ${c.cli.padEnd(9)} ${c.installed ? c.path : "not found"}${c.usage ? "" : "  (usage not exposed)"}`);
-  const have = clis.filter((c) => c.installed).map((c) => `${c.cli}:<model>`);
-  println(`  blind pass:   ultrasec council --run ${run} --models "${have.length ? have.join(",") : "kilo:<model>,opencode:<provider/model>"}"`);
+    println(
+      `    ${c.installed ? "✓" : "✗"} ${c.reviewer.padEnd(w)} ${c.installed ? c.path : `${c.bin} not found`}${c.source === "config" ? "  (config)" : ""}${c.usage ? "" : "  (usage not exposed)"} — read-only: ${c.readOnly}`,
+    );
+  const have = clis.filter((c) => c.installed).map((c) => `${c.reviewer}:<provider>/<model>`);
+  println(`  blind pass:   ultrasec council --run ${run} --models "${have.length ? have.join(",") : "<reviewer>:<provider>/<model>,…"}"`);
   println(`  then:         ultrasec council --run ${run} --apply <decisions.json>   ·   --phase devil after verify`);
   println(`  each reviewer works on a \`git archive HEAD\` snapshot with an emptied environment; nothing enters the run unverified.`);
   return 0;
@@ -428,7 +481,7 @@ function applyMode(
   for (const r of res.refused) println(`  ✗ ${r.id}: ${r.reason}`);
   for (const line of formatDropped(parsed.dropped)) println(line);
   if (todo.contested.length)
-    println(`  ${todo.contested.length} contestation(s) stay a worklist (COUNCIL.md) — re-verify those findings; nothing was changed for them.`);
+    println(`  ${todo.contested.length} contested finding(s) stay a worklist (COUNCIL.md) — re-verify those findings; nothing was changed for them.`);
   if (res.ingested) println(`  next: \`ultrasec verify --run ${run}\` — accepted candidates are open, and are adjudicated like any other.`);
   return strict && refusals > 0 ? 1 : 0;
 }

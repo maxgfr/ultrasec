@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { ADAPTERS, onPath, type CouncilCli, type ModelSpec, type Reviewer } from "./adapters.js";
-import { argvMessage, finalizeMessage, type Lang, type Phase } from "./brief.js";
+import { argvMessage, briefName, finalizeMessage, type Lang, type Phase } from "./brief.js";
 import { addUsage, digest, emptyUsage, isContractShaped, watchLine, type Digest, type Failure } from "./events.js";
 import { reviewerDir, type Attempt, type ReviewerRecord, type ReviewerStatus } from "./ledger.js";
 import { redactJsonLine, redactReviewerText } from "./redact.js";
+import { buildArgs, getSpec, onPath, specEnv, usageExposed, type ModelSpec, type Reviewer, type ReviewerRegistry } from "./reviewers.js";
 import { councilEnv } from "./snapshot.js";
 
 // Running the reviewers: in parallel, each on the snapshot, each with an
@@ -94,10 +94,14 @@ export interface RunnerContext {
   maxTurns: number;
   fallbacks: ModelSpec[];
   spawner: CouncilSpawner;
-  /** Test seam: replace a CLI's binary with an argv prefix (a fake CLI). */
-  commands?: Partial<Record<CouncilCli, string[]>>;
+  /** Presets and config-defined reviewers. */
+  registry: ReviewerRegistry;
+  /** Test seam: replace a reviewer's binary with an argv prefix (a fake CLI). */
+  commands?: Record<string, string[]>;
   /** Base environment the emptied one is derived from (HOME, PATH). */
   baseEnv?: NodeJS.ProcessEnv;
+  /** Masking-placeholder shapes beyond the defaults — never redacted. */
+  placeholders?: readonly RegExp[];
 }
 
 /** The closing turn is short by construction; it never needs the full budget. */
@@ -117,40 +121,53 @@ function statusOf(d: Digest, res: SpawnResult): ReviewerStatus {
 }
 
 /** One invocation of one CLI: fresh, or resuming `session` for one closing turn. */
-async function attempt(ctx: RunnerContext, reviewer: Reviewer, spec: ModelSpec, session: string | undefined): Promise<AttemptOutcome> {
-  const adapter = ADAPTERS[spec.cli];
+async function attempt(ctx: RunnerContext, reviewer: Reviewer, ms: ModelSpec, session: string | undefined): Promise<AttemptOutcome> {
+  const spec = getSpec(ctx.registry, ms.cli);
   const resume = session !== undefined;
   const dir = reviewerDir(ctx.run, ctx.phase, reviewer.name);
-  const input = {
-    model: spec.model,
+  const brief = briefName(ctx.phase, reviewer.name);
+  // A report the CLI writes to a file lands beside the logs, is read once, and
+  // is removed: only the redacted `out.md` stays.
+  const outFile = join(dir, "final-message.txt");
+  const values = {
+    brief,
+    briefPath: join(ctx.snapshot, brief),
+    model: ms.model,
     dir: ctx.snapshot,
     message: resume ? finalizeMessage(ctx.lang, ctx.phase, reviewer.name) : argvMessage(ctx.lang, ctx.phase, reviewer.name),
     title: `ultrasec council ${ctx.phase} ${reviewer.name}`,
-    maxTurns: ctx.maxTurns,
+    maxTurns: String(resume ? 1 : ctx.maxTurns),
+    outFile,
     ...(session ? { session } : {}),
   };
-  const args = resume ? adapter.resume(input) : adapter.start(input);
-  const base = { cli: spec.cli, model: spec.model, resume, exit: null, durationMs: 0, usage: emptyUsage(adapter.usageExposed) };
+  const args = buildArgs(spec, values, resume);
+  const base = { cli: ms.cli, model: ms.model, resume, exit: null, durationMs: 0, usage: emptyUsage(usageExposed(spec)) };
   if (!args) {
-    const failure: Failure = { kind: "error", message: `${spec.cli} cannot resume a session it did not name` };
+    const failure: Failure = {
+      kind: "error",
+      message: `${ms.cli} cannot resume ${spec.resumeArgs ? "a session it did not name" : "a session (no resumeArgs)"}`,
+    };
     return { attempt: { ...base, status: "failed", failure }, digest: { usage: base.usage, text: "", failure, toolCalls: 0 } };
   }
-  const env = councilEnv(adapter.env?.(spec.model) ?? {}, ctx.baseEnv);
-  const prefix = ctx.commands?.[spec.cli];
-  if (!prefix && !onPath(adapter.bin, env.PATH)) {
-    const failure: Failure = { kind: "error", message: `${adapter.bin} is not on PATH` };
+  const baseEnv = ctx.baseEnv ?? process.env;
+  const env = councilEnv(specEnv(spec, values, baseEnv), baseEnv);
+  const prefix = ctx.commands?.[ms.cli];
+  if (!prefix && !onPath(spec.bin, env.PATH)) {
+    const failure: Failure = { kind: "error", message: `${spec.bin} is not on PATH` };
     return { attempt: { ...base, status: "not-installed", failure }, digest: { usage: base.usage, text: "", failure, toolCalls: 0 } };
   }
+  mkdirSync(dir, { recursive: true });
+  rmSync(outFile, { force: true });
 
   let cost = 0;
   let watched: Failure | undefined;
   const res = await ctx.spawner({
-    argv: [...(prefix ?? [adapter.bin]), ...args],
+    argv: [...(prefix ?? [spec.bin]), ...args],
     cwd: ctx.snapshot,
     env,
     timeoutMs: resume ? Math.min(ctx.timeoutMs, FINALIZE_TIMEOUT_MS) : ctx.timeoutMs,
     onLine: (stream, line) => {
-      const w = watchLine(adapter.format, stream, line);
+      const w = watchLine(spec, stream, line);
       if (w.cost) cost += w.cost;
       if (ctx.maxCost !== undefined && cost > ctx.maxCost) return "budget";
       // A provider stop does not recover by waiting: stop paying for the wait.
@@ -161,18 +178,23 @@ async function attempt(ctx: RunnerContext, reviewer: Reviewer, spec: ModelSpec, 
       return undefined;
     },
   });
-  const d = digest(adapter.format, res.stdout, res.stderr, res.code);
+  let fileText: string | undefined;
+  if (existsSync(outFile)) {
+    fileText = readFileSync(outFile, "utf8");
+    rmSync(outFile, { force: true });
+  }
+  const d = digest(spec, res.stdout, res.stderr, res.code, fileText);
   if (watched && !d.failure && !isContractShaped(d.text)) d.failure = watched;
 
   // Logs, redacted on the way in: the event stream carries every file the
   // reviewer read, verbatim.
-  mkdirSync(dir, { recursive: true });
-  const marker = JSON.stringify({ type: "ultrasec.attempt", cli: spec.cli, model: spec.model, resume, exit: res.code, killed: res.killed ?? null });
-  if (adapter.format !== "text") {
+  const ph = ctx.placeholders ?? [];
+  const marker = JSON.stringify({ type: "ultrasec.attempt", cli: ms.cli, model: ms.model, resume, exit: res.code, killed: res.killed ?? null });
+  if (spec.events === "jsonl-steps" || spec.events === "jsonl") {
     const lines = res.stdout.split("\n").filter((l) => l.trim());
-    appendFileSync(join(dir, "events.jsonl"), [marker, ...lines.map(redactJsonLine)].join("\n") + "\n");
+    appendFileSync(join(dir, "events.jsonl"), [marker, ...lines.map((l) => redactJsonLine(l, ph))].join("\n") + "\n");
   }
-  if (res.stderr.trim()) appendFileSync(join(dir, "err.log"), `--- ${spec.cli}:${spec.model}${resume ? " (resume)" : ""}\n${redactReviewerText(res.stderr)}\n`);
+  if (res.stderr.trim()) appendFileSync(join(dir, "err.log"), `--- ${ms.cli}:${ms.model}${resume ? " (resume)" : ""}\n${redactReviewerText(res.stderr, ph)}\n`);
 
   const status = statusOf(d, res);
   return {
@@ -182,7 +204,7 @@ async function attempt(ctx: RunnerContext, reviewer: Reviewer, spec: ModelSpec, 
       exit: res.code,
       durationMs: res.durationMs,
       usage: d.usage,
-      ...(d.failure ? { failure: { ...d.failure, message: redactReviewerText(d.failure.message) } } : {}),
+      ...(d.failure ? { failure: { ...d.failure, message: redactReviewerText(d.failure.message, ph) } } : {}),
     },
     digest: d,
   };
@@ -197,10 +219,10 @@ const CURABLE_IN_PLACE: ReadonlySet<ReviewerStatus> = new Set(["budget", "timeou
  * 1. The full review on the reviewer's own model.
  * 2. Cut by OUR budget or timeout, or finished without the report? Resume the
  *    same session, same model, for one turn: "stop exploring, write it now".
- * 3. Still nothing — quota, credit, an upstream 504? Walk `--fallback` (same
- *    CLI only: a session belongs to the CLI that opened it), resuming the
- *    session when there is one, starting fresh when there is not. A 504 from
- *    one free model just hands the turn to the next.
+ * 3. Still nothing — quota, credit, a transient error? Walk `--fallback` (same
+ *    reviewer entry only: a session belongs to the CLI that opened it),
+ *    resuming the session when there is one, starting fresh when there is
+ *    not. A transient error on one model just hands the turn to the next.
  */
 export async function runReviewer(ctx: RunnerContext, reviewer: Reviewer, prior?: ReviewerRecord): Promise<ReviewerRecord> {
   const dir = reviewerDir(ctx.run, ctx.phase, reviewer.name);
@@ -238,7 +260,7 @@ export async function runReviewer(ctx: RunnerContext, reviewer: Reviewer, prior?
   const status = done ? "ok" : (last() ?? "failed");
   let report = prior?.report;
   if (best?.text) {
-    writeFileSync(join(dir, "out.md"), `${redactReviewerText(best.text)}\n`);
+    writeFileSync(join(dir, "out.md"), `${redactReviewerText(best.text, ctx.placeholders ?? [])}\n`);
     report = relative(ctx.run, join(dir, "out.md")).split("\\").join("/");
   }
   const allAttempts = [...(prior?.attempts ?? []), ...attempts];
@@ -252,7 +274,7 @@ export async function runReviewer(ctx: RunnerContext, reviewer: Reviewer, prior?
     ...(session ? { session } : {}),
     ...(resetAt && status !== "ok" ? { resetAt } : {}),
     attempts: allAttempts,
-    usage: allAttempts.reduce((acc, a) => addUsage(acc, a.usage), emptyUsage(ADAPTERS[reviewer.cli].usageExposed)),
+    usage: allAttempts.reduce((acc, a) => addUsage(acc, a.usage), emptyUsage(usageExposed(getSpec(ctx.registry, reviewer.cli)))),
     ...(report ? { report } : {}),
   };
 }

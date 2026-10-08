@@ -56,7 +56,7 @@ function dossier(findings: Finding[]): Dossier {
 
 describe("redactSecrets — each credential shape", () => {
   it("masks a modular-crypt password hash, keeping the algorithm and cost", () => {
-    const out = redactSecrets(`the seed row inserts '${ARGON}' for super`);
+    const out = redactSecrets(`the seed row inserts '${ARGON}' for the seed admin`);
     expect(out).toContain("$argon2id$v=19$m=65536,t=3,p=4$…");
     expect(out).not.toContain(SALT);
     expect(out).not.toContain(DIGEST);
@@ -160,17 +160,17 @@ describe("authored notes are redacted on the way into the dossier", () => {
 
   it("verify --apply folds a redacted note and exploit path", () => {
     const r = applyVerdicts(dossier([finding("a")]), [
-      { id: "a", verdict: "supported", note: `seed.sql:1 inserts ${ARGON}`, exploitPath: "login as super with SUPER_PASSWORD=Adm1nAdm1n!Adm1n" },
+      { id: "a", verdict: "supported", note: `seed.sql:1 inserts ${ARGON}`, exploitPath: "login as admin with ADMIN_PASSWORD=Adm1nAdm1n!Adm1n" },
     ]);
     const a = r.findings[0]!;
     expect(a.message).not.toContain(DIGEST);
     expect(a.message).toContain("Verdict (supported): seed.sql:1 inserts $argon2id$v=19$m=65536,t=3,p=4$…");
-    expect(a.exploitPath).toBe("login as super with SUPER_PASSWORD=Adm1…");
+    expect(a.exploitPath).toBe("login as admin with ADMIN_PASSWORD=Adm1…");
   });
 
   it("revalidate --apply folds a redacted note — the path that leaked", () => {
     const r = applyRevalidations(dossier([finding("a", { status: "confirmed" })]), [
-      { id: "a", verdict: "still-valid", note: `current line: ('admin@example.org', '${ARGON}', 'super')` },
+      { id: "a", verdict: "still-valid", note: `current line: ('admin@example.org', '${ARGON}', 'owner')` },
     ]);
     expect(r.findings[0]!.message).not.toContain(SALT);
     expect(r.findings[0]!.message).toContain("Revalidation (still-valid): current line:");
@@ -178,15 +178,15 @@ describe("authored notes are redacted on the way into the dossier", () => {
 
   it("investigate --apply redacts the hunter's write-up", () => {
     const repo = mkdtempSync(join(tmpdir(), "ultrasec-redact-inv-"));
-    writeFileSync(join(repo, "config.js"), "module.exports = {\n  stripeKey: 'sk_live_0123456789abcdefABCDEF',\n};\n");
+    writeFileSync(join(repo, "config.js"), "module.exports = {\n  paymentKey: 'sk_live_0123456789abcdefABCDEF',\n};\n");
     const r = ingestDiscoveries(
       dossier([]),
       [
         {
-          title: "Hard-coded Stripe key",
+          title: "Hard-coded payment provider key",
           category: "secret",
           severity: "high",
-          message: "config.js ships STRIPE_SECRET_KEY=sk_live_0123456789abcdefABCDEF to every client",
+          message: "config.js ships PAYMENT_SECRET_KEY=sk_live_0123456789abcdefABCDEF to every client",
           file: "config.js",
           line: 2,
           path: [{ file: "config.js", line: 2, why: "api_key: sk_live_0123456789abcdefABCDEF" }],
@@ -195,7 +195,7 @@ describe("authored notes are redacted on the way into the dossier", () => {
       repo,
     );
     const f = r.findings[0]!;
-    expect(f.message).toContain("STRIPE_SECRET_KEY=sk_l…");
+    expect(f.message).toContain("PAYMENT_SECRET_KEY=sk_l…");
     expect(JSON.stringify(f)).not.toContain("0123456789abcdefABCDEF");
   });
 });
@@ -217,7 +217,7 @@ describe.skipIf(!gitAvailable())("REVALIDATE.todo.json never quotes a credential
     git("config", "user.email", "t@example.com");
     git("config", "user.name", "t");
     mkdirSync(join(dir, "src"), { recursive: true });
-    writeFileSync(join(dir, "seed.sql"), `INSERT INTO users VALUES ('admin@example.org', '${ARGON}', 'super');\n`);
+    writeFileSync(join(dir, "seed.sql"), `INSERT INTO users VALUES ('admin@example.org', '${ARGON}', 'owner');\n`);
     writeFileSync(join(dir, "src", "db.js"), "const token = req.query.token; db.query(token);\n");
     git("add", "-A");
     git("commit", "-qm", "init");
@@ -249,7 +249,7 @@ describe.skipIf(!gitAvailable())("REVALIDATE.todo.json never quotes a credential
 const HEX40 = ["a1b2c3d4e5", "f6a7b8c9d0", "e1f2a3b4c5", "d6e7f8a9b0"].join("");
 const JWT = ["eyJhbGciOiJIUzI1NiJ9", "eyJzdWIiOiIxMjM0NTYifQ", "c2lnbmF0dXJlX3Zh"].join(".");
 const AWS = ["AKIA", "IOSFODNN7EXAMPLE"].join("");
-const PLACEHOLDER = ["SECRETGATE", "ab1426b6f023"].join("_");
+const PLACEHOLDER = ["MASKTOOL", "ab1426b6f023"].join("_");
 const UUID = "123e4567-e89b-12d3-a456-426614174000";
 
 const SHARED_TABLE: [label: string, input: string, expected: string][] = [
@@ -262,8 +262,8 @@ const SHARED_TABLE: [label: string, input: string, expected: string][] = [
   ["40-char hex key, named", `SIGNING_KEY=${HEX40}`, "SIGNING_KEY=a1b2…"],
   ["40-char hex key, quoted", `"api_key": "${HEX40}"`, '"api_key": "a1b2…"'],
   ["AWS access key", `the key ${AWS} ships`, "the key AKIA… ships"],
-  ["SECRETGATE placeholder, named", `TOKEN=${PLACEHOLDER}`, `TOKEN=${PLACEHOLDER}`],
-  ["SECRETGATE placeholder, bare", `replaced by ${PLACEHOLDER}`, `replaced by ${PLACEHOLDER}`],
+  ["masking placeholder, named", `TOKEN=${PLACEHOLDER}`, `TOKEN=${PLACEHOLDER}`],
+  ["masking placeholder, bare", `replaced by ${PLACEHOLDER}`, `replaced by ${PLACEHOLDER}`],
   ["UUID", `request ${UUID} failed`, `request ${UUID} failed`],
   ["process.env reference", "password: process.env.DB_PASSWORD", "password: process.env.DB_PASSWORD"],
   ["already masked", "DB_PASSWORD=Sup3… and postgres://app:…@db", "DB_PASSWORD=Sup3… and postgres://app:…@db"],

@@ -1,7 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Lang, Phase } from "./brief.js";
-import type { CouncilCli } from "./adapters.js";
 import type { CouncilTodo } from "./consolidate.js";
 import { addUsage, emptyUsage, type Failure, type Usage } from "./events.js";
 
@@ -21,10 +20,11 @@ export const LEDGER = "COUNCIL.json";
 export const TODO = "COUNCIL.todo.json";
 export const BRIEF_MD = "COUNCIL.md";
 
-export type ReviewerStatus = "ok" | "no-report" | "budget" | "timeout" | "quota" | "credit" | "upstream" | "failed" | "not-installed";
+export type ReviewerStatus = "ok" | "no-report" | "budget" | "timeout" | "quota" | "credit" | "transient" | "failed" | "not-installed";
 
 export interface Attempt {
-  cli: CouncilCli;
+  /** The reviewer entry (preset or config) the attempt ran. */
+  cli: string;
   model: string;
   /** True when this attempt resumed the reviewer's session for one closing turn. */
   resume: boolean;
@@ -38,12 +38,13 @@ export interface Attempt {
 export interface ReviewerRecord {
   name: string;
   phase: Phase;
-  cli: CouncilCli;
+  /** The reviewer entry (preset or config). Re-resolved on `--resume`, never executed from here. */
+  cli: string;
   model: string;
   focus?: string;
   status: ReviewerStatus;
   session?: string;
-  /** Provider-announced quota reset, verbatim — `council --resume` prints it. */
+  /** A reset time the provider announced, verbatim — `council --resume` prints it. */
   resetAt?: string;
   attempts: Attempt[];
   usage: Usage;
@@ -115,7 +116,7 @@ export function renderCouncilMd(run: string, l: Ledger, todo: CouncilTodo): stri
   L.push(`yourself, reproduce what can be reproduced, then record a decision per candidate and fold it with`);
   L.push(`\`ultrasec council --run ${run} --apply <decisions.json>\`. Corroboration orders the reading; it decides nothing.`, "");
 
-  L.push(`## Reviewers`, "", `| reviewer | phase | cli:model | status | usage | report |`, `|---|---|---|---|---|---|`);
+  L.push(`## Reviewers`, "", `| reviewer | phase | entry:model | status | usage | report |`, `|---|---|---|---|---|---|`);
   for (const r of l.reviewers) {
     const via =
       r.attempts.length > 1
@@ -125,14 +126,15 @@ export function renderCouncilMd(run: string, l: Ledger, todo: CouncilTodo): stri
       `| ${r.name} | ${r.phase} | ${r.cli}:${r.model || "(default)"} | ${r.status}${r.resetAt ? ` — resets ${r.resetAt}` : ""}${via} | ${usageLine(r.usage)} | ${r.report ? `\`${r.report}\`` : "—"} |`,
     );
   }
-  L.push("", `Total: ${usageLine(l.totals)}${l.reviewers.some((r) => !r.usage.exposed) ? " (some CLIs do not expose usage)" : ""}`, "");
+  L.push("", `Total: ${usageLine(l.totals)}${l.reviewers.some((r) => !r.usage.exposed) ? " (some reviewers do not expose usage)" : ""}`, "");
 
   L.push(`## Candidates (${todo.candidates.length})`, "");
   if (!todo.candidates.length) L.push("_None — every claim either mapped onto an existing finding or carried nothing to verify._", "");
   for (const c of todo.candidates) {
     L.push(`### \`${c.id}\` — ${c.title}`);
     L.push(`- severity: ${c.severity ?? "unstated"} · ${c.cwe ?? "no CWE"} (${c.family}) · sources: ${c.sources.join(", ")} (${c.corroboration})`);
-    for (const x of c.citations) L.push(`- ${x.citation === "ok" ? "✓" : "✗"} \`${x.at}\`${x.reason ? ` — ${x.reason}` : ""}`);
+    for (const x of c.citations)
+      L.push(`- ${x.citation === "ok" ? "✓" : "✗"} \`${x.at}\`${x.raw ? ` (written \`${x.raw}\`)` : ""}${x.reason ? ` — ${x.reason}` : ""}`);
     if (c.scenario) L.push(`- scenario: ${c.scenario}`);
     for (const f of c.flags) L.push(`- ⚠ ${f}`);
     for (const r of c.claims) L.push(`- ${r.reviewer}/${r.phase} \`${r.ref}\`: ${r.title}${r.severity ? ` (${r.severity})` : ""}`);

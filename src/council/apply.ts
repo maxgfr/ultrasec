@@ -16,7 +16,7 @@ import { redactReviewerText } from "./redact.js";
 // citation gate, the same `ultrasec-ai` tool, `status: open` — and is then
 // adjudicated by `verify` like any other candidate. A rejected one is recorded
 // in the ledger WITH its reason, so the report can say what the council raised
-// and why it did not survive. Contestations of existing findings are a worklist
+// and why it did not survive. Contested findings are a worklist
 // and are never applied here: changing a verdict is `verify`'s job.
 
 export const DECISIONS = ["accept", "reject"] as const;

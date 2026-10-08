@@ -1,6 +1,7 @@
 import { lineCount } from "../check.js";
 import type { Severity } from "../types.js";
 import type { Phase } from "./brief.js";
+import { ADVISORY, FIX_FIELD, HISTORY, SCENARIO_FIELD, SECTION_WORDS, SEVERITY_FIELD, SEVERITY_WORDS } from "./locale.js";
 import { placeholderArtefacts, redactReviewerText } from "./redact.js";
 import { BRIEF_PREFIX } from "./snapshot.js";
 
@@ -35,7 +36,7 @@ export interface Claim {
   reviewer: string;
   phase: Phase;
   section: ClaimSection;
-  /** The reviewer's own id (`R3`), or — on a contestation — the contested id. */
+  /** The reviewer's own id (`R3`), or — on a contested finding — its id. */
   ref: string;
   title: string;
   severity?: Severity;
@@ -69,43 +70,18 @@ export function indexTree(root: string, files: readonly string[]): TreeIndex {
   return { root, files: new Set(files), byBase };
 }
 
-const SEVERITY_WORDS: Record<string, Severity> = {
-  critical: "critical",
-  critique: "critical",
-  high: "high",
-  haute: "high",
-  haut: "high",
-  élevée: "high",
-  elevee: "high",
-  élevé: "high",
-  medium: "medium",
-  moderate: "medium",
-  moyenne: "medium",
-  moyen: "medium",
-  modérée: "medium",
-  low: "low",
-  faible: "low",
-  basse: "low",
-  bas: "low",
-  info: "info",
-  informational: "info",
-  informative: "info",
-};
-
-const FIELD = (names: string): RegExp => new RegExp(`^\\s*[-*]?\\s*\\**\\s*(?:${names})\\s*\\**\\s*[:：]\\s*\\**\\s*(.+)$`, "im");
-const SEVERITY_FIELD = FIELD("severity|sévérité|severite|gravité|gravite");
-const SCENARIO_FIELD = FIELD("scenario|scénario|attacker scenario|scénario d'attaque|attack");
-const FIX_FIELD = FIELD("fix|correctif|remediation|remédiation|correction");
-
 export function parseSeverity(text: string): Severity | undefined {
   const field = text.match(SEVERITY_FIELD)?.[1];
   const word = (s: string | undefined): Severity | undefined => {
     if (!s) return undefined;
-    const m = s.toLowerCase().match(/[a-zéè]+/);
-    return m ? SEVERITY_WORDS[m[0]] : undefined;
+    const m = s.toLowerCase().match(/\p{L}+/u);
+    return m && Object.hasOwn(SEVERITY_WORDS, m[0]) ? SEVERITY_WORDS[m[0]] : undefined;
   };
-  return word(field) ?? word(text.match(/[[(](critical|high|medium|low|critique|haute|moyenne|faible)[\])]/i)?.[1]);
+  return word(field) ?? word(text.match(BRACKETED_SEVERITY)?.[1]);
 }
+
+/** `[high]`, `(critical)` — a severity word in brackets, in any locale. */
+const BRACKETED_SEVERITY = new RegExp(`[[(](${Object.keys(SEVERITY_WORDS).join("|")})[\\])]`, "iu");
 
 /** Bare files a citation may name without an extension. */
 const NO_EXT = new Set(["Dockerfile", "Makefile", "Procfile", "Gemfile", "Rakefile", "Jenkinsfile", "Vagrantfile", "Caddyfile", "Brewfile", "Containerfile"]);
@@ -177,25 +153,22 @@ export function resolveCitation(
   return { ...base, file, citation: "ok", ...(resolvedFrom ? { resolvedFrom } : {}) };
 }
 
-const ADVISORY =
-  /\bCVE-\d{4}-\d{3,}|\bGHSA-[\w-]+|\badvisor(?:y|ies)\b|avis de sécurité|fixed (?:in|version)|patched in|vulnerable version|version (?:corrigée|vulnérable)|known[- ]vulnerable/i;
-const HISTORY =
-  /git history|historique git|\bcommit [0-9a-f]{7,}\b|was (?:removed|added|introduced|changed) in|\bpreviously\b|auparavant|a été (?:supprimé|ajouté|introduit)/i;
-
 function verifyNotes(text: string): string[] {
   const notes: string[] = [];
-  if (ADVISORY.test(text)) notes.push("advisory/version status asserted without an advisory database — check the run's osv/trivy/package-checker results");
+  if (ADVISORY.test(text)) notes.push("advisory/version status asserted without an advisory database — check the run's own dependency-scanner results");
   if (HISTORY.test(text)) notes.push("history asserted on a snapshot with no git history — check with `revalidate` / git log");
   return notes;
 }
 
 const MAX_EXCERPT = 1500;
 
+/** The kind of claims a `##` section holds: its letter (A/B/C, language-neutral) or a heading word of any locale. */
 function sectionOf(heading: string, phase: Phase): ClaimSection | "skip" {
   const h = heading.toLowerCase();
-  if (/^##\s+a[.)]\s|contest/.test(h)) return "contest";
-  if (/^##\s+b[.)]\s|new findings|nouveaux/.test(h)) return "new";
-  if (/^##\s+c[.)]\s|coverage|couverture|to verify|à vérifier|a verifier|hardening|durcissement/.test(h)) return "skip";
+  const has = (words: readonly string[]): boolean => words.some((w) => h.includes(w));
+  if (/^##\s+a[.)]\s/.test(h) || has(SECTION_WORDS.contested)) return "contest";
+  if (/^##\s+b[.)]\s/.test(h) || has(SECTION_WORDS.newFindings)) return "new";
+  if (/^##\s+c[.)]\s/.test(h) || has(SECTION_WORDS.noClaims)) return "skip";
   return phase === "devil" ? "new" : "finding";
 }
 
@@ -210,10 +183,12 @@ function splitHeading(raw: string, n: number): { ref: string; title: string } {
 /**
  * Parse one reviewer report into claims. `###`/`####` blocks are claims; the
  * `##` section they sit under says what kind (a devil's-advocate report has
- * `A. Contestations`, `B. New findings`, `C. Coverage`, in either language).
- * Coverage and to-verify sections carry no claims.
+ * `A.` contested findings, `B.` new findings, `C.` coverage, headed in any
+ * locale of `locale.ts`). Coverage and to-verify sections carry no claims.
+ * `placeholders` adds masking-placeholder shapes to the defaults.
  */
-export function parseReport(md: string, who: { reviewer: string; phase: Phase }, idx: TreeIndex): Claim[] {
+export function parseReport(md: string, who: { reviewer: string; phase: Phase }, idx: TreeIndex, opts: { placeholders?: readonly RegExp[] } = {}): Claim[] {
+  const ph = opts.placeholders ?? [];
   const lineCache = new Map<string, number | null>();
   const lines = (f: string): number | null => {
     if (!lineCache.has(f)) lineCache.set(f, lineCount(idx.root, f));
@@ -235,22 +210,22 @@ export function parseReport(md: string, who: { reviewer: string; phase: Phase },
     const cwe = raw.match(/\bCWE[-‐–\s]?(\d{1,4})\b/i)?.[1];
     const scenario = raw.match(SCENARIO_FIELD)?.[1]?.trim();
     const fix = raw.match(FIX_FIELD)?.[1]?.trim();
-    const excerpt = redactReviewerText(raw);
+    const excerpt = redactReviewerText(raw, ph);
     claims.push({
       reviewer: who.reviewer,
       phase: who.phase,
       section,
-      ref: redactReviewerText(ref),
-      title: redactReviewerText(title),
+      ref: redactReviewerText(ref, ph),
+      title: redactReviewerText(title, ph),
       ...(severity ? { severity } : {}),
       ...(cwe ? { cwe: `CWE-${Number(cwe)}` } : {}),
       citations: extractCitations(raw).map((c) => resolveCitation(idx, c, lines)),
-      ...(scenario ? { scenario: redactReviewerText(scenario).slice(0, 400) } : {}),
-      ...(fix ? { fix: redactReviewerText(fix).slice(0, 400) } : {}),
+      ...(scenario ? { scenario: redactReviewerText(scenario, ph).slice(0, 400) } : {}),
+      ...(fix ? { fix: redactReviewerText(fix, ph).slice(0, 400) } : {}),
       excerpt: excerpt.length > MAX_EXCERPT ? `${excerpt.slice(0, MAX_EXCERPT)}…` : excerpt,
       // On the RAW block: a placeholder is an artefact whether or not our own
       // redaction would have masked what surrounds it.
-      artefacts: placeholderArtefacts(raw),
+      artefacts: placeholderArtefacts(raw, ph),
       verify: verifyNotes(raw),
       cves: [...new Set([...raw.matchAll(/\bCVE-\d{4}-\d{3,}\b/gi)].map((m) => m[0].toUpperCase()))],
     });

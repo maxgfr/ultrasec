@@ -7,6 +7,7 @@ import { parseRevalidations } from "../src/revalidate.js";
 import { parseDiscoveries } from "../src/investigate.js";
 import { parseNarrative } from "../src/narrative.js";
 import { parseDecisions } from "../src/council/apply.js";
+import { parseCouncilConfig, PRESETS } from "../src/council/reviewers.js";
 import { SEVERITIES, CONFIDENCES, CATEGORIES, STATUSES, VERDICTS, type Finding } from "../src/types.js";
 
 // references/schemas.md is the only place an agent can learn the exact shape of every
@@ -100,6 +101,17 @@ describe("references/schemas.md examples round-trip through the real --apply par
     expect(n.remediations?.length).toBeGreaterThan(0);
     expect(n.attackChains?.length).toBeGreaterThan(0);
     expect(n.rootCauses?.length).toBeGreaterThan(0);
+  });
+
+  it("the council reviewer-config example is accepted by parseCouncilConfig", () => {
+    const cfg = parseCouncilConfig(
+      blockWhere((v) => !!v && typeof v === "object" && "reviewers" in (v as object)),
+      "schemas.md",
+    );
+    expect(Object.keys(cfg.reviewers).sort()).toEqual(["my-agent", "my-gateway"]);
+    // `extends` keeps the preset's argv and adds only what it overrides.
+    expect(cfg.reviewers["my-gateway"]!.args).toEqual(PRESETS.opencode!.args);
+    expect(cfg.placeholderPatterns).toHaveLength(1);
   });
 
   it("the council decisions example is accepted by parseDecisions", () => {
