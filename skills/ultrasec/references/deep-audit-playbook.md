@@ -137,42 +137,44 @@ loud. Two consecutive dry rounds is a reasonable stopping rule for an exhaustive
 ## Second opinion from other models
 
 Another model family misses different things, and the cheapest way to find what your own pass
-missed is to ask one that did not watch you look. On one Next.js audit, three external reviewers
-(through `kilo`, `vibe` and `opencode`) plus two read-only subagents produced the run's only HIGH
-that neither the engine nor the first manual pass had seen — a module-level `debounce` shared
-across server-rendered requests — and four confident claims that were false. Both outcomes are
+missed is to ask one that did not watch you look. On one server-rendered web-app audit, three
+external reviewers (each through its own agent CLI) plus two read-only subagents produced the
+run's only HIGH that neither the engine nor the first manual pass had seen — a module-level
+`debounce` shared across server-rendered requests — and four confident claims that were false. Both outcomes are
 the reason for the protocol below.
 
 `ultrasec council` runs this protocol; the steps below are what it does and why
 ([commands.md](commands.md) has every flag, [schemas.md](schemas.md) every file).
 
 ```bash
-ultrasec council --run .ultrasec                    # the plan: which CLIs are installed — ZERO calls
-ultrasec council --run .ultrasec --models "kilo:<model>,opencode:<provider/model>,vibe:<model>" --focus "kilo=src/api;opencode=src/web"
+ultrasec council --run .ultrasec                    # the plan: which reviewers are installed — ZERO calls
+ultrasec council --run .ultrasec --models "<rev-a>:<provider>/<model>,<rev-b>:<provider>/<model>" --focus "<rev-a>=src/api;<rev-b>=src/web"
 ultrasec council --run .ultrasec --apply decisions.json          # after YOU verified each candidate
-ultrasec council --run .ultrasec --phase devil --models "vibe:<model>"   # after verify
+ultrasec council --run .ultrasec --phase devil --models "<rev-c>:<provider>/<model>"   # after verify
 ```
 
 1. **A snapshot, not the repo.** Reviewers work on `git archive HEAD` under `<run>/council/`:
    same line numbers, no untracked `.env`, nothing they can write back into the working tree. Each
    CLI starts with an emptied environment (`HOME`, `PATH`, `TERM=dumb`) — agent allow-lists often
-   include `printenv`, and your shell holds tokens — on its read-only agent (`plan` / `--sandbox
-   read-only`). opencode always gets `--pure`: a user plugin once replaced its default agent with
-   one that delegated to a model that did not exist, and the run stalled without an error.
+   include `printenv`, and your shell holds tokens — on its read-only mode, with user plugins
+   switched off where the CLI has them: a user plugin once replaced a CLI's default agent with one
+   that delegated to a model that did not exist, and the run stalled without an error. Reviewers
+   are data — presets for common agent CLIs, or your own entries in a reviewer config
+   ([schemas.md](schemas.md#council-reviewer-config)).
 2. **Blind pass first.** The same brief to every model — the trust model from `CONTEXT.md`, the
    area to cover, and an output contract of one block per finding with `path:line`, attacker
    scenario (who · sends what · gets what), quoted evidence and fix, then what to verify and what
    was not reviewed. The brief is a file in the snapshot and argv only points at it (a 60 KB argv
-   prompt hung opencode for eleven minutes). Your findings are **not** shown: a model that has
+   prompt hung a CLI for eleven minutes). Your findings are **not** shown: a model that has
    read them returns them.
 3. **Cap the spend, and plan for the cap.** A budget stop before the final answer loses the whole
    run — one reviewer was cut at its cap with nothing but progress notes. `--max-cost` and
    `--timeout-min` stop a reviewer from its own JSON events, then `council` **resumes the same
    session for one turn**: "stop exploring, no tools, write the report now". The context is already
-   paid for; the report costs cents. A quota or credit stop goes to `--fallback` instead (kilo's
-   free models — one of which answered 504 "Upstream idle timeout", so the next one gets the turn),
+   paid for; the report costs cents. A quota or credit stop goes to `--fallback` instead (a
+   transient error — one free model answered a gateway 504 — just hands the turn to the next),
    and `--resume <reviewer>` finishes it after the printed reset time. Do not rely on a CLI's own
-   price cap (`vibe --max-price`) until you have seen it stop a run.
+   price cap until you have seen it stop a run.
 4. **Parse, don't read raw.** Every `path:line` is resolved against the snapshot — `ok` or
    `unresolved` with the reason — claims are grouped across reviewers by location and CWE family,
    and a claim landing on a finding the run already holds is reported against that id. Secrets in
@@ -183,18 +185,18 @@ ultrasec council --run .ultrasec --phase devil --models "vibe:<model>"   # after
    is recorded with its reason. Corroboration across families is signal, not proof.
 6. **Devil's advocate second.** `--phase devil` hands a model (the one with budget to spare) the
    run's confirmed and needs-human findings — id, severity, status, title, first citations; never a
-   message or an evidence line — plus what was rejected and why. Its contestations come back as a
-   worklist for `verify`, never applied. Pair it with one fresh read-only subagent: the subagent can
+   message or an evidence line — plus what was rejected and why. The findings it contests come back
+   as a worklist for `verify`, never applied. Pair it with one fresh read-only subagent: the subagent can
    read `node_modules` and run a library in isolation; the external CLIs on the snapshot cannot, so
    they reason about library behaviour from memory.
 
 What the external reviewers got wrong on that audit, so you know where to look first:
 
-- **Framework behaviour from memory.** "React forwards a lowercase `onclick`/`onerror` to the
-  DOM": it drops unknown `on*` props (checked with React's own SSR). Treat any claim about what a
+- **Framework behaviour from memory.** "The UI framework forwards a lowercase `onclick`/`onerror`
+  to the DOM": it drops unknown `on*` props (checked with the framework's own server renderer). Treat any claim about what a
   library or framework does as unverified until you run it.
 - **Advisory status offline.** Without network access, "no known-vulnerable pins in the lockfile"
-  is a guess; the run's own `pnpm audit` / osv results decide.
+  is a guess; the run's own dependency-scanner results decide.
 - **Deployment facts.** "Source maps are shipped publicly" — the deployed chunk's `.map` was a
   404. Probe the deployed artifact (passively) before asserting what it serves.
 - **Severity drift.** External reviewers rate by class name; recalibrate against the trust model

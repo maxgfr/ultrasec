@@ -250,10 +250,11 @@ taught, and why:
   consolidation notes are a leak path too: before sharing, search the run directory and the
   rendered outputs for every secret value the audit found.
 - **A masking placeholder is not a value.** A secret-masking hook in the auditor's environment
-  rewrites tool output (`SECRETGATE_<hex>`), and reviewers and the auditor alike took placeholders
-  for real values. Confirm against `git show HEAD:<file>` before reporting one.
+  rewrote tool output (`NAME_<hex>` tokens), and reviewers and the auditor alike took placeholders
+  for real values. Confirm against `git show HEAD:<file>` before reporting one; `council` flags
+  claims that lean on one (add your tool's shape with `--placeholder-pattern`).
 - **The one HIGH only the engine found was in a notebook.** A Python notebook `eval()`ed
-  analytics event names — Matomo `e_n`, settable by any visitor — and no model saw it in free
+  analytics event names — a field any visitor can set — and no model saw it in free
   review. Keep the `eval as a callable` sink in notebooks near the top of the queue.
 - **Coverage V1 is a judgment cell by design.** No finding can light it. Answer it explicitly in
   the narrative, from CONTEXT.md: was a trust and threat model established, or was severity rated

@@ -486,21 +486,21 @@ worklist; you verify each candidate yourself and write the decisions; `--apply` 
   "candidates": [
     { "id": "C-3b9e1f0a2c", "title": "Missing ownership check on invoice read",
       "severity": "high", "cwe": "CWE-862", "family": "access-control",
-      "sources": ["kilo", "opencode"], "corroboration": 2,
-      "claims": [ { "reviewer": "kilo", "phase": "blind", "section": "finding", "ref": "K1",
+      "sources": ["rev-a", "rev-b"], "corroboration": 2,
+      "claims": [ { "reviewer": "rev-a", "phase": "blind", "section": "finding", "ref": "K1",
                     "title": "Missing ownership check on invoice read", "severity": "high" },
-                  { "reviewer": "opencode", "phase": "blind", "section": "finding", "ref": "R1",
+                  { "reviewer": "rev-b", "phase": "blind", "section": "finding", "ref": "R1",
                     "title": "IDOR: any user reads any invoice", "severity": "high" } ],
       "citations": [ { "at": "src/app.ts:11", "citation": "ok" },
-                     { "at": "src/app.ts:10", "citation": "ok" },
+                     { "at": "src/app.ts:10", "raw": "app.ts:10", "citation": "ok" },
                      { "at": "src/app.ts:999", "citation": "unresolved", "reason": "line out of range (file has 22 lines)" } ],
       "primary": { "file": "src/app.ts", "line": 11 },
       "scenario": "any logged-in user · GET /invoice/2 · another user's invoice",
       "excerpt": "### K1 — Missing ownership check on invoice read …",
       "flags": [], "decision": null, "reason": "" } ],
   "corroborations": [ { "findingId": "7e51071c4783", "title": "SQL injection: untrusted input reaches query()",
-                        "status": "confirmed", "sources": ["opencode"], "claims": [], "via": "location" } ],
-  "contested": [ { "id": "7e51071c4783", "known": "finding", "reviewer": "vibe",
+                        "status": "confirmed", "sources": ["rev-b"], "claims": [], "via": "location" } ],
+  "contested": [ { "id": "7e51071c4783", "known": "finding", "reviewer": "rev-c",
                    "claim": "the query is not reachable unauthenticated",
                    "proof": "- Proof: `src/routes.js:8` returns 401 first",
                    "citations": [ { "at": "src/routes.js:8", "citation": "ok" } ] } ] }
@@ -508,7 +508,7 @@ worklist; you verify each candidate yourself and write the decisions; `--apply` 
 
 | field | notes |
 |---|---|
-| `candidates[]` | claims grouped by file + ±3 lines + CWE **family**. `corroboration` = how many reviewers raised it: a reading order, never a verdict. `flags` says what to check first — a masking placeholder (an artefact, not a fact), an advisory or history claim made without a database, a severity the reviewers disagree on, no resolvable citation. |
+| `candidates[]` | claims grouped by file + ±3 lines + CWE **family**. A citation's `at` is the resolved `path:line`; `raw` is how the reviewer wrote it, when that differs. `corroboration` = how many reviewers raised it: a reading order, never a verdict. `flags` says what to check first — a masking placeholder (an artefact, not a fact), an advisory or history claim made without a database, a severity the reviewers disagree on, no resolvable citation. |
 | `corroborations[]` | candidates that landed on a finding the run already holds (location + family, or the same CVE) — reported by that id, never re-ingested. |
 | `contested[]` | devil's-advocate section A: a finding id, the claim, the reviewer's proof. **A worklist — never applied.** Re-open the finding with `dossier` and re-verify it. `known` is `finding`, `candidate` or `unknown`. |
 
@@ -520,7 +520,7 @@ You write the decisions — an array of `{id, decision, reason}`, `decision` one
 [ { "id": "C-3b9e1f0a2c", "decision": "accept",
     "reason": "Reproduced: GET /invoice/2 as user 1 returns user 2's invoice." },
   { "id": "C-0d4e8a7b11", "decision": "reject",
-    "reason": "SECRETGATE_… is the orchestrator's own masking, not the deployed value." } ]
+    "reason": "MASK_9f3a… is the orchestrator's own masking placeholder, not the deployed value." } ]
 ```
 
 An accepted candidate is filed through `ingestDiscoveries` — the `investigate --apply` citation
@@ -528,14 +528,52 @@ gate, tool `ultrasec-ai`, `status: open`, adjudicated later by `verify` — with
 in its message. A candidate the gate refuses is recorded as rejected `by: "citation-gate"`.
 
 `COUNCIL.json` (engine-written ledger): `{schema, repo, commit, lang, reviewers[], totals,
-decisions}`. Each reviewer record carries `name`, `phase`, `cli`, `model`, `status` (`ok` ·
-`no-report` · `budget` · `timeout` · `quota` · `credit` · `upstream` · `failed` ·
-`not-installed`), `session`, `resetAt` (a provider-announced quota reset, verbatim),
+decisions}`. Each reviewer record carries `name`, `phase`, `cli` (the reviewer entry it ran —
+re-resolved from presets and config on `--resume`, never executed from the ledger), `model`,
+`status` (`ok` · `no-report` · `budget` · `timeout` · `quota` · `credit` · `transient` · `failed` ·
+`not-installed`), `session`, `resetAt` (a reset time the provider announced, verbatim),
 `attempts[]` (each `{cli, model, resume, status, exit, durationMs, usage, failure?}`), the summed
 `usage` (`{exposed, input, output, reasoning, cacheRead, cacheWrite, cost, steps}` — `exposed:
-false` for vibe and codex) and `report` (the redacted `out.md`). `decisions` holds
+false` for an entry without `usagePaths`) and `report` (the redacted `out.md`). `decisions` holds
 `accepted[]` (`{candidate, title, sources, findingId}`) and `rejected[]` (`{candidate, title,
 sources, reason, by}`), so a claim that did not survive stays listed with its reason.
+
+### Council reviewer config
+
+`--reviewer-config <file.json>`, or `$XDG_CONFIG_HOME/ultrasec/council.json` (default
+`~/.config/ultrasec/council.json`) when the flag is absent — never a file from the audited
+repository. Validated fail-closed: an unknown key, an unknown placeholder or a bad regex exits 2.
+
+```json
+{ "reviewers": {
+    "my-agent": {
+      "bin": "my-agent",
+      "args": ["review", "--read-only", "--cwd", "{dir}", ["--model", "{model}"],
+               "--prompt-file", "{briefPath}", "--output-last-message", "{outFile}"],
+      "events": "none",
+      "readOnly": "--read-only: the CLI's sandbox refuses writes",
+      "env": { "MY_AGENT_THEME": "plain" },
+      "quotaPatterns": ["daily allowance used"],
+      "creditPatterns": ["wallet empty"] },
+    "my-gateway": {
+      "extends": "opencode",
+      "modelPrefix": "gateway/" } },
+  "placeholderPatterns": ["@@[A-Z0-9]{6,}@@"] }
+```
+
+| field | notes |
+|---|---|
+| `bin` · `args` | the binary (PATH or absolute) and its argv. An element is a string or a group (`["--model", "{model}"]`); an element or group that names a placeholder with no value is dropped whole. Placeholders: `{message}` (the short pointer to the brief), `{brief}`, `{briefPath}`, `{dir}` (the snapshot), `{model}`, `{title}`, `{maxTurns}`, `{session}`, `{outFile}`. `args` must pass the brief. |
+| `resumeArgs` | argv to resume `{session}` for ONE closing turn (`{message}` is then the "write it now" message). Absent: the reviewer cannot be resumed and goes straight to `--fallback`. |
+| `events` | `jsonl-steps` (one JSON event per line: steps with usage, text parts, tool calls, errors) · `jsonl` (one JSON result object) · `text` (stdout is the report) · `none` (the report is read from `{outFile}`). |
+| `finalTextFrom` | `events-text` · `stdout` · `file`; defaults from `events`. |
+| `sessionIdPath` · `usagePaths` · `eventPaths` | dotted paths into an event: the session id; `{input, output, reasoning, cacheRead, cacheWrite, cost, steps}`; `{type, textType, stepType, toolType, errorType, text, messageId, errors, errorFlag}`. No `usagePaths` = "usage not exposed". |
+| `modelPrefix` | prepended to the model unless already there. |
+| `env` · `envPassthrough` | extra variables (templated; configuration, never a credential) and names copied from your shell — each one weakens the emptied environment. |
+| `quotaPatterns` · `creditPatterns` · `transientPatterns` | case-insensitive regexes, checked before the generic stop phrasings. |
+| `readOnly` | required: how this CLI is kept from writing (shown in the plan). |
+| `extends` | a preset to start from; an entry named like a preset overrides it the same way, field by field. |
+| `placeholderPatterns` | masking-placeholder shapes added to the defaults (`REDACTED`, `***`, `xxxx`, `NAME_<hex>`); same as `--placeholder-pattern`. |
 
 ---
 

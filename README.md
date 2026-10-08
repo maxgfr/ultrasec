@@ -123,14 +123,15 @@ CLI to fill the worklists), use `run`:
 node scripts/ultrasec.mjs run --repo . --out .ultrasec    # emits every worklist + a TODO; ZERO external calls
 node scripts/ultrasec.mjs run --repo . --powered --agent claude --cross-check codex   # autonomous (keys live in the CLI)
 node scripts/ultrasec.mjs council --run .ultrasec     # second opinion from other model families: plan only, ZERO calls
-node scripts/ultrasec.mjs council --run .ultrasec --models "kilo:<model>,opencode:<provider/model>"   # blind reviewers on a HEAD snapshot
+node scripts/ultrasec.mjs council --run .ultrasec --models "<reviewer>:<provider>/<model>,…"   # blind reviewers on a HEAD snapshot
 ```
 
-`council` turns "ask another model family" into a command: each reviewer CLI (opencode, kilo,
-vibe, claude, codex) works on a `git archive HEAD` snapshot with an emptied environment, its
-report is parsed into claims whose every `path:line` is resolved against the snapshot, claims
-are grouped across reviewers, and only what you accept goes in — through the same citation gate
-as `investigate --apply`. See [powered-mode.md](skills/ultrasec/references/powered-mode.md).
+`council` turns "ask another model family" into a command: each reviewer — any agent CLI,
+described as data (built-in presets for common ones, or your own entries in a reviewer config
+file) — works on a `git archive HEAD` snapshot with an emptied environment, its report is parsed
+into claims whose every `path:line` is resolved against the snapshot, claims are grouped across
+reviewers, and only what you accept goes in — through the same citation gate as
+`investigate --apply`. See [commands.md](skills/ultrasec/references/commands.md#council---run-dir).
 
 Nothing external is required — the link-graph and taint reasoning are the
 always-on core. Installed scanners (Trivy, OpenGrep/Semgrep, gitleaks,

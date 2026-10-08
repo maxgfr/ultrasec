@@ -53,7 +53,8 @@ ultrasec run --repo . --powered --agent "mytool exec {prompt} --cwd {run}"
 
 `--cross-check` asks a second agent the SAME worklist question. `council` asks other model
 families an OPEN one — review this snapshot blind, then attack the findings as a devil's
-advocate — through their own CLIs (opencode, kilo, vibe, claude, codex), in parallel. It shares
+advocate — through their own agent CLIs (built-in presets, or entries you describe in a reviewer
+config file), in parallel. It shares
 this page's security model: argv arrays, a brief passed as a file path, keys only in those CLIs —
 and adds a `git archive HEAD` snapshot instead of the working tree and an emptied environment.
 Without `--models` it calls nothing. Reviewers only propose: you verify, and
