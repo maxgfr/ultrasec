@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.61.5](https://github.com/maxgfr/ultrasec/compare/v1.61.4...v1.61.5) (2026-10-08)
+
+
+### Bug Fixes
+
+* **revalidate:** a whole-file citation still resolves when the file exists ([6704377](https://github.com/maxgfr/ultrasec/commit/6704377ab4b8b0fe6d1dcbbb0c3dcbb12dfbeae5))
+
 ## [1.61.4](https://github.com/maxgfr/ultrasec/compare/v1.61.3...v1.61.4) (2026-10-08)
 
 
