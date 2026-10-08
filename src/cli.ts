@@ -209,6 +209,21 @@ COMMANDS
              and are NOT valid --stages tokens. Flags: --repo · --out · --powered ·
              --agent <name|tpl> · --cross-check <name|tpl> · --stages · --no-scan ·
              --scope/--include/--exclude/--max-files/--gitignore · --json.
+  council    A second opinion from OTHER model families (opencode, kilo, vibe,
+             claude, codex). Each reviewer works on a \`git archive HEAD\`
+             snapshot under <run>/council/, started with an emptied environment
+             and a short argv pointing at a brief file; reviewers run in
+             parallel, their reports are parsed into claims, every path:line is
+             resolved against the snapshot, and claims are grouped across
+             reviewers into candidates (corroboration is a prior, never a
+             verdict). A reviewer cut by budget/timeout/quota is resumed for ONE
+             closing turn. Without --models: prints the plan, ZERO calls.
+             --apply folds the orchestrator's accept/reject decisions through
+             the investigate citation gate; contestations stay a worklist.
+             Flags: --run · --repo · --phase blind|devil · --models
+             "cli:model,…" · --focus "name=area;…" · --fallback "cli:model,…" ·
+             --timeout-min (default 60) · --max-cost <usd> · --lang en|fr ·
+             --parse · --resume <reviewer> · --apply <file> · --strict · --json.
   orchestrate Emit the run's multi-agent orchestration from its CURRENT worklists
              into <run>/orchestration/: one <phase>.workflow.mjs per ready phase
              (adjudicate | verify | revalidate | investigate, real ids batched

@@ -77,6 +77,8 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "allow-private",
   "deep",
   "graphql",
+  // `council` only — re-parse the reviewer reports without calling anything.
+  "parse",
 ]);
 
 /** Single-dash short-flag aliases, as documented in the CLI's GLOBAL help. Each
