@@ -249,7 +249,12 @@ export function revalFactsFromWorklist(items: RevalidateItem[]): ApplyRevalOptio
   const unresolved = new Set<string>();
   const fixedInById = new Map<string, string>();
   for (const it of items) {
-    if (!it.fileExists || it.currentLine === null) unresolved.add(it.id);
+    // Line 0 cites the whole file (checkov's workflow-level CKV2_GHA_1, a missing
+    // top-level `permissions:` block): there is no line content to read back, and
+    // the file existing at HEAD is the whole of "still resolves". `check` already
+    // accepts it; flagging it here asked for a re-confirmation nothing could give.
+    const wholeFile = it.at.endsWith(":0");
+    if (!it.fileExists || (it.currentLine === null && !wholeFile)) unresolved.add(it.id);
     if (it.lineLastChanged?.commit) fixedInById.set(it.id, it.lineLastChanged.commit);
   }
   return { unresolved, fixedInById };

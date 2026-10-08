@@ -42458,7 +42458,8 @@ function revalFactsFromWorklist(items) {
   const unresolved = /* @__PURE__ */ new Set();
   const fixedInById = /* @__PURE__ */ new Map();
   for (const it of items) {
-    if (!it.fileExists || it.currentLine === null) unresolved.add(it.id);
+    const wholeFile = it.at.endsWith(":0");
+    if (!it.fileExists || it.currentLine === null && !wholeFile) unresolved.add(it.id);
     if (it.lineLastChanged?.commit) fixedInById.set(it.id, it.lineLastChanged.commit);
   }
   return { unresolved, fixedInById };

@@ -148,6 +148,24 @@ describe("revalFactsFromWorklist", () => {
     expect([...facts.unresolved!]).toEqual(["gone"]);
     expect(facts.fixedInById!.get("live")).toBe("abc1234");
   });
+
+  it("resolves a whole-file citation (line 0) when the file exists, and only then", () => {
+    const item = (id: string, fileExists: boolean) => ({
+      id,
+      severity: "medium" as const,
+      title: "CKV2_GHA_1 Ensure top-level permissions are not set to write-all",
+      at: ".github/workflows/quality.yml:0",
+      fileExists,
+      currentLine: null,
+      commitsSinceFinding: null,
+      lineLastChanged: null,
+      renamedTo: null,
+      verdict: null,
+      note: "",
+    });
+    const facts = revalFactsFromWorklist([item("present", true), item("deleted", false)]);
+    expect([...facts.unresolved!]).toEqual(["deleted"]);
+  });
 });
 
 describe("parseRevalidations", () => {
