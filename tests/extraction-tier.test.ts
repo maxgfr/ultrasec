@@ -48,7 +48,8 @@ function miniRepo(): string {
   return repo;
 }
 
-describe("extraction tier is recorded, never assumed", () => {
+// Two tests run a full `scan` in a subprocess, past vitest's 5s default on a busy machine.
+describe("extraction tier is recorded, never assumed", { timeout: 30_000 }, () => {
   it("extractionTier() reports the tier and whether AST is live", () => {
     const t = extractionTier();
     expect(["adjacent", "env", "cache", "none"]).toContain(t.tier);

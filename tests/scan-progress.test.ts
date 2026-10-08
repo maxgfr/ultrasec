@@ -70,7 +70,9 @@ describe("orchestrate reports each adapter starting and finishing", () => {
   });
 });
 
-describe("scan progress stream", () => {
+// Each test runs a full `scan` in a subprocess: ~4s alone, past vitest's 5s
+// default as soon as the machine is busy.
+describe("scan progress stream", { timeout: 30_000 }, () => {
   it("reports stages and per-scanner progress on stderr, by default", async () => {
     const { stderr } = await run(["scan", "--repo", FIXTURE, "--out", out(), "--offline"]);
     expect(stderr).toMatch(/ultrasec · walking /);
