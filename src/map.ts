@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { readText } from "./walk.js";
-import { detectWorkspaces } from "./vendor/codeindex-engine.mjs";
+import { detectWorkspaces, isTestPath } from "./vendor/codeindex-engine.mjs";
 import type { RepoScan } from "./scan.js";
 import { localDefNames } from "./scan.js";
 import { langForFile } from "./lang.js";
@@ -56,10 +56,14 @@ export interface EntryPoint {
   line: number;
   kind: string;
   title: string;
+  /** In a test harness: counted and shown, never ranked ahead of shipped code. */
+  test?: boolean;
 }
 export interface EntryGroup {
   kind: string;
   count: number;
+  /** How many of `count` sit in a test harness (see `isTestHarness`). */
+  testCount?: number;
   samples: EntryPoint[];
 }
 export interface SinkSummary {
@@ -67,6 +71,8 @@ export interface SinkSummary {
   cwe: string;
   severity: Severity;
   count: number;
+  /** How many of `count` sit in a test harness (see `isTestHarness`). */
+  testCount?: number;
   samples: { file: string; line: number; callee: string }[];
 }
 export interface LangSummary {
@@ -120,6 +126,19 @@ export interface AttackSurface {
   byFile: FileSurface[];
   /** Deterministic default order the AI may override — highest-value scopes first. */
   suggestedTargets: TargetSuggestion[];
+}
+
+/**
+ * A test file, or a test runner's own config/setup file (`jest.setup.js`,
+ * `playwright.rgaa.config.ts`), which `isTestPath` does not cover. On a Next.js
+ * monorepo these produced most of the map: Testing Library `ui.x.query()` read as
+ * 434 SQL sinks, `jest.setup.js` led the entry points, and a test-only directory
+ * could outrank the app as the first target. They stay counted and marked, the
+ * way `context` marks them, but they carry no rank.
+ */
+const TEST_RUNNER_FILE = /(^|\/)(jest|vitest|playwright|cypress|karma)[\w.-]*\.(config|setup)\.[cm]?[jt]sx?$/;
+export function isTestHarness(rel: string): boolean {
+  return isTestPath(rel) || TEST_RUNNER_FILE.test(rel);
 }
 
 function topDir(rel: string): string {
@@ -193,6 +212,8 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
   const regionOf = regionKeyer(scan.repo);
   let totalSources = 0;
   let totalSinks = 0;
+  // Test-harness sink samples wait until every shipped one has had a slot.
+  const testSinkSamples = new Map<string, SinkSummary["samples"]>();
 
   for (const f of scan.files) {
     const lang = langForFile(f.rel);
@@ -203,6 +224,8 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
     la.files++;
     da.files++;
     const fs: FileSurface = { file: f.rel, region: dir, sources: 0, sinks: 0, score: 0 };
+    const harness = isTestHarness(f.rel);
+    const rank = harness ? 0 : 1;
 
     const text = readText(join(scan.repo, f.rel));
     const sources = findSources(lang, text, f.rel);
@@ -210,26 +233,29 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
       totalSources++;
       la.sources++;
       da.sources++;
-      const w = entryWeight(s.kind);
+      const w = entryWeight(s.kind) * rank;
       da.score += w;
       fs.sources++;
       fs.score += w;
       const arr = entryByKind.get(s.kind) ?? entryByKind.set(s.kind, []).get(s.kind)!;
-      arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
+      arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title, ...(harness ? { test: true } : {}) });
     }
 
     for (const sink of findSinks(lang, f.calls, undefined, f.imports, localDefNames(f.symbols), text.split(/\r?\n/))) {
       totalSinks++;
       la.sinks++;
       da.sinks++;
-      da.score += SEV_WEIGHT[sink.severity];
+      da.score += SEV_WEIGHT[sink.severity] * rank;
       fs.sinks++;
-      fs.score += SEV_WEIGHT[sink.severity];
+      fs.score += SEV_WEIGHT[sink.severity] * rank;
       const ss =
         sinkByKind.get(sink.kind) ??
-        sinkByKind.set(sink.kind, { kind: sink.kind, cwe: sink.cwe, severity: sink.severity, count: 0, samples: [] }).get(sink.kind)!;
+        sinkByKind.set(sink.kind, { kind: sink.kind, cwe: sink.cwe, severity: sink.severity, count: 0, testCount: 0, samples: [] }).get(sink.kind)!;
       ss.count++;
-      if (ss.samples.length < MAX_SAMPLES) ss.samples.push({ file: f.rel, line: sink.line, callee: sink.callee });
+      if (harness) {
+        ss.testCount = (ss.testCount ?? 0) + 1;
+        (testSinkSamples.get(sink.kind) ?? testSinkSamples.set(sink.kind, []).get(sink.kind)!).push({ file: f.rel, line: sink.line, callee: sink.callee });
+      } else if (ss.samples.length < MAX_SAMPLES) ss.samples.push({ file: f.rel, line: sink.line, callee: sink.callee });
     }
 
     if (fs.score > 0) fileAgg.push(fs);
@@ -242,18 +268,27 @@ export function buildAttackSurface(scan: RepoScan, coveredScopes: string[] = [])
   // cap further up the alphabet.
   const fileScore = new Map(fileAgg.map((f) => [f.file, f.score]));
   const bySurfaceThenPath = (a: EntryPoint, b: EntryPoint) =>
-    (fileScore.get(b.file) ?? 0) - (fileScore.get(a.file) ?? 0) || byStr(a.file, b.file) || a.line - b.line;
+    Number(!!a.test) - Number(!!b.test) || (fileScore.get(b.file) ?? 0) - (fileScore.get(a.file) ?? 0) || byStr(a.file, b.file) || a.line - b.line;
   const entryPoints: EntryGroup[] = [...entryByKind.entries()]
     .sort((a, b) => byStr(a[0], b[0]))
     .map(([kind, eps]) => {
       const kept = breadthFirstByFile(eps.sort(bySurfaceThenPath)).slice(0, MAX_ENTRY_SAMPLES);
-      return { kind, count: eps.length, samples: kept.sort((a, b) => byStr(a.file, b.file) || a.line - b.line) };
+      return {
+        kind,
+        count: eps.length,
+        testCount: eps.filter((e) => e.test).length,
+        samples: kept.sort((a, b) => Number(!!a.test) - Number(!!b.test) || byStr(a.file, b.file) || a.line - b.line),
+      };
     });
 
   const sinks = [...sinkByKind.values()].sort(
     (a, b) => SEVERITIES.indexOf(a.severity) - SEVERITIES.indexOf(b.severity) || b.count - a.count || byStr(a.kind, b.kind),
   );
-  for (const s of sinks) s.samples.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+  for (const s of sinks) {
+    s.samples.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+    const tests = (testSinkSamples.get(s.kind) ?? []).sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+    s.samples.push(...tests.slice(0, Math.max(0, MAX_SAMPLES - s.samples.length)));
+  }
 
   const byLanguage = [...langAgg.values()].sort((a, b) => byStr(a.lang, b.lang));
   const byTopDir = [...dirAgg.values()].sort((a, b) => b.score - a.score || b.sinks - a.sinks || byStr(a.dir, b.dir));
@@ -321,7 +356,9 @@ export function renderMapMd(repo: string, s: AttackSurface): string {
   if (!s.entryPoints.length) L.push(`_None detected._`);
   for (const g of s.entryPoints) {
     const shown = g.samples.slice(0, MAX_SAMPLES);
-    L.push(`- **${g.kind}** (${g.count}): ${shown.map((e) => `\`${e.file}:${e.line}\``).join(", ")}${g.count > shown.length ? " …" : ""}`);
+    L.push(
+      `- **${g.kind}** (${g.count}${g.testCount ? `, ${g.testCount} in test files` : ""}): ${shown.map((e) => `\`${e.file}:${e.line}\``).join(", ")}${g.count > shown.length ? " …" : ""}`,
+    );
   }
   L.push("");
 
@@ -330,7 +367,7 @@ export function renderMapMd(repo: string, s: AttackSurface): string {
   if (!s.sinks.length) L.push(`_None detected._`);
   for (const k of s.sinks) {
     L.push(
-      `- **${k.kind}** (${k.cwe}, ${k.severity}) ×${k.count}: ${k.samples.map((x) => `\`${x.file}:${x.line}\``).join(", ")}${k.count > k.samples.length ? " …" : ""}`,
+      `- **${k.kind}** (${k.cwe}, ${k.severity}) ×${k.count}${k.testCount ? ` (${k.testCount} in test files)` : ""}: ${k.samples.map((x) => `\`${x.file}:${x.line}\``).join(", ")}${k.count > k.samples.length ? " …" : ""}`,
     );
   }
   L.push("");

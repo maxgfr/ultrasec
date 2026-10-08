@@ -32573,6 +32573,10 @@ var ENTRY_WEIGHT = {
 };
 var DEFAULT_ENTRY_WEIGHT = 1;
 var entryWeight = (kind) => ENTRY_WEIGHT[kind] ?? DEFAULT_ENTRY_WEIGHT;
+var TEST_RUNNER_FILE = /(^|\/)(jest|vitest|playwright|cypress|karma)[\w.-]*\.(config|setup)\.[cm]?[jt]sx?$/;
+function isTestHarness(rel2) {
+  return isTestPath(rel2) || TEST_RUNNER_FILE.test(rel2);
+}
 function topDir(rel2) {
   const i2 = rel2.indexOf("/");
   return i2 === -1 ? "." : rel2.slice(0, i2);
@@ -32613,6 +32617,7 @@ function buildAttackSurface(scan2, coveredScopes = []) {
   const regionOf = regionKeyer(scan2.repo);
   let totalSources = 0;
   let totalSinks = 0;
+  const testSinkSamples = /* @__PURE__ */ new Map();
   for (const f of scan2.files) {
     const lang = langForFile(f.rel);
     if (!lang) continue;
@@ -32622,42 +32627,56 @@ function buildAttackSurface(scan2, coveredScopes = []) {
     la.files++;
     da.files++;
     const fs2 = { file: f.rel, region: dir, sources: 0, sinks: 0, score: 0 };
+    const harness = isTestHarness(f.rel);
+    const rank2 = harness ? 0 : 1;
     const text = readText2(join37(scan2.repo, f.rel));
     const sources = findSources(lang, text, f.rel);
     for (const s of sources) {
       totalSources++;
       la.sources++;
       da.sources++;
-      const w = entryWeight(s.kind);
+      const w = entryWeight(s.kind) * rank2;
       da.score += w;
       fs2.sources++;
       fs2.score += w;
       const arr = entryByKind.get(s.kind) ?? entryByKind.set(s.kind, []).get(s.kind);
-      arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title });
+      arr.push({ file: f.rel, line: s.line, kind: s.kind, title: s.title, ...harness ? { test: true } : {} });
     }
     for (const sink of findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols), text.split(/\r?\n/))) {
       totalSinks++;
       la.sinks++;
       da.sinks++;
-      da.score += SEV_WEIGHT[sink.severity];
+      da.score += SEV_WEIGHT[sink.severity] * rank2;
       fs2.sinks++;
-      fs2.score += SEV_WEIGHT[sink.severity];
-      const ss = sinkByKind.get(sink.kind) ?? sinkByKind.set(sink.kind, { kind: sink.kind, cwe: sink.cwe, severity: sink.severity, count: 0, samples: [] }).get(sink.kind);
+      fs2.score += SEV_WEIGHT[sink.severity] * rank2;
+      const ss = sinkByKind.get(sink.kind) ?? sinkByKind.set(sink.kind, { kind: sink.kind, cwe: sink.cwe, severity: sink.severity, count: 0, testCount: 0, samples: [] }).get(sink.kind);
       ss.count++;
-      if (ss.samples.length < MAX_SAMPLES) ss.samples.push({ file: f.rel, line: sink.line, callee: sink.callee });
+      if (harness) {
+        ss.testCount = (ss.testCount ?? 0) + 1;
+        (testSinkSamples.get(sink.kind) ?? testSinkSamples.set(sink.kind, []).get(sink.kind)).push({ file: f.rel, line: sink.line, callee: sink.callee });
+      } else if (ss.samples.length < MAX_SAMPLES) ss.samples.push({ file: f.rel, line: sink.line, callee: sink.callee });
     }
     if (fs2.score > 0) fileAgg.push(fs2);
   }
   const fileScore = new Map(fileAgg.map((f) => [f.file, f.score]));
-  const bySurfaceThenPath = (a, b) => (fileScore.get(b.file) ?? 0) - (fileScore.get(a.file) ?? 0) || byStr(a.file, b.file) || a.line - b.line;
+  const bySurfaceThenPath = (a, b) => Number(!!a.test) - Number(!!b.test) || (fileScore.get(b.file) ?? 0) - (fileScore.get(a.file) ?? 0) || byStr(a.file, b.file) || a.line - b.line;
   const entryPoints = [...entryByKind.entries()].sort((a, b) => byStr(a[0], b[0])).map(([kind, eps]) => {
     const kept = breadthFirstByFile(eps.sort(bySurfaceThenPath)).slice(0, MAX_ENTRY_SAMPLES);
-    return { kind, count: eps.length, samples: kept.sort((a, b) => byStr(a.file, b.file) || a.line - b.line) };
+    return {
+      kind,
+      count: eps.length,
+      testCount: eps.filter((e) => e.test).length,
+      samples: kept.sort((a, b) => Number(!!a.test) - Number(!!b.test) || byStr(a.file, b.file) || a.line - b.line)
+    };
   });
   const sinks = [...sinkByKind.values()].sort(
     (a, b) => SEVERITIES2.indexOf(a.severity) - SEVERITIES2.indexOf(b.severity) || b.count - a.count || byStr(a.kind, b.kind)
   );
-  for (const s of sinks) s.samples.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+  for (const s of sinks) {
+    s.samples.sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+    const tests = (testSinkSamples.get(s.kind) ?? []).sort((a, b) => byStr(a.file, b.file) || a.line - b.line);
+    s.samples.push(...tests.slice(0, Math.max(0, MAX_SAMPLES - s.samples.length)));
+  }
   const byLanguage2 = [...langAgg.values()].sort((a, b) => byStr(a.lang, b.lang));
   const byTopDir = [...dirAgg.values()].sort((a, b) => b.score - a.score || b.sinks - a.sinks || byStr(a.dir, b.dir));
   const byFile = fileAgg.sort((a, b) => b.score - a.score || b.sinks - a.sinks || byStr(a.file, b.file));
@@ -32712,7 +32731,9 @@ function renderMapMd(repo, s) {
   if (!s.entryPoints.length) L.push(`_None detected._`);
   for (const g of s.entryPoints) {
     const shown = g.samples.slice(0, MAX_SAMPLES);
-    L.push(`- **${g.kind}** (${g.count}): ${shown.map((e) => `\`${e.file}:${e.line}\``).join(", ")}${g.count > shown.length ? " \u2026" : ""}`);
+    L.push(
+      `- **${g.kind}** (${g.count}${g.testCount ? `, ${g.testCount} in test files` : ""}): ${shown.map((e) => `\`${e.file}:${e.line}\``).join(", ")}${g.count > shown.length ? " \u2026" : ""}`
+    );
   }
   L.push("");
   L.push(`## Sinks by class`);
@@ -32720,7 +32741,7 @@ function renderMapMd(repo, s) {
   if (!s.sinks.length) L.push(`_None detected._`);
   for (const k of s.sinks) {
     L.push(
-      `- **${k.kind}** (${k.cwe}, ${k.severity}) \xD7${k.count}: ${k.samples.map((x) => `\`${x.file}:${x.line}\``).join(", ")}${k.count > k.samples.length ? " \u2026" : ""}`
+      `- **${k.kind}** (${k.cwe}, ${k.severity}) \xD7${k.count}${k.testCount ? ` (${k.testCount} in test files)` : ""}: ${k.samples.map((x) => `\`${x.file}:${x.line}\``).join(", ")}${k.count > k.samples.length ? " \u2026" : ""}`
     );
   }
   L.push("");
