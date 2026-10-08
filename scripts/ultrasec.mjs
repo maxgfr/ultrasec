@@ -28264,7 +28264,23 @@ async function runEachWorkspace(adapter, repo, cmd, argv, dirs, ctx) {
   const failures = [];
   for (const dir of dirs) {
     const rel2 = relative9(repo, dir);
-    const { stdout, failed: failed2, err: err2 } = await execAsync(cmd[0], [...cmd.slice(1), ...argv], dir, adapter.stderr);
+    let prepared;
+    try {
+      prepared = adapter.workspaceArgv?.(dir, argv);
+    } catch (e) {
+      prepared = e.message;
+    }
+    if (typeof prepared === "string") {
+      failures.push(`${rel2 || "."}: ${prepared}`);
+      continue;
+    }
+    let exec;
+    try {
+      exec = await execAsync(cmd[0], [...cmd.slice(1), ...prepared?.argv ?? argv], dir, adapter.stderr);
+    } finally {
+      prepared?.dispose?.();
+    }
+    const { stdout, failed: failed2, err: err2 } = exec;
     const one = finish(adapter, repo, stdout, failed2, err2, false, { ...ctx, workspace: rel2 });
     findings.push(...one.findings);
     if (!one.ok) {
@@ -38563,6 +38579,7 @@ var checkov = {
   cacheable: true,
   category: "config",
   dockerImage: "bridgecrew/checkov:latest",
+  stage: (repo) => stageTrackedFiles(repo),
   argv: (target) => ["-d", target, "-o", "json", "--compact", "--quiet", "--soft-fail"],
   parse(raw) {
     const data = JSON.parse(raw || "{}");
@@ -38923,15 +38940,45 @@ var grype = {
 };
 
 // src/tools/pip-audit.ts
-import { existsSync as existsSync24 } from "fs";
+import { execFileSync as execFileSync7 } from "child_process";
+import { existsSync as existsSync24, mkdtempSync as mkdtempSync6, rmSync as rmSync9 } from "fs";
+import { tmpdir as tmpdir4 } from "os";
 import { join as join52 } from "path";
+var PY_MANIFESTS = ["requirements.txt", "uv.lock"];
+function manifestIn(dir) {
+  return existsSync24(join52(dir, "uv.lock")) && !existsSync24(join52(dir, "requirements.txt")) ? "uv.lock" : "requirements.txt";
+}
+function exportUvLock(dir) {
+  const tmp = mkdtempSync6(join52(tmpdir4(), "ultrasec-uv-export-"));
+  const file = join52(tmp, "requirements.txt");
+  try {
+    execFileSync7("uv", ["export", "--frozen", "--no-hashes", "--no-emit-workspace", "--format", "requirements-txt", "-o", file], {
+      cwd: dir,
+      stdio: ["ignore", "ignore", "pipe"],
+      timeout: 12e4
+    });
+  } catch (e) {
+    rmSync9(tmp, { recursive: true, force: true });
+    const err2 = e;
+    if (err2.code === "ENOENT") return "uv.lock found but `uv` is not installed \u2014 it is needed to export the lock for pip-audit";
+    return `uv export failed: ${String(err2.stderr ?? err2.message).trim().split("\n")[0]}`;
+  }
+  return { file, dispose: () => rmSync9(tmp, { recursive: true, force: true }) };
+}
 var pipAudit = {
   name: "pip-audit",
   category: "dep",
   network: true,
-  applicable: (repo) => existsSync24(join52(repo, "requirements.txt")) ? null : "no requirements.txt",
+  applicable: (repo) => findManifestDirs(repo, PY_MANIFESTS).length ? null : "no requirements.txt or uv.lock (checked the root and its subdirectories)",
+  workspaces: (repo) => findManifestDirs(repo, PY_MANIFESTS),
   argv: () => ["-r", "requirements.txt", "-f", "json", "--progress-spinner", "off"],
-  parse(raw) {
+  workspaceArgv(dir, argv) {
+    if (manifestIn(dir) === "requirements.txt") return { argv };
+    const exported = exportUvLock(dir);
+    if (typeof exported === "string") return exported;
+    return { argv: ["-r", exported.file, "--no-deps", "--disable-pip", "-f", "json", "--progress-spinner", "off"], dispose: exported.dispose };
+  },
+  parse(raw, repo, ctx) {
     let data;
     try {
       data = JSON.parse(raw || "{}");
@@ -38939,6 +38986,9 @@ var pipAudit = {
       return [];
     }
     const deps = Array.isArray(data) ? data : Array.isArray(data?.dependencies) ? data.dependencies : [];
+    const ws = ctx?.workspace ?? "";
+    const manifest = manifestIn(join52(repo, ws));
+    const file = ws ? `${ws}/${manifest}` : manifest;
     const out2 = [];
     for (const dep of deps) {
       const name2 = dep?.name;
@@ -38956,7 +39006,7 @@ var pipAudit = {
             // the MAX severity across sources, so a real (higher) severity wins.
             severity: "medium",
             message: `${name2}@${version}: ${v.description || v.id}` + (fixed ? ` (fixed in ${fixed})` : ""),
-            file: "requirements.txt",
+            file,
             pkg: name2,
             version,
             // v.id is usually PYSEC-…/GHSA-…; v.aliases carries the CVE — the join key.
@@ -38972,7 +39022,7 @@ var pipAudit = {
 // src/tools/pm-audit.ts
 import { existsSync as existsSync25 } from "fs";
 import { join as join53 } from "path";
-import { execFileSync as execFileSync7 } from "child_process";
+import { execFileSync as execFileSync8 } from "child_process";
 var NPM_LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json"];
 var PNPM_LOCKFILES = ["pnpm-lock.yaml"];
 var YARN_LOCKFILES = ["yarn.lock"];
@@ -39103,7 +39153,7 @@ var yarnMajorCache;
 function yarnMajor() {
   if (yarnMajorCache !== void 0) return yarnMajorCache;
   try {
-    const out2 = execFileSync7("yarn", ["--version"], { stdio: ["ignore", "pipe", "ignore"], timeout: 5e3 }).toString().trim();
+    const out2 = execFileSync8("yarn", ["--version"], { stdio: ["ignore", "pipe", "ignore"], timeout: 5e3 }).toString().trim();
     const major = Number.parseInt(out2.split(".")[0] ?? "", 10);
     yarnMajorCache = Number.isFinite(major) ? major : null;
   } catch {
@@ -39177,9 +39227,9 @@ var yarnAudit = {
 };
 
 // src/tools/package-checker.ts
-import { execFileSync as execFileSync8 } from "child_process";
+import { execFileSync as execFileSync9 } from "child_process";
 import { createHash as createHash7 } from "crypto";
-import { existsSync as existsSync26, mkdirSync as mkdirSync13, readFileSync as readFileSync30, readdirSync as readdirSync4, rmSync as rmSync9, writeFileSync as writeFileSync14 } from "fs";
+import { existsSync as existsSync26, mkdirSync as mkdirSync13, readFileSync as readFileSync30, readdirSync as readdirSync4, rmSync as rmSync10, writeFileSync as writeFileSync14 } from "fs";
 import { isAbsolute as isAbsolute11, join as join54, relative as relative12 } from "path";
 function hasRepoLocalPurlFeed(repo) {
   let entries;
@@ -39210,7 +39260,7 @@ var apiBase = () => process.env.ULTRASEC_PACKAGE_CHECKER_API || "https://api.git
 var rawBase = () => process.env.ULTRASEC_PACKAGE_CHECKER_RAW || "https://raw.githubusercontent.com";
 function curlFetch(url) {
   try {
-    return execFileSync8("curl", ["-fsSL", "--max-time", String(RESOLVE_CURL_TIMEOUT_S), url], {
+    return execFileSync9("curl", ["-fsSL", "--max-time", String(RESOLVE_CURL_TIMEOUT_S), url], {
       timeout: RESOLVE_TIMEOUT_MS,
       stdio: ["ignore", "pipe", "ignore"]
     });
@@ -39375,7 +39425,7 @@ var packageChecker = {
       return [];
     }
     try {
-      rmSync9(path, { force: true });
+      rmSync10(path, { force: true });
     } catch {
     }
     try {
@@ -39868,8 +39918,12 @@ async function runScan2(args2) {
   const required = [...new Set(requiredValues.flatMap((v) => typeof v === "string" ? v.split(",").map((s) => s.trim()) : [""]))].sort();
   const toolsFlag = flagStr(args2, "tools");
   const selected = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : void 0;
-  if (required.some((name2) => !ADAPTERS.some((a) => a.name === name2)) || required.length > 0 && (flagBool(args2, "no-tools") || toolsFlag === "none" || selected?.some((name2) => !ADAPTERS.some((a) => a.name === name2)) || required.some((name2) => selected && !selected.includes(name2)))) {
-    eprintln("ultrasec: --require-tools needs known scanner names and cannot conflict with --tools/--no-tools. Use `ultrasec tools` to list names.");
+  const known = (name2) => ADAPTERS.some((a) => a.name === name2);
+  const unknownRequired = required.filter((name2) => !known(name2));
+  const unknownSelected = required.length > 0 ? selected?.filter((name2) => !known(name2)) ?? [] : [];
+  const policyProblem = unknownRequired.length > 0 ? `unknown scanner name(s) in --require-tools: ${unknownRequired.map((n) => `'${n}'`).join(", ")}` : unknownSelected.length > 0 ? `unknown scanner name(s) in --tools: ${unknownSelected.map((n) => `'${n}'`).join(", ")}` : required.length > 0 && (flagBool(args2, "no-tools") || toolsFlag === "none") ? "--require-tools conflicts with --no-tools / --tools none" : required.length > 0 && selected && required.some((name2) => !selected.includes(name2)) ? `--require-tools names scanner(s) missing from --tools: ${required.filter((n) => !selected.includes(n)).join(", ")}` : void 0;
+  if (policyProblem) {
+    eprintln(`ultrasec: ${policyProblem}. Use \`ultrasec tools\` to list names.`);
     return 2;
   }
   const scope = listFlag(args2, "scope");
@@ -46610,8 +46664,8 @@ function runRender(args2) {
 }
 
 // src/commands/clean.ts
-import { execFileSync as execFileSync9 } from "child_process";
-import { existsSync as existsSync36, rmSync as rmSync10, readdirSync as readdirSync7 } from "fs";
+import { execFileSync as execFileSync10 } from "child_process";
+import { existsSync as existsSync36, rmSync as rmSync11, readdirSync as readdirSync7 } from "fs";
 import { join as join76, resolve as resolve37 } from "path";
 var TOOLBOX_IMAGE = "ultrasec-toolbox";
 var VOLUME_NAME_FILTER = "trivy-cache";
@@ -46621,7 +46675,7 @@ function dockerImages() {
 }
 function dockerAvailable() {
   try {
-    execFileSync9("docker", ["--version"], { stdio: "ignore", timeout: 5e3 });
+    execFileSync10("docker", ["--version"], { stdio: "ignore", timeout: 5e3 });
     return true;
   } catch {
     return false;
@@ -46629,7 +46683,7 @@ function dockerAvailable() {
 }
 function docker(args2) {
   try {
-    const out2 = execFileSync9("docker", args2, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 });
+    const out2 = execFileSync10("docker", args2, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], timeout: 6e4 });
     return { ok: true, out: out2 };
   } catch {
     return { ok: false, out: "" };
@@ -46645,7 +46699,7 @@ function runClean(args2) {
   const kept = [];
   if (!keepOutput && existsSync36(run2)) {
     if (all) {
-      if (!dry) rmSync10(run2, { recursive: true, force: true });
+      if (!dry) rmSync11(run2, { recursive: true, force: true });
       removed.push(`output  ${run2}`);
     } else {
       let preservedAny = false;
@@ -46655,11 +46709,11 @@ function runClean(args2) {
           kept.push(`deliverable  ${join76(run2, entry2)}`);
           continue;
         }
-        if (!dry) rmSync10(join76(run2, entry2), { recursive: true, force: true });
+        if (!dry) rmSync11(join76(run2, entry2), { recursive: true, force: true });
         removed.push(`intermediate  ${join76(run2, entry2)}`);
       }
       if (!preservedAny) {
-        if (!dry) rmSync10(run2, { recursive: true, force: true });
+        if (!dry) rmSync11(run2, { recursive: true, force: true });
       }
     }
   }

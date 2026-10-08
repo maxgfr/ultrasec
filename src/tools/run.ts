@@ -132,6 +132,14 @@ export interface ToolAdapter {
    * Absent ⇒ one run at the repo root, as before.
    */
   workspaces?(repo: string): string[];
+  /**
+   * The argv for ONE workspace, when the input differs between them: pip-audit
+   * reads a `requirements.txt` as it is, but a uv project only through an export
+   * of its `uv.lock`. Returns the argv (and a cleanup for anything it wrote), or a
+   * string saying why this workspace cannot be audited — recorded as a failure of
+   * that workspace, never as a clean pass. Absent ⇒ every workspace runs `argv`.
+   */
+  workspaceArgv?(dir: string, argv: string[]): { argv: string[]; dispose?(): void } | string;
   /** Needs the network on every run (registry-query audits) → skipped under
    *  --offline. A function answers per-run ("only if feeds not cached"). */
   network?: boolean | (() => boolean);
@@ -458,7 +466,23 @@ async function runEachWorkspace(adapter: ToolAdapter, repo: string, cmd: string[
   const failures: string[] = [];
   for (const dir of dirs) {
     const rel = relative(repo, dir);
-    const { stdout, failed, err } = await execAsync(cmd[0]!, [...cmd.slice(1), ...argv], dir, adapter.stderr);
+    let prepared: ReturnType<NonNullable<ToolAdapter["workspaceArgv"]>> | undefined;
+    try {
+      prepared = adapter.workspaceArgv?.(dir, argv);
+    } catch (e) {
+      prepared = (e as Error).message;
+    }
+    if (typeof prepared === "string") {
+      failures.push(`${rel || "."}: ${prepared}`);
+      continue;
+    }
+    let exec: ExecResult;
+    try {
+      exec = await execAsync(cmd[0]!, [...cmd.slice(1), ...(prepared?.argv ?? argv)], dir, adapter.stderr);
+    } finally {
+      prepared?.dispose?.();
+    }
+    const { stdout, failed, err } = exec;
     // Relativize against the REPO, and tell the adapter which workspace it is in,
     // so the path it records — and therefore the finding id — is repo-relative
     // from the start.

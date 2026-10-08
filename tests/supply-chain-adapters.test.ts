@@ -93,7 +93,7 @@ describe("pip-audit adapter", () => {
     expect(pipAudit.applicable!(withReq)).toBeNull();
 
     const withoutReq = mkdtempSync(join(tmpdir(), "ultrasec-pip-audit-"));
-    expect(pipAudit.applicable!(withoutReq)).toBe("no requirements.txt");
+    expect(pipAudit.applicable!(withoutReq)).toBe("no requirements.txt or uv.lock (checked the root and its subdirectories)");
   });
 });
 
