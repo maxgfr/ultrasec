@@ -118,6 +118,14 @@ export interface ToolAdapter {
    *  Unlike `enumerate`, the result is NOT appended to argv. */
   applicable?(repo: string): string | null;
   /**
+   * The tool's own way of saying "there was nothing here for me", when it says it
+   * with a non-zero exit (osv-scanner: "No package sources found"). A match turns
+   * the run into a skip with this fixed note instead of a failure whose note is
+   * the tool's stderr — timings included, so the status was neither accurate nor
+   * reproducible. Checked against the error text only; any other failure stays one.
+   */
+  nothingToScan?: { pattern: RegExp; note: string };
+  /**
    * Directories this tool should be run in, when its manifest can live below the
    * repo root (monorepos). Returns absolute paths, nearest-first; the runner
    * execs once per directory and merges the findings, naming each in the note.
@@ -514,6 +522,9 @@ function finish(
   /** The directory the tool actually scanned, when it was not `repo` (a staged copy). */
   scanned?: string,
 ): ToolRunResult {
+  if (failed && adapter.nothingToScan?.pattern.test(err ?? "")) {
+    return { name: adapter.name, ran: false, ok: false, findings: [], note: adapter.nothingToScan.note };
+  }
   if (failed) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err ?? "no output"}` };
   try {
     let parsed: Finding[];

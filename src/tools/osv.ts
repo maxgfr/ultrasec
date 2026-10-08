@@ -12,6 +12,10 @@ export const osvScanner: ToolAdapter = {
   dockerImage: "ghcr.io/google/osv-scanner:latest",
   // v2 CLI: `scan source` walks a directory for lockfiles/manifests. JSON → stdout.
   argv: (target) => ["scan", "source", "--recursive", "--format", "json", target],
+  nothingToScan: {
+    pattern: /No package sources found/,
+    note: "no lockfile or manifest osv-scanner reads (checked the root and its subdirectories)",
+  },
   parse(raw): Finding[] {
     const data = JSON.parse(raw || "{}") as any;
     const out: Finding[] = [];

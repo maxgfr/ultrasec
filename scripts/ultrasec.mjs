@@ -28306,6 +28306,9 @@ async function runDocker(adapter, repo, ctx) {
   return withHistoryFallback(adapter, ctx, run2);
 }
 function finish(adapter, repo, stdout, failed2, err2, docker2, ctx, scanned) {
+  if (failed2 && adapter.nothingToScan?.pattern.test(err2 ?? "")) {
+    return { name: adapter.name, ran: false, ok: false, findings: [], note: adapter.nothingToScan.note };
+  }
   if (failed2) return { name: adapter.name, ran: true, ok: false, findings: [], note: `run failed: ${err2 ?? "no output"}` };
   try {
     let parsed2;
@@ -38251,6 +38254,10 @@ var osvScanner = {
   dockerImage: "ghcr.io/google/osv-scanner:latest",
   // v2 CLI: `scan source` walks a directory for lockfiles/manifests. JSON → stdout.
   argv: (target) => ["scan", "source", "--recursive", "--format", "json", target],
+  nothingToScan: {
+    pattern: /No package sources found/,
+    note: "no lockfile or manifest osv-scanner reads (checked the root and its subdirectories)"
+  },
   parse(raw) {
     const data = JSON.parse(raw || "{}");
     const out2 = [];
