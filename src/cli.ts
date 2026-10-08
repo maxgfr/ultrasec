@@ -21,6 +21,19 @@ USAGE
   ultrasec <command> [options]
 
 COMMANDS
+  audit      ONE command, ONE report: scan (every scan flag passes through) →
+             the stage pipeline → check → <run>/REPORT.md (REPORT.html with
+             --html; both with --html --md) → remove the intermediates. Prints
+             the report path and a one-line status: adjudicated & grounded, or
+             DRAFT with why. ZERO agent calls unless --powered <cli> (drives
+             that CLI per worklist; --cross-check <cli>) or --council
+             "<reviewer:model,…>". --keep-work keeps .work/ and the JSON
+             worklists for an agent to adjudicate (then render + clean).
+             Re-running on the same --out merges (verdicts survive); --fresh
+             starts over. --full: exhaustive annexes. --strict: exit 1 on a
+             DRAFT. Flags: --repo · --out · --html · --md · --full ·
+             --keep-work · --powered <cli> · --cross-check <cli> · --council ·
+             --stages · --fresh · --strict · --json · scan flags.
   map        Cheap attack-surface recon: where untrusted input enters + what sinks
              exist, with suggested scoped targets. No taint BFS, no tools, no
              network — fast on huge repos. Writes MAP.md + attack-surface.json only
@@ -69,7 +82,7 @@ COMMANDS
              never sudo. Docker scans and package-checker already self-refresh.
              Flags: --upgrade · --dry-run (print the commands, run nothing) ·
              --json.
-  graph      Show the links into/out of a file or symbol. Reads <run>/graph.json
+  graph      Show the links into/out of a file or symbol. Reads <run>/.work/graph.json
              with --run, else live-scans --repo. Flags: <file|symbol> · --depth n
              (default 1) · --run · --repo · --json.
   paths      List candidate cross-file source→sink chains.
@@ -163,16 +176,19 @@ COMMANDS
              findings, folding the grounded NARRATIVE.json (fixes, patches, root causes)
              when present. Emit-only — never changes a finding's status. Feed IMPLEMENT.md
              to the 'to-prd' skill or an implementer. Flags: --run · --narrative <file> · --json.
-  render     Render SUMMARY/REPORT.md + a self-contained index.html, organised by
-             SURFACE: this repo's own code first, then secrets/CI/IaC, then the
-             dependency advisories rolled up one row per package.
-             --narrative <file> folds in AI-authored sections (exec summary, fixes,
-             attack chains, root causes), clearly marked + grounding-checked.
-             EXITS 1 when a HIGH/CRITICAL source-code candidate was never read —
-             the files are still written, and carry the same warning as a banner.
-             Dependency advisories may stay open; that is what triage is for.
-             --draft acknowledges an incomplete audit and exits 0.
-             Flags: --run · --narrative <file> · --draft.
+  render     Write THE report: <run>/REPORT.md (or REPORT.html with --html;
+             both with --html --md) — executive summary, dashboard, chains,
+             follow-up, findings by severity then area (scenario · fix ·
+             effort · priority), secrets, CI/CD, dependencies one row per
+             package, hardening, coverage, remediation plan, annexes.
+             Dismissals are SUMMARISED and repeated findings are one card;
+             --full restores every exhaustive table. Folds <run>/NARRATIVE.json
+             (or --narrative <file>), grounding-checked. EXITS 1 when a
+             HIGH/CRITICAL source-code candidate was never read — the file is
+             still written, with a DRAFT banner; --draft exits 0. --legacy
+             writes the previous SUMMARY.md + tiered REPORT.md + index.html.
+             Flags: --run · --html · --md · --full · --narrative <file> ·
+             --draft · --legacy.
   coverage   The honest complement to 'only report what you can exploit': a
              standards matrix of what this audit looked at and what it did NOT.
              A short report reads as "nothing there" when it means "nothing
@@ -190,23 +206,24 @@ COMMANDS
              fails when a candidate is still unadjudicated. Exit 0 ok · 1 gate
              failed · 2 unreadable run. Flags: --run · --repo · --semantic ·
              --min-severity critical|high|medium|low|info · --json.
-  clean      Remove the intermediate scan artifacts, KEEPING the rendered
-             deliverables (REPORT/SUMMARY/index.html + findings.json); --all wipes
-             the whole run dir, --keep-output keeps everything. With --docker also
+  clean      Remove the intermediates — .work/, worklists, DOSSIER.md,
+             orchestration and council scratch — KEEPING REPORT.md/REPORT.html,
+             findings.json, manifest.json, CONTEXT.md and NARRATIVE.json (and an
+             older run's SUMMARY.md / index.html / JOURNAL.md); --all wipes the
+             whole run dir, --keep-output keeps everything. With --docker also
              removes the scanner images + toolbox image + trivy cache volume
-             (--dry-run to preview). NOTE: CONTEXT.md, MAP.md, sbom.cdx.json,
-             LOGSTATS.json, NARRATIVE.json, IMPLEMENT.md and orchestration/ count as
-             intermediates; a run that was never rendered is removed whole.
+             (--dry-run to preview). A run that was never scanned is removed whole.
              Flags: --run · --all · --keep-output · --docker · --dry-run · --json.
   run        Orchestrate the AI stages (context → assumptions → triage → guards →
              throttle → investigate → verify → revalidate → variants → narrative →
-             implement), then ALWAYS check + render. DEFAULT
+             implement), then ALWAYS check + the report (as render). DEFAULT
              makes ZERO external calls: scans + emits every worklist + prints the agent
              TODO. --powered drives an agent CLI per worklist (keys live in that CLI,
              not ultrasec); --cross-check <cli> escalates high/critical verify/
              revalidate disagreement to needs-human. --stages selects a subset of the
              stage names above — 'check'/'render' are unconditional post-steps
-             and are NOT valid --stages tokens. Flags: --repo · --out · --powered ·
+             and are NOT valid --stages tokens. Worklists are JSON only (--md
+             adds the human .md twins). Flags: --repo · --out · --powered ·
              --agent <name|tpl> · --cross-check <name|tpl> · --stages · --no-scan ·
              --scope/--include/--exclude/--max-files/--gitignore · --json.
   council    A second opinion from OTHER model families, through their own
@@ -230,7 +247,7 @@ COMMANDS
              --placeholder-pattern <regex> (repeatable) · --parse · --resume
              <reviewer> · --apply <file> · --strict · --json.
   orchestrate Emit the run's multi-agent orchestration from its CURRENT worklists
-             into <run>/orchestration/: one <phase>.workflow.mjs per ready phase
+             into <run>/.work/orchestration/: one <phase>.workflow.mjs per ready phase
              (adjudicate | verify | revalidate | investigate, real ids batched
              8/agent), the dispatch contracts (agents/<role>.md) and a sequential
              RUNBOOK.md fallback. Subagents RETURN verdict/discovery fragments;
@@ -275,8 +292,10 @@ GLOBAL
   --report <p>   ALSO archive this command's output to <p>; the extension picks the
                  format (.md, .html, .json, .txt/.log). stdout is unchanged; an
                  unknown extension exits 2 before the command runs.
-  --no-journal   Don't append this command to <run>/JOURNAL.md (the append-only
-                 record of every command run against an audit directory).
+  --no-journal   Don't append this command to <run>/.work/JOURNAL.md (the
+                 append-only record of every command run against an audit dir).
+  --md           Also write each worklist's human .md brief (or ULTRASEC_MD=1);
+                 by default worklists are JSON only and the instructions print.
   --strict       On an --apply stage, exit 1 if any row was refused, so a partial
                  fold can't pass CI. (triage/verify/investigate/revalidate)
 
@@ -384,7 +403,7 @@ async function runMcp(args: ParsedArgs): Promise<number> {
 // Commands that walk the repo and extract symbols. Only these pay for the
 // grammar warm-up: `check`/`render`/`triage`/… re-read an existing dossier and
 // must never trigger a 22 MB download to do it.
-const SCANNING_COMMANDS = new Set(["scan", "run", "graph", "map", "context", "investigate", "logs"]);
+const SCANNING_COMMANDS = new Set(["audit", "scan", "run", "graph", "map", "context", "investigate", "logs"]);
 
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
@@ -428,6 +447,17 @@ async function main(): Promise<void> {
 const READ_ONLY_COMMANDS = new Set(["dossier", "graph", "paths", "check", "tools", "help", "version"]);
 
 /**
+ * Commands whose last act is to remove `.work/`: `clean`, and `audit` without
+ * `--keep-work`. Journaling them would recreate `.work/JOURNAL.md` the moment
+ * after it was removed — one stray folder in a run that promised to hold only
+ * the report.
+ */
+function leavesOnlyDeliverables(args: ParsedArgs): boolean {
+  const cmd = args._[0];
+  return cmd === "clean" || (cmd === "audit" && !flagBool(args, "keep-work"));
+}
+
+/**
  * Run a command, archiving its output when asked.
  *
  * `--report <path>` writes this one command's transcript; a run directory gets an
@@ -442,7 +472,7 @@ async function withArchiving(args: ParsedArgs, argv: string[], execute: () => Pr
   const reportPath = flagStr(args, "report");
   // `scan` names its run dir `--out`; every later stage calls it `--run`.
   const runDir = flagStr(args, "run") ?? flagStr(args, "out");
-  const journal = runDir !== undefined && !READ_ONLY_COMMANDS.has(args._[0] ?? "") && !flagBool(args, "no-journal");
+  const journal = runDir !== undefined && !READ_ONLY_COMMANDS.has(args._[0] ?? "") && !flagBool(args, "no-journal") && !leavesOnlyDeliverables(args);
   if ((!reportPath && !journal) || args._[0] === "mcp") return execute();
 
   // Fail BEFORE running: writing a report is the point of passing the flag, and

@@ -26,6 +26,7 @@ import { runOrchestrate } from "./orchestrate.js";
 import { runProbe } from "./probe.js";
 import { runRoute } from "./route.js";
 import { runCouncil } from "./council.js";
+import { runAudit } from "./audit.js";
 
 // The command table, in its own module so both front-ends can reach it.
 //
@@ -38,6 +39,7 @@ import { runCouncil } from "./council.js";
 export type CommandHandler = (args: ParsedArgs) => number | Promise<number>;
 
 export const COMMAND_HANDLERS: Record<string, CommandHandler> = {
+  audit: runAudit,
   tools: runTools,
   graph: runGraph,
   map: runMap,
