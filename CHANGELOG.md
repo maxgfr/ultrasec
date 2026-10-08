@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.61.2](https://github.com/maxgfr/ultrasec/compare/v1.61.1...v1.61.2) (2026-10-08)
+
+
+### Bug Fixes
+
+* **guards:** let a row that is not a handler be dropped, not waived ([bf4db71](https://github.com/maxgfr/ultrasec/commit/bf4db7162856f069ee74bca7f769b25a2150dd5b))
+
 ## [1.61.1](https://github.com/maxgfr/ultrasec/compare/v1.61.0...v1.61.1) (2026-10-08)
 
 
