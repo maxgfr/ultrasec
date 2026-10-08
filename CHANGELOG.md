@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.61.0](https://github.com/maxgfr/ultrasec/compare/v1.60.1...v1.61.0) (2026-10-08)
+
+
+### Features
+
+* **skill:** let the agent invoke ultrasec on request ([949a85d](https://github.com/maxgfr/ultrasec/commit/949a85d4695161adfdb085d065874b5747487f55))
+
 ## [1.60.1](https://github.com/maxgfr/ultrasec/compare/v1.60.0...v1.60.1) (2026-10-08)
 
 
