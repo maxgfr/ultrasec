@@ -81,15 +81,23 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const required = [...new Set(requiredValues.flatMap((v) => (typeof v === "string" ? v.split(",").map((s) => s.trim()) : [""])))].sort();
   const toolsFlag = flagStr(args, "tools");
   const selected = toolsFlag && toolsFlag !== "auto" && toolsFlag !== "none" ? toolsFlag.split(",").map((s) => s.trim()) : undefined;
-  if (
-    required.some((name) => !ADAPTERS.some((a) => a.name === name)) ||
-    (required.length > 0 &&
-      (flagBool(args, "no-tools") ||
-        toolsFlag === "none" ||
-        selected?.some((name) => !ADAPTERS.some((a) => a.name === name)) ||
-        required.some((name) => selected && !selected.includes(name))))
-  ) {
-    eprintln("ultrasec: --require-tools needs known scanner names and cannot conflict with --tools/--no-tools. Use `ultrasec tools` to list names.");
+  // Name the offending value: "needs known names" alone sends the user diffing the
+  // list by hand to find which of nine scanners ultrasec does not run.
+  const known = (name: string) => ADAPTERS.some((a) => a.name === name);
+  const unknownRequired = required.filter((name) => !known(name));
+  const unknownSelected = required.length > 0 ? (selected?.filter((name) => !known(name)) ?? []) : [];
+  const policyProblem =
+    unknownRequired.length > 0
+      ? `unknown scanner name(s) in --require-tools: ${unknownRequired.map((n) => `'${n}'`).join(", ")}`
+      : unknownSelected.length > 0
+        ? `unknown scanner name(s) in --tools: ${unknownSelected.map((n) => `'${n}'`).join(", ")}`
+        : required.length > 0 && (flagBool(args, "no-tools") || toolsFlag === "none")
+          ? "--require-tools conflicts with --no-tools / --tools none"
+          : required.length > 0 && selected && required.some((name) => !selected.includes(name))
+            ? `--require-tools names scanner(s) missing from --tools: ${required.filter((n) => !selected.includes(n)).join(", ")}`
+            : undefined;
+  if (policyProblem) {
+    eprintln(`ultrasec: ${policyProblem}. Use \`ultrasec tools\` to list names.`);
     return 2;
   }
 

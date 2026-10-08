@@ -57,6 +57,19 @@ describe("required scanner completion policy", () => {
       expect(result.manifest).toBeUndefined();
     },
   );
+  it.each([
+    [["--require-tools", "gitleaks,zizmor"], "unknown scanner name(s) in --require-tools: 'zizmor'"],
+    [["--require-tools", "gitleaks", "--tools", "bandit"], "--require-tools names scanner(s) missing from --tools: gitleaks"],
+    [["--require-tools", "gitleaks", "--no-tools"], "--require-tools conflicts with --no-tools / --tools none"],
+  ])("names what is wrong with a rejected policy: %j", async (flags, message) => {
+    const err = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    try {
+      expect((await scan(flags)).code).toBe(2);
+      expect(err.mock.calls.map((c) => String(c[0])).join("")).toContain(message);
+    } finally {
+      err.mockRestore();
+    }
+  });
   it("leaves optional scanner failures nonfatal without the new policy", async () => {
     const result = await scan([], [{ name: "gitleaks", ran: true, ok: false, findings: [], note: "timeout" }]);
     expect(result.code).toBe(0);
