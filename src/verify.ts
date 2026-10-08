@@ -1,6 +1,7 @@
 import type { Dossier } from "./store.js";
 import { BROCARDS, VERDICTS, type Brocard, type Finding, type Status, type Verdict } from "./types.js";
 import { byStr, withStageNote } from "./util.js";
+import { redactSecrets } from "./redact.js";
 import { proposedFor, renderProposalSummary, type ProposedAdjudication } from "./noise.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 
@@ -299,7 +300,8 @@ export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): Apply
       verdict: v.verdict,
       confidence: v.verdict === "supported" ? "high" : v.verdict === "partial" ? "medium" : f.confidence,
     };
-    if (v.exploitPath) next.exploitPath = v.exploitPath;
+    // Authored prose, rendered like the note — and as likely to quote the line.
+    if (v.exploitPath) next.exploitPath = redactSecrets(v.exploitPath);
     // Only meaningful on a refutation: it names the ground the dismissal stands on.
     if (v.brocard && v.verdict === "refuted") next.brocard = v.brocard;
     if (v.note) next.message = withStageNote(f.message, "Verdict", v.verdict, v.note);

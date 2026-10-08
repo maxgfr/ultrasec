@@ -25530,11 +25530,11 @@ function renderScip(scan2, opts = {}) {
     }
   }
   const relationships = /* @__PURE__ */ new Map();
-  const relate = (from, to, isReference) => {
+  const relate = (from, to, isReference2) => {
     if (from === to) return;
     let targets = relationships.get(from);
     if (!targets) relationships.set(from, targets = /* @__PURE__ */ new Map());
-    targets.set(to.symbol, isReference || targets.get(to.symbol) === true);
+    targets.set(to.symbol, isReference2 || targets.get(to.symbol) === true);
   };
   for (const r of resolveRelations(scan2, importPairsFor(scan2))) {
     const subs = (docDefs.get(r.fromFile)?.byName.get(r.from) ?? []).filter((d) => d.suffix !== "()." && d.suffix !== "!");
@@ -25617,10 +25617,10 @@ function renderScip(scan2, opts = {}) {
     for (const si of infos) {
       sb.reset();
       pushString(sb, F_SI_SYMBOL, si.symbol);
-      for (const [target, isReference] of si.relationships) {
+      for (const [target, isReference2] of si.relationships) {
         rb.reset();
         pushString(rb, F_REL_SYMBOL, target);
-        if (isReference) pushVarintField(rb, F_REL_IS_REFERENCE, 1);
+        if (isReference2) pushVarintField(rb, F_REL_IS_REFERENCE, 1);
         pushVarintField(rb, F_REL_IS_IMPLEMENTATION, 1);
         pushMessage(sb, F_SI_RELATIONSHIPS, rb);
       }
@@ -27252,6 +27252,116 @@ var SOURCE_SCOPES = ["symbol", "module", "file"];
 import { AsyncLocalStorage } from "async_hooks";
 import { createHash as createHash4 } from "crypto";
 import { statSync as statSync13 } from "fs";
+
+// src/logs/secrets.ts
+var SECRET_PATTERNS = [
+  { kind: "aws-access-key", re: /AKIA[0-9A-Z]{16}/g },
+  { kind: "private-key", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g },
+  { kind: "jwt", re: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g },
+  { kind: "query-secret", re: /[?&](?:password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)=[^&\s"]+/gi },
+  { kind: "auth-header", re: /Authorization:\s*(?:Bearer|Basic)\s+\S+/gi },
+  { kind: "slack-token", re: /xox[baprs]-[0-9A-Za-z-]{10,}/g },
+  { kind: "google-api-key", re: /AIza[0-9A-Za-z_-]{35}/g }
+];
+var PII_PATTERNS = [
+  { kind: "email", re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g },
+  // Credit-card CANDIDATE — gated by luhn() below (reject non-Luhn) so a plain
+  // 13-16 digit run (an order id, a phone number) isn't flagged as a card.
+  { kind: "credit-card", re: /\b(?:\d[ -]?){13,16}\b/g }
+];
+function luhn(digits) {
+  const clean = digits.replace(/\D/g, "");
+  if (clean.length < 13 || clean.length > 19) return false;
+  let sum = 0;
+  let double = false;
+  for (let i2 = clean.length - 1; i2 >= 0; i2--) {
+    let n = Number(clean[i2]);
+    if (double) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    double = !double;
+  }
+  return sum % 10 === 0;
+}
+var EVIDENCE_MAX = 200;
+function truncateEvidence(s) {
+  return s.length > EVIDENCE_MAX ? s.slice(0, EVIDENCE_MAX) : s;
+}
+function redact(line2) {
+  const hits = [];
+  let redacted = line2;
+  for (const p of SECRET_PATTERNS) {
+    redacted = redacted.replace(p.re, () => {
+      hits.push({ kind: p.kind });
+      return `\u2039REDACTED:${p.kind}\u203A`;
+    });
+  }
+  for (const p of PII_PATTERNS) {
+    if (p.kind === "credit-card") {
+      redacted = redacted.replace(p.re, (m) => {
+        if (!luhn(m)) return m;
+        hits.push({ kind: p.kind });
+        return `\u2039REDACTED:${p.kind}\u203A`;
+      });
+      continue;
+    }
+    redacted = redacted.replace(p.re, () => {
+      hits.push({ kind: p.kind });
+      return `\u2039REDACTED:${p.kind}\u203A`;
+    });
+  }
+  return { redacted, hits };
+}
+
+// src/redact.ts
+function redactPasswordHashes(text) {
+  return text.replace(/\$(argon2(?:id|i|d)?|2[abxy]|scrypt|pbkdf2[\w-]*)\$[\w./+=,$-]*/g, (literal2, algo, at, whole) => {
+    if (whole[at + literal2.length] === "\u2026") return literal2;
+    const kept = [algo];
+    for (const part of literal2.split("$").slice(2)) {
+      if (/^(?:[a-z]+=\d+(?:,[a-z]+=\d+)*|\d{1,7})$/.test(part)) kept.push(part);
+      else break;
+    }
+    return `$${kept.join("$")}$\u2026`;
+  });
+}
+function maskValue(value) {
+  return `${value.slice(0, Math.min(4, Math.floor(value.length / 3)))}\u2026`;
+}
+var PEM_KEY = /(-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
+var URI_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)([^\s:@/]*):([^\s@/]+)@/gi;
+var NAMED_VALUE = /(["'`]?)\b([\w.-]*(?:secret|token|passwd|password|api_?key|private_?key)[\w.-]*)\1(\s*(?::|=(?![=>]))\s*)(["'`]?)([^\s"'`,;)}\]]+)/gi;
+var NOT_A_VALUE = /* @__PURE__ */ new Set(["none", "null", "nil", "undefined", "true", "false", "empty", "unset", "required", "optional", "redacted", "masked"]);
+function isReference(value) {
+  if (/[…*]/.test(value) || NOT_A_VALUE.has(value.toLowerCase())) return true;
+  if (/^\$(?:argon2|2[abxy]\$|scrypt|pbkdf2)/.test(value)) return true;
+  if (/^(?:\$\{|\$[A-Z_][A-Z0-9_]*$|\{\{|<|%)/.test(value)) return true;
+  const chain = /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)+(?:\(.*|\[.*)?$|^[A-Za-z_$][\w$]*[([].*$/;
+  return chain.test(value) && !/\beyJ/.test(value) && value.split(/[.([]/).every((seg) => seg.length <= 40);
+}
+var PROVIDER_TOKENS = SECRET_PATTERNS.filter((p) => ["aws-access-key", "jwt", "slack-token", "google-api-key"].includes(p.kind)).map((p) => p.re);
+var AUTH_HEADER = /(Authorization:\s*(?:Bearer|Basic)\s+)([^\s"'`]+)/gi;
+function redactSecrets(text) {
+  if (!text) return text;
+  const out2 = redactPasswordHashes(text).replace(PEM_KEY, (_m, begin, end) => `${begin}\u2026${end}`).replace(URI_USERINFO, (_m, scheme, user) => `${scheme}${user}:****@`).replace(
+    NAMED_VALUE,
+    (match, q1, name2, sep14, q2, value) => value.length < 4 || isReference(value) ? match : `${q1}${name2}${q1}${sep14}${q2}${maskValue(value)}`
+  ).replace(AUTH_HEADER, (match, head, value) => /[…*]/.test(value) ? match : `${head}${maskValue(value)}`);
+  return PROVIDER_TOKENS.reduce((acc, re) => acc.replace(re, (token) => maskValue(token)), out2);
+}
+var OPAQUE_TOKEN = /[A-Za-z0-9+/=_-]{20,}/g;
+function isCredentialFinding(f) {
+  if (f.category === "secret") return true;
+  const credentialCwe = /\bCWE-(?:798|259|321|522|916)\b/;
+  return credentialCwe.test(f.cwe ?? "") || credentialCwe.test(f.title);
+}
+function redactCredentialLine(line2) {
+  return redactSecrets(line2).replace(OPAQUE_TOKEN, (run2) => /\d/.test(run2) && /[A-Za-z]/.test(run2) ? maskValue(run2) : run2);
+}
+
+// src/util.ts
 var BOOLEAN_FLAGS = /* @__PURE__ */ new Set([
   "help",
   "version",
@@ -27385,9 +27495,10 @@ var STAGE_SPLIT = new RegExp(`\\n\\n(?=(?:${STAGE_LABELS.join("|")}) \\()`);
 function withStageNote(message, stage, label, note) {
   const parts2 = message.split(STAGE_SPLIT);
   const kept = parts2.filter((part, i2) => i2 === 0 || !part.startsWith(`${stage} (`));
+  const safe = note ? redactSecrets(note) : "";
   return `${kept.join("\n\n")}
 
-${stage} (${label})${note ? `: ${note}` : ""}`;
+${stage} (${label})${safe ? `: ${safe}` : ""}`;
 }
 function stageNotes(message) {
   const parts2 = String(message ?? "").split(STAGE_SPLIT);
@@ -33333,68 +33444,6 @@ function enumerateSinkCandidates(scan2, covered, opts = {}) {
   return { findings: kept, truncated: total - kept.length, total };
 }
 
-// src/logs/secrets.ts
-var SECRET_PATTERNS = [
-  { kind: "aws-access-key", re: /AKIA[0-9A-Z]{16}/g },
-  { kind: "private-key", re: /-----BEGIN [A-Z ]*PRIVATE KEY-----/g },
-  { kind: "jwt", re: /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g },
-  { kind: "query-secret", re: /[?&](?:password|passwd|pwd|secret|api[_-]?key|token|access[_-]?token)=[^&\s"]+/gi },
-  { kind: "auth-header", re: /Authorization:\s*(?:Bearer|Basic)\s+\S+/gi },
-  { kind: "slack-token", re: /xox[baprs]-[0-9A-Za-z-]{10,}/g },
-  { kind: "google-api-key", re: /AIza[0-9A-Za-z_-]{35}/g }
-];
-var PII_PATTERNS = [
-  { kind: "email", re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g },
-  // Credit-card CANDIDATE — gated by luhn() below (reject non-Luhn) so a plain
-  // 13-16 digit run (an order id, a phone number) isn't flagged as a card.
-  { kind: "credit-card", re: /\b(?:\d[ -]?){13,16}\b/g }
-];
-function luhn(digits) {
-  const clean = digits.replace(/\D/g, "");
-  if (clean.length < 13 || clean.length > 19) return false;
-  let sum = 0;
-  let double = false;
-  for (let i2 = clean.length - 1; i2 >= 0; i2--) {
-    let n = Number(clean[i2]);
-    if (double) {
-      n *= 2;
-      if (n > 9) n -= 9;
-    }
-    sum += n;
-    double = !double;
-  }
-  return sum % 10 === 0;
-}
-var EVIDENCE_MAX = 200;
-function truncateEvidence(s) {
-  return s.length > EVIDENCE_MAX ? s.slice(0, EVIDENCE_MAX) : s;
-}
-function redact(line2) {
-  const hits = [];
-  let redacted = line2;
-  for (const p of SECRET_PATTERNS) {
-    redacted = redacted.replace(p.re, () => {
-      hits.push({ kind: p.kind });
-      return `\u2039REDACTED:${p.kind}\u203A`;
-    });
-  }
-  for (const p of PII_PATTERNS) {
-    if (p.kind === "credit-card") {
-      redacted = redacted.replace(p.re, (m) => {
-        if (!luhn(m)) return m;
-        hits.push({ kind: p.kind });
-        return `\u2039REDACTED:${p.kind}\u203A`;
-      });
-      continue;
-    }
-    redacted = redacted.replace(p.re, () => {
-      hits.push({ kind: p.kind });
-      return `\u2039REDACTED:${p.kind}\u203A`;
-    });
-  }
-  return { redacted, hits };
-}
-
 // src/logs/hygiene.ts
 var DEFAULT_MAX_CANDIDATES3 = 40;
 var SENSITIVE_NAME_RE = /\b(pass(word|wd)?|secret|token|api[_-]?key|authorization|credential|private[_-]?key|ssn|card[_-]?number)\b/i;
@@ -34108,16 +34157,6 @@ var WEAK_SECRETS = /* @__PURE__ */ new Set([
   "admin",
   "default"
 ]);
-function redactPasswordHashes(text) {
-  return text.replace(/\$(argon2(?:id|i|d)?|2[abxy]|scrypt|pbkdf2[\w-]*)\$[\w./+=,$-]*/g, (literal2, algo) => {
-    const kept = [algo];
-    for (const part of literal2.split("$").slice(2)) {
-      if (/^(?:[a-z]+=\d+(?:,[a-z]+=\d+)*|\d{1,7})$/.test(part)) kept.push(part);
-      else break;
-    }
-    return `$${kept.join("$")}$\u2026`;
-  });
-}
 function hit3(rel2, line2, shape, evidence) {
   return makeToolFinding({
     tool: "ultrasec",
@@ -42132,7 +42171,7 @@ function applyVerdicts(dossier, verdicts) {
       verdict: v.verdict,
       confidence: v.verdict === "supported" ? "high" : v.verdict === "partial" ? "medium" : f.confidence
     };
-    if (v.exploitPath) next.exploitPath = v.exploitPath;
+    if (v.exploitPath) next.exploitPath = redactSecrets(v.exploitPath);
     if (v.brocard && v.verdict === "refuted") next.brocard = v.brocard;
     if (v.note) next.message = withStageNote(f.message, "Verdict", v.verdict, v.note);
     return next;
@@ -42331,7 +42370,8 @@ function buildRevalidateWorklist(dossier, repo) {
     const file = loc?.file ?? "";
     const line2 = loc?.line ?? 0;
     const fileExists = file ? fileExistsAtHead(repo, file) : false;
-    const currentLine = fileExists && line2 ? lineContentAtHead(repo, file, line2) : null;
+    const atHead = fileExists && line2 ? lineContentAtHead(repo, file, line2) : null;
+    const currentLine = atHead !== null && isCredentialFinding(f) ? redactCredentialLine(atHead) : atHead;
     const sinceRef = f.provenance?.commit;
     const since = sinceRef && file ? logSince(repo, file, sinceRef) : null;
     return {
@@ -43626,14 +43666,16 @@ function ingestDiscoveries(dossier, discoveries, repo, opts = {}) {
       ident: `${d.category}:${d.title}:${d.file}:${d.line}`,
       title: d.title,
       severity: d.severity,
-      message: d.message,
+      // The hunter's own write-up, quoting what it found; a hard-coded key is
+      // reported by quoting it. Same mask as every other authored note.
+      message: redactSecrets(d.message),
       file: d.file,
       line: d.line,
       cwe: d.cwe,
       confidence: "low"
       // AI-discovered + unverified — recall-oriented, adjudicate it
     });
-    if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: p.why }));
+    if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: redactSecrets(p.why) }));
     if (d.vulnClass) f.vulnClass = d.vulnClass;
     f.risk = scoreFinding(f, deployment);
     result.set(f.id, f);

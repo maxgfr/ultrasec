@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
+import { redactSecrets } from "./redact.js";
 
 // ── Tiny zero-dependency arg parser ──────────────────────────────────────────
 // Supports: positionals, `--flag value`, `--flag=value`, boolean `--flag`, and
@@ -213,12 +214,18 @@ const STAGE_SPLIT = new RegExp(`\\n\\n(?=(?:${STAGE_LABELS.join("|")}) \\()`);
  * Other stages' blocks are preserved: a revalidation note must survive a
  * re-verify, and a verdict note must survive a re-revalidation. Within one
  * stage it is last-wins, which is what makes a repeated `--apply` a no-op.
+ *
+ * The note is redacted on the way in. It is the auditor's prose, and prose
+ * quotes: on a real run a revalidation note quoted the cited line from
+ * REVALIDATE.todo.json, the line was a seed row, and a full argon2 hash reached
+ * REPORT.md and index.html after the detector had been fixed to keep it out.
  */
 export function withStageNote(message: string, stage: (typeof STAGE_LABELS)[number], label: string, note?: string): string {
   // parts[0] is the text before the first stage block; every later part IS one.
   const parts = message.split(STAGE_SPLIT);
   const kept = parts.filter((part, i) => i === 0 || !part.startsWith(`${stage} (`));
-  return `${kept.join("\n\n")}\n\n${stage} (${label})${note ? `: ${note}` : ""}`;
+  const safe = note ? redactSecrets(note) : "";
+  return `${kept.join("\n\n")}\n\n${stage} (${label})${safe ? `: ${safe}` : ""}`;
 }
 
 /**

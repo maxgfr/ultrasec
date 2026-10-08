@@ -2,6 +2,7 @@ import type { Dossier } from "./store.js";
 import type { Finding, Status } from "./types.js";
 import { isHigh } from "./verify.js";
 import { byStr, withStageNote } from "./util.js";
+import { isCredentialFinding, redactCredentialLine } from "./redact.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 import { fileExistsAtHead, lineContentAtHead, lineLastChanged, fileRenamedTo, logSince, type LineChange } from "./git.js";
 
@@ -72,7 +73,12 @@ export function buildRevalidateWorklist(dossier: Dossier, repo: string): Revalid
       const file = loc?.file ?? "";
       const line = loc?.line ?? 0;
       const fileExists = file ? fileExistsAtHead(repo, file) : false;
-      const currentLine = fileExists && line ? lineContentAtHead(repo, file, line) : null;
+      const atHead = fileExists && line ? lineContentAtHead(repo, file, line) : null;
+      // For a credential finding the cited line IS the credential. The worklist
+      // is read by agents and humans, and on a real run the revalidator quoted
+      // this field into its note — a seed row's full argon2 hash went from here
+      // into REPORT.md. Masked, the line still answers "is it still there?".
+      const currentLine = atHead !== null && isCredentialFinding(f) ? redactCredentialLine(atHead) : atHead;
       const sinceRef = f.provenance?.commit;
       const since = sinceRef && file ? logSince(repo, file, sinceRef) : null;
       return {

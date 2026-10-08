@@ -1,6 +1,7 @@
 import { readText, walk, type RepoTree } from "./walk.js";
 import type { Finding, Severity } from "./types.js";
 import { makeToolFinding } from "./tools/normalize.js";
+import { redactPasswordHashes } from "./redact.js";
 
 // Authentication-token weaknesses — the JWT / OAuth / OIDC / SAML shapes that a
 // taint walk can't reach because the flaw is a verification that DOESN'T happen,
@@ -203,28 +204,9 @@ const WEAK_SECRETS = new Set([
   "default",
 ]);
 
-/**
- * A password hash with its salt and digest masked: the algorithm and its cost
- * parameters stay — they are what the finding is about — the crackable part
- * does not. The evidence line is echoed into findings.json, DOSSIER.md and the
- * rendered REPORT.md/index.html; on a real audit that put two complete argon2id
- * hashes of a `super` account into a report written to be passed around.
- */
-export function redactPasswordHashes(text: string): string {
-  // The literal's own alphabet (base64, cost lists like `m=65536,t=3,p=4`), so a
-  // closing quote or bracket ends it — a comma does not, or the salt and digest
-  // after the cost list would survive.
-  return text.replace(/\$(argon2(?:id|i|d)?|2[abxy]|scrypt|pbkdf2[\w-]*)\$[\w./+=,$-]*/g, (literal, algo: string) => {
-    const kept = [algo];
-    for (const part of literal.split("$").slice(2)) {
-      // Version and cost segments: `v=19`, `m=65536,t=3,p=4`, scrypt's `ln=16,r=8,p=1`,
-      // bcrypt's `12`, pbkdf2's `29000` iterations.
-      if (/^(?:[a-z]+=\d+(?:,[a-z]+=\d+)*|\d{1,7})$/.test(part)) kept.push(part);
-      else break;
-    }
-    return `$${kept.join("$")}$…`;
-  });
-}
+// The redaction lives in `redact.ts` with the other credential masks, so the
+// auditor's notes go through the same function as this detector's evidence.
+export { redactPasswordHashes };
 
 function hit(rel: string, line: number, shape: AuthShape, evidence: string): Finding {
   return makeToolFinding({

@@ -7,6 +7,7 @@ import { makeToolFinding } from "./tools/normalize.js";
 import { deploymentFacts, scoreFinding } from "./tools/scoring.js";
 import { insideRepo, lineCount } from "./check.js";
 import { byStr } from "./util.js";
+import { redactSecrets } from "./redact.js";
 import { leadsForRegion } from "./assumptions.js";
 import {
   DISCOVERY_REQUIREMENT,
@@ -304,13 +305,15 @@ export function ingestDiscoveries(dossier: Dossier, discoveries: Discovery[], re
       ident: `${d.category}:${d.title}:${d.file}:${d.line}`,
       title: d.title,
       severity: d.severity,
-      message: d.message,
+      // The hunter's own write-up, quoting what it found; a hard-coded key is
+      // reported by quoting it. Same mask as every other authored note.
+      message: redactSecrets(d.message),
       file: d.file,
       line: d.line,
       cwe: d.cwe,
       confidence: "low", // AI-discovered + unverified — recall-oriented, adjudicate it
     });
-    if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: p.why }));
+    if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: redactSecrets(p.why) }));
     // Keep the class the author named. `category` had to be folded to stay a
     // closed vocabulary; the fold should not also erase the answer.
     if (d.vulnClass) f.vulnClass = d.vulnClass;
