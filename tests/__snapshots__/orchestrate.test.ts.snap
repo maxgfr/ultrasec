@@ -21,21 +21,21 @@ conservative folds; only wall-clock differs. Fan-out is an optimization, not a r
 ## The loop (play every role yourself, one item at a time)
 
 1. **Scan** (if not done): \`node <ENGINE> scan --repo <REPO> --out <RUN>\` → \`<RUN>/findings.json\` (+ optionally prime \`node <ENGINE> context\`).
-2. **Investigate the attack surface** (discovery) — \`node <ENGINE> investigate --run <RUN>\` writes \`<RUN>/INVESTIGATE.todo.json\`. For EVERY region, apply \`<RUN>/orchestration/agents/hunter.md\` yourself; merge the grounded Discovery[] into \`<RUN>/orchestration/out/investigate/INVESTIGATE.json\`. Then ingest (citation-checked): \`node <ENGINE> investigate --apply <RUN>/orchestration/out/investigate/INVESTIGATE.json --run <RUN>\`.
-3. **Adjudicate the open candidates** — the worklist is \`<RUN>/findings.json\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`<RUN>/orchestration/agents/analyzer.md\` yourself (\`node <ENGINE> dossier <id> --run <RUN>\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`<RUN>/orchestration/out/adjudicate/verdicts.json\`. Then fold, conservatively: \`node <ENGINE> verify --apply <RUN>/orchestration/out/adjudicate/verdicts.json --run <RUN>\`.
-4. **Verify adversarially** — \`node <ENGINE> verify --run <RUN>\` writes \`<RUN>/VERIFY.todo.json\` (the still-pending findings). For EVERY entry, apply \`<RUN>/orchestration/agents/skeptic.md\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`<RUN>/orchestration/out/verify/verdicts.json\`. Then: \`node <ENGINE> verify --apply <RUN>/orchestration/out/verify/verdicts.json --run <RUN>\`.
-5. **Revalidate against git history** — \`node <ENGINE> revalidate --run <RUN>\` writes \`<RUN>/REVALIDATE.todo.json\`. For EVERY entry, apply \`<RUN>/orchestration/agents/revalidator.md\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`<RUN>/orchestration/out/revalidate/REVALIDATE.json\`. Then: \`node <ENGINE> revalidate --apply <RUN>/orchestration/out/revalidate/REVALIDATE.json --run <RUN>\`.
+2. **Investigate the attack surface** (discovery) — \`node <ENGINE> investigate --run <RUN>\` writes \`<RUN>/INVESTIGATE.todo.json\`. For EVERY region, apply \`<RUN>/.work/orchestration/agents/hunter.md\` yourself; merge the grounded Discovery[] into \`<RUN>/.work/orchestration/out/investigate/INVESTIGATE.json\`. Then ingest (citation-checked): \`node <ENGINE> investigate --apply <RUN>/.work/orchestration/out/investigate/INVESTIGATE.json --run <RUN>\`.
+3. **Adjudicate the open candidates** — the worklist is \`<RUN>/findings.json\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`<RUN>/.work/orchestration/agents/analyzer.md\` yourself (\`node <ENGINE> dossier <id> --run <RUN>\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`<RUN>/.work/orchestration/out/adjudicate/verdicts.json\`. Then fold, conservatively: \`node <ENGINE> verify --apply <RUN>/.work/orchestration/out/adjudicate/verdicts.json --run <RUN>\`.
+4. **Verify adversarially** — \`node <ENGINE> verify --run <RUN>\` writes \`<RUN>/VERIFY.todo.json\` (the still-pending findings). For EVERY entry, apply \`<RUN>/.work/orchestration/agents/skeptic.md\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`<RUN>/.work/orchestration/out/verify/verdicts.json\`. Then: \`node <ENGINE> verify --apply <RUN>/.work/orchestration/out/verify/verdicts.json --run <RUN>\`.
+5. **Revalidate against git history** — \`node <ENGINE> revalidate --run <RUN>\` writes \`<RUN>/REVALIDATE.todo.json\`. For EVERY entry, apply \`<RUN>/.work/orchestration/agents/revalidator.md\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`<RUN>/.work/orchestration/out/revalidate/REVALIDATE.json\`. Then: \`node <ENGINE> revalidate --apply <RUN>/.work/orchestration/out/revalidate/REVALIDATE.json --run <RUN>\`.
 6. **Gate**: \`node <ENGINE> check --run <RUN> --semantic\` must exit 0 before presenting anything.
 7. **Render**: \`node <ENGINE> render --run <RUN>\` (optionally author the narrative first: \`node <ENGINE> narrative --run <RUN>\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
 
-With subagents available, prefer the emitted workflows instead: \`orchestrate --run <RUN> --phase <p>\` then \`Workflow({ scriptPath: "<RUN>/orchestration/<p>.workflow.mjs" })\` — you stay the sole writer either way.
+With subagents available, prefer the emitted workflows instead: \`orchestrate --run <RUN> --phase <p>\` then \`Workflow({ scriptPath: "<RUN>/.work/orchestration/<p>.workflow.mjs" })\` — you stay the sole writer either way.
 "
 `;
 
 exports[`orchestrate — contracts & runbook > golden shape (paths normalized) > adjudicate.workflow.mjs 1`] = `
 "export const meta = {"name":"ultrasec-adjudicate","description":"Adjudicate the 1 open candidate(s) of an ultrasec audit from dossier evidence (analyzer fan-out, conservative fold)","phases":[{"title":"Adjudicate"}]}
 
-// NOT a plain Node script: launch via the Workflow tool — Workflow({ scriptPath: "<RUN>/orchestration/adjudicate.workflow.mjs" }).
+// NOT a plain Node script: launch via the Workflow tool — Workflow({ scriptPath: "<RUN>/.work/orchestration/adjudicate.workflow.mjs" }).
 // Emitted by \`ultrasec orchestrate\` from the CURRENT worklist. The worklist is the source
 // of truth: if it changes, re-run \`orchestrate --phase adjudicate\` before launching.
 
@@ -43,7 +43,7 @@ exports[`orchestrate — contracts & runbook > golden shape (paths normalized) >
 const RUN = "<RUN>"
 const ENGINE = "<ENGINE>"
 const WORKLIST = "<RUN>/findings.json"
-const AGENTS = RUN + '/orchestration/agents'
+const AGENTS = RUN + '/.work/orchestration/agents'
 const BATCHES = [["9b0bcc91ea6a"]]
 const SCHEMA = {"type":"object","required":["verdicts"],"properties":{"verdicts":{"type":"array","items":{"type":"object","required":["id","verdict","note"],"properties":{"id":{"type":"string"},"verdict":{"enum":["supported","partial","unsupported","refuted"]},"note":{"type":"string","description":"one line grounded in the source you read, citing [file:line]"},"exploitPath":{"type":"string","description":"REQUIRED for supported: who · what they send · what they get"}}}}}}
 
@@ -61,8 +61,8 @@ const results = await pipeline(BATCHES, (batch, _item, i) =>
   agent(contract('analyzer', 'ITEMS=' + batch.join(',')), { label: 'adjudicate:' + (i + 1), phase: "Adjudicate", agentType: 'general-purpose', schema: SCHEMA }))
 
 // One-writer rule: this workflow only COLLECTS verdicts fragments. The main agent merges
-// the returned \`verdicts\` arrays into <RUN>/orchestration/out/adjudicate/verdicts.json, then runs the conservative fold:
-//   node <ENGINE> verify --apply <RUN>/orchestration/out/adjudicate/verdicts.json --run <RUN>
+// the returned \`verdicts\` arrays into <RUN>/.work/orchestration/out/adjudicate/verdicts.json, then runs the conservative fold:
+//   node <ENGINE> verify --apply <RUN>/.work/orchestration/out/adjudicate/verdicts.json --run <RUN>
 return { phase: "adjudicate", worklist: WORKLIST, results: results.filter(Boolean) }
 "
 `;
@@ -89,6 +89,6 @@ Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploit
 
 ## Return, don't write
 
-Return ONLY the structured output specified above. Do NOT write, edit, or delete any file; do NOT run any engine command that writes (\`scan\`, \`import\`, any stage's emit or \`--apply\` — \`verify\`, \`triage\`, \`revalidate\`, \`investigate\`, \`context\`, \`narrative\`, \`implement\`, \`render\`, \`clean\`, \`run\`). The only engine commands you may run are the read-only ones: \`dossier\`, \`graph\`, \`paths\`, \`tools\`. The orchestrator is the sole writer — it merges your fragments into one apply file itself and runs the conservative \`--apply\` fold. Exception: if a justification is prose too large to return, write ONLY to \`<RUN>/orchestration/out/<role>-<batch>.md\` (a file namespaced to you alone) and return its path.
+Return ONLY the structured output specified above. Do NOT write, edit, or delete any file; do NOT run any engine command that writes (\`scan\`, \`import\`, any stage's emit or \`--apply\` — \`verify\`, \`triage\`, \`revalidate\`, \`investigate\`, \`context\`, \`narrative\`, \`implement\`, \`render\`, \`clean\`, \`run\`, \`audit\`). The only engine commands you may run are the read-only ones: \`dossier\`, \`graph\`, \`paths\`, \`tools\`. The orchestrator is the sole writer — it merges your fragments into one apply file itself and runs the conservative \`--apply\` fold. Exception: if a justification is prose too large to return, write ONLY to \`<RUN>/.work/orchestration/out/<role>-<batch>.md\` (a file namespaced to you alone) and return its path.
 "
 `;

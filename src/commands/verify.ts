@@ -1,7 +1,7 @@
 import { join, resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
+import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { surfaceDropped } from "../apply-parse.js";
 import { buildWorklist, renderWorklistMd, shard, applyVerdicts, parseVerdicts, worklistCounts } from "../verify.js";
 import { loadContextDoc } from "../context.js";
@@ -29,17 +29,19 @@ export function runVerify(args: ParsedArgs): number {
   const shardIdx = Number(flagStr(args, "shard") ?? "0") || 0;
   if (shards > 1) items = shard(items, shards, shardIdx);
 
-  // The MD brief always reflects the FULL worklist; only the JSON todo is sharded.
+  // The MD brief (opt-in, `--md`) always reflects the FULL worklist; only the JSON todo is sharded.
   // CONTEXT.md (if authored) is injected into the brief — presence-gated, so a run
   // without one is byte-identical to today (guarded by verify-snapshot.test.ts).
   const files = shards > 1 ? { todo: `VERIFY.todo.${shardIdx}.json`, md: "VERIFY.md" } : stageFiles("VERIFY");
-  const todoPath = emitWorklist(run, files, items, renderWorklistMd(buildWorklist(dossier, { all }), loadContextDoc(run), counts));
+  const wroteMd = wantsMdTwin(args);
+  const todoPath = emitWorklist(run, files, items, () => renderWorklistMd(buildWorklist(dossier, { all }), loadContextDoc(run), counts), { md: wroteMd });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
   println(`ultrasec verify → ${todoPath} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
+  println(worklistNote(files, wroteMd));
   // Name what was withheld and the flag that would show it — the `clean --all`
   // shape. Silence here is what let a "delta" batch re-verdict everything.
   if (counts.withheld) println(`  ${counts.fresh} new · ${counts.withheld} already adjudicated as needs-human, not shown — pass --all to re-open them`);

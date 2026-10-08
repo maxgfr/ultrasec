@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeDossier, type Dossier } from "../src/store.js";
-import { appendJournal, writeReport, JOURNAL_FILE, type Transcript } from "../src/transcript.js";
+import { appendJournal, writeReport, journalPath, type Transcript } from "../src/transcript.js";
 import type { Finding } from "../src/types.js";
 
 // `--report` and JOURNAL.md exist because, before them, every intermediate stage's
@@ -113,7 +113,7 @@ describe("JOURNAL.md accumulates across commands", () => {
     appendJournal(run, TRANSCRIPT);
     appendJournal(run, { ...TRANSCRIPT, command: "ultrasec check --semantic", stdout: "grounding OK", at: "2026-01-02T03:09:00.000Z" });
 
-    const body = readFileSync(join(run, JOURNAL_FILE), "utf8");
+    const body = readFileSync(journalPath(run), "utf8");
     expect(body.match(/^# ultrasec run journal$/gm)).toHaveLength(1); // header written once
     expect(body).toContain("`ultrasec verify --run .ultrasec`");
     expect(body).toContain("`ultrasec check --semantic`");
@@ -149,7 +149,7 @@ describe("archiving is additive — stdout never changes", () => {
     expect(code).toBe(2);
     expect(out).toMatch(/unsupported --report extension "pdf"/);
     // The command must not have run: the dossier is untouched, no journal written.
-    expect(existsSync(join(run, JOURNAL_FILE))).toBe(false);
+    expect(existsSync(journalPath(run))).toBe(false);
   });
 
   it.runIf(existsSync(BUNDLE))("journals a run automatically, and --no-journal opts out", () => {
@@ -157,12 +157,12 @@ describe("archiving is additive — stdout never changes", () => {
     writeFileSync(join(run, "verdicts.json"), JSON.stringify([{ id: "f1", verdict: "refuted" }]));
 
     cli(["verify", "--run", run, "--apply", join(run, "verdicts.json")]);
-    expect(readFileSync(join(run, JOURNAL_FILE), "utf8")).toContain("applied 1 verdict");
+    expect(readFileSync(journalPath(run), "utf8")).toContain("applied 1 verdict");
 
     const quiet = seedRun();
     writeFileSync(join(quiet, "verdicts.json"), JSON.stringify([{ id: "f1", verdict: "refuted" }]));
     cli(["verify", "--run", quiet, "--apply", join(quiet, "verdicts.json"), "--no-journal"]);
-    expect(existsSync(join(quiet, JOURNAL_FILE))).toBe(false);
+    expect(existsSync(journalPath(quiet))).toBe(false);
   });
 });
 
@@ -176,7 +176,7 @@ describe("read-only commands never journal", () => {
     it.runIf(existsSync(BUNDLE))(`${cmd} leaves the run directory without a JOURNAL.md`, () => {
       const run = seedRun();
       cli([cmd, "--run", run]);
-      expect(existsSync(join(run, JOURNAL_FILE)), `${cmd} wrote a journal entry`).toBe(false);
+      expect(existsSync(journalPath(run)), `${cmd} wrote a journal entry`).toBe(false);
     });
   }
 
@@ -185,13 +185,13 @@ describe("read-only commands never journal", () => {
     const report = join(run, "paths.md");
     cli(["paths", "--run", run, "--report", report]);
     expect(existsSync(report)).toBe(true);
-    expect(existsSync(join(run, JOURNAL_FILE))).toBe(false);
+    expect(existsSync(journalPath(run))).toBe(false);
   });
 
   it.runIf(existsSync(BUNDLE))("a writing command still journals", () => {
     const run = seedRun();
     writeFileSync(join(run, "verdicts.json"), JSON.stringify([{ id: "f1", verdict: "refuted" }]));
     cli(["verify", "--run", run, "--apply", join(run, "verdicts.json")]);
-    expect(existsSync(join(run, JOURNAL_FILE))).toBe(true);
+    expect(existsSync(journalPath(run))).toBe(true);
   });
 });

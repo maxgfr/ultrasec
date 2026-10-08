@@ -580,6 +580,13 @@ export interface Remediation {
   fix: string;
   patch?: string;
   owner?: string;
+  /**
+   * How much work the fix is — `S` (an hour, one place), `M` (a day, a few
+   * places), `L` (a design change). Authored, never inferred: the report prints
+   * a dash rather than guess, because a wrong effort estimate reorders a
+   * remediation plan as surely as a wrong severity does.
+   */
+  effort?: "S" | "M" | "L";
 }
 export interface AttackChain {
   title: string;
@@ -742,4 +749,11 @@ export interface Manifest {
    * Additive/optional — absent when no framework was detected.
    */
   weaknessClasses?: ClassCoverageCell[];
+  /**
+   * `"full"` when the run asked for the full per-candidate packets in
+   * DOSSIER.md (`scan --dossier full`). Absent ⇒ the compact ranked index —
+   * kept in the manifest because every `--apply` rewrites DOSSIER.md, and a
+   * choice made at scan time must survive them. Additive/optional.
+   */
+  dossier?: "full";
 }

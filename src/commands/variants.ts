@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
+import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { ingestDiscoveries } from "../investigate.js";
@@ -75,13 +75,16 @@ export function runVariants(args: ParsedArgs): number {
   }
 
   const items = buildVariantWorklist(dossier);
-  const todoPath = emitWorklist(run, stageFiles("VARIANTS"), items, renderVariantsMd(items, loadContextDoc(run)));
+  const files = stageFiles("VARIANTS");
+  const wroteMd = wantsMdTwin(args);
+  const todoPath = emitWorklist(run, files, items, () => renderVariantsMd(items, loadContextDoc(run)), { md: wroteMd });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
   println(`ultrasec variants → ${todoPath} (${items.length} seed${items.length === 1 ? "" : "s"})`);
+  println(worklistNote(files, wroteMd));
   if (!items.length) {
     println(`  no confirmed findings yet — variants are hunted from proved bugs, not candidates.`);
     println(`  run \`ultrasec verify --apply <verdicts> --run ${run}\` first.`);

@@ -33,6 +33,7 @@ import { writeDossier, loadDossier, mergeDossier, countBySeverity, type Dossier 
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest } from "../types.js";
 import { loadContextDoc } from "../context.js";
 import { classifyDependencyReachability } from "../reachability.js";
+import { readPath } from "../runlayout.js";
 
 // Budget presets scale call-graph depth × candidate breadth. `standard` reproduces
 // the historical defaults (6 hops / 1000 candidates).
@@ -143,7 +144,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     const relOut = relative(repo, out);
     const changed = relOut && relOut !== "." && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
-    if (existsSync(join(out, "graph.json"))) {
+    if (existsSync(readPath(out, "graph.json"))) {
       try {
         targets = reverseDependents(loadDossier(out).graph, changed, REVDEP_DEPTH);
         // Blast radius: how much else depends on what moved. Risk follows this,
@@ -192,6 +193,15 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     if (closed && closed.ms >= 1000) step(`${closed.name} done${secs(closed.ms)}`);
     step(msg);
   };
+
+  // `--dossier full` restores the per-candidate packets in DOSSIER.md; the
+  // default is the compact ranked index (see `DOSSIER_INDEX_CAP`). An unknown
+  // value is an error, like `--budget`: a typo must not silently pick a mode.
+  const dossierMode = flagStr(args, "dossier");
+  if (dossierMode !== undefined && dossierMode !== "full" && dossierMode !== "index") {
+    eprintln(`ultrasec: unknown --dossier '${dossierMode}' (expected index|full).`);
+    return 2;
+  }
 
   const scanOpts = { scope: effectiveScope, include, exclude, maxFiles, gitignore };
   const resume = flagBool(args, "resume");
@@ -490,6 +500,7 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     ...(resolutionGaps.length ? { resolutionGaps } : {}),
     ...(frameworks.length ? { frameworks } : {}),
     ...(classCells.length ? { weaknessClasses: classCells } : {}),
+    ...(dossierMode === "full" ? { dossier: "full" as const } : {}),
   };
 
   const nextDossier: Dossier = { manifest, findings, graph };

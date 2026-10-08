@@ -254,6 +254,21 @@ export function buildContextScaffold(repo: string, scan: RepoScan, surface: Atta
   };
 }
 
+/**
+ * What CONTEXT.md should cover, one line per section — printed by `context` (the
+ * JSON scaffold carries the data, this carries the ask) and repeated in the
+ * opt-in CONTEXT.todo.md brief. Full guidance: references/context-playbook.md.
+ */
+export const CONTEXT_OUTLINE: readonly string[] = [
+  "what the app does and who its users are",
+  "authentication & authorization model — who may do what, and where it is enforced",
+  "trust boundaries — where untrusted data enters, what is trusted",
+  "framework protections already in place (ORM parameterization, auto-escaping, CSRF…)",
+  "known-safe sinks / accepted risks",
+  "`Exposure: internet-facing|internal|build-time` and `Criticality: crown-jewel|standard|peripheral` (the risk score reads them)",
+  "threat model — STRIDE per trust boundary, LINDDUN for personal data (references/threat-modeling.md)",
+];
+
 /** The CONTEXT.todo.md brief: the scaffold + an outline the agent fills into CONTEXT.md. */
 export function renderContextScaffoldMd(repo: string, run: string, s: ContextScaffold): string {
   const L: string[] = [];

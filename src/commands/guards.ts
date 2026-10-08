@@ -19,12 +19,12 @@ import {
 import { ingestDiscoveries } from "../investigate.js";
 import { detectedIds } from "../classes/markers.js";
 import { loadContextDoc } from "../context.js";
-import { emitWorklist, stageFiles, readApply, persistFindings } from "../stage.js";
+import { emitWorklist, stageFiles, readApply, persistFindings, wantsMdTwin, worklistNote } from "../stage.js";
 import { surfaceDropped, type ParseResult } from "../apply-parse.js";
 
-// `ultrasec guards --run <dir> [--repo <dir>]`      → GUARDS.md + GUARDS.todo.json
+// `ultrasec guards --run <dir> [--repo <dir>]`      → GUARDS.todo.json (+ GUARDS.md with --md)
 // `ultrasec guards --apply GUARDS.json --run <dir>` → fold the verdicts in
-// `ultrasec guards --lens throttle …`               → THROTTLE.md + THROTTLE.todo.json
+// `ultrasec guards --lens throttle …`               → THROTTLE.todo.json (+ THROTTLE.md with --md)
 //
 // The stage that asks the questions a taint pass cannot: which request handlers
 // has nobody put an authorization check in front of, and which has nobody put a
@@ -125,7 +125,9 @@ export function runGuards(args: ParsedArgs): number {
   }
 
   const rows: GuardRow[] = buildGuardMatrix(scanRepo(repo), lens, markers, matrixOpts);
-  const todoPath = emitWorklist(run, stageFiles(spec.stem), rows, renderGuardsMd(rows, loadContextDoc(run), lens));
+  const files = stageFiles(spec.stem);
+  const wroteMd = wantsMdTwin(args);
+  const todoPath = emitWorklist(run, files, rows, () => renderGuardsMd(rows, loadContextDoc(run), lens), { md: wroteMd });
   const t = guardTotals(rows);
 
   // Record the pass, so `coverage` can stop calling CWE-306/862 (auth) and
@@ -154,8 +156,9 @@ export function runGuards(args: ParsedArgs): number {
     println(`  no HTTP/WS handler found — if the app has routes, check \`manifest.extraction\` and the scan's --scope.`);
   }
   println(`  worklist: ${todoPath}`);
+  println(worklistNote(files, wroteMd));
   println(
-    `  next: read ${spec.stem}.md, set a verdict per row, then \`ultrasec guards${lens === "auth" ? "" : ` --lens ${lens}`} --apply ${spec.stem}.json --run ${run}\``,
+    `  next: read each row's handler, set a verdict per row (${present}|${absent}|${waived}|${NOT_A_HANDLER}), then \`ultrasec guards${lens === "auth" ? "" : ` --lens ${lens}`} --apply ${spec.stem}.json --run ${run}\``,
   );
   return 0;
 }

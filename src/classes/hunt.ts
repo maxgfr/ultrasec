@@ -1,5 +1,6 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { readPath, workPath } from "../runlayout.js";
 import type { Manifest } from "../types.js";
 import type { AttackSurface } from "../map.js";
 import type { InvestigateRegion } from "../investigate.js";
@@ -249,7 +250,10 @@ export function recordHuntResults(
   results: readonly HuntResults[],
   packIds: readonly string[],
 ): RecordResult {
-  const path = join(run, PACK_SUGGESTIONS_FILE);
+  // Proposals for a maintainer, never read during the audit: `.work/` state.
+  // An older run's top-level copy is still merged in (see runlayout.ts).
+  const path = workPath(run, PACK_SUGGESTIONS_FILE);
+  const priorAt = readPath(run, PACK_SUGGESTIONS_FILE);
   const rejected: RecordResult["rejected"] = [];
   const fresh: PackSuggestion[] = [];
   const hunted = new Set<string>();
@@ -274,9 +278,9 @@ export function recordHuntResults(
   if (!fresh.length && !hunted.size) return { accepted: 0, rejected, hunted: [] };
 
   let prior: PackSuggestionsFile = { schema: 1, note: SUGGESTIONS_NOTE, hunted: [], suggestions: [] };
-  if (existsSync(path)) {
+  if (existsSync(priorAt)) {
     try {
-      const p = JSON.parse(readFileSync(path, "utf8")) as Partial<PackSuggestionsFile>;
+      const p = JSON.parse(readFileSync(priorAt, "utf8")) as Partial<PackSuggestionsFile>;
       prior = { ...prior, hunted: p.hunted ?? [], suggestions: p.suggestions ?? [] };
     } catch {
       /* an unreadable file is replaced by what this apply knows, not merged into */
@@ -296,6 +300,7 @@ export function recordHuntResults(
     hunted: [...new Set([...prior.hunted, ...hunted])].sort(byStr),
     suggestions: [...merged.values()].sort((a, b) => byStr(a.class, b.class) || byStr(a.framework, b.framework) || byStr(a.file, b.file) || a.line - b.line),
   };
+  mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(file, null, 2) + "\n");
   return { accepted, rejected, hunted: [...hunted].sort(byStr), path };
 }

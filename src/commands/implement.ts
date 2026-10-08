@@ -24,7 +24,9 @@ export function runImplement(args: ParsedArgs): number {
   const narrFile = flagStr(args, "narrative");
   const narrative = loadNarrative(run, dossier, narrFile ? resolve(narrFile) : undefined);
   const wl = buildImplementWorklist(dossier, narrative);
-  const todoPath = emitWorklist(run, stageFiles("IMPLEMENT"), wl, renderImplementMd(wl, loadContextDoc(run)));
+  // IMPLEMENT.md is not a twin of the JSON: it is the remediation-PRD draft this
+  // command exists to produce, so it is always written.
+  const todoPath = emitWorklist(run, stageFiles("IMPLEMENT"), wl, () => renderImplementMd(wl, loadContextDoc(run)), { md: true });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(wl, null, 2));

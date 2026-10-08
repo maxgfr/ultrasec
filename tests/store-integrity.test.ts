@@ -91,6 +91,6 @@ describe("duplicate finding ids", () => {
       code: 0,
       at: "2026-01-01T00:00:00.000Z",
     });
-    expect(readFileSync(join(dir, "JOURNAL.md"), "utf8")).toContain("✗ dropped 1 duplicate finding row(s)");
+    expect(readFileSync(join(dir, ".work", "JOURNAL.md"), "utf8")).toContain("✗ dropped 1 duplicate finding row(s)");
   });
 });

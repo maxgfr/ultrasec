@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
+import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { formatNormalized, surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { scanRepo } from "../scan.js";
@@ -152,7 +152,9 @@ export function runInvestigate(args: ParsedArgs): number {
     eprintln(`ultrasec investigate: ${(e as Error).message}`);
     return 2;
   }
-  const todoPath = emitWorklist(run, stageFiles("INVESTIGATE"), regions, renderInvestigateMd(regions, loadContextDoc(run)));
+  const files = stageFiles("INVESTIGATE");
+  const wroteMd = wantsMdTwin(args);
+  const todoPath = emitWorklist(run, files, regions, () => renderInvestigateMd(regions, loadContextDoc(run)), { md: wroteMd });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(regions, null, 2));
@@ -163,6 +165,7 @@ export function runInvestigate(args: ParsedArgs): number {
   println(
     `ultrasec investigate → ${todoPath} (${areas} region${areas === 1 ? "" : "s"}${hunts ? ` · ${hunts} weakness-class hunt${hunts === 1 ? "" : "s"}` : ""})`,
   );
+  println(worklistNote(files, wroteMd));
   if (!regions.length) {
     println(`  no attack-surface regions detected — try \`map\` or widen the scope.`);
   } else {

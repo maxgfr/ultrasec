@@ -6,15 +6,23 @@ import { runClean, dockerImages } from "../src/commands/clean.js";
 import { parseArgs } from "../src/util.js";
 import { ADAPTERS } from "../src/tools/index.js";
 
-const DELIVERABLES = ["SUMMARY.md", "REPORT.md", "index.html", "findings.json"];
-const INTERMEDIATES = ["manifest.json", "graph.json", "DOSSIER.md", "VERIFY.todo.json", "NARRATIVE.json"];
+// What a finished run keeps: the report, the dossier it renders from, and the
+// two authored documents. An older run's rendered SUMMARY.md / index.html stay
+// too — a report someone produced is never deleted by a tidy-up.
+const DELIVERABLES = ["REPORT.md", "REPORT.html", "findings.json", "manifest.json", "CONTEXT.md", "NARRATIVE.json", "SUMMARY.md", "index.html"];
+const INTERMEDIATES = ["DOSSIER.md", "VERIFY.todo.json", "VERIFY.md", "CONTEXT.scaffold.json", "graph.json", ".work"];
 
-// A fully-rendered run: deliverables + intermediate scan artifacts + a cache subdir.
+// A fully-rendered run: deliverables + intermediate scan artifacts + the `.work/` state dir.
 function makeRun(files: string[] = [...DELIVERABLES, ...INTERMEDIATES]): string {
   const dir = mkdtempSync(join(tmpdir(), "ultrasec-clean-"));
   const run = join(dir, ".ultrasec");
   mkdirSync(run, { recursive: true });
-  for (const f of files) writeFileSync(join(run, f), f.endsWith(".json") ? "{}" : "x");
+  for (const f of files) {
+    if (f === ".work") {
+      mkdirSync(join(run, ".work", "cache"), { recursive: true });
+      writeFileSync(join(run, ".work", "graph.json"), "{}");
+    } else writeFileSync(join(run, f), f.endsWith(".json") ? "{}" : "x");
+  }
   return run;
 }
 const has = (run: string, f: string) => existsSync(join(run, f));
@@ -38,7 +46,7 @@ describe("clean — output removal", () => {
   });
 
   it("prunes the dir when there are no deliverables to keep", () => {
-    const run = makeRun(INTERMEDIATES); // never rendered
+    const run = makeRun(INTERMEDIATES); // never scanned to a dossier, never rendered
     runClean(parseArgs(["clean", "--run", run]));
     expect(existsSync(run)).toBe(false);
   });

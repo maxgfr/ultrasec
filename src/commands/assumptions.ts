@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { emitWorklist, readApply, stageFiles } from "../stage.js";
+import { emitWorklist, readApply, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { scanRepo } from "../scan.js";
@@ -69,13 +69,16 @@ export function runAssumptions(args: ParsedArgs): number {
     gitignore: flagBool(args, "gitignore"),
   });
   const items = buildAssumptionWorklist(scan);
-  const todoPath = emitWorklist(run, stageFiles("ASSUMPTIONS"), items, renderAssumptionsMd(items, loadContextDoc(run)));
+  const files = stageFiles("ASSUMPTIONS");
+  const wroteMd = wantsMdTwin(args);
+  const todoPath = emitWorklist(run, files, items, () => renderAssumptionsMd(items, loadContextDoc(run)), { md: wroteMd });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
   println(`ultrasec assumptions → ${todoPath} (${items.length} unit${items.length === 1 ? "" : "s"})`);
+  println(worklistNote(files, wroteMd));
   if (!items.length) {
     println(`  no unit reads untrusted input or performs a dangerous operation — check the scan scope.`);
   } else {

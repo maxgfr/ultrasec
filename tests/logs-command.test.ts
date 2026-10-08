@@ -32,7 +32,8 @@ describe("runLogs — end to end", () => {
     restore();
     expect(code).toBe(0);
 
-    for (const f of ["manifest.json", "findings.json", "graph.json", "DOSSIER.md", "LOGSTATS.json"]) {
+    // The link-graph is the engine's own state, under `.work/` (see runlayout.ts).
+    for (const f of ["manifest.json", "findings.json", ".work/graph.json", "DOSSIER.md", "LOGSTATS.json"]) {
       expect(existsSync(join(out, f)), `${f} missing`).toBe(true);
     }
 

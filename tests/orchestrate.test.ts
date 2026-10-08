@@ -107,7 +107,7 @@ function fullRun(): Promise<string> {
   return fullRunPromise;
 }
 
-const wf = (run: string, phase: string) => join(run, "orchestration", `${phase}.workflow.mjs`);
+const wf = (run: string, phase: string) => join(run, ".work", "orchestration", `${phase}.workflow.mjs`);
 const readWf = (run: string, phase: string) => readFileSync(wf(run, phase), "utf8");
 const stable = (src: string, run: string) => src.replaceAll(run, "<RUN>").replaceAll(REPO, "<REPO>").replaceAll(ENGINE, "<ENGINE>");
 
@@ -159,9 +159,9 @@ describe("orchestrate — emitted workflow", () => {
     const res = orchestrateRun(run, ENGINE);
     expect(res.exitCode).toBe(0);
     for (const phase of PHASES) expect(existsSync(wf(run, phase))).toBe(true);
-    expect(existsSync(join(run, "orchestration", "RUNBOOK.md"))).toBe(true);
+    expect(existsSync(join(run, ".work", "orchestration", "RUNBOOK.md"))).toBe(true);
     for (const role of ["analyzer", "skeptic", "revalidator", "hunter"]) {
-      expect(existsSync(join(run, "orchestration", "agents", `${role}.md`))).toBe(true);
+      expect(existsSync(join(run, ".work", "orchestration", "agents", `${role}.md`))).toBe(true);
     }
   });
 
@@ -227,7 +227,7 @@ describe("orchestrate — emitted workflow", () => {
     const run = await fullRun();
     const emit = () => {
       orchestrateRun(run, ENGINE);
-      return PHASES.map((p) => readWf(run, p)).join("\0") + readFileSync(join(run, "orchestration", "RUNBOOK.md"), "utf8");
+      return PHASES.map((p) => readWf(run, p)).join("\0") + readFileSync(join(run, ".work", "orchestration", "RUNBOOK.md"), "utf8");
     };
     expect(emit()).toBe(emit());
   });
@@ -276,7 +276,7 @@ describe("orchestrate — emitted workflow", () => {
   it("every contract('<role>') referenced by a workflow has its agents/<role>.md", async () => {
     const run = await fullRun();
     orchestrateRun(run, ENGINE);
-    const agents = readdirSync(join(run, "orchestration", "agents")).map((f) => f.replace(/\.md$/, ""));
+    const agents = readdirSync(join(run, ".work", "orchestration", "agents")).map((f) => f.replace(/\.md$/, ""));
     for (const phase of PHASES) {
       const refs = [...readWf(run, phase).matchAll(/contract\('([a-z-]+)'/g)].map((m) => m[1]!);
       expect(refs.length).toBeGreaterThan(0);
@@ -304,21 +304,21 @@ describe("orchestrate — contracts & runbook", () => {
   it("every emitted contract carries the one-writer footer and returns structured output", async () => {
     const run = await fullRun();
     orchestrateRun(run, ENGINE);
-    const dir = join(run, "orchestration", "agents");
+    const dir = join(run, ".work", "orchestration", "agents");
     const files = readdirSync(dir);
     expect(files.sort()).toEqual(["analyzer.md", "hunter.md", "revalidator.md", "skeptic.md"]);
     for (const f of files) {
       const md = readFileSync(join(dir, f), "utf8");
       expect(md).toContain("Return, don't write");
       expect(md).toContain("The orchestrator is the sole writer");
-      expect(md).toContain("orchestration/out/");
+      expect(md).toContain(".work/orchestration/out/");
     }
   });
 
   it("analyzer + skeptic contracts encode the conservative verdict rules; revalidator + hunter their own", async () => {
     const run = await fullRun();
     orchestrateRun(run, ENGINE);
-    const dir = join(run, "orchestration", "agents");
+    const dir = join(run, ".work", "orchestration", "agents");
     const analyzer = readFileSync(join(dir, "analyzer.md"), "utf8");
     for (const v of ["`supported`", "`partial`", "`unsupported`", "`refuted`"]) expect(analyzer).toContain(v);
     expect(analyzer).toContain("dossier");
@@ -340,7 +340,7 @@ describe("orchestrate — contracts & runbook", () => {
   it("the runbook covers every phase with concrete paths and the phase status", async () => {
     const run = await fullRun();
     orchestrateRun(run, ENGINE);
-    const rb = readFileSync(join(run, "orchestration", "RUNBOOK.md"), "utf8");
+    const rb = readFileSync(join(run, ".work", "orchestration", "RUNBOOK.md"), "utf8");
     for (const w of ["findings.json", "VERIFY.todo.json", "REVALIDATE.todo.json", "INVESTIGATE.todo.json"]) {
       expect(rb).toContain(join(run, w));
     }
@@ -353,8 +353,8 @@ describe("orchestrate — contracts & runbook", () => {
     const run = await fullRun();
     orchestrateRun(run, ENGINE);
     expect(stable(readWf(run, "adjudicate"), run)).toMatchSnapshot("adjudicate.workflow.mjs");
-    expect(stable(readFileSync(join(run, "orchestration", "agents", "skeptic.md"), "utf8"), run)).toMatchSnapshot("skeptic.md");
-    expect(stable(readFileSync(join(run, "orchestration", "RUNBOOK.md"), "utf8"), run)).toMatchSnapshot("RUNBOOK.md");
+    expect(stable(readFileSync(join(run, ".work", "orchestration", "agents", "skeptic.md"), "utf8"), run)).toMatchSnapshot("skeptic.md");
+    expect(stable(readFileSync(join(run, ".work", "orchestration", "RUNBOOK.md"), "utf8"), run)).toMatchSnapshot("RUNBOOK.md");
   });
 });
 
@@ -363,8 +363,8 @@ describe("orchestrate — eco mode & phase gating", () => {
     const run = await makeRun({ scan: true, verify: true });
     const res = orchestrateRun(run, ENGINE, { eco: true });
     expect(res.exitCode).toBe(0);
-    expect(existsSync(join(run, "orchestration", "RUNBOOK.md"))).toBe(true);
-    expect(existsSync(join(run, "orchestration", "agents", "analyzer.md"))).toBe(true);
+    expect(existsSync(join(run, ".work", "orchestration", "RUNBOOK.md"))).toBe(true);
+    expect(existsSync(join(run, ".work", "orchestration", "agents", "analyzer.md"))).toBe(true);
     for (const phase of PHASES) expect(existsSync(wf(run, phase))).toBe(false);
   });
 
@@ -512,14 +512,14 @@ describe("orchestrate — emitted fragments fold back through the real --apply (
     const adj = emittedFold(run, "adjudicate").fragment;
     const ver = emittedFold(run, "verify").fragment;
     expect(dirname(adj)).not.toBe(dirname(ver));
-    expect(adj).toContain(join("orchestration", "out", "adjudicate"));
-    expect(ver).toContain(join("orchestration", "out", "verify"));
+    expect(adj).toContain(join(".work", "orchestration", "out", "adjudicate"));
+    expect(ver).toContain(join(".work", "orchestration", "out", "verify"));
   });
 
-  it("emission creates every per-phase fragment dir under orchestration/out/", async () => {
+  it("emission creates every per-phase fragment dir under .work/orchestration/out/", async () => {
     const run = await makeRun({ scan: true });
     orchestrateRun(run, ENGINE);
-    for (const phase of PHASES) expect(existsSync(join(run, "orchestration", "out", phase))).toBe(true);
+    for (const phase of PHASES) expect(existsSync(join(run, ".work", "orchestration", "out", phase))).toBe(true);
   });
 });
 
@@ -609,7 +609,7 @@ describe("orchestrate — emission hardening", () => {
     const run = await fullRun();
     orchestrateRun(run, ENGINE);
     for (const role of ["analyzer", "skeptic", "revalidator", "hunter"]) {
-      expect(readFileSync(join(run, "orchestration", "agents", `${role}.md`), "utf8")).toMatch(/no longer in the worklist/);
+      expect(readFileSync(join(run, ".work", "orchestration", "agents", `${role}.md`), "utf8")).toMatch(/no longer in the worklist/);
     }
   });
 });

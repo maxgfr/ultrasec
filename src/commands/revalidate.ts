@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
+import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../revalidate.js";
@@ -75,13 +75,16 @@ export function runRevalidate(args: ParsedArgs): number {
 
   // Emit mode
   const items = buildRevalidateWorklist(dossier, repo);
-  const todoPath = emitWorklist(run, stageFiles("REVALIDATE"), items, renderRevalidateMd(items, loadContextDoc(run)));
+  const files = stageFiles("REVALIDATE");
+  const wroteMd = wantsMdTwin(args);
+  const todoPath = emitWorklist(run, files, items, () => renderRevalidateMd(items, loadContextDoc(run)), { md: wroteMd });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
   println(`ultrasec revalidate → ${todoPath} (${items.length} item${items.length === 1 ? "" : "s"})`);
+  println(worklistNote(files, wroteMd));
   if (!items.length) {
     println(`  no confirmed/needs-human findings to revalidate — run \`verify --apply\` first.`);
   } else {

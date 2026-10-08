@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { emitWorklist, readApply, persistFindings, stageFiles } from "../stage.js";
+import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from "../triage.js";
@@ -59,13 +59,16 @@ export function runTriage(args: ParsedArgs): number {
   // takes no surface. A verdict file names its ids and folds exactly those.
   const scoped = surface === "all" ? dossier : { ...dossier, findings: dossier.findings.filter((f) => surfaceOf(f) === surface) };
   const items = buildTriageWorklist(scoped);
-  const todoPath = emitWorklist(run, stageFiles("TRIAGE"), items, renderTriageMd(items, loadContextDoc(run)));
+  const files = stageFiles("TRIAGE");
+  const wroteMd = wantsMdTwin(args);
+  const todoPath = emitWorklist(run, files, items, () => renderTriageMd(items, loadContextDoc(run)), { md: wroteMd });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(items, null, 2));
     return 0;
   }
   println(`ultrasec triage → ${todoPath} (${items.length} open candidate${items.length === 1 ? "" : "s"}${surface === "all" ? "" : `, surface ${surface}`})`);
+  println(worklistNote(files, wroteMd));
   if (!items.length) {
     println(`  no open candidates to triage.`);
   } else {

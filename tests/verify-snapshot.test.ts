@@ -57,15 +57,16 @@ describe("verify command — byte-identical output (Phase 0 harness refactor gua
   afterEach(() => log.mockRestore());
 
   it("emit writes a stable VERIFY.todo.json + VERIFY.md", () => {
+    // The .md brief is opt-in (`--md`); this snapshot pins its content when asked for.
     const run = setup([finding("a", "high"), finding("b", "low")]);
-    runVerify(parseArgs(["verify", "--run", run]));
+    runVerify(parseArgs(["verify", "--run", run, "--md"]));
     expect(readFileSync(join(run, "VERIFY.todo.json"), "utf8")).toMatchSnapshot("VERIFY.todo.json");
     expect(readFileSync(join(run, "VERIFY.md"), "utf8")).toMatchSnapshot("VERIFY.md");
   });
 
   it("emit --shards writes a sharded todo + the full MD", () => {
     const run = setup([finding("a", "high"), finding("b", "low"), finding("c", "medium")]);
-    runVerify(parseArgs(["verify", "--run", run, "--shards", "2", "--shard", "0"]));
+    runVerify(parseArgs(["verify", "--run", run, "--shards", "2", "--shard", "0", "--md"]));
     expect(readFileSync(join(run, "VERIFY.todo.0.json"), "utf8")).toMatchSnapshot("VERIFY.todo.0.json");
     expect(readFileSync(join(run, "VERIFY.md"), "utf8")).toMatchSnapshot("VERIFY.md-shard");
   });

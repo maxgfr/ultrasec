@@ -59,7 +59,7 @@ describe("scan cache (--resume)", () => {
     expect(loadScanCache(run).size).toBe(cache.size);
 
     writeFileSync(
-      join(run, "cache", "scan-cache.json"),
+      join(run, ".work", "cache", "scan-cache.json"),
       JSON.stringify({ cacheVersion: CACHE_VERSION + 99, extractorVersion: EXTRACTOR_VERSION, entries: {} }),
     );
     expect(loadScanCache(run).size).toBe(0); // stale format → ignored
@@ -72,7 +72,7 @@ describe("scan cache (--resume)", () => {
     scanRepoCached(repo, {}, cache);
     saveScanCache(run, cache);
 
-    const path = join(run, "cache", "scan-cache.json");
+    const path = join(run, ".work", "cache", "scan-cache.json");
     const data = JSON.parse(readFileSync(path, "utf8"));
     expect(data.extractorVersion).toBe(EXTRACTOR_VERSION); // it was embedded
     data.extractorVersion = EXTRACTOR_VERSION + 1; // simulate a future engine re-pin

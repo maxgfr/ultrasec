@@ -1,14 +1,14 @@
 import { existsSync, realpathSync } from "node:fs";
-import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listPhases, orchestrateRun, PHASES, SURFACE_FILTERS, type SurfaceFilter } from "../orchestrate.js";
 import { eprintln, flagBool, flagStr, println, type ParsedArgs } from "../util.js";
+import { workPath } from "../runlayout.js";
 
 // `ultrasec orchestrate --run <dir> [--phase <name>] [--surface <s>] [--eco] [--list]`
 // Emit the run's multi-agent orchestration from its CURRENT worklists: one
 // <phase>.workflow.mjs per ready phase (real ids batched in), the dispatch
 // contracts (agents/<role>.md) and a sequential RUNBOOK.md, all under
-// <run>/orchestration/. Subagents RETURN fragments; every `--apply` fold stays
+// <run>/.work/orchestration/. Subagents RETURN fragments; every `--apply` fold stays
 // with the orchestrator (one writer).
 export function runOrchestrate(args: ParsedArgs): number {
   const runFlag = flagStr(args, "run");
@@ -58,7 +58,7 @@ export function runOrchestrate(args: ParsedArgs): number {
     for (const w of workflows) println(`Launch: Workflow({ scriptPath: ${JSON.stringify(w)} })`);
     println("Then merge the returned fragments into one apply file and run the `--apply` fold shown at the end of each workflow (you stay the sole writer).");
   } else {
-    println(`Follow ${join(runFlag, "orchestration", "RUNBOOK.md")} sequentially (the eco path).`);
+    println(`Follow ${workPath(runFlag, "orchestration", "RUNBOOK.md")} sequentially (the eco path).`);
   }
   // Surface the valid phase names once, so a scripted caller can discover them without --help.
   if (flagStr(args, "phase") === undefined && workflows.length === 0 && !flagBool(args, "eco")) {

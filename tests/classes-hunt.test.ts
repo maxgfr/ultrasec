@@ -126,13 +126,13 @@ describe("recordHuntResults", () => {
     );
     expect(first.accepted).toBe(1);
     expect(first.rejected[0]!.reason).toMatch(/line out of range/);
-    const file = JSON.parse(readFileSync(join(run, PACK_SUGGESTIONS_FILE), "utf8"));
+    const file = JSON.parse(readFileSync(join(run, ".work", PACK_SUGGESTIONS_FILE), "utf8"));
     expect(file.schema).toBe(1);
     expect(file.note).toMatch(/NEVER applies/);
     expect(file.suggestions[0]).toMatchObject({ pack: "new pack: koa", seenOn: "koa 2.15.0", evidence: 'ctx.body = rows.map((r) => [r.a, r.b].join(","));' });
     const again = recordHuntResults(run, repo, manifest, [{ idioms: [idiom], hunted: ["hunt:env-bool-coercion:koa"], dropped: [] }], ["nextjs"]);
     expect(again.accepted).toBe(0);
-    const merged = JSON.parse(readFileSync(join(run, PACK_SUGGESTIONS_FILE), "utf8"));
+    const merged = JSON.parse(readFileSync(join(run, ".work", PACK_SUGGESTIONS_FILE), "utf8"));
     expect(merged.suggestions).toHaveLength(1);
     expect(merged.hunted).toEqual(["hunt:csv-formula-injection:koa", "hunt:env-bool-coercion:koa"]);
   });
@@ -175,7 +175,8 @@ describe("investigate — weakness-class hunts end to end", () => {
       graph: { files: [], edges: [], symbolDefs: {} },
     });
 
-    const emit = capture(() => runInvestigate(parseArgs(["--run", run, "--repo", repo])));
+    // `--md`: this test reads the human brief, which is opt-in (worklists are JSON only by default).
+    const emit = capture(() => runInvestigate(parseArgs(["--run", run, "--repo", repo, "--md"])));
     expect(emit.code).toBe(0);
     expect(emit.out).toContain("3 weakness-class hunt");
     const todo = JSON.parse(readFileSync(join(run, "INVESTIGATE.todo.json"), "utf8")) as { region: string; hunt?: { id: string } }[];

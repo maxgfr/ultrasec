@@ -1,5 +1,6 @@
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
+import { readPath, workDir, workPath } from "./runlayout.js";
 import { mergeGraphs, type Graph } from "./graph.js";
 import { byStr, carryStageNotes, eprintln } from "./util.js";
 import { redactSecrets } from "./redact.js";
@@ -110,11 +111,21 @@ export function writeDossier(outDir: string, d: Dossier): void {
     };
   }
   d = { ...d, manifest, findings };
-  mkdirSync(outDir, { recursive: true });
+  mkdirSync(workDir(outDir), { recursive: true });
   writeFileSync(join(outDir, "manifest.json"), JSON.stringify(d.manifest, null, 2));
   writeFileSync(join(outDir, "findings.json"), JSON.stringify(d.findings, null, 2));
-  writeFileSync(join(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
+  // The link-graph is the engine's own state — megabytes on a real monorepo and
+  // never meant to be opened by a reader — so it lives under `.work/`. A copy an
+  // older run left at the top is removed, so the two can never disagree.
+  writeFileSync(workPath(outDir, "graph.json"), JSON.stringify(d.graph, null, 2));
+  rmSync(join(outDir, "graph.json"), { force: true });
   writeFileSync(join(outDir, "DOSSIER.md"), renderDossierMd(d));
+}
+
+/** The graph a run without one loads as: a cleaned run keeps findings.json and
+ *  manifest.json, and re-rendering its report must not need a re-scan. */
+export function emptyGraph(): Graph {
+  return { files: [], edges: [], symbolDefs: {} };
 }
 
 /**
@@ -242,8 +253,12 @@ export function loadDossier(outDir: string): Dossier {
   // A missing id is unreadable; a repeated one is not. Collapse it, say so, and
   // carry the record in the manifest so the next write persists it.
   const manifest: Manifest = read("manifest.json");
+  // `.work/graph.json`, or the top-level copy of a run written before `.work/`
+  // existed; absent entirely after `clean`, which keeps only the deliverables.
+  const graphAt = readPath(outDir, "graph.json");
+  const graph: Graph = existsSync(graphAt) ? JSON.parse(readFileSync(graphAt, "utf8")) : emptyGraph();
   const { findings: unique, duplicates } = dedupeFindings(findings as Finding[]);
-  if (!duplicates.length) return { manifest, findings: unique, graph: read("graph.json") };
+  if (!duplicates.length) return { manifest, findings: unique, graph };
   warnDuplicates(duplicates);
   return {
     manifest: {
@@ -252,7 +267,7 @@ export function loadDossier(outDir: string): Dossier {
       ...(manifest.counts ? { counts: { findings: unique.length, bySeverity: countBySeverity(unique) } } : {}),
     },
     findings: unique,
-    graph: read("graph.json"),
+    graph,
   };
 }
 
@@ -286,8 +301,26 @@ export function provenanceLine(f: Finding): string {
   return bits.length ? `provenance: ${bits.join(" · ")}` : "";
 }
 
+/**
+ * How many candidates the default DOSSIER.md lists, one line each.
+ *
+ * The dossier used to carry the full packet of EVERY candidate — engine prose,
+ * path, provenance — and on a 1,245-candidate run that was 1.2 MB an agent was
+ * told to "open first". Nobody adjudicates from that file: the unit of work is
+ * `ultrasec dossier <id>`, which prints the real code. So the default is an
+ * INDEX — ranked, one line per undecided or kept candidate, capped — and the
+ * full packets are opt-in (`scan --dossier full`).
+ */
+export const DOSSIER_INDEX_CAP = 200;
+
+/** First `n` merged locations, then a count — enough to tell a monorepo spread. */
+function shortLocations(locations: NonNullable<Finding["locations"]>, n = 3): string {
+  const head = locationsLine(locations.slice(0, n));
+  return locations.length > n ? `${head} · +${locations.length - n} more` : head;
+}
+
 /** A compact, always-loadable index of the run — the AI reads THIS, not graph.json. */
-export function renderDossierMd(d: Dossier): string {
+export function renderDossierMd(d: Dossier, opts: { full?: boolean } = {}): string {
   const { manifest: m, findings } = d;
   const c = m.counts.bySeverity;
   const L: string[] = [];
@@ -347,13 +380,19 @@ export function renderDossierMd(d: Dossier): string {
   // whole of the grouping this design does: reading, never verdicts.
   L.push(...renderProposalSummary(findings.map((f) => ({ id: f.id, proposed: proposedFor(f) }))));
 
-  L.push(`## Candidates`);
-  L.push("");
   // What the audit has DECIDED first, then highest composite risk, so the AI
   // adjudicates what matters most early and never re-reads its own refutations
   // ahead of what it confirmed. One comparator for the dossier, the Markdown
   // report and the HTML — see `rank.ts` for why they must not drift apart.
   const ordered = sortFindings(findings);
+  if (!(opts.full || m.dossier === "full")) {
+    L.push(...dossierIndex(ordered));
+    L.push(`---`);
+    L.push(`Engine: ultrasec ${m.version}. ${m.generatedNote}`);
+    return L.join("\n") + "\n";
+  }
+  L.push(`## Candidates`);
+  L.push("");
   for (const f of ordered) {
     L.push(`### ${f.id} — ${severityBadge(f.severity)} ${f.title}`);
     L.push("");
@@ -379,4 +418,31 @@ export function renderDossierMd(d: Dossier): string {
   L.push(`---`);
   L.push(`Engine: ultrasec ${m.version}. ${m.generatedNote}`);
   return L.join("\n") + "\n";
+}
+
+/** The default candidate section: one ranked line per live candidate, capped. */
+function dossierIndex(ordered: readonly Finding[]): string[] {
+  const live = ordered.filter((f) => f.status !== "dismissed");
+  const dismissed = ordered.length - live.length;
+  const L = [`## Candidates (index — ${live.length} live${dismissed ? `, ${dismissed} dismissed not listed` : ""})`, ""];
+  L.push(`One line per candidate, decided first, then by risk. Open one with \`ultrasec dossier <id> --run <run>\``);
+  L.push(`(\`--brief\` for batches); filter with \`ultrasec paths --run <run> --surface code\`. Never load`);
+  L.push(`findings.json or .work/graph.json whole.`);
+  L.push("");
+  for (const f of live.slice(0, DOSSIER_INDEX_CAP)) {
+    const at = f.path?.length
+      ? `${f.path[0]!.file}:${f.path[0]!.line} → ${f.path[f.path.length - 1]!.file}:${f.path[f.path.length - 1]!.line}`
+      : f.sink
+        ? `${f.sink.file}:${f.sink.line}`
+        : "";
+    const risk = typeof f.risk === "number" ? ` · risk ${f.risk}` : "";
+    const kev = f.kev ? " · 🚨 KEV" : "";
+    const affects = f.locations?.length ? ` · affects: ${shortLocations(f.locations)}` : "";
+    L.push(`- \`${f.id}\` ${severityBadge(f.severity)} ${f.title}${at ? ` — \`${at}\`` : ""} · ${f.status}${risk}${kev}${affects}`);
+  }
+  if (live.length > DOSSIER_INDEX_CAP) {
+    L.push(`- _…and ${live.length - DOSSIER_INDEX_CAP} more, lower-ranked — \`ultrasec paths --run <run>\` lists every one._`);
+  }
+  L.push("");
+  return L;
 }

@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { readPath } from "../runlayout.js";
 import type { DetectedFramework } from "../frameworks.js";
 import { satisfies } from "../frameworks.js";
 import { CLASS_LIST, MATRIX_ROWS } from "./registry.js";
@@ -199,7 +200,7 @@ export function huntProgress(run: string): { emitted: Set<string>; hunted: Set<s
     /* an unreadable worklist hunts nothing */
   }
   try {
-    const sug = join(run, PACK_SUGGESTIONS_FILE);
+    const sug = readPath(run, PACK_SUGGESTIONS_FILE);
     if (existsSync(sug)) for (const id of (JSON.parse(readFileSync(sug, "utf8")) as { hunted?: string[] }).hunted ?? []) hunted.add(id);
   } catch {
     /* an unreadable suggestions file records nothing */

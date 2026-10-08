@@ -79,6 +79,13 @@ export const BOOLEAN_FLAGS: ReadonlySet<string> = new Set([
   "graphql",
   // `council` only — re-parse the reviewer reports without calling anything.
   "parse",
+  // `audit` / `render` / `run` — the single report and the run layout.
+  "html",
+  "md",
+  "full",
+  "legacy",
+  "keep-work",
+  "fresh",
 ]);
 
 /** Single-dash short-flag aliases, as documented in the CLI's GLOBAL help. Each
@@ -273,6 +280,11 @@ export function stageNotes(message: string | undefined | null): string {
   return parts.slice(1).join(" · ").trim();
 }
 
+/** The engine's own prose — the part of a message BEFORE any stage block. */
+export function engineProse(message: string | undefined | null): string {
+  return (String(message ?? "").split(STAGE_SPLIT)[0] ?? "").trim();
+}
+
 // ── Output sink ──────────────────────────────────────────────────────────────
 // The commands print their results. That is right for a CLI and fatal for the
 // MCP server, whose stdout carries JSON-RPC frames and nothing else — a single
@@ -291,6 +303,9 @@ interface OutputSink {
   err: string[];
   /** Also write through to the real streams (`--report` archives, never diverts). */
   tee?: boolean;
+  /** Write stderr through while collecting stdout — a composite command (`audit`)
+   *  keeps its own stdout to one line but must not hide a sub-step's warnings. */
+  errThrough?: boolean;
 }
 
 const outputSink = new AsyncLocalStorage<OutputSink>();
@@ -299,7 +314,7 @@ export function eprintln(msg: string): void {
   const sink = outputSink.getStore();
   if (sink) {
     sink.err.push(msg);
-    if (!sink.tee) return;
+    if (!sink.tee && !sink.errThrough) return;
   }
   process.stderr.write(msg + "\n");
 }
@@ -332,6 +347,14 @@ export async function captureOutput<T>(fn: () => T | Promise<T>): Promise<Captur
 // watching the terminal must see exactly what they saw before.
 export async function teeOutput<T>(fn: () => T | Promise<T>): Promise<Captured<T>> {
   const sink: OutputSink = { out: [], err: [], tee: true };
+  const result = await outputSink.run(sink, async () => await fn());
+  return { result, stdout: sink.out.join("\n"), stderr: sink.err.join("\n") };
+}
+
+// Collect a sub-step's stdout (so a composite command decides what it prints)
+// while its stderr — progress, warnings, refusals — still reaches the user.
+export async function quietStdout<T>(fn: () => T | Promise<T>): Promise<Captured<T>> {
+  const sink: OutputSink = { out: [], err: [], errThrough: true };
   const result = await outputSink.run(sink, async () => await fn());
   return { result, stdout: sink.out.join("\n"), stderr: sink.err.join("\n") };
 }

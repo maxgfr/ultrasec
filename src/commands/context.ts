@@ -3,7 +3,8 @@ import { join, resolve } from "node:path";
 import { flagStr, flagBool, listFlag, numFlag, println, eprintln, isScannableDir, type ParsedArgs } from "../util.js";
 import { scanRepo } from "../scan.js";
 import { buildAttackSurface } from "../map.js";
-import { buildContextScaffold, renderContextScaffoldMd } from "../context.js";
+import { buildContextScaffold, renderContextScaffoldMd, CONTEXT_OUTLINE } from "../context.js";
+import { wantsMdTwin } from "../stage.js";
 
 // `ultrasec context --repo <dir> [--out .ultrasec] [--scope <glob>] [--json]`
 // The project-context primer: emit a deterministic scaffold (CONTEXT.scaffold.json)
@@ -46,17 +47,22 @@ export function runContext(args: ParsedArgs): number {
 
   mkdirSync(out, { recursive: true });
   writeFileSync(join(out, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
-  writeFileSync(join(out, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out, scaffold));
+  // The human brief is opt-in, like every worklist twin (see stage.ts): the
+  // scaffold JSON is the input, and the outline is printed below.
+  const wroteMd = wantsMdTwin(args);
+  if (wroteMd) writeFileSync(join(out, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out, scaffold));
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(scaffold, null, 2));
     return 0;
   }
   println(`ultrasec context → ${out}`);
-  println(`  ${join(out, "CONTEXT.scaffold.json")}  ·  ${join(out, "CONTEXT.todo.md")}`);
+  println(`  ${join(out, "CONTEXT.scaffold.json")}${wroteMd ? `  ·  ${join(out, "CONTEXT.todo.md")}` : ""}`);
   println(
     `  frameworks: ${scaffold.frameworks.join(", ") || "—"}  ·  entry points: ${entryNote}  ·  auth sites: ${scaffold.authMiddleware.length}  ·  sanitizers: ${scaffold.sanitizers.length}`,
   );
-  println(`  next: author ${join(out, "CONTEXT.md")} (see CONTEXT.todo.md), then run \`scan\`/\`verify\` — it's injected into every dossier.`);
+  println(`  next: author ${join(out, "CONTEXT.md")} from the scaffold, covering:`);
+  CONTEXT_OUTLINE.forEach((line, i) => println(`    ${i + 1}. ${line}`));
+  println(`  then run \`scan\`/\`verify\` — it's injected into every dossier.`);
   return 0;
 }

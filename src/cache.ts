@@ -2,10 +2,11 @@ import { createHash } from "node:crypto";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { byStr } from "./util.js";
+import { readPath, workPath } from "./runlayout.js";
 import type { ToolCacheEntry } from "./tools/run.js";
 import { EXTRACTOR_VERSION, type FileRecord } from "./vendor/codeindex-engine.mjs";
 
-// A content-hash-keyed scan cache under the run dir (`<run>/cache/scan-cache.json`).
+// A content-hash-keyed scan cache under the run dir (`<run>/.work/cache/scan-cache.json`).
 // `--resume` reuses the engine's extraction for files whose content is unchanged, so
 // a re-audit of a huge repo only re-parses what actually moved. Pure optimization —
 // kept OUT of the versioned dossier schema. Two guards invalidate the whole cache so a
@@ -29,8 +30,10 @@ interface CacheFile {
   entries: Record<string, CacheEntry>;
 }
 
+// Under `.work/` (see runlayout.ts); a run from before that layout is still read
+// from its top-level `cache/`, so `--resume` keeps its warm cache across the move.
 function cachePath(run: string): string {
-  return join(run, "cache", "scan-cache.json");
+  return workPath(run, "cache", "scan-cache.json");
 }
 
 /**
@@ -65,7 +68,7 @@ export function isCacheEntry(key: string, v: unknown): v is CacheEntry {
  */
 export function loadScanCache(run: string): Map<string, CacheEntry> {
   try {
-    const data = JSON.parse(readFileSync(cachePath(run), "utf8")) as CacheFile;
+    const data = JSON.parse(readFileSync(readPath(run, "cache", "scan-cache.json"), "utf8")) as CacheFile;
     if (!data || data.cacheVersion !== CACHE_VERSION || data.extractorVersion !== EXTRACTOR_VERSION) return new Map();
     if (!data.entries || typeof data.entries !== "object" || Array.isArray(data.entries)) return new Map();
     const out = new Map<string, CacheEntry>();
@@ -77,7 +80,7 @@ export function loadScanCache(run: string): Map<string, CacheEntry> {
 }
 
 // ── External-scanner results (`--resume`) ────────────────────────────────────
-// `<run>/cache/tools-cache.json`: the last result of every `cacheable` adapter,
+// `<run>/.work/cache/tools-cache.json`: the last result of every `cacheable` adapter,
 // with the key it was computed under (see `ToolResultCache` in tools/run.ts).
 // Same `cacheVersion` guard as the scan cache; an entry with the wrong shape is
 // dropped, never replayed.
@@ -88,7 +91,7 @@ interface ToolsCacheFile {
 }
 
 function toolsCachePath(run: string): string {
-  return join(run, "cache", "tools-cache.json");
+  return workPath(run, "cache", "tools-cache.json");
 }
 
 function isToolCacheEntry(name: string, v: unknown): v is ToolCacheEntry {
@@ -102,7 +105,7 @@ function isToolCacheEntry(name: string, v: unknown): v is ToolCacheEntry {
 
 export function loadToolsCache(run: string): Map<string, ToolCacheEntry> {
   try {
-    const data = JSON.parse(readFileSync(toolsCachePath(run), "utf8")) as ToolsCacheFile;
+    const data = JSON.parse(readFileSync(readPath(run, "cache", "tools-cache.json"), "utf8")) as ToolsCacheFile;
     if (!data || data.cacheVersion !== CACHE_VERSION) return new Map();
     if (!data.entries || typeof data.entries !== "object" || Array.isArray(data.entries)) return new Map();
     const out = new Map<string, ToolCacheEntry>();
@@ -114,7 +117,7 @@ export function loadToolsCache(run: string): Map<string, ToolCacheEntry> {
 }
 
 export function saveToolsCache(run: string, cache: Map<string, ToolCacheEntry>): void {
-  const dir = join(run, "cache");
+  const dir = workPath(run, "cache");
   mkdirSync(dir, { recursive: true });
   const entries: Record<string, ToolCacheEntry> = {};
   for (const [k, v] of [...cache.entries()].sort((a, b) => byStr(a[0], b[0]))) entries[k] = v;
@@ -133,7 +136,7 @@ export function treeDigest(files: readonly { rel: string; bytes: number; mtimeMs
 }
 
 // ── Stage timings ────────────────────────────────────────────────────────────
-// Wall-clock per stage of a `scan`, written to `<run>/cache/timings.json`.
+// Wall-clock per stage of a `scan`, written to `<run>/.work/cache/timings.json`.
 // Deliberately in the cache dir and nowhere else: `manifest.json` is
 // byte-compared between runs and the example audit is committed, and a
 // duration in either would make every run a diff.
@@ -173,14 +176,14 @@ export function stageTimer(now: () => number = () => performance.now()): StageTi
 }
 
 export function saveTimings(run: string, timings: Record<string, number>): void {
-  const dir = join(run, "cache");
+  const dir = workPath(run, "cache");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "timings.json"), `${JSON.stringify(timings, null, 2)}\n`);
 }
 
 /** Persist the scan cache deterministically (entries sorted by path). */
 export function saveScanCache(run: string, cache: Map<string, CacheEntry>): void {
-  const dir = join(run, "cache");
+  const dir = workPath(run, "cache");
   mkdirSync(dir, { recursive: true });
   const entries: Record<string, CacheEntry> = {};
   for (const [k, v] of [...cache.entries()].sort((a, b) => byStr(a[0], b[0]))) entries[k] = v;

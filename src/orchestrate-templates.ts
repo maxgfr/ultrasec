@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { PhaseInfo } from "./orchestrate.js";
 import { REVALIDATION_VERDICTS } from "./revalidate.js";
 import { CATEGORIES, SEVERITIES, VERDICTS } from "./types.js";
+import { workPath } from "./runlayout.js";
 
 // ---------------------------------------------------------------------------
 // Templates for `ultrasec orchestrate` — the generator that turns the run's
@@ -17,7 +18,7 @@ import { CATEGORIES, SEVERITIES, VERDICTS } from "./types.js";
 const ONE_WRITER_FOOTER = `
 ## Return, don't write
 
-Return ONLY the structured output specified above. Do NOT write, edit, or delete any file; do NOT run any engine command that writes (\`scan\`, \`import\`, any stage's emit or \`--apply\` — \`verify\`, \`triage\`, \`revalidate\`, \`investigate\`, \`context\`, \`narrative\`, \`implement\`, \`render\`, \`clean\`, \`run\`). The only engine commands you may run are the read-only ones: \`dossier\`, \`graph\`, \`paths\`, \`tools\`. The orchestrator is the sole writer — it merges your fragments into one apply file itself and runs the conservative \`--apply\` fold. Exception: if a justification is prose too large to return, write ONLY to \`<RUN>/orchestration/out/<role>-<batch>.md\` (a file namespaced to you alone) and return its path.
+Return ONLY the structured output specified above. Do NOT write, edit, or delete any file; do NOT run any engine command that writes (\`scan\`, \`import\`, any stage's emit or \`--apply\` — \`verify\`, \`triage\`, \`revalidate\`, \`investigate\`, \`context\`, \`narrative\`, \`implement\`, \`render\`, \`clean\`, \`run\`, \`audit\`). The only engine commands you may run are the read-only ones: \`dossier\`, \`graph\`, \`paths\`, \`tools\`. The orchestrator is the sole writer — it merges your fragments into one apply file itself and runs the conservative \`--apply\` fold. Exception: if a justification is prose too large to return, write ONLY to \`<RUN>/.work/orchestration/out/<role>-<batch>.md\` (a file namespaced to you alone) and return its path.
 `;
 
 // Structured-output schemas the emitted workflows pass to agent(..., { schema }).
@@ -137,16 +138,16 @@ const PHASE_SPECS: Record<string, PhaseSpec> = {
     title: "Adjudicate",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adjudicate the ${n} open candidate(s) of an ultrasec audit from dossier evidence (analyzer fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join(run, "orchestration", "out", "adjudicate", "verdicts.json")} --run ${run}`,
-    fragmentFile: (run) => join(run, "orchestration", "out", "adjudicate", "verdicts.json"),
+    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${workPath(run, "orchestration", "out", "adjudicate", "verdicts.json")} --run ${run}`,
+    fragmentFile: (run) => workPath(run, "orchestration", "out", "adjudicate", "verdicts.json"),
   },
   verify: {
     role: "skeptic",
     title: "Verify",
     schema: VERDICT_SCHEMA,
     description: (n) => `Adversarially verify the ${n} pending finding(s) of an ultrasec audit (skeptic fan-out, conservative fold)`,
-    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${join(run, "orchestration", "out", "verify", "verdicts.json")} --run ${run}`,
-    fragmentFile: (run) => join(run, "orchestration", "out", "verify", "verdicts.json"),
+    applyHint: (engine, _worklist, run) => `node ${engine} verify --apply ${workPath(run, "orchestration", "out", "verify", "verdicts.json")} --run ${run}`,
+    fragmentFile: (run) => workPath(run, "orchestration", "out", "verify", "verdicts.json"),
   },
   revalidate: {
     role: "revalidator",
@@ -154,8 +155,8 @@ const PHASE_SPECS: Record<string, PhaseSpec> = {
     schema: REVALIDATE_SCHEMA,
     description: (n) => `Revalidate the ${n} confirmed/needs-human finding(s) against git history (false-positive cut, conservative fold)`,
     applyHint: (engine, _worklist, run) =>
-      `node ${engine} revalidate --apply ${join(run, "orchestration", "out", "revalidate", "REVALIDATE.json")} --run ${run}`,
-    fragmentFile: (run) => join(run, "orchestration", "out", "revalidate", "REVALIDATE.json"),
+      `node ${engine} revalidate --apply ${workPath(run, "orchestration", "out", "revalidate", "REVALIDATE.json")} --run ${run}`,
+    fragmentFile: (run) => workPath(run, "orchestration", "out", "revalidate", "REVALIDATE.json"),
   },
   investigate: {
     role: "hunter",
@@ -163,8 +164,8 @@ const PHASE_SPECS: Record<string, PhaseSpec> = {
     schema: INVESTIGATE_SCHEMA,
     description: (n) => `Hunt authz/IDOR, business-logic and multi-hop bugs across ${n} attack-surface region(s) (hunter fan-out, citation-checked ingest)`,
     applyHint: (engine, _worklist, run) =>
-      `node ${engine} investigate --apply ${join(run, "orchestration", "out", "investigate", "INVESTIGATE.json")} --run ${run}`,
-    fragmentFile: (run) => join(run, "orchestration", "out", "investigate", "INVESTIGATE.json"),
+      `node ${engine} investigate --apply ${workPath(run, "orchestration", "out", "investigate", "INVESTIGATE.json")} --run ${run}`,
+    fragmentFile: (run) => workPath(run, "orchestration", "out", "investigate", "INVESTIGATE.json"),
   },
 };
 
@@ -189,7 +190,7 @@ function oneLine(s: string): string {
 
 export function phaseWorkflowScript(ph: PhaseInfo, runAbs: string, engineAbs: string, batchSize: number): string {
   const spec = phaseSpec(ph.name);
-  const scriptPath = join(runAbs, "orchestration", `${ph.name}.workflow.mjs`);
+  const scriptPath = workPath(runAbs, "orchestration", `${ph.name}.workflow.mjs`);
   const meta = { name: `ultrasec-${ph.name}`, description: spec.description(ph.items), phases: [{ title: spec.title }] };
   const fragmentKey = ph.name === "investigate" ? "discoveries" : "verdicts";
   return [
@@ -203,7 +204,7 @@ export function phaseWorkflowScript(ph: PhaseInfo, runAbs: string, engineAbs: st
     `const RUN = ${JSON.stringify(runAbs)}`,
     `const ENGINE = ${JSON.stringify(engineAbs)}`,
     `const WORKLIST = ${JSON.stringify(ph.worklist)}`,
-    `const AGENTS = RUN + '/orchestration/agents'`,
+    `const AGENTS = RUN + '/.work/orchestration/agents'`,
     `const BATCHES = ${JSON.stringify(toBatches(ph.ids, batchSize))}`,
     `const SCHEMA = ${JSON.stringify(spec.schema)}`,
     ``,
@@ -316,7 +317,7 @@ export function runbookMd(phases: PhaseInfo[], runAbs: string, engineAbs: string
     .map((p) => `| ${p.name} | \`${p.worklist}\` | ${p.ready ? `ready (${p.items} item(s))` : "not ready"} | \`${p.prerequisite}\` |`)
     .join("\n");
   const engine = `node ${engineAbs}`;
-  const agents = (role: string) => join(runAbs, "orchestration", "agents", `${role}.md`);
+  const agents = (role: string) => workPath(runAbs, "orchestration", "agents", `${role}.md`);
   const frag = (name: string) => phaseSpec(name).fragmentFile(runAbs);
   return `# ultrasec — sequential RUNBOOK (eco / no-subagent fallback)
 
@@ -342,6 +343,6 @@ ${status}
 6. **Gate**: \`${engine} check --run ${runAbs} --semantic\` must exit 0 before presenting anything.
 7. **Render**: \`${engine} render --run ${runAbs}\` (optionally author the narrative first: \`${engine} narrative --run ${runAbs}\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
 
-With subagents available, prefer the emitted workflows instead: \`orchestrate --run ${runAbs} --phase <p>\` then \`Workflow({ scriptPath: "${join(runAbs, "orchestration", "<p>.workflow.mjs")}" })\` — you stay the sole writer either way.
+With subagents available, prefer the emitted workflows instead: \`orchestrate --run ${runAbs} --phase <p>\` then \`Workflow({ scriptPath: "${workPath(runAbs, "orchestration", "<p>.workflow.mjs")}" })\` — you stay the sole writer either way.
 `;
 }

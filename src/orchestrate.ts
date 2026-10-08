@@ -6,6 +6,7 @@ import type { RevalidateItem } from "./revalidate.js";
 import { surfaceOf, SURFACES } from "./surface.js";
 import type { Finding } from "./types.js";
 import type { VerifyItem } from "./verify.js";
+import { workPath } from "./runlayout.js";
 
 // ---------------------------------------------------------------------------
 // `ultrasec orchestrate` — emit the run's multi-agent orchestration from its
@@ -191,7 +192,7 @@ export function orchestrateRun(runDir: string, engineAbs: string, opts: Orchestr
   }
 
   const repoAbs = repoOf(run);
-  const orchDir = join(run, "orchestration");
+  const orchDir = workPath(run, "orchestration");
   const agentsDir = join(orchDir, "agents");
   // One fragment dir per phase: `verify --apply` serves both adjudicate and
   // verify, so fragments must not share a flat out/ a directory apply could

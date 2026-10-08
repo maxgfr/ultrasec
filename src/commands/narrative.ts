@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { emitWorklist, stageFiles } from "../stage.js";
+import { emitWorklist, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { loadContextDoc } from "../context.js";
 import { buildNarrativeWorklist, renderNarrativeWorklistMd } from "../narrative.js";
 
@@ -21,18 +21,21 @@ export function runNarrative(args: ParsedArgs): number {
   }
 
   const wl = buildNarrativeWorklist(dossier);
-  const todoPath = emitWorklist(run, stageFiles("NARRATIVE"), wl, renderNarrativeWorklistMd(wl, loadContextDoc(run)));
+  const files = stageFiles("NARRATIVE");
+  const wroteMd = wantsMdTwin(args);
+  const todoPath = emitWorklist(run, files, wl, () => renderNarrativeWorklistMd(wl, loadContextDoc(run)), { md: wroteMd });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(wl, null, 2));
     return 0;
   }
   println(`ultrasec narrative → ${todoPath} (${wl.findings.length} reportable finding${wl.findings.length === 1 ? "" : "s"})`);
+  println(worklistNote(files, wroteMd));
   if (!wl.findings.length) {
     println(`  nothing confirmed/needs-human yet — run \`verify --apply\` first.`);
   } else {
-    println(`  author NARRATIVE.json (see NARRATIVE.md), then:`);
-    println(`  ultrasec render --narrative NARRATIVE.json --run ${run}`);
+    println(`  author NARRATIVE.json from the \`scaffold\` in NARRATIVE.todo.json, then:`);
+    println(`  ultrasec render --run ${run}   (picks up ${run}/NARRATIVE.json)`);
   }
   return 0;
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { stageFiles, emitWorklist, collectApplyFiles, readApply, persistFindings } from "../src/stage.js";
@@ -17,13 +17,38 @@ describe("stageFiles", () => {
 });
 
 describe("emitWorklist", () => {
-  it("writes the JSON todo + the markdown brief and returns the todo path", () => {
+  it("writes the JSON todo + the markdown brief (when asked) and returns the todo path", () => {
     const run = join(tmp(), "nested-run"); // not yet created — emit must mkdir -p
     const items = [{ id: "x", verdict: null }];
-    const path = emitWorklist(run, stageFiles("TRIAGE"), items, "# brief\n");
+    const path = emitWorklist(run, stageFiles("TRIAGE"), items, "# brief\n", { md: true });
     expect(path).toBe(join(run, "TRIAGE.todo.json"));
     expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(items);
     expect(readFileSync(join(run, "TRIAGE.md"), "utf8")).toBe("# brief\n");
+  });
+
+  // Every worklist used to be written twice, and agents read both: on a real
+  // run REVALIDATE alone was 264 KB of JSON plus 158 KB restating it. The JSON
+  // is the worklist; the brief is opt-in (`--md`, ULTRASEC_MD=1).
+  it("writes the JSON only by default, and never renders the brief it does not write", () => {
+    const run = join(tmp(), "json-only");
+    const prev = process.env.ULTRASEC_MD;
+    delete process.env.ULTRASEC_MD;
+    try {
+      let rendered = false;
+      emitWorklist(run, stageFiles("TRIAGE"), [], () => {
+        rendered = true;
+        return "# brief\n";
+      });
+      expect(existsSync(join(run, "TRIAGE.todo.json"))).toBe(true);
+      expect(existsSync(join(run, "TRIAGE.md"))).toBe(false);
+      expect(rendered).toBe(false);
+      process.env.ULTRASEC_MD = "1";
+      emitWorklist(run, stageFiles("TRIAGE"), [], () => "# brief\n");
+      expect(existsSync(join(run, "TRIAGE.md"))).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.ULTRASEC_MD;
+      else process.env.ULTRASEC_MD = prev;
+    }
   });
 });
 
@@ -115,7 +140,7 @@ describe("persistFindings", () => {
     const written = JSON.parse(readFileSync(join(run, "manifest.json"), "utf8"));
     expect(written.counts).toEqual({ findings: 2, bySeverity: { critical: 0, high: 1, medium: 0, low: 1, info: 0 } });
     expect(written.generatedNote).toBe("note"); // manifest otherwise preserved
-    expect(JSON.parse(readFileSync(join(run, "graph.json"), "utf8")).files).toEqual(["src/a.js"]);
+    expect(JSON.parse(readFileSync(join(run, ".work", "graph.json"), "utf8")).files).toEqual(["src/a.js"]);
     expect(JSON.parse(readFileSync(join(run, "findings.json"), "utf8")).map((f: Finding) => f.id)).toEqual(["a", "b"]);
   });
 });

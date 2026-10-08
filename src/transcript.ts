@@ -1,5 +1,6 @@
 import { appendFileSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, extname, join } from "node:path";
+import { dirname, extname } from "node:path";
+import { workPath } from "./runlayout.js";
 
 // Archivable command output.
 //
@@ -101,6 +102,11 @@ function headline(t: Transcript): string {
 
 export const JOURNAL_FILE = "JOURNAL.md";
 
+/** Where a run's journal is written: `<run>/.work/JOURNAL.md`. */
+export function journalPath(runDir: string): string {
+  return workPath(runDir, JOURNAL_FILE);
+}
+
 /**
  * Append one entry to the run's JOURNAL.md, creating it on first use.
  *
@@ -109,8 +115,10 @@ export const JOURNAL_FILE = "JOURNAL.md";
  * succeeded — the caller swallows the error.
  */
 export function appendJournal(runDir: string, t: Transcript): void {
-  mkdirSync(runDir, { recursive: true });
-  const path = join(runDir, JOURNAL_FILE);
+  // Under `.work/`: the journal is the engine's own record, read when an audit
+  // is reconstructed, not on the way to the report (see runlayout.ts).
+  const path = journalPath(runDir);
+  mkdirSync(dirname(path), { recursive: true });
   if (!existsSync(path)) writeFileSync(path, JOURNAL_HEADER);
   // Keep the entry to the summary line plus anything that signals lost coverage —
   // a journal nobody reads is as useless as no journal. Both streams: the
