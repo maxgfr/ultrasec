@@ -156,6 +156,14 @@ export const CATEGORY_ALIASES: Readonly<Record<string, Category>> = {
   authorization: "authz",
   authentication: "authz",
   authn: "authz",
+  // The attack-class docs name this family "auth/session/JWT", so an auditor
+  // writes the short form; refusing `auth` dropped 5 of 28 discoveries on a
+  // real Next.js audit while `authentication` and `authn` were accepted.
+  auth: "authz",
+  "broken-authentication": "authz",
+  session: "authz",
+  "session-management": "authz",
+  jwt: "authz",
   "privilege-escalation": "authz",
   csrf: "authz",
   // Cryptography.

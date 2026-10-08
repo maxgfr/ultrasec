@@ -115,13 +115,15 @@ describe("investigate --apply surfaces every refused row instead of dropping it"
         { ...GOOD_DISCOVERY, title: "stored XSS in the parser", category: "xss" },
         { ...GOOD_DISCOVERY, title: "unbounded fuzzy match", category: "dos", line: 2 },
         { ...GOOD_DISCOVERY, title: "raw error to the client", category: "disclosure", line: 3 },
+        { ...GOOD_DISCOVERY, title: "refresh token never revoked", category: "auth", line: 4 },
       ]),
     );
 
     const { code, out } = capture(() => runInvestigate(parseArgs(["--run", run, "--apply", file, "--repo", REPO])));
 
     expect(code).toBe(0);
-    expect(out).toMatch(/ingested 3 new/);
+    expect(out).toMatch(/ingested 4 new/);
+    expect(out).toMatch(/category "auth" folded to "authz"/);
     expect(out).toMatch(/dropped 0/);
     // Folded, never silently: each rewrite is named.
     expect(out).toMatch(/category "xss" folded to "taint"/);
