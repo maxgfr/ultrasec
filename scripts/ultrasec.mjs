@@ -28027,8 +28027,12 @@ function mergeCluster(group) {
   return out2;
 }
 function sameCwe(a, b) {
-  return !!a && !!b && a.trim().toUpperCase() === b.trim().toUpperCase();
+  if (!a || !b) return false;
+  const x = a.trim().toUpperCase();
+  const y = b.trim().toUpperCase();
+  return x === y || CWE_EQUIVALENT.some((pair) => pair.includes(x) && pair.includes(y));
 }
+var CWE_EQUIVALENT = [["CWE-829", "CWE-1357"]];
 function taintNodes(f) {
   const locs = /* @__PURE__ */ new Set();
   for (const p of f.path ?? []) locs.add(`${p.file}:${p.line}`);

@@ -115,8 +115,16 @@ function mergeCluster(group: Finding[]): Finding {
  *  standalone finding that merely shares a line with a taint node must NOT fold
  *  into it (that silently destroys a distinct finding + misattributes its verdict). */
 function sameCwe(a: string | undefined, b: string | undefined): boolean {
-  return !!a && !!b && a.trim().toUpperCase() === b.trim().toUpperCase();
+  if (!a || !b) return false;
+  const x = a.trim().toUpperCase();
+  const y = b.trim().toUpperCase();
+  return x === y || CWE_EQUIVALENT.some((pair) => pair.includes(x) && pair.includes(y));
 }
+
+/** CWE pairs that tools use for the SAME defect. Kept to pairs seen in the wild:
+ *  a mutable `uses:` ref is CWE-829 to the agentic-CI pass and CWE-1357 to
+ *  semgrep's github-actions-mutable-action-tag — 79 duplicate rows on one repo. */
+const CWE_EQUIVALENT: readonly (readonly string[])[] = [["CWE-829", "CWE-1357"]];
 
 /** Every distinct file:line a taint finding touches (source, hops, sink). */
 function taintNodes(f: Finding): Set<string> {
