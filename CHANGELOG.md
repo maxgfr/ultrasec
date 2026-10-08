@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.61.1](https://github.com/maxgfr/ultrasec/compare/v1.61.0...v1.61.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **scan:** name the offending value when --require-tools is rejected ([d752507](https://github.com/maxgfr/ultrasec/commit/d752507bcbe9a0fdf635999381a59e698c9a3f9e))
+* **tools:** keep checkov and pip-audit covering JS monorepos ([4cd1863](https://github.com/maxgfr/ultrasec/commit/4cd1863dc75be4b067c540bc69c8fdb955fbd29b))
+
 # [1.61.0](https://github.com/maxgfr/ultrasec/compare/v1.60.1...v1.61.0) (2026-10-08)
 
 
