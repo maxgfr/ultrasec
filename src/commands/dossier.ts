@@ -38,11 +38,27 @@ export function runDossier(args: ParsedArgs): number {
   // Deliberately NOT "print it once per session": `dossier` is in
   // READ_ONLY_COMMANDS so a fan-out subagent stays a non-writer, and remembering
   // across invocations would need a marker file in the run dir.
-  const context = flagBool(args, "no-context") ? undefined : loadContextDoc(run);
-  const shown = context && flagBool(args, "compact") ? (compactContextDoc(context) ?? context) : context;
+  const brief = flagBool(args, "brief");
+  const shown = dossierContext(loadContextDoc(run), {
+    brief,
+    compact: flagBool(args, "compact"),
+    noContext: flagBool(args, "no-context"),
+  });
   // `--brief` is the batch packet: narrow windows, no enclosing bodies, no
   // reachability block. One subagent reading eight findings pays for the full
   // depth eight times; one auditor deciding a single flow wants all of it.
-  println(renderFindingDossier(repo, d.graph, f, { context: shown, brief: flagBool(args, "brief") }));
+  println(renderFindingDossier(repo, d.graph, f, { context: shown, brief }));
   return 0;
+}
+
+/**
+ * The CONTEXT.md a dossier prints. `--brief` implies `--compact`: the batch
+ * packet exists so a subagent reading eight ids does not pay for eight copies of
+ * the same document, and it was still carrying the whole trust model (85 of 132
+ * lines on one real run). An unrecognised layout stays whole — losing the threat
+ * model silently is worse than repeating it.
+ */
+export function dossierContext(doc: string | undefined, opts: { brief?: boolean; compact?: boolean; noContext?: boolean }): string | undefined {
+  if (opts.noContext || !doc) return undefined;
+  return opts.brief || opts.compact ? (compactContextDoc(doc) ?? doc) : doc;
 }

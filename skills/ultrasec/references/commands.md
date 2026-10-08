@@ -262,8 +262,10 @@ verdict — which was checked, and what was found:
 | auth / rate-limit markers in scope | the `AUTH_MARKER` / `THROTTLE_MARKER` vocabulary the guard matrix uses | NONE is not "public": the guard may be middleware, a proxy or the platform |
 | sanitizers near the path | the catalog's per-sink-kind patterns, within 12 lines of any hop | none found is absence of a known pattern, not proof the value is raw |
 
-`--brief` drops the enclosing bodies and this block and narrows the windows — the packet for a
-batch fan-out, where one subagent reads eight findings at once.
+`--brief` drops the enclosing bodies and this block, narrows the windows and prints CONTEXT.md
+compacted as `--compact` would (trust model, exposure, criticality, hunt list) — the packet for a
+batch fan-out, where one subagent reads eight findings at once and must not get eight copies of
+the whole document. `--no-context` still drops it entirely.
 
 ## Adjudicate
 

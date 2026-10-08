@@ -39635,13 +39635,14 @@ function renderContextScaffoldMd(repo, run2, s) {
   return L.join("\n") + "\n";
 }
 var COMPACT_SECTIONS = /^##\s*(hunt list|exposure|criticality|trust model|trust boundaries|auth)/i;
+var RISK_LINE = /^\s*(exposure|criticality)\s*:/i;
 function compactContextDoc(doc) {
   const lines5 = doc.split(/\r?\n/);
   const out2 = [];
   let keeping = false;
   for (const line2 of lines5) {
     if (/^##\s/.test(line2)) keeping = COMPACT_SECTIONS.test(line2);
-    if (keeping) out2.push(line2);
+    if (keeping || RISK_LINE.test(line2)) out2.push(line2);
   }
   const kept = out2.join("\n").trim();
   return kept.length ? kept : void 0;
@@ -41705,10 +41706,18 @@ function runDossier(args2) {
     return 2;
   }
   const repo = flagStr(args2, "repo") ?? d.manifest.repo;
-  const context = flagBool(args2, "no-context") ? void 0 : loadContextDoc(run2);
-  const shown = context && flagBool(args2, "compact") ? compactContextDoc(context) ?? context : context;
-  println(renderFindingDossier(repo, d.graph, f, { context: shown, brief: flagBool(args2, "brief") }));
+  const brief = flagBool(args2, "brief");
+  const shown = dossierContext(loadContextDoc(run2), {
+    brief,
+    compact: flagBool(args2, "compact"),
+    noContext: flagBool(args2, "no-context")
+  });
+  println(renderFindingDossier(repo, d.graph, f, { context: shown, brief }));
   return 0;
+}
+function dossierContext(doc, opts) {
+  if (opts.noContext || !doc) return void 0;
+  return opts.brief || opts.compact ? compactContextDoc(doc) ?? doc : doc;
 }
 
 // src/commands/triage.ts

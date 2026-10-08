@@ -333,6 +333,7 @@ export function renderContextScaffoldMd(repo: string, run: string, s: ContextSca
  * statement and the stack inventory do not have to be there fifty times.
  */
 const COMPACT_SECTIONS = /^##\s*(hunt list|exposure|criticality|trust model|trust boundaries|auth)/i;
+const RISK_LINE = /^\s*(exposure|criticality)\s*:/i;
 
 /**
  * CONTEXT.md reduced to its adjudication-bearing sections, or `undefined` when
@@ -346,7 +347,9 @@ export function compactContextDoc(doc: string): string | undefined {
   let keeping = false;
   for (const line of lines) {
     if (/^##\s/.test(line)) keeping = COMPACT_SECTIONS.test(line);
-    if (keeping) out.push(line);
+    // `Exposure:` / `Criticality:` are asked for as plain lines (the risk score
+    // reads them that way), so they can sit outside any kept section.
+    if (keeping || RISK_LINE.test(line)) out.push(line);
   }
   const kept = out.join("\n").trim();
   return kept.length ? kept : undefined;

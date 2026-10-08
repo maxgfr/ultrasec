@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { scanRepo } from "../src/scan.js";
 import { buildAttackSurface } from "../src/map.js";
 import { buildContextScaffold, loadContextDoc, compactContextDoc } from "../src/context.js";
+import { dossierContext } from "../src/commands/dossier.js";
 import { renderFindingDossier } from "../src/dossier.js";
 import type { Finding } from "../src/types.js";
 import type { Graph } from "../src/graph.js";
@@ -164,6 +165,48 @@ describe("compactContextDoc — the adjudication-bearing sections only", () => {
   it("returns undefined on an unrecognised layout, so the caller keeps the whole document", () => {
     // Losing the threat model silently would be far worse than printing it.
     expect(compactContextDoc("# CONTEXT\n\nJust prose, no headings.\n")).toBeUndefined();
+  });
+
+  it("keeps Exposure:/Criticality: written as plain lines, the form the scaffold asks for", () => {
+    const doc = [
+      "# CONTEXT",
+      "",
+      "Exposure: internet-facing",
+      "Criticality: standard",
+      "",
+      "## Purpose",
+      "A site.",
+      "## Trust boundaries",
+      "1. Visitor → API.",
+    ].join("\n");
+    const out = compactContextDoc(doc)!;
+    expect(out).toContain("Exposure: internet-facing");
+    expect(out).toContain("Criticality: standard");
+    expect(out).toContain("Trust boundaries");
+    expect(out).not.toContain("A site.");
+  });
+});
+
+describe("dossierContext — which CONTEXT.md a dossier prints", () => {
+  const DOC = ["# CONTEXT", "## Purpose", "Long purpose prose.", "## Trust boundaries", "1. Visitor → API."].join("\n");
+
+  it("--brief prints the compact context: the batch packet must not repeat the whole document per id", () => {
+    const out = dossierContext(DOC, { brief: true })!;
+    expect(out).toContain("Trust boundaries");
+    expect(out).not.toContain("Long purpose prose.");
+  });
+
+  it("the default single-finding dossier keeps the whole document", () => {
+    expect(dossierContext(DOC, {})).toBe(DOC);
+  });
+
+  it("--no-context wins over everything", () => {
+    expect(dossierContext(DOC, { brief: true, noContext: true })).toBeUndefined();
+  });
+
+  it("an unrecognised layout stays whole even under --brief", () => {
+    const prose = "# CONTEXT\n\nJust prose.";
+    expect(dossierContext(prose, { brief: true })).toBe(prose);
   });
 });
 
