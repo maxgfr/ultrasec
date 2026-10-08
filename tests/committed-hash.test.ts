@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { auditAuthTokens } from "../src/authtokens.js";
+import { auditAuthTokens, redactPasswordHashes } from "../src/authtokens.js";
 
 // A password hash committed to the repository.
 //
@@ -79,5 +79,29 @@ VALUES (
   it("still reports the code-only shapes it always did", () => {
     const repo = repoWith({ "auth.js": `const jwt = require("jsonwebtoken");\njwt.verify(t, k, { algorithms: ["none"] });\n` });
     expect(auditAuthTokens(repo).some((f) => /none/i.test(f.title))).toBe(true);
+  });
+});
+
+describe("committed password hash — the evidence never carries the hash", () => {
+  // The evidence line is echoed into findings.json and the rendered report; a
+  // real audit's REPORT.md and index.html carried two complete argon2id hashes
+  // of a `super` account. The algorithm and cost stay: they are the finding.
+  const argon = "$argon2id$v=19$m=65536,t=3,p=4$dTv43xyuOUbJbECoftnQ$aC5yrzCJalCLMLwzuJYi9kQ2OPCWoGRagfGR9BMpj8";
+
+  it("masks salt and digest, keeps the algorithm and its cost", () => {
+    expect(redactPasswordHashes(`password = '${argon}',`)).toBe("password = '$argon2id$v=19$m=65536,t=3,p=4$…',");
+    expect(redactPasswordHashes("$2b$12$abcdefghijklmnopqrstuuWzRB1Rk2E6v3eQYYkNLe/dbnDRyiAA6")).toBe("$2b$12$…");
+    expect(redactPasswordHashes("$scrypt$ln=16,r=8,p=1$aaaaaaaaaaaaaaaa$bbbbbbbbbbbbbbbb")).toBe("$scrypt$ln=16,r=8,p=1$…");
+    expect(redactPasswordHashes("('$pbkdf2-sha256$29000$salt$derivedkeyhere')")).toBe("('$pbkdf2-sha256$29000$…')");
+    expect(redactPasswordHashes("no hash here")).toBe("no hash here");
+  });
+
+  it("files the finding with a redacted evidence line", () => {
+    const repo = repoWith({ "seed.sql": `INSERT INTO auth.users VALUES ('admin@example.org', '${argon}', 'super');\n` });
+    const [found] = hashes(repo);
+    expect(found).toBeDefined();
+    expect(found!.message).toContain("$argon2id$v=19$m=65536,t=3,p=4$…");
+    expect(found!.message).not.toContain("dTv43xyuOUbJbECoftnQ");
+    expect(found!.message).not.toContain("aC5yrzCJalCLMLwzuJYi9kQ2OPCWoGRagfGR9BMpj8");
   });
 });

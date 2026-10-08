@@ -34108,6 +34108,16 @@ var WEAK_SECRETS = /* @__PURE__ */ new Set([
   "admin",
   "default"
 ]);
+function redactPasswordHashes(text) {
+  return text.replace(/\$(argon2(?:id|i|d)?|2[abxy]|scrypt|pbkdf2[\w-]*)\$[\w./+=,$-]*/g, (literal2, algo) => {
+    const kept = [algo];
+    for (const part of literal2.split("$").slice(2)) {
+      if (/^(?:[a-z]+=\d+(?:,[a-z]+=\d+)*|\d{1,7})$/.test(part)) kept.push(part);
+      else break;
+    }
+    return `$${kept.join("$")}$\u2026`;
+  });
+}
 function hit3(rel2, line2, shape, evidence) {
   return makeToolFinding({
     tool: "ultrasec",
@@ -34117,7 +34127,7 @@ function hit3(rel2, line2, shape, evidence) {
     severity: shape.severity,
     message: `${shape.note}
 
-Evidence: \`${evidence.trim().slice(0, 160)}\``,
+Evidence: \`${redactPasswordHashes(evidence.trim()).slice(0, 160)}\``,
     file: rel2,
     line: line2,
     cwe: shape.cwe
