@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.61.4](https://github.com/maxgfr/ultrasec/compare/v1.61.3...v1.61.4) (2026-10-08)
+
+
+### Bug Fixes
+
+* **authtokens:** never echo a password hash in the evidence line ([b50f683](https://github.com/maxgfr/ultrasec/commit/b50f683e5d1fbeab4aff5e0fe5ac043d69c055da))
+
 ## [1.61.3](https://github.com/maxgfr/ultrasec/compare/v1.61.2...v1.61.3) (2026-10-08)
 
 
