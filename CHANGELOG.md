@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.62.0](https://github.com/maxgfr/ultrasec/compare/v1.61.5...v1.62.0) (2026-10-08)
+
+
+### Bug Fixes
+
+* **merge:** a re-detected finding takes the fresh message, keeping only its stage notes ([c21446a](https://github.com/maxgfr/ultrasec/commit/c21446a0d22a83b55a8aa534830a2bba2deb37d2))
+* **notes:** redact credentials in every authored note before it is folded ([1a092d1](https://github.com/maxgfr/ultrasec/commit/1a092d19b9cad7d5c6479e6cf6df74077198b464))
+
+
+### Features
+
+* **council:** multi-model second opinion as a deterministic command ([095f6f6](https://github.com/maxgfr/ultrasec/commit/095f6f63bc541835a64db37eb930a37ffad8cd39))
+
 ## [1.61.5](https://github.com/maxgfr/ultrasec/compare/v1.61.4...v1.61.5) (2026-10-08)
 
 
