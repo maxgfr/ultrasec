@@ -259,7 +259,7 @@ async function dispatch(name: string, args: Record<string, unknown>, repo: strin
 
     case "ultrasec_render":
       requireRun(run);
-      return runCommand(name, [], { repo, run, narrative: str(args.narrative), json: true });
+      return runCommand(name, [], { repo, run, narrative: str(args.narrative), html: args.html === true, full: args.full === true, json: true });
 
     default:
       requireRun(run);

@@ -69,7 +69,7 @@ export function renderNarrativeWorklistMd(wl: { findings: NarrativeFindingRef[];
   L.push(
     `- \`positivePatterns\`: what the codebase does **well** (solid auth, parameterized queries…) — calibrates trust in the findings and helps prioritise. Free prose, advisory.`,
   );
-  L.push(`- \`remediations\`: \`{id, fix, patch?, owner?}\` — a concrete fix per **confirmed** finding.`);
+  L.push(`- \`remediations\`: \`{id, fix, patch?, owner?, effort?}\` — a concrete fix per **confirmed** finding; \`effort\` is S|M|L.`);
   L.push(`- \`attackChains\`: \`{title, findingIds[], narrative}\` — how findings combine into an exploit.`);
   L.push(`- \`rootCauses\`: \`{cause, findingIds[], note}\` — group findings by shared underlying cause.`);
   L.push(
@@ -119,6 +119,7 @@ export function parseNarrative(raw: string): Narrative {
         fix: r.fix,
         ...(typeof r.patch === "string" ? { patch: r.patch } : {}),
         ...(typeof r.owner === "string" ? { owner: r.owner } : {}),
+        ...(r.effort === "S" || r.effort === "M" || r.effort === "L" ? { effort: r.effort } : {}),
       }));
     if (rem.length) n.remediations = rem;
   }

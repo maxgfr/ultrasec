@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs } from "../util.js";
+import { wantsMdTwin } from "../stage.js";
 import { CliAgentRunner } from "../powered/agent.js";
 import { runPipeline, ALL_STAGES, type StageName, type PipelineOptions } from "../powered/pipeline.js";
 
@@ -51,6 +52,8 @@ export function runRun(args: ParsedArgs): number {
       maxFiles: numFlag(args, "max-files"),
       gitignore: flagBool(args, "gitignore"),
     },
+    md: wantsMdTwin(args),
+    report: { html: flagBool(args, "html"), md: flagBool(args, "md"), full: flagBool(args, "full") },
   };
   if (powered) {
     opts.runner = new CliAgentRunner(agent);
@@ -87,7 +90,8 @@ export function runRun(args: ParsedArgs): number {
       const apply = noApply ? "" : ` → \`ultrasec ${e.stage} --apply ${e.outName} --run ${run}\``;
       println(`    - ${e.stage}: read ${e.worklist}, write ${join(run, e.outName)}${apply}`);
     }
-    println(`  then: ultrasec render${stages.includes("narrative") ? " --narrative NARRATIVE.json" : ""} --run ${run}`);
+    println(`  report (draft until the worklists are applied): ${res.report.written.join(" · ")}`);
+    println(`  then: ultrasec render --run ${run}`);
     return 0;
   }
 
@@ -96,6 +100,6 @@ export function runRun(args: ParsedArgs): number {
   if (res.escalated.length) println(`  ⚠️  cross-check escalated ${res.escalated.length} finding(s) to needs-human: ${res.escalated.join(", ")}`);
   printNotices();
   for (const err of res.errors) println(`  ✗ ${err}`);
-  println(`  report: ${join(run, "REPORT.md")} · ${join(run, "index.html")}`);
+  println(`  report: ${res.report.written.join(" · ")}`);
   return res.errors.length ? 1 : 0;
 }

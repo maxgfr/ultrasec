@@ -9,8 +9,11 @@ import { buildCoverage, enumeratedKindsOf, renderCoverageMd } from "../coverage.
 import { groupAdvisoriesByPackage } from "../deps.js";
 import { bySurface, SURFACE_TITLE, unadjudicatedCode, type Surface } from "../surface.js";
 
-// The tiered Markdown report: SUMMARY (TL;DR) and REPORT — the complete audit,
-// every finding grouped by status (incl. dismissed), with the reasoning trail.
+// The PREVIOUS report layout: SUMMARY (TL;DR) and the tiered REPORT, every
+// finding grouped by status with one row per dismissed candidate. `render
+// --legacy` still writes it (with index.html); the default deliverable is the
+// single-file report in `audit-report.ts`, which reuses the helpers exported
+// here so the two never disagree about a badge, a path or a banner.
 
 const BADGE: Record<Severity, string> = {
   critical: "🟥 CRITICAL",
@@ -23,12 +26,12 @@ const BADGE: Record<Severity, string> = {
 /** The severity badge, or a dash. A bare `BADGE[f.severity]` on a malformed
  *  finding interpolated the literal string "undefined" into the report — the
  *  Markdown twin of the TypeError the HTML renderer threw on the same run. */
-function badgeOf(s: Severity | undefined | null): string {
+export function badgeOf(s: Severity | undefined | null): string {
   return (s && BADGE[s]) || "—";
 }
 
 /** Risk / EPSS / KEV / verified annotations, when present. */
-function riskTag(f: Finding): string {
+export function riskTag(f: Finding): string {
   const parts: string[] = [];
   if (typeof f.risk === "number") parts.push(`risk ${f.risk}`);
   if (typeof f.epss === "number") parts.push(`EPSS ${(f.epss * 100).toFixed(1)}%`);
@@ -38,7 +41,7 @@ function riskTag(f: Finding): string {
 }
 
 /** Deterministic blame/owner provenance, when present (opt-in `--blame`). */
-function provTag(f: Finding): string {
+export function provTag(f: Finding): string {
   const p = f.provenance;
   if (!p) return "";
   const who = [p.author, p.date].filter(Boolean).join(" · ");
@@ -46,13 +49,13 @@ function provTag(f: Finding): string {
 }
 
 /** "agreed by a, b" when multiple scanners corroborate; else "via <tool>". */
-function sourcesTag(f: Finding): string {
+export function sourcesTag(f: Finding): string {
   const s = f.sources && f.sources.length ? f.sources : f.tool !== "ultrasec" ? [f.tool] : [];
   if (s.length > 1) return `agreed by ${s.join(", ")}`;
   return f.tool !== "ultrasec" ? `via ${f.tool}` : "";
 }
 
-function pathLine(f: Finding): string {
+export function pathLine(f: Finding): string {
   if (f.path?.length) return f.path.map((p) => `\`${p.file}:${p.line}\``).join(" → ");
   if (f.sink) return `\`${f.sink.file}:${f.sink.line}\``;
   return "—";
@@ -176,7 +179,7 @@ export function renderSummary(d: Dossier, narrative?: Narrative): string {
  * being read as a clean bill of health, plus any scanner that died — three of
  * nine did on the run that prompted it, one of them the only IaC scanner.
  */
-function coverageCaveat(d: Dossier): string[] {
+export function coverageCaveat(d: Dossier): string[] {
   const rows = buildCoverage(d, enumeratedKindsOf(d.findings));
   const unexamined = rows.filter((r) => r.state === "unexamined");
   const failed = (d.manifest.toolStatus ?? []).filter((s) => s.status === "failed");
@@ -265,7 +268,7 @@ function renderFinding(f: Finding, opts: { mermaid?: boolean; remediation?: Reme
  * several, and dropping that would make a two-workspace monorepo look like a
  * one-workspace problem.
  */
-function tierTable(findings: readonly Finding[]): string[] {
+export function tierTable(findings: readonly Finding[]): string[] {
   const L = [`| | finding | where | why |`, `|---|---|---|---|`];
   const row = (f: Finding, count: number): string => {
     const ground = f.brocard ? `**${f.brocard}**` : (f.verdict ?? "");
@@ -343,7 +346,7 @@ function tierSections(findings: readonly Finding[], rem: Map<string, Remediation
  * list and stopping at the bar is the prescribed outcome. An unread cross-file
  * flow is not — deciding it means opening the file.
  */
-function incompleteBanner(d: Dossier): string[] {
+export function incompleteBanner(d: Dossier): string[] {
   const policy = d.manifest.scannerPolicy;
   const scanner =
     policy && !policy.complete

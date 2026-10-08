@@ -487,6 +487,45 @@ function kindsOf(f: Finding): string[] {
   return [f.category, f.sink?.kind, f.cwe].filter((x): x is string => Boolean(x));
 }
 
+/**
+ * The OWASP Top 10 (2021) item a finding falls under, by the same kind matching
+ * the coverage matrix uses — so a finding card and the coverage table can never
+ * file one finding under two different items. The first matching item wins
+ * (the list is in the standard's own order). Undefined when nothing matches.
+ */
+export function owaspTop10Of(f: Finding): { id: string; title: string } | undefined {
+  const kinds = kindsOf(f);
+  const cats = STANDARDS["owasp-top10"]!.categories;
+  // A scanner finding carries a CWE but no sink kind, and the pack keys
+  // injection/SSRF on sink kinds. These CWEs are the ones OWASP itself files
+  // under those items; used for LABELLING only, never for coverage scoring.
+  const byCwe = f.cwe ? CWE_TOP10_FALLBACK[f.cwe] : undefined;
+  const hit = cats.find((c) => (c.kinds ?? []).some((k) => kinds.includes(k))) ?? cats.find((c) => c.id === byCwe);
+  return hit ? { id: hit.id, title: hit.title } : undefined;
+}
+
+const CWE_TOP10_FALLBACK: Readonly<Record<string, string>> = {
+  "CWE-22": "A01",
+  "CWE-23": "A01",
+  "CWE-284": "A01",
+  "CWE-285": "A01",
+  "CWE-639": "A01",
+  "CWE-862": "A01",
+  "CWE-863": "A01",
+  "CWE-77": "A03",
+  "CWE-78": "A03",
+  "CWE-79": "A03",
+  "CWE-89": "A03",
+  "CWE-90": "A03",
+  "CWE-94": "A03",
+  "CWE-95": "A03",
+  "CWE-643": "A03",
+  "CWE-917": "A03",
+  "CWE-943": "A03",
+  "CWE-1336": "A03",
+  "CWE-918": "A10",
+};
+
 /** The kinds a run enumerated — every category, sink kind and CWE its findings
  *  carry. Shared by the `coverage` command and the report renderer so the two
  *  can never disagree about what "engine covered" means. */

@@ -33,8 +33,10 @@ describe("required scanner completion policy", () => {
     expect(readFileSync(join(result.out, "DOSSIER.md"), "utf8")).toContain("INCOMPLETE");
     expect(runCheck(parseArgs(["check", "--run", result.out]))).toBe(1);
     expect(runRender(parseArgs(["render", "--run", result.out]))).toBe(1);
-    for (const file of ["SUMMARY.md", "REPORT.md", "index.html"])
-      expect(readFileSync(join(result.out, file), "utf8")).toContain("Required scanners incomplete");
+    // The one report carries it as a DRAFT reason — the banner is what travels.
+    const report = readFileSync(join(result.out, "REPORT.md"), "utf8");
+    expect(report).toContain("DRAFT");
+    expect(report).toContain("required scanner(s) did not complete: gitleaks");
   });
   it("accepts a required scanner that actually ran and returned zero findings", async () => {
     const result = await scan(["--require-tools", "gitleaks", "--scope", "src"], [{ name: "gitleaks", ran: true, ok: true, findings: [], note: "0 findings" }]);

@@ -79,12 +79,21 @@ describe("render gate", () => {
     expect(runRender({ _: ["render"], flags: { run, "no-journal": true } })).toBe(1);
   });
 
-  it("writes every artifact anyway — a refused report is worse than a flagged one", () => {
+  it("writes the report anyway — a refused report is worse than a flagged one", () => {
     seed([finding()]);
     runRender({ _: ["render"], flags: { run, "no-journal": true } });
+    const md = readFileSync(join(run, "REPORT.md"), "utf8");
+    expect(md).toContain("DRAFT");
+    // ONE report: the previous layout's companions are not written by default.
+    for (const name of ["SUMMARY.md", "index.html", "REPORT.html"]) expect(existsSync(join(run, name)), name).toBe(false);
+  });
+
+  it("--legacy still writes the previous trio, each carrying the banner", () => {
+    seed([finding()]);
+    runRender({ _: ["render"], flags: { run, legacy: true, "no-journal": true } });
     for (const name of ["SUMMARY.md", "REPORT.md", "index.html"]) {
       expect(existsSync(join(run, name)), name).toBe(true);
-      expect(readFileSync(join(run, name), "utf8").length).toBeGreaterThan(0);
+      expect(readFileSync(join(run, name), "utf8")).toContain("Incomplete audit");
     }
   });
 

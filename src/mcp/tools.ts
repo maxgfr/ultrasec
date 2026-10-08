@@ -186,12 +186,18 @@ export const TOOLS: ToolDecl[] = [
     name: "ultrasec_render",
     title: "Render the audit report",
     description:
-      "Turn the run plus the narrative you wrote into SUMMARY.md, REPORT.md and a self-contained index.html. Run it after ultrasec_check passes — " +
+      "Turn the run plus the narrative you wrote (<run>/NARRATIVE.json is folded automatically) into ONE report: REPORT.md, or a self-contained REPORT.html with html=true. Dismissals are summarised; full=true restores every exhaustive table. Run it after ultrasec_check passes — " +
       "rendering an unvalidated run just makes an ungrounded report look finished. " +
       RUN_NOTE,
     inputSchema: {
       type: "object",
-      properties: { repo: repoProp, run: runProp, narrative: { type: "string", description: "Absolute path to the NARRATIVE.json you authored." } },
+      properties: {
+        repo: repoProp,
+        run: runProp,
+        narrative: { type: "string", description: "Absolute path to a NARRATIVE.json other than <run>/NARRATIVE.json." },
+        html: { type: "boolean", description: "Write REPORT.html (self-contained) instead of REPORT.md." },
+        full: { type: "boolean", description: "Exhaustive annexes: every dismissal, every undecided candidate, every location." },
+      },
       required: ["repo"],
     },
   },

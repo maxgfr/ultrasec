@@ -1,77 +1,103 @@
-# Security audit — report
+# Security audit report
 
-repo `examples/vuln-express` · ultrasec 0.0.0-development  
-findings: **4** — 🟥 CRITICAL 1 · 🟧 HIGH 1 · 🟨 MEDIUM 1 · 🟩 LOW 1 · ⬜ INFO 0  
-tools: none (graph + taint only)  
-_ranked by composite risk (severity ⊕ EPSS ⊕ KEV)_
+`examples/vuln-express` · ultrasec 0.0.0-development · 4 candidate(s) · citations resolve
 
-## Executive summary (AI-authored)
+**Status:** ✅ adjudicated & grounded — 2 confirmed · 1 needs human · 0 undecided · 1 dismissed
+
+**Contents:** [1. Executive summary](#1-executive-summary) · [2. Dashboard](#2-dashboard) · [3. Attack chains](#3-attack-chains) · [4. Follow-up vs previous audit](#4-follow-up-vs-previous-audit) · [5. Detailed findings](#5-detailed-findings) · [6. Secrets & history](#6-secrets--history) · [7. CI/CD & infrastructure exposure](#7-cicd--infrastructure-exposure) · [8. Dependencies](#8-dependencies) · [9. Hardening notes](#9-hardening-notes) · [10. Coverage & limits](#10-coverage--limits) · [11. Remediation plan](#11-remediation-plan) · [Annex A — Dismissed candidates](#annex-a--dismissed-candidates) · [Annex B — Needs human review](#annex-b--needs-human-review) · [Annex C — Engines & usage](#annex-c--engines--usage)
+
+## 1. Executive summary
+
 _AI-authored — verify against the cited findings before acting._
 
 Two confirmed injection flaws in a public Express API. Untrusted req.query values cross file boundaries into a raw SQL statement and a shell command, with no validation on any hop and no authentication on either route, so both are exploitable by any unauthenticated client — command injection first, which yields code execution as the app user. Both come from the same habit: request values handed straight to a helper that builds an interpreter string.
 
-## What the codebase does well (AI-authored)
+**2 confirmed** (1 critical, 1 high), **1 awaiting a human decision**, out of 4 candidates.
+
+Most urgent:
+
+- 🟥 CRITICAL OS command injection: untrusted input reaches execSync() — src (`3ffa0917b004`)
+- 🟧 HIGH SQL injection: untrusted input reaches query() — src (`54b733703450`)
+
+## 2. Dashboard
+
+| severity | confirmed | needs human | undecided | dismissed | total |
+|---|---|---|---|---|---|
+| 🟥 CRITICAL | 1 | 0 | 0 | 0 | 1 |
+| 🟧 HIGH | 1 | 0 | 0 | 0 | 1 |
+| 🟨 MEDIUM | 0 | 0 | 0 | 1 | 1 |
+| 🟩 LOW | 0 | 1 | 0 | 0 | 1 |
+| ⬜ INFO | 0 | 0 | 0 | 0 | 0 |
+
+| surface | confirmed | needs human | undecided | dismissed |
+|---|---|---|---|---|
+| source code | 2 | 0 | 0 | 1 |
+| secrets | 0 | 0 | 0 | 0 |
+| CI/CD & infra | 0 | 1 | 0 | 0 |
+| dependencies | 0 | 0 | 0 | 0 |
+
+By area (live candidates; areas are detected workspaces, else the first two path segments):
+
+| area | critical | high | medium | low/info | of which decided | undecided |
+|---|---|---|---|---|---|---|
+| `src` | 1 | 1 | 0 | 1 | 3 | 0 |
+
+## 3. Attack chains
+
 _AI-authored — verify against the cited findings before acting._
 
-The data layer already knows how to do this correctly — db.getUserSafe (src/db.js:11) uses a `?` placeholder with a parameter array, so the parameterized path exists and is the one to standardize on. The two findings below are deviations from it, not a missing capability.
+### Unauthenticated code execution, then data access
 
-## Confirmed (2)
+Steps: OS command injection: untrusted input reaches execSync() (`3ffa0917b004`) → SQL injection: untrusted input reaches query() (`54b733703450`)
 
-### 🟥 CRITICAL OS command injection: untrusted input reaches execSync()
+Neither route requires authentication. GET /report gives shell execution as the app user (report.js:5), which already reaches the database file directly; GET /user independently returns arbitrary rows (db.js:6). Fixing only the SQL injection leaves the stronger path intact.
 
-`3ffa0917b004` · [CWE-78](https://cwe.mitre.org/data/definitions/78.html) · taint · status **confirmed** · verdict supported · confidence high
+## 4. Follow-up vs previous audit
 
-**Risk:** risk 60
+| outcome | count | examples |
+|---|---|---|
+| ✅ fixed | 0 | — |
+| ⏳ still present | 2 | OS command injection: untrusted input reaches execSync() (`3ffa0917b004`), SQL injection: untrusted input reaches query() (`54b733703450`) |
+| ❓ escalated / uncertain | 0 | — |
+| 🆕 new since (not revalidated) | 1 | Web misconfig — No security-headers middleware where the app is built (`698ed561f7dd`) |
 
-**Path:** `src/server.js:18` → `src/server.js:19` → `src/report.js:5`
+_Per-finding table: `render --full` (annex D)._
 
-Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
+## 5. Detailed findings
 
-Verdict (supported): req.query.name is concatenated into a shell string at report.js:5 and executed with execSync; no validation on any hop, and the route has no auth.
+Confirmed and needs-human findings in this repository's own code, by severity then area. A repeated finding is one card.
 
-Revalidation (still-valid): report.js:5 is unchanged at HEAD — still execSync on a concatenated string.
+### 5.1 Critical (1)
 
-**Exploit path:** GET /report?name=x;sleep%205 · unauthenticated → the response takes 5s (baseline ~40ms), proving shell execution as the app user
+#### Area `src`
 
-**Suggested fix (AI):** Replace execSync with execFile and an argv array: execFile("generate-report", ["--for", name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can't be read as an option. · owner @backend
+##### 🟥 CRITICAL OS command injection: untrusted input reaches execSync()
+
+`3ffa0917b004` · area `src` · CWE-78 · OWASP A03 Injection · priority **P0** · effort — · confirmed (supported) · found by ultrasec
+
+- **Where:** `src/server.js:18` → `src/server.js:19` → `src/report.js:5`
+- **Attacker scenario:** GET /report?name=x;sleep%205 · unauthenticated → the response takes 5s (baseline ~40ms), proving shell execution as the app user
+- **Fix:** Replace execSync with execFile and an argv array: execFile("generate-report", ["--for", name]). An argv array removes the shell, but it does not stop argument injection — validate `name` against an allow-list (or pass it after a `--` terminator) so it can't be read as an option. · owner @backend
 
 ```diff
 - return execSync("generate-report --for " + name).toString();
 + return execFileSync("generate-report", ["--for", "--", name]).toString();
 ```
 
-```mermaid
-flowchart LR
-  n0["SOURCE<br/>src/server.js:18"]
-  n1["hop<br/>src/server.js:19"]
-  n2["SINK<br/>src/report.js:5<br/>runReport()"]
-  n0 --> n1
-  n1 --> n2
-  classDef src fill:#fde68a,stroke:#b45309;
-  classDef snk fill:#fecaca,stroke:#b91c1c;
-  class n0 src;
-  class n2 snk;
-```
+- **Notes:** Verdict (supported): req.query.name is concatenated into a shell string at report.js:5 and executed with execSync; no validation on any hop, and the route has no auth. · Revalidation (still-valid): report.js:5 is unchanged at HEAD — still execSync on a concatenated string. · risk 60
+- **Evidence:** Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data ac…
 
-References: <https://cwe.mitre.org/data/definitions/78.html>
+### 5.2 High (1)
 
-### 🟧 HIGH SQL injection: untrusted input reaches query()
+#### Area `src`
 
-`54b733703450` · [CWE-89](https://cwe.mitre.org/data/definitions/89.html) · taint · status **confirmed** · verdict supported · confidence high
+##### 🟧 HIGH SQL injection: untrusted input reaches query()
 
-**Risk:** risk 48
+`54b733703450` · area `src` · CWE-89 · OWASP A03 Injection · priority **P1** · effort — · confirmed (supported) · found by ultrasec
 
-**Path:** `src/server.js:10` → `src/server.js:11` → `src/db.js:6`
-
-Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
-
-Verdict (supported): req.query.id is concatenated into SQL at db.js:5 and reaches sqlite.query() with no parameter array. The parameterized sibling getUserSafe (db.js:11) is NOT on this path.
-
-Revalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation it consumes is still at db.js:5.
-
-**Exploit path:** GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`, proving the value is parsed as SQL, not data
-
-**Suggested fix (AI):** Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query("SELECT * FROM users WHERE id = ?", [id]). · owner @backend
+- **Where:** `src/server.js:10` → `src/server.js:11` → `src/db.js:6`
+- **Attacker scenario:** GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of `users`, proving the value is parsed as SQL, not data
+- **Fix:** Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query("SELECT * FROM users WHERE id = ?", [id]). · owner @backend
 
 ```diff
 - const sql = "SELECT * FROM users WHERE id = " + id;
@@ -79,73 +105,51 @@ Revalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation 
 + return sqlite.query("SELECT * FROM users WHERE id = ?", [id]);
 ```
 
-```mermaid
-flowchart LR
-  n0["SOURCE<br/>src/server.js:10"]
-  n1["hop<br/>src/server.js:11"]
-  n2["SINK<br/>src/db.js:6<br/>getUser()"]
-  n0 --> n1
-  n1 --> n2
-  classDef src fill:#fde68a,stroke:#b45309;
-  classDef snk fill:#fecaca,stroke:#b91c1c;
-  class n0 src;
-  class n2 snk;
-```
+- **Notes:** Verdict (supported): req.query.id is concatenated into SQL at db.js:5 and reaches sqlite.query() with no parameter array. The parameterized sibling getUserSafe (db.js:11) is NOT on this path. · Revalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation it consumes is still at db.js:5. · risk 48
+- **Evidence:** Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.
 
-References: <https://cwe.mitre.org/data/definitions/89.html>
+## 6. Secrets & history
 
-## Needs human review (1)
+_No live secret finding._
 
-### 🟩 LOW Web misconfig — No security-headers middleware where the app is built
+## 7. CI/CD & infrastructure exposure
 
-`698ed561f7dd` · [CWE-693](https://cwe.mitre.org/) · config · status **needs-human** · verdict partial · confidence medium
+Workflows, infrastructure-as-code and security configuration — read as a diff, one row per class.
 
-**Risk:** risk 15
+| priority | worst | class | verdicts | where |
+|---|---|---|---|---|
+| P2 | 🟩 LOW | Web misconfig — No security-headers middleware where the app is built | 1 needs-human | `src/server.js:5` |
 
-**Path:** `src/server.js:5`
+##### 🟩 LOW Web misconfig — No security-headers middleware where the app is built
 
-The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to check.
+`698ed561f7dd` · area `src` · CWE-693 · OWASP A05 Security misconfiguration · priority **P2** · effort — · needs-human (partial) · found by ultrasec
 
-Evidence: `const app = express();`
+- **Where:** `src/server.js:5`
+- **Attacker scenario:** _not established — that is why it needs a human (see notes)._
+- **Notes:** Verdict (partial): server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options. Real, but a hardening gap rather than an exploit on its own: what it costs depends on whether a reverse proxy in front sets these headers, which the repo cannot show. · risk 15
+- **Evidence:** The file constructs the application and registers no `helmet()` / `secureHeaders()` / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to c…
 
-Verdict (partial): server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options. Real, but a hardening gap rather than an exploit on its own: what it costs depends on whether a reverse proxy in front sets these headers, which the repo cannot show.
+## 8. Dependencies
 
-## Refuted (1)
+_No live dependency advisory._
 
-Kept so the refutations can be disagreed with: **why** carries the named ground and the
-argument that was actually made.
+## 9. Hardening notes
 
-| | finding | where | why |
-|---|---|---|---|
-| 🟨 MEDIUM | Cross-site scripting (reflected): untrusted input reaches send() <code>9b0bcc91ea6a</code> | `src/server.js:18` → `src/server.js:20` | unsupported — Verdict (unsupported): The argument to res.send() at server.js:20 is `out` — the return value of runReport() — not req.query.name, so the query parameter is never reflected. The attacker does control that output, but only by way of the command injection at report.js:5, whose impact (RCE) subsumes it; reporting a separate MEDIUM XSS would double-count one bug. Tracked by 3ffa0917b004. |
+_AI-authored — verify against the cited findings before acting. Defense in depth — **not** findings, excluded from every count._
 
-_The compact tiers above carry every finding's id, location, severity and adjudication — what is dropped is the engine's own boilerplate, the diagrams and the CWE links, all of which are in `findings.json`._
-
-## Attack chains (AI-authored)
-_AI-authored — verify against the cited findings before acting._
-
-### Unauthenticated code execution, then data access
-- findings: `3ffa0917b004` → `54b733703450`
-
-Neither route requires authentication. GET /report gives shell execution as the app user (report.js:5), which already reaches the database file directly; GET /user independently returns arbitrary rows (db.js:6). Fixing only the SQL injection leaves the stronger path intact.
-
-## Root-cause groups (AI-authored)
-_AI-authored — verify against the cited findings before acting._
-
-### Request values handed to a helper that builds an interpreter string
-- findings: `3ffa0917b004`, `54b733703450`
-
-Both handlers read req.query.* and pass it, unvalidated, to a helper that concatenates it into SQL or a shell command. The fix is structural, not per-site: bind parameters at the data layer and use argv arrays for process execution, then add validation at the route boundary so a future helper inherits neither habit.
-
-## Hardening notes (AI-authored)
-_AI-authored — verify against the cited findings before acting._
-
-_Defense-in-depth suggestions — **not** findings (the attack is already prevented elsewhere); excluded from the severity counts._
+**What the codebase does well:** The data layer already knows how to do this correctly — db.getUserSafe (src/db.js:11) uses a `?` placeholder with a parameter array, so the parameterized path exists and is the one to standardize on. The two findings below are deviations from it, not a missing capability.
 
 - Neither route validates the shape of its input before use (an integer id, a report name from a known set). Type/shape validation at the boundary is defense in depth once the two fixes above land — it is not what makes them exploitable today.
 - res.send() at server.js:20 returns command output with the default text/html content type. Once the command injection is fixed the attacker no longer controls that body, but setting an explicit content type (or res.json) removes the reflected-content question entirely.
 
-## Coverage (OWASP ASVS)
+## 10. Coverage & limits
+
+**Not looked at / limits:**
+
+- no external scanner ran — graph + taint only
+- static analysis only: no DAST, no fuzzing, no authenticated crawling, no runtime testing
+
+### Coverage (OWASP ASVS)
 
 What this audit looked at, and what it did not. A category marked **not examined** is not
 a clean bill of health — it is a gap in the audit, and it belongs in the report.
@@ -166,7 +170,7 @@ a clean bill of health — it is a gap in the audit, and it belongs in the repor
 | V13 | API & web service | ⬜ **not examined** | — |
 | V14 | Configuration & supply chain | ✅ examined | 1 |
 
-### Not examined (11)
+#### Not examined (11)
 
 - **V1 Architecture & threat modelling** — Did CONTEXT.md establish a trust model and a threat model, or was severity rated in the abstract?
 - **V2 Authentication** — Password/OTP/session-establishment paths read? Credential comparison constant-time?
@@ -180,7 +184,7 @@ a clean bill of health — it is a gap in the audit, and it belongs in the repor
 - **V12 Files & resources** — Traversal and zip-slip are enumerated; upload type/size/AV policy is not.
 - **V13 API & web service** — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.
 
-### Answer these explicitly (9)
+#### Answer these explicitly (9)
 
 No deterministic signal can establish coverage here. For each, write either a finding or
 one line saying **why it does not apply to this repo** — "not applicable" without a
@@ -196,7 +200,7 @@ reason is how coverage silently shrinks between audits.
 - **V11 Business logic** — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance. Anti-automation is partly enumerated: `scan` finds unbounded similarity/distance calls (CWE-407), `guards --lens throttle` finds handlers nothing rate-limits.
 - **V13 API & web service** — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.
 
-### Weakness classes × frameworks
+#### Weakness classes × frameworks
 
 Each detected framework against each weakness class: matched by a pack (`✅`), not applicable (`➖`),
 handed to the AI hunt (`🔎` pending, `🧭` done), or **not covered**. A `⚠` cell is degraded — no framework
@@ -223,5 +227,56 @@ Degraded or uncovered (1): express — pack express has no idiom for this class.
 Run `ultrasec investigate` — it emits one hunt per such cell.
 
 
+## 11. Remediation plan
+
+Root causes (AI-authored — verify against the cited findings before acting.) — fixing one closes every finding under it:
+
+- **Request values handed to a helper that builds an interpreter string** (`3ffa0917b004`, `54b733703450`) — Both handlers read req.query.* and pass it, unvalidated, to a helper that concatenates it into SQL or a shell command. The fix is structural, not per-site: bind parameters at the data layer and use argv arrays for process execution, then add validation at the route boundary so a future helper inherits neither habit.
+
+### P0 — fix now (1)
+
+- [ ] **OS command injection: untrusted input reaches execSync()** · `src` · `3ffa0917b004` — Replace execSync with execFile and an argv array: execFile("generate-report", ["--for", name]). An argv array removes the shell, but it doe…
+
+### P1 — this sprint (1)
+
+- [ ] **SQL injection: untrusted input reaches query()** · `src` · `54b733703450` — Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query("SELECT * FROM users WHERE id = ?", [id]).
+
+### P2 — planned (1)
+
+- [ ] **Decide: Web misconfig — No security-headers middleware where the app is built** · `src` · `698ed561f7dd`
+
+## Annex A — Dismissed candidates
+
+1 candidate(s) dismissed — summarised. Every one keeps its id, ground and argument in `findings.json`; `render --full` lists them all.
+
+| ground | count | meaning |
+|---|---|---|
+| **dismissed — no ground recorded** | 1 |  |
+
+| produced by | count |
+|---|---|
+| ultrasec | 1 |
+
+By shape:
+
+| candidate shape | count | areas |
+|---|---|---|
+| Cross-site scripting (reflected): untrusted input reaches send() | 1 | `src` |
+
+## Annex B — Needs human review
+
+- 🟩 LOW Web misconfig — No security-headers middleware where the app is built — `src` — `src/server.js:5` `698ed561f7dd` — Verdict (partial): server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options…
+
+## Annex C — Engines & usage
+
+- engine: ultrasec 0.0.0-development (schema 11) · extraction cache, AST
+- languages: javascript
+- stack: Express 4.17.1
+
+External scanners: none — graph + taint only.
+
+Run directory: `REPORT.md` · `REPORT.html` · `findings.json` · `manifest.json` · `CONTEXT.md` · `NARRATIVE.json`.
+
 ---
-Engine: ultrasec 0.0.0-development. Taint candidates are deterministic; external-tool results depend on installed scanners.
+
+_Engine: ultrasec 0.0.0-development. Taint candidates are deterministic; external-tool results depend on installed scanners. Every finding keeps its own id in `findings.json`; this report groups and summarises, it never merges or decides. Exhaustive annexes: `ultrasec render --full`._

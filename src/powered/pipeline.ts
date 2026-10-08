@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadDossier, writeDossier, countBySeverity, type Dossier } from "../store.js";
-import { emitWorklist, persistFindings, stageFiles } from "../stage.js";
+import { emitWorklist, persistFindings, stageFiles, wantsMdTwin } from "../stage.js";
 import { scanRepo, extractionTier, type ScanOptions } from "../scan.js";
 import { buildGraph } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
@@ -9,10 +9,10 @@ import { buildAttackSurface } from "../map.js";
 import { VERSION, SCHEMA_VERSION, type Finding, type Manifest, type Status } from "../types.js";
 import { isHigh } from "../verify.js";
 import { check } from "../check.js";
-import { renderSummary, renderReport } from "../render/report.js";
-import { renderHtml } from "../render/html.js";
+import { deliverReport, runNarrative, type DeliverOptions } from "../render/deliver.js";
+import type { ReportStatus } from "../render/audit-report.js";
 
-import { buildContextScaffold, renderContextScaffoldMd, loadContextDoc } from "../context.js";
+import { buildContextScaffold, renderContextScaffoldMd, loadContextDoc, CONTEXT_OUTLINE } from "../context.js";
 import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from "../triage.js";
 import { buildInvestigateWorklist, renderInvestigateMd, ingestDiscoveries, parseDiscoveries } from "../investigate.js";
 import { buildClassHunts, parseHuntResults, recordHuntResults } from "../classes/hunt.js";
@@ -23,7 +23,7 @@ import { buildAssumptionWorklist, renderAssumptionsMd, parseAssumptionResults, r
 import { buildVariantWorklist, renderVariantsMd, parseVariantResults, renderRegressionRules } from "../variants.js";
 import { detectedIds } from "../classes/markers.js";
 import { buildGuardMatrix, renderGuardsMd, parseGuardVerdicts, guardDiscovery, LENSES } from "../guards.js";
-import { buildNarrativeWorklist, renderNarrativeWorklistMd, parseNarrative, mergeNarrative, hasNarrativeContent } from "../narrative.js";
+import { buildNarrativeWorklist, renderNarrativeWorklistMd } from "../narrative.js";
 import { buildImplementWorklist, renderImplementMd, loadNarrative } from "../implement.js";
 import type { AgentRunner } from "./agent.js";
 import { formatDropped, type ParseResult } from "../apply-parse.js";
@@ -62,8 +62,9 @@ export const ALL_STAGES = [
 export type StageName = (typeof ALL_STAGES)[number];
 
 interface StageDef {
-  /** Emit the worklist; return the brief path (for the TODO list) + the file the agent writes. */
-  emit(repo: string, run: string, dossier: Dossier): { worklist: string; outName: string };
+  /** Emit the worklist; return its path (the JSON the agent reads) + the file the agent writes.
+   *  `md` also writes the human brief twin (see stage.ts for why it is opt-in). */
+  emit(repo: string, run: string, dossier: Dossier, md: boolean): { worklist: string; outName: string };
   /** Pure apply for the agent's output → new findings (absent for context/narrative). */
   applyPure?(repo: string, run: string, dossier: Dossier, raw: string): Finding[];
   /** Whether a `--cross-check` second agent reconciles this stage. */
@@ -106,24 +107,24 @@ function rowsOf<T>(stage: string, parsed: ParseResult<T>): T[] {
 const STAGES: Record<StageName, StageDef> = {
   context: {
     crossCheckable: false,
-    emit(repo, run) {
+    emit(repo, run, _dossier, md) {
       const scan = scanRepo(repo);
       const scaffold = buildContextScaffold(repo, scan, buildAttackSurface(scan));
-      writeFileSync(join(run, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
-      const wl = join(run, "CONTEXT.todo.md");
-      writeFileSync(wl, renderContextScaffoldMd(repo, run, scaffold));
+      const wl = join(run, "CONTEXT.scaffold.json");
+      writeFileSync(wl, JSON.stringify(scaffold, null, 2));
+      if (md) writeFileSync(join(run, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, run, scaffold));
       return { worklist: wl, outName: "CONTEXT.md" };
     },
     instruction: (repo, run, worklist, outPath) =>
-      `Security audit of ${repo}. Read the project-context scaffold at ${worklist} and author a concise CONTEXT.md (purpose, trust model, auth/authorization scheme, framework protections) at ${outPath}. ${UNTRUSTED}`,
+      `Security audit of ${repo}. Read the project-context scaffold (JSON) at ${worklist} and author a concise CONTEXT.md at ${outPath} covering: ${CONTEXT_OUTLINE.join("; ")}. ${UNTRUSTED}`,
   },
   assumptions: {
     crossCheckable: false,
-    emit(repo, run) {
+    emit(repo, run, _dossier, md) {
       const items = buildAssumptionWorklist(scanRepo(repo));
       const f = stageFiles("ASSUMPTIONS");
-      emitWorklist(run, f, items, renderAssumptionsMd(items, loadContextDoc(run)));
-      return { worklist: join(run, f.md), outName: "ASSUMPTIONS.json" };
+      const worklist = emitWorklist(run, f, items, () => renderAssumptionsMd(items, loadContextDoc(run)), { md });
+      return { worklist, outName: "ASSUMPTIONS.json" };
     },
     // Deliberately no `applyPure`: this stage produces UNDERSTANDING, not
     // findings. Its output is the map plus the leads that `investigate` picks up
@@ -139,11 +140,11 @@ const STAGES: Record<StageName, StageDef> = {
   },
   triage: {
     crossCheckable: false,
-    emit(repo, run, dossier) {
+    emit(repo, run, dossier, md) {
       const items = buildTriageWorklist(dossier);
       const f = stageFiles("TRIAGE");
-      emitWorklist(run, f, items, renderTriageMd(items, loadContextDoc(run)));
-      return { worklist: join(run, f.md), outName: "TRIAGE.json" };
+      const worklist = emitWorklist(run, f, items, () => renderTriageMd(items, loadContextDoc(run)), { md });
+      return { worklist, outName: "TRIAGE.json" };
     },
     applyPure: (_repo, _run, dossier, raw) => applyTriage(dossier, rowsOf("triage", parseTriage(raw))).findings,
     instruction: (repo, run, worklist, outPath) =>
@@ -155,11 +156,11 @@ const STAGES: Record<StageName, StageDef> = {
   // contained none of the app's routes at all.
   guards: {
     crossCheckable: false,
-    emit(repo, run) {
+    emit(repo, run, _dossier, md) {
       const rows = buildGuardMatrix(scanRepo(repo), "auth", [], { detected: runStack(run) });
       const f = stageFiles("GUARDS");
-      emitWorklist(run, f, rows, renderGuardsMd(rows, loadContextDoc(run)));
-      return { worklist: join(run, f.md), outName: "GUARDS.json" };
+      const worklist = emitWorklist(run, f, rows, () => renderGuardsMd(rows, loadContextDoc(run)), { md });
+      return { worklist, outName: "GUARDS.json" };
     },
     applyPure: (repo, run, dossier, raw) => {
       const byId = new Map(buildGuardMatrix(scanRepo(repo), "auth", [], { detected: detectedIds(dossier.manifest.frameworks) }).map((r) => [r.id, r]));
@@ -180,11 +181,11 @@ const STAGES: Record<StageName, StageDef> = {
   // should already know about when it picks where to look.
   throttle: {
     crossCheckable: false,
-    emit(repo, run) {
+    emit(repo, run, _dossier, md) {
       const rows = buildGuardMatrix(scanRepo(repo), "throttle", [], { detected: runStack(run) });
       const f = stageFiles(LENSES.throttle.stem);
-      emitWorklist(run, f, rows, renderGuardsMd(rows, loadContextDoc(run), "throttle"));
-      return { worklist: join(run, f.md), outName: "THROTTLE.json" };
+      const worklist = emitWorklist(run, f, rows, () => renderGuardsMd(rows, loadContextDoc(run), "throttle"), { md });
+      return { worklist, outName: "THROTTLE.json" };
     },
     applyPure: (repo, run, dossier, raw) => {
       const byId = new Map(buildGuardMatrix(scanRepo(repo), "throttle", [], { detected: detectedIds(dossier.manifest.frameworks) }).map((r) => [r.id, r]));
@@ -202,12 +203,12 @@ const STAGES: Record<StageName, StageDef> = {
   },
   investigate: {
     crossCheckable: false,
-    emit(repo, run, dossier) {
+    emit(repo, run, dossier, md) {
       const surface = buildAttackSurface(scanRepo(repo));
       const regions = buildInvestigateWorklist(surface, dossier.graph, [], undefined, buildClassHunts(dossier.manifest, surface));
       const f = stageFiles("INVESTIGATE");
-      emitWorklist(run, f, regions, renderInvestigateMd(regions, loadContextDoc(run)));
-      return { worklist: join(run, f.md), outName: "INVESTIGATE.json" };
+      const worklist = emitWorklist(run, f, regions, () => renderInvestigateMd(regions, loadContextDoc(run)), { md });
+      return { worklist, outName: "INVESTIGATE.json" };
     },
     applyPure: (repo, run, dossier, raw) =>
       ingestDiscoveries(dossier, rowsOf("investigate", parseDiscoveries(raw)), repo, { context: loadContextDoc(run) }).findings,
@@ -227,11 +228,11 @@ const STAGES: Record<StageName, StageDef> = {
   },
   verify: {
     crossCheckable: true,
-    emit(repo, run, dossier) {
+    emit(repo, run, dossier, md) {
       const items = buildWorklist(dossier);
       const f = stageFiles("VERIFY");
-      emitWorklist(run, f, items, renderWorklistMd(items, loadContextDoc(run)));
-      return { worklist: join(run, f.md), outName: "verdicts.json" };
+      const worklist = emitWorklist(run, f, items, () => renderWorklistMd(items, loadContextDoc(run)), { md });
+      return { worklist, outName: "verdicts.json" };
     },
     applyPure: (_repo, _run, dossier, raw) => applyVerdicts(dossier, rowsOf("verify", parseVerdicts(raw))).findings,
     instruction: (repo, run, worklist, outPath) =>
@@ -239,11 +240,11 @@ const STAGES: Record<StageName, StageDef> = {
   },
   revalidate: {
     crossCheckable: true,
-    emit(repo, run, dossier) {
+    emit(repo, run, dossier, md) {
       const items = buildRevalidateWorklist(dossier, repo);
       const f = stageFiles("REVALIDATE");
-      emitWorklist(run, f, items, renderRevalidateMd(items, loadContextDoc(run)));
-      return { worklist: join(run, f.md), outName: "REVALIDATE.json" };
+      const worklist = emitWorklist(run, f, items, () => renderRevalidateMd(items, loadContextDoc(run)), { md });
+      return { worklist, outName: "REVALIDATE.json" };
     },
     applyPure: (repo, _run, dossier, raw) =>
       applyRevalidations(dossier, rowsOf("revalidate", parseRevalidations(raw)), revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo))).findings,
@@ -252,11 +253,11 @@ const STAGES: Record<StageName, StageDef> = {
   },
   variants: {
     crossCheckable: false,
-    emit(repo, run, dossier) {
+    emit(repo, run, dossier, md) {
       const items = buildVariantWorklist(dossier);
       const f = stageFiles("VARIANTS");
-      emitWorklist(run, f, items, renderVariantsMd(items, loadContextDoc(run)));
-      return { worklist: join(run, f.md), outName: "VARIANTS.json" };
+      const worklist = emitWorklist(run, f, items, () => renderVariantsMd(items, loadContextDoc(run)), { md });
+      return { worklist, outName: "VARIANTS.json" };
     },
     applyPure: (repo, run, dossier, raw) =>
       ingestDiscoveries(
@@ -274,22 +275,23 @@ const STAGES: Record<StageName, StageDef> = {
   },
   narrative: {
     crossCheckable: false,
-    emit(repo, run, dossier) {
+    emit(repo, run, dossier, md) {
       const wl = buildNarrativeWorklist(dossier);
       const f = stageFiles("NARRATIVE");
-      emitWorklist(run, f, wl, renderNarrativeWorklistMd(wl, loadContextDoc(run)));
-      return { worklist: join(run, f.md), outName: "NARRATIVE.json" };
+      const worklist = emitWorklist(run, f, wl, () => renderNarrativeWorklistMd(wl, loadContextDoc(run)), { md });
+      return { worklist, outName: "NARRATIVE.json" };
     },
     instruction: (repo, run, worklist, outPath) =>
       `Read the narrative worklist at ${worklist}. Author NARRATIVE.json (executiveSummary, remediations, attackChains, rootCauses) citing only confirmed finding ids, and write it to ${outPath}. ${UNTRUSTED}`,
   },
   implement: {
     crossCheckable: false,
-    emit(repo, run, dossier) {
+    emit(repo, run, dossier, _md) {
       const narrative = loadNarrative(run, dossier);
       const wl = buildImplementWorklist(dossier, narrative);
       const f = stageFiles("IMPLEMENT");
-      emitWorklist(run, f, wl, renderImplementMd(wl, loadContextDoc(run)));
+      // The PRD draft IS this stage's brief (not a twin of the JSON): always written, and what the agent reads.
+      emitWorklist(run, f, wl, () => renderImplementMd(wl, loadContextDoc(run)), { md: true });
       return { worklist: join(run, f.md), outName: "REMEDIATION_PRD.md" };
     },
     instruction: (repo, run, worklist, outPath) =>
@@ -326,6 +328,10 @@ export interface PipelineOptions {
   crossRunner?: AgentRunner;
   scan?: boolean; // default true — deterministic offline scan first
   scanOpts?: ScanOptions;
+  /** Also write each worklist's human `.md` twin (default: ULTRASEC_MD=1). */
+  md?: boolean;
+  /** How the final report is written (format, `--full`). */
+  report?: Omit<DeliverOptions, "narrative" | "grounding">;
 }
 
 export interface PipelineResult {
@@ -334,6 +340,10 @@ export interface PipelineResult {
   externalCalls: number;
   escalated: string[];
   errors: string[];
+  /** The report the run ended with, and whether it is a draft. */
+  report: { written: string[]; status: ReportStatus };
+  /** Whether every cited location resolved (`check`). */
+  grounded: boolean;
   /** Things the run must SAY but that did not break it — a negation in
    *  CONTEXT.md the code contradicts, above all. Not `errors`: the citation gate
    *  passed, and the audit is still usable; what is wrong is a sentence every
@@ -376,7 +386,7 @@ export function runPipeline(opts: PipelineOptions): PipelineResult {
   for (const name of opts.stages) {
     const stage = STAGES[name];
     const dossier = loadDossier(opts.run);
-    const { worklist, outName } = stage.emit(opts.repo, opts.run, dossier);
+    const { worklist, outName } = stage.emit(opts.repo, opts.run, dossier, opts.md ?? wantsMdTwin());
     actions.push(`emit:${name}`);
     emitted.push({ stage: name, worklist, outName });
 
@@ -427,7 +437,7 @@ export function runPipeline(opts: PipelineOptions): PipelineResult {
     actions.push(`apply:${name}`);
   }
 
-  // Final deterministic steps: grounding check + render (narrative-aware if filled).
+  // Final deterministic steps: grounding check + THE report (narrative-aware if filled).
   //
   // `run` is where CONTEXT.md is authored, so it is where a negation the code
   // contradicts must be said out loud — passing the run dir is what lets the
@@ -443,20 +453,24 @@ export function runPipeline(opts: PipelineOptions): PipelineResult {
   }
   actions.push("check");
 
-  let narrative: ReturnType<typeof mergeNarrative> | undefined;
-  const narrPath = join(opts.run, "NARRATIVE.json");
-  if (opts.powered && opts.stages.includes("narrative")) {
-    try {
-      const merged = mergeNarrative(parseNarrative(readFileSync(narrPath, "utf8")), dossier);
-      if (hasNarrativeContent(merged)) narrative = merged;
-    } catch {
-      /* no narrative authored — render plain */
-    }
-  }
-  writeFileSync(join(opts.run, "SUMMARY.md"), renderSummary(dossier, narrative));
-  writeFileSync(join(opts.run, "REPORT.md"), renderReport(dossier, narrative));
-  writeFileSync(join(opts.run, "index.html"), renderHtml(dossier, narrative));
+  // The narrative: the one this run's agent just authored, or one an earlier
+  // pass left in the run dir — grounding-checked either way.
+  const narrative = runNarrative(opts.run, dossier).narrative;
+  const delivered = deliverReport(opts.run, dossier, {
+    ...opts.report,
+    narrative,
+    grounding: { ok: ck.ok, dangling: ck.dangling.length },
+  });
   actions.push("render");
 
-  return { actions, emitted, externalCalls, escalated, errors, notices };
+  return {
+    actions,
+    emitted,
+    externalCalls,
+    escalated,
+    errors,
+    notices,
+    report: { written: delivered.written, status: delivered.status },
+    grounded: ck.ok,
+  };
 }

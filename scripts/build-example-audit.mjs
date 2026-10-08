@@ -31,20 +31,19 @@ const SANITIZED_REPO = "examples/vuln-express";
 const SANITIZED_VERSION = "0.0.0-development";
 const AUTHORED = ["CONTEXT.md", "verdicts.json", "REVALIDATE.json", "NARRATIVE.json"];
 // Everything the pipeline emits, in the order the README documents them.
+// The engine's own state (`.work/graph.json`, the cache, the journal) is not part of
+// the example: it is what a reader is NOT meant to open. Worklists are JSON only — the
+// `.md` briefs are opt-in (`--md`). The report is rendered in both formats here so the
+// example shows each; a real run writes one.
 const GENERATED = [
   "manifest.json",
   "findings.json",
-  "graph.json",
   "DOSSIER.md",
   "VERIFY.todo.json",
-  "VERIFY.md",
   "REVALIDATE.todo.json",
-  "REVALIDATE.md",
   "NARRATIVE.todo.json",
-  "NARRATIVE.md",
-  "SUMMARY.md",
   "REPORT.md",
-  "index.html",
+  "REPORT.html",
   "IMPLEMENT.md",
   "IMPLEMENT.todo.json",
 ];
@@ -103,7 +102,7 @@ try {
   ultrasec("check", "--run", "run", "--repo", SANITIZED_REPO, "--semantic");
   ultrasec("narrative", "--run", "run");
   writeFileSync(join(run, "NARRATIVE.json"), readFileSync(join(outDir, "NARRATIVE.json"), "utf8"));
-  ultrasec("render", "--run", "run", "--narrative", join(run, "NARRATIVE.json"));
+  ultrasec("render", "--run", "run", "--narrative", join(run, "NARRATIVE.json"), "--md", "--html");
   ultrasec("implement", "--run", "run", "--narrative", join(run, "NARRATIVE.json"));
 
   const sanitize = (s) =>

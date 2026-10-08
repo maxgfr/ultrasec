@@ -146,7 +146,7 @@ ${CORE_RULE}
 1. \`ultrasec_paths\` and \`ultrasec_check\` — take stock of what survived verification, and confirm every citation still resolves before writing a word.
 2. \`ultrasec_dossier\` on each finding you intend to report, to get its citations exactly right.
 3. Write the narrative: per finding, what an attacker does, what they get, and the specific fix. Ordered by real risk, not by the scanner's severity label.
-4. \`ultrasec_render\` to produce SUMMARY.md, REPORT.md and the self-contained HTML.
+4. Save it as <run>/NARRATIVE.json (remediations with \`effort\`, attack chains, root causes), then \`ultrasec_render\` to produce the ONE report — REPORT.md, or REPORT.html with html=true.
 
 **Write for the maintainer who has to act.** A finding without a concrete attack is a lint warning; a fix without a file and line is homework. Severity is about what the attacker gains and how reachable it is — an unauthenticated RCE on a public endpoint and the same class of bug behind an admin login are not the same finding.
 

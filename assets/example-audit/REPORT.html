@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Security audit report</title>
+<style>
+:root{color-scheme:light dark;--bg:#f6f7f9;--surface:#fff;--alt:#eef1f5;--ink:#14181f;--soft:#4e5769;--faint:#79808f;--rule:#dce1ea;--accent:#24487a;--warn-bg:#fff4e5;--warn:#8a4b00;--add:#1f6f3f;--del:#9b2233;--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+@media (prefers-color-scheme:dark){:root{--bg:#101319;--surface:#171b23;--alt:#1e232d;--ink:#e6eaf2;--soft:#a3acbe;--faint:#757e92;--rule:#2a303c;--accent:#8daedd;--warn-bg:#2b2112;--warn:#f0b35a;--add:#7fd19b;--del:#e8798a}}
+*,*::before,*::after{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:1100px;margin:0 auto;padding:32px 16px 72px}
+h1{font-size:2rem;margin:0 0 8px}
+h2{font-size:1.35rem;margin:40px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--ink)}
+h3{font-size:1.1rem;margin:28px 0 8px}
+h4{font-size:1rem;margin:22px 0 6px;color:var(--soft)}
+h5{font-size:1rem;margin:18px 0 4px;padding:10px 14px;background:var(--surface);border:1px solid var(--rule);border-left:4px solid var(--accent);border-radius:5px}
+h2,h3,h4,h5{scroll-margin-top:16px}
+p{margin:8px 0}
+a{color:var(--accent)}
+code{font-family:var(--mono);font-size:.86em;background:var(--alt);border:1px solid var(--rule);border-radius:3px;padding:.05em .3em;word-break:break-word}
+pre{background:var(--surface);border:1px solid var(--rule);border-radius:5px;padding:12px;overflow-x:auto}
+pre code{background:none;border:0;padding:0}
+.add{color:var(--add)}.del{color:var(--del)}
+.tw{overflow-x:auto;margin:10px 0}
+table{border-collapse:collapse;width:100%;background:var(--surface);font-size:.9em}
+th,td{border:1px solid var(--rule);padding:5px 8px;text-align:left;vertical-align:top}
+th{background:var(--alt)}
+ul{padding-left:22px}
+li{margin:3px 0}
+li.task{list-style:none;margin-left:-20px}
+blockquote.banner{margin:16px 0;padding:4px 16px;background:var(--warn-bg);border-left:4px solid var(--warn);border-radius:4px}
+blockquote.banner h2{border:0;margin:10px 0 4px;color:var(--warn)}
+hr{border:0;border-top:1px solid var(--rule);margin:32px 0}
+@media print{body{background:#fff}main{max-width:none}}
+</style>
+</head>
+<body>
+<main>
+<h1 id="security-audit-report">Security audit report</h1>
+<p><code>examples/vuln-express</code> · ultrasec 0.0.0-development · 4 candidate(s) · citations resolve</p>
+<p><strong>Status:</strong> ✅ adjudicated &amp; grounded — 2 confirmed · 1 needs human · 0 undecided · 1 dismissed</p>
+<p><strong>Contents:</strong> <a href="#1-executive-summary">1. Executive summary</a> · <a href="#2-dashboard">2. Dashboard</a> · <a href="#3-attack-chains">3. Attack chains</a> · <a href="#4-follow-up-vs-previous-audit">4. Follow-up vs previous audit</a> · <a href="#5-detailed-findings">5. Detailed findings</a> · <a href="#6-secrets--history">6. Secrets &amp; history</a> · <a href="#7-cicd--infrastructure-exposure">7. CI/CD &amp; infrastructure exposure</a> · <a href="#8-dependencies">8. Dependencies</a> · <a href="#9-hardening-notes">9. Hardening notes</a> · <a href="#10-coverage--limits">10. Coverage &amp; limits</a> · <a href="#11-remediation-plan">11. Remediation plan</a> · <a href="#annex-a--dismissed-candidates">Annex A — Dismissed candidates</a> · <a href="#annex-b--needs-human-review">Annex B — Needs human review</a> · <a href="#annex-c--engines--usage">Annex C — Engines &amp; usage</a></p>
+<h2 id="1-executive-summary">1. Executive summary</h2>
+<p><em>AI-authored — verify against the cited findings before acting.</em></p>
+<p>Two confirmed injection flaws in a public Express API. Untrusted req.query values cross file boundaries into a raw SQL statement and a shell command, with no validation on any hop and no authentication on either route, so both are exploitable by any unauthenticated client — command injection first, which yields code execution as the app user. Both come from the same habit: request values handed straight to a helper that builds an interpreter string.</p>
+<p><strong>2 confirmed</strong> (1 critical, 1 high), <strong>1 awaiting a human decision</strong>, out of 4 candidates.</p>
+<p>Most urgent:</p>
+<ul><li>🟥 CRITICAL OS command injection: untrusted input reaches execSync() — src (<code>3ffa0917b004</code>)</li><li>🟧 HIGH SQL injection: untrusted input reaches query() — src (<code>54b733703450</code>)</li></ul>
+<h2 id="2-dashboard">2. Dashboard</h2>
+<div class="tw"><table><thead><tr><th>severity</th><th>confirmed</th><th>needs human</th><th>undecided</th><th>dismissed</th><th>total</th></tr></thead><tbody><tr><td>🟥 CRITICAL</td><td>1</td><td>0</td><td>0</td><td>0</td><td>1</td></tr><tr><td>🟧 HIGH</td><td>1</td><td>0</td><td>0</td><td>0</td><td>1</td></tr><tr><td>🟨 MEDIUM</td><td>0</td><td>0</td><td>0</td><td>1</td><td>1</td></tr><tr><td>🟩 LOW</td><td>0</td><td>1</td><td>0</td><td>0</td><td>1</td></tr><tr><td>⬜ INFO</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr></tbody></table></div>
+<div class="tw"><table><thead><tr><th>surface</th><th>confirmed</th><th>needs human</th><th>undecided</th><th>dismissed</th></tr></thead><tbody><tr><td>source code</td><td>2</td><td>0</td><td>0</td><td>1</td></tr><tr><td>secrets</td><td>0</td><td>0</td><td>0</td><td>0</td></tr><tr><td>CI/CD &amp; infra</td><td>0</td><td>1</td><td>0</td><td>0</td></tr><tr><td>dependencies</td><td>0</td><td>0</td><td>0</td><td>0</td></tr></tbody></table></div>
+<p>By area (live candidates; areas are detected workspaces, else the first two path segments):</p>
+<div class="tw"><table><thead><tr><th>area</th><th>critical</th><th>high</th><th>medium</th><th>low/info</th><th>of which decided</th><th>undecided</th></tr></thead><tbody><tr><td><code>src</code></td><td>1</td><td>1</td><td>0</td><td>1</td><td>3</td><td>0</td></tr></tbody></table></div>
+<h2 id="3-attack-chains">3. Attack chains</h2>
+<p><em>AI-authored — verify against the cited findings before acting.</em></p>
+<h3 id="unauthenticated-code-execution-then-data-access">Unauthenticated code execution, then data access</h3>
+<p>Steps: OS command injection: untrusted input reaches execSync() (<code>3ffa0917b004</code>) → SQL injection: untrusted input reaches query() (<code>54b733703450</code>)</p>
+<p>Neither route requires authentication. GET /report gives shell execution as the app user (report.js:5), which already reaches the database file directly; GET /user independently returns arbitrary rows (db.js:6). Fixing only the SQL injection leaves the stronger path intact.</p>
+<h2 id="4-follow-up-vs-previous-audit">4. Follow-up vs previous audit</h2>
+<div class="tw"><table><thead><tr><th>outcome</th><th>count</th><th>examples</th></tr></thead><tbody><tr><td>✅ fixed</td><td>0</td><td>—</td></tr><tr><td>⏳ still present</td><td>2</td><td>OS command injection: untrusted input reaches execSync() (<code>3ffa0917b004</code>), SQL injection: untrusted input reaches query() (<code>54b733703450</code>)</td></tr><tr><td>❓ escalated / uncertain</td><td>0</td><td>—</td></tr><tr><td>🆕 new since (not revalidated)</td><td>1</td><td>Web misconfig — No security-headers middleware where the app is built (<code>698ed561f7dd</code>)</td></tr></tbody></table></div>
+<p><em>Per-finding table: <code>render --full</code> (annex D).</em></p>
+<h2 id="5-detailed-findings">5. Detailed findings</h2>
+<p>Confirmed and needs-human findings in this repository's own code, by severity then area. A repeated finding is one card.</p>
+<h3 id="51-critical-1">5.1 Critical (1)</h3>
+<h4 id="area-src">Area <code>src</code></h4>
+<h5 id="critical-os-command-injection-untrusted-input-reaches-execsync">🟥 CRITICAL OS command injection: untrusted input reaches execSync()</h5>
+<p><code>3ffa0917b004</code> · area <code>src</code> · CWE-78 · OWASP A03 Injection · priority <strong>P0</strong> · effort — · confirmed (supported) · found by ultrasec</p>
+<ul><li><strong>Where:</strong> <code>src/server.js:18</code> → <code>src/server.js:19</code> → <code>src/report.js:5</code></li><li><strong>Attacker scenario:</strong> GET /report?name=x;sleep%205 · unauthenticated → the response takes 5s (baseline ~40ms), proving shell execution as the app user</li><li><strong>Fix:</strong> Replace execSync with execFile and an argv array: execFile(&quot;generate-report&quot;, [&quot;--for&quot;, name]). An argv array removes the shell, but it does not stop argument injection — validate <code>name</code> against an allow-list (or pass it after a <code>--</code> terminator) so it can't be read as an option. · owner @backend</li></ul>
+<pre class="lang-diff"><code><span class="del">- return execSync(&quot;generate-report --for &quot; + name).toString();</span>
+<span class="add">+ return execFileSync(&quot;generate-report&quot;, [&quot;--for&quot;, &quot;--&quot;, name]).toString();</span></code></pre>
+<ul><li><strong>Notes:</strong> Verdict (supported): req.query.name is concatenated into a shell string at report.js:5 and executed with execSync; no validation on any hop, and the route has no auth. · Revalidation (still-valid): report.js:5 is unchanged at HEAD — still execSync on a concatenated string. · risk 60</li><li><strong>Evidence:</strong> Cross-file candidate: http input at src/server.js:18 may reach the command sink execSync() at src/report.js:5 through 2 hop(s). Tainted data in a shell command. Prefer argv-array exec (execFile/execve) over a shell string; verify no shell metacharacters reach a shell. Heuristic — verify the data ac…</li></ul>
+<h3 id="52-high-1">5.2 High (1)</h3>
+<h4 id="area-src">Area <code>src</code></h4>
+<h5 id="high-sql-injection-untrusted-input-reaches-query">🟧 HIGH SQL injection: untrusted input reaches query()</h5>
+<p><code>54b733703450</code> · area <code>src</code> · CWE-89 · OWASP A03 Injection · priority <strong>P1</strong> · effort — · confirmed (supported) · found by ultrasec</p>
+<ul><li><strong>Where:</strong> <code>src/server.js:10</code> → <code>src/server.js:11</code> → <code>src/db.js:6</code></li><li><strong>Attacker scenario:</strong> GET /user?id=1%20OR%201=1 · unauthenticated → returns every row of <code>users</code>, proving the value is parsed as SQL, not data</li><li><strong>Fix:</strong> Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query(&quot;SELECT * FROM users WHERE id = ?&quot;, [id]). · owner @backend</li></ul>
+<pre class="lang-diff"><code><span class="del">- const sql = &quot;SELECT * FROM users WHERE id = &quot; + id;</span>
+<span class="del">- return sqlite.query(sql);</span>
+<span class="add">+ return sqlite.query(&quot;SELECT * FROM users WHERE id = ?&quot;, [id]);</span></code></pre>
+<ul><li><strong>Notes:</strong> Verdict (supported): req.query.id is concatenated into SQL at db.js:5 and reaches sqlite.query() with no parameter array. The parameterized sibling getUserSafe (db.js:11) is NOT on this path. · Revalidation (still-valid): db.js:6 is unchanged at HEAD, and the concatenation it consumes is still at db.js:5. · risk 48</li><li><strong>Evidence:</strong> Cross-file candidate: http input at src/server.js:10 may reach the sql sink query() at src/db.js:6 through 2 hop(s). Tainted data concatenated into a SQL statement. Verify it isn't a parameterized/prepared query. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.</li></ul>
+<h2 id="6-secrets--history">6. Secrets &amp; history</h2>
+<p><em>No live secret finding.</em></p>
+<h2 id="7-cicd--infrastructure-exposure">7. CI/CD &amp; infrastructure exposure</h2>
+<p>Workflows, infrastructure-as-code and security configuration — read as a diff, one row per class.</p>
+<div class="tw"><table><thead><tr><th>priority</th><th>worst</th><th>class</th><th>verdicts</th><th>where</th></tr></thead><tbody><tr><td>P2</td><td>🟩 LOW</td><td>Web misconfig — No security-headers middleware where the app is built</td><td>1 needs-human</td><td><code>src/server.js:5</code></td></tr></tbody></table></div>
+<h5 id="low-web-misconfig--no-security-headers-middleware-where-the-app-is-built">🟩 LOW Web misconfig — No security-headers middleware where the app is built</h5>
+<p><code>698ed561f7dd</code> · area <code>src</code> · CWE-693 · OWASP A05 Security misconfiguration · priority <strong>P2</strong> · effort — · needs-human (partial) · found by ultrasec</p>
+<ul><li><strong>Where:</strong> <code>src/server.js:5</code></li><li><strong>Attacker scenario:</strong> <em>not established — that is why it needs a human (see notes).</em></li><li><strong>Notes:</strong> Verdict (partial): server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options. Real, but a hardening gap rather than an exploit on its own: what it costs depends on whether a reverse proxy in front sets these headers, which the repo cannot show. · risk 15</li><li><strong>Evidence:</strong> The file constructs the application and registers no <code>helmet()</code> / <code>secureHeaders()</code> / equivalent. Without it the responses carry no CSP, HSTS, X-Frame-Options or X-Content-Type-Options. Register it first, before any route — unless a reverse proxy in front sets these headers, which is the thing to c…</li></ul>
+<h2 id="8-dependencies">8. Dependencies</h2>
+<p><em>No live dependency advisory.</em></p>
+<h2 id="9-hardening-notes">9. Hardening notes</h2>
+<p><em>AI-authored — verify against the cited findings before acting. Defense in depth — <strong>not</strong> findings, excluded from every count.</em></p>
+<p><strong>What the codebase does well:</strong> The data layer already knows how to do this correctly — db.getUserSafe (src/db.js:11) uses a <code>?</code> placeholder with a parameter array, so the parameterized path exists and is the one to standardize on. The two findings below are deviations from it, not a missing capability.</p>
+<ul><li>Neither route validates the shape of its input before use (an integer id, a report name from a known set). Type/shape validation at the boundary is defense in depth once the two fixes above land — it is not what makes them exploitable today.</li><li>res.send() at server.js:20 returns command output with the default text/html content type. Once the command injection is fixed the attacker no longer controls that body, but setting an explicit content type (or res.json) removes the reflected-content question entirely.</li></ul>
+<h2 id="10-coverage--limits">10. Coverage &amp; limits</h2>
+<p><strong>Not looked at / limits:</strong></p>
+<ul><li>no external scanner ran — graph + taint only</li><li>static analysis only: no DAST, no fuzzing, no authenticated crawling, no runtime testing</li></ul>
+<h3 id="coverage-owasp-asvs">Coverage (OWASP ASVS)</h3>
+<p>What this audit looked at, and what it did not. A category marked <strong>not examined</strong> is not a clean bill of health — it is a gap in the audit, and it belongs in the report.</p>
+<div class="tw"><table><thead><tr><th></th><th>category</th><th>state</th><th>findings</th></tr></thead><tbody><tr><td>V1</td><td>Architecture &amp; threat modelling</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V2</td><td>Authentication</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V3</td><td>Session management</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V4</td><td>Access control</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V5</td><td>Validation, sanitization &amp; encoding</td><td>✅ examined</td><td>3</td></tr><tr><td>V6</td><td>Stored cryptography</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V7</td><td>Error handling &amp; logging</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V8</td><td>Data protection &amp; privacy</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V9</td><td>Communications</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V11</td><td>Business logic</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V12</td><td>Files &amp; resources</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V13</td><td>API &amp; web service</td><td>⬜ <strong>not examined</strong></td><td>—</td></tr><tr><td>V14</td><td>Configuration &amp; supply chain</td><td>✅ examined</td><td>1</td></tr></tbody></table></div>
+<h4 id="not-examined-11">Not examined (11)</h4>
+<ul><li><strong>V1 Architecture &amp; threat modelling</strong> — Did CONTEXT.md establish a trust model and a threat model, or was severity rated in the abstract?</li><li><strong>V2 Authentication</strong> — Password/OTP/session-establishment paths read? Credential comparison constant-time?</li><li><strong>V3 Session management</strong> — Token lifetime, rotation on privilege change, invalidation on logout.</li><li><strong>V4 Access control</strong> — The highest-yield class, and never enumerable: every route's guard vs. the object it returns (IDOR).</li><li><strong>V6 Stored cryptography</strong> — Weak-hash detection is mechanical; key management, IV reuse and constant-time comparison are not.</li><li><strong>V7 Error handling &amp; logging</strong> — The error-HANDLING half is enumerated (CWE-209 — a caught error written into the response body). Needs <code>scan --log-hygiene</code> for the logging half (CWE-117/532).</li><li><strong>V8 Data protection &amp; privacy</strong> — Where personal data goes, how long it stays, whether pseudonymisation is reversible.</li><li><strong>V9 Communications</strong> — TLS verification disabled anywhere? Certificate pinning claims that do not hold?</li><li><strong>V11 Business logic</strong> — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance. Anti-automation is partly enumerated: <code>scan</code> finds unbounded similarity/distance calls (CWE-407), <code>guards --lens throttle</code> finds handlers nothing rate-limits.</li><li><strong>V12 Files &amp; resources</strong> — Traversal and zip-slip are enumerated; upload type/size/AV policy is not.</li><li><strong>V13 API &amp; web service</strong> — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.</li></ul>
+<h4 id="answer-these-explicitly-9">Answer these explicitly (9)</h4>
+<p>No deterministic signal can establish coverage here. For each, write either a finding or one line saying <strong>why it does not apply to this repo</strong> — &quot;not applicable&quot; without a reason is how coverage silently shrinks between audits.</p>
+<ul><li><strong>V1 Architecture &amp; threat modelling</strong> — Did CONTEXT.md establish a trust model and a threat model, or was severity rated in the abstract?</li><li><strong>V2 Authentication</strong> — Password/OTP/session-establishment paths read? Credential comparison constant-time?</li><li><strong>V3 Session management</strong> — Token lifetime, rotation on privilege change, invalidation on logout.</li><li><strong>V4 Access control</strong> — The highest-yield class, and never enumerable: every route's guard vs. the object it returns (IDOR).</li><li><strong>V6 Stored cryptography</strong> — Weak-hash detection is mechanical; key management, IV reuse and constant-time comparison are not.</li><li><strong>V8 Data protection &amp; privacy</strong> — Where personal data goes, how long it stays, whether pseudonymisation is reversible.</li><li><strong>V9 Communications</strong> — TLS verification disabled anywhere? Certificate pinning claims that do not hold?</li><li><strong>V11 Business logic</strong> — Workflow skipping, price/quantity tampering, replay, quota bypass, races on balance. Anti-automation is partly enumerated: <code>scan</code> finds unbounded similarity/distance calls (CWE-407), <code>guards --lens throttle</code> finds handlers nothing rate-limits.</li><li><strong>V13 API &amp; web service</strong> — SSRF and open redirect are enumerated; GraphQL field authz and mass-assignment on API models are not.</li></ul>
+<h4 id="weakness-classes--frameworks">Weakness classes × frameworks</h4>
+<p>Each detected framework against each weakness class: matched by a pack (<code>✅</code>), not applicable (<code>➖</code>), handed to the AI hunt (<code>🔎</code> pending, <code>🧭</code> done), or <strong>not covered</strong>. A <code>⚠</code> cell is degraded — no framework pack, or a version outside the range the pack was validated on — and is hunted, not trusted.</p>
+<div class="tw"><table><thead><tr><th>class</th><th>express 4.17.1</th></tr></thead><tbody><tr><td>timing-unsafe-secret-compare</td><td>✅ pack</td></tr><tr><td>csv-formula-injection</td><td>✅ pack</td></tr><tr><td>client-ip-first-xff</td><td>✅ pack</td></tr><tr><td>unbounded-public-export</td><td>✅ pack</td></tr><tr><td>security-headers-absent</td><td>✅ pack</td></tr><tr><td>session-cookie-chunks-on-logout</td><td>⬜ <strong>not covered</strong> ⚠</td></tr><tr><td>env-bool-coercion</td><td>✅ pack</td></tr><tr><td>insecure-session-cookie</td><td>✅ pack</td></tr><tr><td>proxy-headers-trusted</td><td>✅ pack</td></tr><tr><td>request-body-unbounded</td><td>✅ pack</td></tr><tr><td>graphql-introspection-enabled</td><td>✅ pack</td></tr><tr><td>csrf-protection-disabled</td><td>✅ pack</td></tr><tr><td>debug-mode-enabled</td><td>✅ pack</td></tr><tr><td>taint-catalog</td><td>✅ pack</td></tr></tbody></table></div>
+<p>Degraded or uncovered (1): express — pack express has no idiom for this class. Run <code>ultrasec investigate</code> — it emits one hunt per such cell.</p>
+<h2 id="11-remediation-plan">11. Remediation plan</h2>
+<p>Root causes (AI-authored — verify against the cited findings before acting.) — fixing one closes every finding under it:</p>
+<ul><li><strong>Request values handed to a helper that builds an interpreter string</strong> (<code>3ffa0917b004</code>, <code>54b733703450</code>) — Both handlers read req.query.* and pass it, unvalidated, to a helper that concatenates it into SQL or a shell command. The fix is structural, not per-site: bind parameters at the data layer and use argv arrays for process execution, then add validation at the route boundary so a future helper inherits neither habit.</li></ul>
+<h3 id="p0--fix-now-1">P0 — fix now (1)</h3>
+<ul><li class="task"><input type="checkbox" disabled> <strong>OS command injection: untrusted input reaches execSync()</strong> · <code>src</code> · <code>3ffa0917b004</code> — Replace execSync with execFile and an argv array: execFile(&quot;generate-report&quot;, [&quot;--for&quot;, name]). An argv array removes the shell, but it doe…</li></ul>
+<h3 id="p1--this-sprint-1">P1 — this sprint (1)</h3>
+<ul><li class="task"><input type="checkbox" disabled> <strong>SQL injection: untrusted input reaches query()</strong> · <code>src</code> · <code>54b733703450</code> — Bind the value instead of concatenating it, exactly as getUserSafe already does: sqlite.query(&quot;SELECT * FROM users WHERE id = ?&quot;, [id]).</li></ul>
+<h3 id="p2--planned-1">P2 — planned (1)</h3>
+<ul><li class="task"><input type="checkbox" disabled> <strong>Decide: Web misconfig — No security-headers middleware where the app is built</strong> · <code>src</code> · <code>698ed561f7dd</code></li></ul>
+<h2 id="annex-a--dismissed-candidates">Annex A — Dismissed candidates</h2>
+<p>1 candidate(s) dismissed — summarised. Every one keeps its id, ground and argument in <code>findings.json</code>; <code>render --full</code> lists them all.</p>
+<div class="tw"><table><thead><tr><th>ground</th><th>count</th><th>meaning</th></tr></thead><tbody><tr><td><strong>dismissed — no ground recorded</strong></td><td>1</td><td></td></tr></tbody></table></div>
+<div class="tw"><table><thead><tr><th>produced by</th><th>count</th></tr></thead><tbody><tr><td>ultrasec</td><td>1</td></tr></tbody></table></div>
+<p>By shape:</p>
+<div class="tw"><table><thead><tr><th>candidate shape</th><th>count</th><th>areas</th></tr></thead><tbody><tr><td>Cross-site scripting (reflected): untrusted input reaches send()</td><td>1</td><td><code>src</code></td></tr></tbody></table></div>
+<h2 id="annex-b--needs-human-review">Annex B — Needs human review</h2>
+<ul><li>🟩 LOW Web misconfig — No security-headers middleware where the app is built — <code>src</code> — <code>src/server.js:5</code> <code>698ed561f7dd</code> — Verdict (partial): server.js:5 builds the Express app and registers no helmet()/security-headers middleware, so responses carry no CSP, HSTS or X-Frame-Options…</li></ul>
+<h2 id="annex-c--engines--usage">Annex C — Engines &amp; usage</h2>
+<ul><li>engine: ultrasec 0.0.0-development (schema 11) · extraction cache, AST</li><li>languages: javascript</li><li>stack: Express 4.17.1</li></ul>
+<p>External scanners: none — graph + taint only.</p>
+<p>Run directory: <code>REPORT.md</code> · <code>REPORT.html</code> · <code>findings.json</code> · <code>manifest.json</code> · <code>CONTEXT.md</code> · <code>NARRATIVE.json</code>.</p>
+<hr>
+<p><em>Engine: ultrasec 0.0.0-development. Taint candidates are deterministic; external-tool results depend on installed scanners. Every finding keeps its own id in <code>findings.json</code>; this report groups and summarises, it never merges or decides. Exhaustive annexes: <code>ultrasec render --full</code>.</em></p>
+</main>
+</body>
+</html>
