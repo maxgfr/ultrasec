@@ -20,7 +20,9 @@ Writes `REVALIDATE.todo.json` + `REVALIDATE.md`. Per finding you get:
 
 - `at` — the cited `file:line`.
 - `fileExists` — does the file still exist at HEAD?
-- `currentLine` — the content of the cited line *now* (or a "drifted/removed" note).
+- `currentLine` — the content of the cited line *now* (or a "drifted/removed" note). Masked
+  for a credential finding (category `secret`, or CWE-798/259/321/522/916): there the line IS
+  the secret, and the worklist is read by agents and humans.
 - `commitsSinceFinding` — commits to the file since the finding's provenance commit
   (only when the dossier carries `--blame` provenance; else `null`).
 - `lineLastChanged` — the commit/author/date that last touched the cited line.
@@ -39,6 +41,11 @@ Set `verdict` to one of:
 
 Save as `REVALIDATE.json` (array of `{id, verdict, fixedIn?, note?}` — filled example in
 [schemas.md](schemas.md)).
+
+**Never quote the cited line into a `note` on a secret or credential finding** — say "still
+present at HEAD", not what is there. On a real run a revalidation note quoted a seed row and a
+full argon2 hash went into REPORT.md after the detector had been fixed to mask it. `--apply` now
+redacts every note it folds; that is the net, not the licence.
 
 **`fixed` is the verdict that gets over-used.** The facts tell you the line *changed*; only the
 code tells you the bug is gone. Before you write `fixed`, rule out all five:

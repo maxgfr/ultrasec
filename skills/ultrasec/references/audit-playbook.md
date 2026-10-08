@@ -123,8 +123,10 @@ count, the version to upgrade to and the KEV/EPSS/dev-only signals. The five que
 cannot answer, and the hostile-package class no CVE feed covers, are in
 [supply-chain.md](supply-chain.md).
 
-Leaving the tail `open` is the prescribed outcome, and the render gate does not hold it against
-you — it only counts unread HIGH/CRITICAL candidates in code you wrote.
+The render gate does not hold an `open` tail against you — it only counts unread HIGH/CRITICAL
+candidates in code you wrote. `check --semantic` does: it fails while any finding is open,
+advisories included. Close the tail per package, not per CVE — see
+[the lessons below](#lessons-from-a-multi-engine-audit).
 
 ## 6. Hunt what taint enumeration can't reach
 
@@ -211,8 +213,9 @@ needs-human list, the coverage caveats from step 3, and the run folder. Writing 
 [citation-format.md](citation-format.md).
 
 > **Coverage improves with more runs.** One pass reads only the paths you dug into. Re-run and
-> fold with `--merge` (verdicts preserved), weighting the next pass toward what this one
-> under-covered — see [severity-and-discipline.md](severity-and-discipline.md).
+> fold with `--merge` (verdicts and their notes preserved; the engine's own message and evidence
+> re-derived), weighting the next pass toward what this one under-covered — see
+> [severity-and-discipline.md](severity-and-discipline.md).
 
 ## 11. Plan the fixes (optional)
 
@@ -223,3 +226,35 @@ ultrasec implement --run .ultrasec    # → IMPLEMENT.md + IMPLEMENT.todo.json
 Confirmed findings become fix stories grounded in their `[file:line]`, grouped by root cause;
 feed `IMPLEMENT.md` to the `to-prd` skill or an implementer. Per-class fix patterns:
 [implement-playbook.md](implement-playbook.md).
+
+## Lessons from a multi-engine audit
+
+One audit ran this engine beside several models reviewing the same repository freely. What it
+taught, and why:
+
+- **`--require-tools` alone narrows the belt.** Without `--tools`, it runs only the scanners it
+  names: bandit, checkov, hadolint and pip-audit silently did not run. Pass
+  `--tools auto --require-tools …` to require some and keep the rest.
+- **Adjudicate by family at scale.** 494 code candidates split into five families — high taint,
+  orphan SQL sinks, other high sinks, low/medium SAST, low taint — one analyst each. "SQL
+  injection: query() sink (no source path found)" on GraphQL clients passing variables was 70
+  false positives out of 70: one read decides the family. Name the brocard
+  (`report-not-dispositive`, `outside-usage`, `no-threat-model`, `documented-behavior`) on every
+  high refutation, or `check --semantic` reports it as unargued.
+- **Open advisories fail `check --semantic`**, even though `render` does not count them. Rather
+  than leaving 280 open, adjudicate per package from a reachability table (runtime vs dev/build)
+  and refute the dev/build-only ones with `outside-usage` — after checking CI does not run them on
+  untrusted input ([supply-chain.md](supply-chain.md#then-apply-the-five-questions-the-score-cant-answer)).
+- **Never quote a cited line into a note on a secret or credential finding**
+  ([revalidate-playbook.md](revalidate-playbook.md)). `--apply` now redacts notes, but your own
+  consolidation notes are a leak path too: before sharing, search the run directory and the
+  rendered outputs for every secret value the audit found.
+- **A masking placeholder is not a value.** A secret-masking hook in the auditor's environment
+  rewrites tool output (`SECRETGATE_<hex>`), and reviewers and the auditor alike took placeholders
+  for real values. Confirm against `git show HEAD:<file>` before reporting one.
+- **The one HIGH only the engine found was in a notebook.** A Python notebook `eval()`ed
+  analytics event names — Matomo `e_n`, settable by any visitor — and no model saw it in free
+  review. Keep the `eval as a callable` sink in notebooks near the top of the queue.
+- **Coverage V1 is a judgment cell by design.** No finding can light it. Answer it explicitly in
+  the narrative, from CONTEXT.md: was a trust and threat model established, or was severity rated
+  in the abstract?

@@ -43,7 +43,7 @@ flows are real and exploitable, find the subtle bugs the tools miss, and verify.
 
 ## Running the engine
 
-Require scanners with `scan --require-tools a,b`; incomplete execution fails.
+Require scanners with `scan --tools auto --require-tools a,b`; without `auto`, only those run.
 See [completion policy](references/commands.md). Execution success does not establish security.
 
 One committed, dependency-free bundle — no `npm install`, no API keys.

@@ -58,7 +58,9 @@ Writes `CONTEXT.scaffold.json` + `CONTEXT.todo.md`. See
 ### `scan --repo <dir>`
 
 `--require-tools <a,b>` requires each named scanner to execute successfully.
-Absent `--tools`, selects these names even for a scoped/diff pass. With explicit
+Absent `--tools`, selects ONLY these names, even for a scoped/diff pass — every
+other installed scanner is skipped. Pass `--tools auto --require-tools <a,b>` to
+require some and keep the rest of the belt. With explicit
 `--tools`, every required scanner must be included. Unknown names, empty values
 and contradictory `--no-tools`/`--tools none` exit 2 before scanning. A skipped,
 failed or missing outcome exits 1 with artifacts retained and `scannerPolicy`

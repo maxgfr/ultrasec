@@ -29,8 +29,10 @@ KEV/EPSS/dev-only signals, and every lockfile the correlator merged. `minimatch`
 advisories is one row and one upgrade, not seven decisions. Open the row's fold for the individual
 CVEs; `findings.json` still holds each one under its own id.
 
-Leaving the tail `open` is a legitimate outcome, and the render gate does not count it: that gate
-only fires on unread HIGH/CRITICAL candidates in code you wrote.
+The render gate does not count an `open` tail: it only fires on unread HIGH/CRITICAL candidates
+in code you wrote. `check --semantic` does count it, so adjudicate the tail per package from a
+reachability table — runtime vs dev/build — rather than leaving it open; the dev-only question
+below is the one that closes most rows.
 
 ### The prioritization ladder
 
@@ -60,7 +62,8 @@ top of that list is a different list.
   different work item (pin/override/fork) from a direct bump. Both are real; the fix differs.
 - **Dev-only?** `devDependencies`, `[dev-dependencies]`, `test`/`provided` scope. Not shipped ⇒
   not exploitable in production, but **still exploitable against your CI** if it runs on
-  untrusted input (see below). Downgrade the severity, don't dismiss the finding.
+  untrusted input (see below). Refute it with `outside-usage` only once you have checked that it
+  does not; otherwise downgrade the severity and keep it.
 - **Does the CVSS vector match your deployment?** `AV:N` on a service that only listens on
   localhost; `PR:H` on something no attacker reaches; `UI:R` on a headless daemon. Rate what your
   deployment exposes.
