@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.61.3](https://github.com/maxgfr/ultrasec/compare/v1.61.2...v1.61.3) (2026-10-08)
+
+
+### Bug Fixes
+
+* **investigate:** fold "auth", "session" and "jwt" onto authz ([20124bd](https://github.com/maxgfr/ultrasec/commit/20124bdadbe06caa7e08433a4bbfb04235b2a0d3))
+
 ## [1.61.2](https://github.com/maxgfr/ultrasec/compare/v1.61.1...v1.61.2) (2026-10-08)
 
 

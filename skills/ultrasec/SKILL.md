@@ -3,7 +3,7 @@ name: ultrasec
 description: Audit a codebase for exploitable security issues with cross-file tracing, scanner adjudication, and grounded findings. Use only when the user explicitly asks for ultrasec or a security audit.
 license: MIT
 metadata:
-  version: 1.61.2
+  version: 1.61.3
   opencode/autoinvoke: 'true'
 ---
 
