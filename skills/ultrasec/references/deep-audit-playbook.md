@@ -133,3 +133,49 @@ budget" at step 7 means you can still afford a full round — a fan-out plus the
 of whatever it surfaces. **"Nothing new"** means a round produced no candidate at a location you
 hadn't already adjudicated; a round that only re-derives known findings is dry even if it is
 loud. Two consecutive dry rounds is a reasonable stopping rule for an exhaustive audit.
+
+## Second opinion from other models
+
+Another model family misses different things, and the cheapest way to find what your own pass
+missed is to ask one that did not watch you look. On one Next.js audit, three external reviewers
+(through `kilo`, `vibe` and `opencode`) plus two read-only subagents produced the run's only HIGH
+that neither the engine nor the first manual pass had seen — a module-level `debounce` shared
+across server-rendered requests — and four confident claims that were false. Both outcomes are
+the reason for the protocol below.
+
+1. **Give them a snapshot, not the repo.** `git archive <sha> | tar -x -C <scratch>/snapshot`:
+   same line numbers, no untracked `.env`, nothing they can write back into the working tree.
+   Start the CLI with an emptied environment (`env -i HOME=$HOME PATH=$PATH …`) — agent
+   allow-lists often include `printenv`, and your shell holds tokens. Use the CLI's read-only
+   agent (`plan` / `ask`) and no auto-approve flag.
+2. **Blind pass first.** Same prompt to every model: the trust model, the areas to cover, and an
+   output contract of one block per finding with `path:line`, attacker scenario (who · sends what
+   · gets what), quoted evidence and fix, then hardening notes and areas not reviewed. Do **not**
+   show your findings yet: a model that has read them returns them.
+3. **Cap the spend, and plan for the cap.** A budget stop before the final answer loses the whole
+   run — one reviewer was cut at its cap with nothing but progress notes. Watch the cost from the
+   CLI's JSON events and stop it yourself; then **resume the same session for one turn** with
+   "stop exploring, write the report now, no tools" (`kilo run -s <session>`, `vibe --resume <id>
+   --max-turns 1 --disabled-tools 're:.*'`). The context is already paid for; the report cost
+   cents. Do not rely on a CLI's own price cap until you have seen it stop a run.
+4. **Devil's advocate second.** Hand one model (the one with budget to spare) and one fresh
+   read-only subagent the consolidated list: attack every item — wrong line, mitigated by another
+   layer, wrong severity — and find what is missing. The subagent can read `node_modules` and run
+   a library in isolation; the external CLIs on the snapshot cannot, so they reason about library
+   behaviour from memory.
+5. **Nothing enters the run unverified.** Open every cited line yourself, reproduce what can be
+   reproduced locally, and file survivors through `investigate --apply` so the citation gate runs.
+   Record who found each one; corroboration across families is signal, not proof.
+
+What the external reviewers got wrong on that audit, so you know where to look first:
+
+- **Framework behaviour from memory.** "React forwards a lowercase `onclick`/`onerror` to the
+  DOM": it drops unknown `on*` props (checked with React's own SSR). Treat any claim about what a
+  library or framework does as unverified until you run it.
+- **Advisory status offline.** Without network access, "no known-vulnerable pins in the lockfile"
+  is a guess; the run's own `pnpm audit` / osv results decide.
+- **Deployment facts.** "Source maps are shipped publicly" — the deployed chunk's `.map` was a
+  404. Probe the deployed artifact (passively) before asserting what it serves.
+- **Severity drift.** External reviewers rate by class name; recalibrate against the trust model
+  in `CONTEXT.md` (a CSP without `'unsafe-inline'` turns several "stored XSS" into defense in
+  depth).
