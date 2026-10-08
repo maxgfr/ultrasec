@@ -141,8 +141,8 @@ ultrasec route   app.apk | ./bin/x.so | https://host # OUT-OF-SCOPE triage → m
    dossier: [references/log-forensics-playbook.md](references/log-forensics-playbook.md).
 9. **"Run it autonomously"** — let an external agent CLI fill the worklists (opt-in, keys live in
    that CLI): [references/powered-mode.md](references/powered-mode.md).
-10. **"Get a second opinion" / other models** — `council`: blind reviewers on a snapshot, then a
-   devil's advocate; you verify, `--apply` gates citations:
+10. **"Second opinion" / other models** — `council`: blind reviewers on a snapshot, then a
+   devil's advocate; `--apply` gates citations:
    [references/deep-audit-playbook.md](references/deep-audit-playbook.md).
 
 ## Workflow (standard audit)

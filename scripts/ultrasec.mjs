@@ -27317,8 +27317,8 @@ function redact(line2) {
 
 // src/redact.ts
 function redactPasswordHashes(text) {
-  return text.replace(/\$(argon2(?:id|i|d)?|2[abxy]|scrypt|pbkdf2[\w-]*)\$[\w./+=,$-]*/g, (literal2, algo, at, whole) => {
-    if (whole[at + literal2.length] === "\u2026") return literal2;
+  return text.replace(/\$(argon2(?:id|i|d)?|2[abxy]|scrypt|pbkdf2[\w-]*)\$[\w./+=,$-]*/g, (literal2, algo, at2, whole) => {
+    if (whole[at2 + literal2.length] === "\u2026") return literal2;
     const kept = [algo];
     for (const part of literal2.split("$").slice(2)) {
       if (/^(?:[a-z]+=\d+(?:,[a-z]+=\d+)*|\d{1,7})$/.test(part)) kept.push(part);
@@ -27332,33 +27332,56 @@ function maskValue(value) {
 }
 var PEM_KEY = /(-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----)[\s\S]*?(-----END [A-Z0-9 ]*PRIVATE KEY-----|$)/g;
 var URI_USERINFO = /\b([a-z][a-z0-9+.-]*:\/\/)([^\s:@/]*):([^\s@/]+)@/gi;
-var NAMED_VALUE = /(["'`]?)\b([\w.-]*(?:secret|token|passwd|password|api_?key|private_?key)[\w.-]*)\1(\s*(?::|=(?![=>]))\s*)(["'`]?)([^\s"'`,;)}\]]+)/gi;
+var NAMED_VALUE = /(["'`]?)\b([\w.-]*(?:secret|token|passwd|password|api[_-]?key|private[_-]?key|access[_-]?key|client[_-]?key)[\w.-]*)\1(\s*(?::|=(?![=>]))\s*)(?:(["'`])([^"'`\n]+)\4|(["'`]?)([^\s"'`,;)}\]]+))/gi;
+var ENV_KEY = /\b((?:[A-Z][A-Z0-9]*_)*KEY(?:_[A-Z0-9]+)*)=(?![=>])(["'`]?)([^\s"'`,;)}\]]+)/g;
 var NOT_A_VALUE = /* @__PURE__ */ new Set(["none", "null", "nil", "undefined", "true", "false", "empty", "unset", "required", "optional", "redacted", "masked"]);
 function isReference(value) {
   if (/[…*]/.test(value) || NOT_A_VALUE.has(value.toLowerCase())) return true;
+  if (/^(?:‹|SECRETGATE_)/i.test(value)) return true;
   if (/^\$(?:argon2|2[abxy]\$|scrypt|pbkdf2)/.test(value)) return true;
-  if (/^(?:\$\{|\$[A-Z_][A-Z0-9_]*$|\{\{|<|%)/.test(value)) return true;
+  if (/^(?:\$\{|\$[A-Za-z_]\w*$|\{\{|<|%)/.test(value)) return true;
   const chain = /^[A-Za-z_$][\w$]*(?:\??\.[A-Za-z_$][\w$]*)+(?:\(.*|\[.*)?$|^[A-Za-z_$][\w$]*[([].*$/;
   return chain.test(value) && !/\beyJ/.test(value) && value.split(/[.([]/).every((seg) => seg.length <= 40);
 }
-var PROVIDER_TOKENS = SECRET_PATTERNS.filter((p) => ["aws-access-key", "jwt", "slack-token", "google-api-key"].includes(p.kind)).map((p) => p.re);
+var JWT = /eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{5,}/g;
+var PROVIDER_TOKENS = [JWT, ...SECRET_PATTERNS.filter((p) => ["aws-access-key", "slack-token", "google-api-key"].includes(p.kind)).map((p) => p.re)];
 var AUTH_HEADER = /(Authorization:\s*(?:Bearer|Basic)\s+)([^\s"'`]+)/gi;
-function redactSecrets(text) {
-  if (!text) return text;
-  const out2 = redactPasswordHashes(text).replace(PEM_KEY, (_m, begin, end) => `${begin}\u2026${end}`).replace(URI_USERINFO, (_m, scheme, user) => `${scheme}${user}:****@`).replace(
-    NAMED_VALUE,
-    (match, q1, name2, sep14, q2, value) => value.length < 4 || isReference(value) ? match : `${q1}${name2}${q1}${sep14}${q2}${maskValue(value)}`
-  ).replace(AUTH_HEADER, (match, head, value) => /[…*]/.test(value) ? match : `${head}${maskValue(value)}`);
-  return PROVIDER_TOKENS.reduce((acc, re) => acc.replace(re, (token) => maskValue(token)), out2);
+var KEY_MATERIAL_RUN = /(?<![A-Za-z0-9+_=-])[A-Za-z0-9+_=-]{32,}(?![A-Za-z0-9+_=-])/g;
+var OPAQUE_RUN = /[A-Za-z0-9+/=_-]{20,}/g;
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function looksLikeKeyMaterial(token) {
+  if (/^SECRETGATE_/i.test(token)) return false;
+  if (UUID.test(token)) return false;
+  if (/^[0-9a-f]{32,}$/i.test(token)) return true;
+  const digits = (token.match(/[0-9]/g) ?? []).length;
+  const letters = (token.match(/[A-Za-z]/g) ?? []).length;
+  return digits >= 4 && letters >= 4;
 }
-var OPAQUE_TOKEN = /[A-Za-z0-9+/=_-]{20,}/g;
+function maskBareRuns(text, level) {
+  if (level === "key-material") return text.replace(KEY_MATERIAL_RUN, (run2) => looksLikeKeyMaterial(run2) ? maskValue(run2) : run2);
+  if (level === "opaque") {
+    return text.replace(OPAQUE_RUN, (run2) => !/^SECRETGATE_/i.test(run2) && /\d/.test(run2) && /[A-Za-z]/.test(run2) ? maskValue(run2) : run2);
+  }
+  return text;
+}
+function redactSecrets(text, opts = {}) {
+  if (!text) return text;
+  const out2 = redactPasswordHashes(text).replace(PEM_KEY, (_m, begin, end) => `${begin}\u2026${end}`).replace(URI_USERINFO, (_m, scheme, user) => `${scheme}${user}:\u2026@`).replace(NAMED_VALUE, (match, q1, name2, sep15, ...v) => {
+    const [closed, quoted, open = "", bare] = v;
+    const value = quoted ?? bare ?? "";
+    if (value.length < 4 || isReference(value)) return match;
+    return quoted !== void 0 ? `${q1}${name2}${q1}${sep15}${closed}${maskValue(value)}${closed}` : `${q1}${name2}${q1}${sep15}${open}${maskValue(value)}`;
+  }).replace(ENV_KEY, (match, name2, q, value) => value.length < 4 || isReference(value) ? match : `${name2}=${q}${maskValue(value)}`).replace(AUTH_HEADER, (match, head, value) => /[…*]/.test(value) ? match : `${head}${maskValue(value)}`);
+  const shaped = PROVIDER_TOKENS.reduce((acc, re) => acc.replace(re, (token) => maskValue(token)), out2);
+  return maskBareRuns(shaped, opts.bareRuns ?? "keep");
+}
 function isCredentialFinding(f) {
   if (f.category === "secret") return true;
   const credentialCwe = /\bCWE-(?:798|259|321|522|916)\b/;
   return credentialCwe.test(f.cwe ?? "") || credentialCwe.test(f.title);
 }
 function redactCredentialLine(line2) {
-  return redactSecrets(line2).replace(OPAQUE_TOKEN, (run2) => /\d/.test(run2) && /[A-Za-z]/.test(run2) ? maskValue(run2) : run2);
+  return redactSecrets(line2, { bareRuns: "opaque" });
 }
 
 // src/util.ts
@@ -48274,33 +48297,11 @@ function councilEnv(extra = {}, base = process.env) {
 }
 
 // src/council/redact.ts
-var REDACTED = "\u2039redacted\u203A";
-var ENV_ASSIGN = /\b((?:[A-Z][A-Z0-9_]*)?(?:SECRET|TOKEN|PASSWORD|PASSWD|KEY)[A-Z0-9_]*)=(["']?)([^\s"'`]+)\2/g;
-var KEYED_LITERAL = /((?:[A-Za-z0-9_-]*)(?:secret|token|passw(?:or)?d|api[_-]?key|private[_-]?key|access[_-]?key|client[_-]?key)[A-Za-z0-9_-]*["']?\s*[:=]\s*)(["'])([^"'\n]{4,})\2/gi;
-var JWT = /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
-var LONG_TOKEN = /(?<![A-Za-z0-9+_=-])[A-Za-z0-9+_=-]{32,}(?![A-Za-z0-9+_=-])/g;
-var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isReference(value) {
-  return /^(?:process\.env|os\.environ|os\.getenv|env\.|\$|\{|<|‹redacted›|SECRETGATE_)/.test(value);
-}
-function looksLikeKeyMaterial(token) {
-  if (token.startsWith("SECRETGATE_")) return false;
-  if (UUID.test(token)) return false;
-  if (/^[0-9a-f]{32,}$/i.test(token)) return true;
-  const digits = (token.match(/[0-9]/g) ?? []).length;
-  const letters = (token.match(/[A-Za-z]/g) ?? []).length;
-  return digits >= 4 && letters >= 4;
-}
-function redactSecrets(text) {
-  let out2 = redactPasswordHashes(text);
-  out2 = out2.replace(JWT, REDACTED);
-  out2 = out2.replace(ENV_ASSIGN, (whole, name2, q, value) => isReference(value) ? whole : `${name2}=${q}${REDACTED}${q}`);
-  out2 = out2.replace(KEYED_LITERAL, (whole, head, q, value) => isReference(value) ? whole : `${head}${q}${REDACTED}${q}`);
-  out2 = out2.replace(LONG_TOKEN, (token) => looksLikeKeyMaterial(token) ? REDACTED : token);
-  return out2;
+function redactReviewerText(text) {
+  return redactSecrets(text, { bareRuns: "key-material" });
 }
 function redactValue(v) {
-  if (typeof v === "string") return redactSecrets(v);
+  if (typeof v === "string") return redactReviewerText(v);
   if (Array.isArray(v)) return v.map(redactValue);
   if (v && typeof v === "object") {
     const o = {};
@@ -48313,7 +48314,7 @@ function redactJsonLine(line2) {
   try {
     return JSON.stringify(redactValue(JSON.parse(line2)));
   } catch {
-    return redactSecrets(line2);
+    return redactReviewerText(line2);
   }
 }
 function placeholderArtefacts(text) {
@@ -48349,17 +48350,17 @@ function buildDevilList(findings, councilRejected = []) {
     id: f.id,
     severity: f.severity,
     status: f.status,
-    title: redactSecrets(f.title),
+    title: redactReviewerText(f.title),
     at: findingCitations(f).slice(0, 3)
   }));
   const dismissed = findings.filter((f) => f.status === "dismissed" && f.verdict && f.category !== "dep").slice(0, MAX_REJECTED).map((f) => ({
     id: f.id,
-    title: redactSecrets(f.title),
-    reason: redactSecrets([f.brocard, f.verdict, stageNotes(f.message)].filter(Boolean).join(" \xB7 ")).slice(0, 200)
+    title: redactReviewerText(f.title),
+    reason: redactReviewerText([f.brocard, f.verdict, stageNotes(f.message)].filter(Boolean).join(" \xB7 ")).slice(0, 200)
   }));
   return {
     items,
-    rejected: [...dismissed, ...councilRejected.map((r) => ({ ...r, title: redactSecrets(r.title), reason: redactSecrets(r.reason) }))],
+    rejected: [...dismissed, ...councilRejected.map((r) => ({ ...r, title: redactReviewerText(r.title), reason: redactReviewerText(r.reason) }))],
     truncated: Math.max(0, standing.length - MAX_DEVIL_ITEMS)
   };
 }
@@ -48481,7 +48482,7 @@ function renderBrief(b) {
   for (const r of s.rules) L.push(`- ${r.replace("{commit}", b.commit.slice(0, 12))}`);
   L.push("", b.focus ? s.focus(b.focus) : s.noFocus, "");
   if (b.context?.trim()) {
-    const ctx = redactSecrets(b.context.trim());
+    const ctx = redactReviewerText(b.context.trim());
     L.push(`## ${s.trust}`, "", ctx.length > MAX_CONTEXT_CHARS ? `${ctx.slice(0, MAX_CONTEXT_CHARS)}
 \u2026` : ctx, "");
   }
@@ -48737,10 +48738,10 @@ function toDiscovery(c2, row) {
   const line2 = row.line ?? c2.primary?.line;
   if (!file || line2 === void 0) return "no resolvable citation on the candidate and none in the decision";
   const credit = `Second opinion (council): raised by ${c2.sources.join(", ")} \u2014 corroboration ${c2.corroboration} is a prior, not a verdict.`;
-  const message = redactSecrets(row.message ?? [c2.scenario, credit, row.reason ? `Orchestrator: ${row.reason}` : ""].filter(Boolean).join("\n\n"));
+  const message = redactReviewerText(row.message ?? [c2.scenario, credit, row.reason ? `Orchestrator: ${row.reason}` : ""].filter(Boolean).join("\n\n"));
   const cwe = row.cwe ?? c2.cwe;
   return {
-    title: redactSecrets(row.title ?? c2.title),
+    title: redactReviewerText(row.title ?? c2.title),
     category: row.category ?? familyCategory(c2.family),
     severity,
     ...cwe ? { cwe } : {},
@@ -48770,7 +48771,7 @@ function applyCouncil(dossier, todo, rows, repo, opts = {}) {
       continue;
     }
     if (row.decision === "reject") {
-      rejected.push({ candidate: c2.id, title: c2.title, sources: c2.sources, reason: redactSecrets(row.reason), by: "orchestrator" });
+      rejected.push({ candidate: c2.id, title: c2.title, sources: c2.sources, reason: redactReviewerText(row.reason), by: "orchestrator" });
       continue;
     }
     const d = toDiscovery(c2, row);
@@ -48939,18 +48940,18 @@ function parseReport(md, who, idx) {
     const cwe = raw.match(/\bCWE[-‐–\s]?(\d{1,4})\b/i)?.[1];
     const scenario = raw.match(SCENARIO_FIELD)?.[1]?.trim();
     const fix = raw.match(FIX_FIELD)?.[1]?.trim();
-    const excerpt = redactSecrets(raw);
+    const excerpt = redactReviewerText(raw);
     claims.push({
       reviewer: who.reviewer,
       phase: who.phase,
       section,
-      ref: redactSecrets(ref2),
-      title: redactSecrets(title),
+      ref: redactReviewerText(ref2),
+      title: redactReviewerText(title),
       ...severity ? { severity } : {},
       ...cwe ? { cwe: `CWE-${Number(cwe)}` } : {},
       citations: extractCitations(raw).map((c2) => resolveCitation(idx, c2, lines5)),
-      ...scenario ? { scenario: redactSecrets(scenario).slice(0, 400) } : {},
-      ...fix ? { fix: redactSecrets(fix).slice(0, 400) } : {},
+      ...scenario ? { scenario: redactReviewerText(scenario).slice(0, 400) } : {},
+      ...fix ? { fix: redactReviewerText(fix).slice(0, 400) } : {},
       excerpt: excerpt.length > MAX_EXCERPT ? `${excerpt.slice(0, MAX_EXCERPT)}\u2026` : excerpt,
       // On the RAW block: a placeholder is an artefact whether or not our own
       // redaction would have masked what surrounds it.
@@ -49325,7 +49326,7 @@ async function attempt(ctx, reviewer, spec, session) {
     appendFileSync2(join85(dir, "events.jsonl"), [marker, ...lines5.map(redactJsonLine)].join("\n") + "\n");
   }
   if (res.stderr.trim()) appendFileSync2(join85(dir, "err.log"), `--- ${spec.cli}:${spec.model}${resume ? " (resume)" : ""}
-${redactSecrets(res.stderr)}
+${redactReviewerText(res.stderr)}
 `);
   const status = statusOf(d, res);
   return {
@@ -49335,7 +49336,7 @@ ${redactSecrets(res.stderr)}
       exit: res.code,
       durationMs: res.durationMs,
       usage: d.usage,
-      ...d.failure ? { failure: { ...d.failure, message: redactSecrets(d.failure.message) } } : {}
+      ...d.failure ? { failure: { ...d.failure, message: redactReviewerText(d.failure.message) } } : {}
     },
     digest: d
   };
@@ -49373,7 +49374,7 @@ async function runReviewer(ctx, reviewer, prior) {
   const status = done ? "ok" : last() ?? "failed";
   let report = prior?.report;
   if (best?.text) {
-    writeFileSync28(join85(dir, "out.md"), `${redactSecrets(best.text)}
+    writeFileSync28(join85(dir, "out.md"), `${redactReviewerText(best.text)}
 `);
     report = relative16(ctx.run, join85(dir, "out.md")).split("\\").join("/");
   }

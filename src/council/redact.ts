@@ -1,4 +1,4 @@
-import { redactPasswordHashes } from "../authtokens.js";
+import { redactSecrets } from "../redact.js";
 
 // Everything a council reviewer says passes through here before it is written
 // into the run directory or printed.
@@ -8,63 +8,28 @@ import { redactPasswordHashes } from "../authtokens.js";
 // password hashes, test fixtures with live tokens. Its report quotes them back
 // as "evidence", and its JSON event stream carries every file it read, verbatim.
 // The run directory is the thing that gets zipped and handed to the client, so a
-// literal that reaches it has been published. `authtokens.ts` already learned
-// this once — two complete argon2id hashes of a `super` account ended up in a
-// shared report — and its redaction is reused rather than re-derived.
+// literal that reaches it has been published.
+//
+// WHAT counts as a secret is decided in `../redact.ts`, the same rules the
+// engine's stage notes go through — this module once had its own, and the same
+// literal could be masked in one place and not the other. Here lives only what
+// is specific to reviewer output: the bare-run level it is redacted at, the
+// JSONL event stream, and the placeholder artefacts a claim can lean on.
 
-/** What a redacted value is replaced with. Deliberately NOT one of the
- *  placeholder shapes `placeholderArtefacts` looks for: re-parsing an `out.md`
- *  this module already redacted must not flag our own marker as an artefact. */
-export const REDACTED = "‹redacted›";
-
-/** `NAME=value` in env-file / shell style, NAME naming a secret. The value stops
- *  at whitespace or a quote, so a JSON string containing it stays valid JSON. */
-const ENV_ASSIGN = /\b((?:[A-Z][A-Z0-9_]*)?(?:SECRET|TOKEN|PASSWORD|PASSWD|KEY)[A-Z0-9_]*)=(["']?)([^\s"'`]+)\2/g;
-
-/** `"jwt_secret": "…"` / `password: '…'` — only QUOTED values, so code that
- *  merely names the field (`password: req.body.password`) is left readable. */
-const KEYED_LITERAL =
-  /((?:[A-Za-z0-9_-]*)(?:secret|token|passw(?:or)?d|api[_-]?key|private[_-]?key|access[_-]?key|client[_-]?key)[A-Za-z0-9_-]*["']?\s*[:=]\s*)(["'])([^"'\n]{4,})\2/gi;
-
-/** A JWT: three base64url segments, the first two decoding to JSON objects. */
-const JWT = /\beyJ[A-Za-z0-9_-]{8,}\.eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/g;
-
-/** A run of base64/hex alphabet long enough to be key material. Slashes are
- *  excluded on purpose — they are what make a long path look like base64. */
-const LONG_TOKEN = /(?<![A-Za-z0-9+_=-])[A-Za-z0-9+_=-]{32,}(?![A-Za-z0-9+_=-])/g;
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** A value that REFERS to a secret rather than being one: `process.env.X`,
- *  `${VAR}`, `$VAR`, `<your-key>`. Redacting it only makes evidence unreadable. */
-function isReference(value: string): boolean {
-  return /^(?:process\.env|os\.environ|os\.getenv|env\.|\$|\{|<|‹redacted›|SECRETGATE_)/.test(value);
-}
-
-function looksLikeKeyMaterial(token: string): boolean {
-  if (token.startsWith("SECRETGATE_")) return false; // an artefact to SEE, not a secret
-  if (UUID.test(token)) return false;
-  if (/^[0-9a-f]{32,}$/i.test(token)) return true; // hex digest / key
-  const digits = (token.match(/[0-9]/g) ?? []).length;
-  const letters = (token.match(/[A-Za-z]/g) ?? []).length;
-  // A long camelCase identifier has one or two digits at most; generated key
-  // material has many. Four of each separates them on every sample we have.
-  return digits >= 4 && letters >= 4;
-}
-
-/** Replace every secret-looking literal in free text. Idempotent. */
-export function redactSecrets(text: string): string {
-  let out = redactPasswordHashes(text);
-  out = out.replace(JWT, REDACTED);
-  out = out.replace(ENV_ASSIGN, (whole, name: string, q: string, value: string) => (isReference(value) ? whole : `${name}=${q}${REDACTED}${q}`));
-  out = out.replace(KEYED_LITERAL, (whole, head: string, q: string, value: string) => (isReference(value) ? whole : `${head}${q}${REDACTED}${q}`));
-  out = out.replace(LONG_TOKEN, (token) => (looksLikeKeyMaterial(token) ? REDACTED : token));
-  return out;
+/**
+ * Redact a reviewer's text: the shared rules, plus bare runs that look like key
+ * material (`"key-material"`, see `BareRuns` in `../redact.ts` for why notes
+ * are not held to it). The mask (`Sup3…`) is deliberately none of the shapes
+ * `placeholderArtefacts` flags, so re-parsing an `out.md` this module already
+ * redacted never takes our own marker for a masking placeholder.
+ */
+export function redactReviewerText(text: string): string {
+  return redactSecrets(text, { bareRuns: "key-material" });
 }
 
 /** Deep-redact every string inside a parsed JSON value. */
 function redactValue(v: unknown): unknown {
-  if (typeof v === "string") return redactSecrets(v);
+  if (typeof v === "string") return redactReviewerText(v);
   if (Array.isArray(v)) return v.map(redactValue);
   if (v && typeof v === "object") {
     const o: Record<string, unknown> = {};
@@ -87,7 +52,7 @@ export function redactJsonLine(line: string): string {
   try {
     return JSON.stringify(redactValue(JSON.parse(line)));
   } catch {
-    return redactSecrets(line);
+    return redactReviewerText(line);
   }
 }
 

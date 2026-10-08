@@ -1,7 +1,7 @@
 import { lineCount } from "../check.js";
 import type { Severity } from "../types.js";
 import type { Phase } from "./brief.js";
-import { placeholderArtefacts, redactSecrets } from "./redact.js";
+import { placeholderArtefacts, redactReviewerText } from "./redact.js";
 import { BRIEF_PREFIX } from "./snapshot.js";
 
 // Turning a reviewer's Markdown into claims the orchestrator can check.
@@ -235,18 +235,18 @@ export function parseReport(md: string, who: { reviewer: string; phase: Phase },
     const cwe = raw.match(/\bCWE[-‐–\s]?(\d{1,4})\b/i)?.[1];
     const scenario = raw.match(SCENARIO_FIELD)?.[1]?.trim();
     const fix = raw.match(FIX_FIELD)?.[1]?.trim();
-    const excerpt = redactSecrets(raw);
+    const excerpt = redactReviewerText(raw);
     claims.push({
       reviewer: who.reviewer,
       phase: who.phase,
       section,
-      ref: redactSecrets(ref),
-      title: redactSecrets(title),
+      ref: redactReviewerText(ref),
+      title: redactReviewerText(title),
       ...(severity ? { severity } : {}),
       ...(cwe ? { cwe: `CWE-${Number(cwe)}` } : {}),
       citations: extractCitations(raw).map((c) => resolveCitation(idx, c, lines)),
-      ...(scenario ? { scenario: redactSecrets(scenario).slice(0, 400) } : {}),
-      ...(fix ? { fix: redactSecrets(fix).slice(0, 400) } : {}),
+      ...(scenario ? { scenario: redactReviewerText(scenario).slice(0, 400) } : {}),
+      ...(fix ? { fix: redactReviewerText(fix).slice(0, 400) } : {}),
       excerpt: excerpt.length > MAX_EXCERPT ? `${excerpt.slice(0, MAX_EXCERPT)}…` : excerpt,
       // On the RAW block: a placeholder is an artefact whether or not our own
       // redaction would have masked what surrounds it.

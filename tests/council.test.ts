@@ -11,7 +11,7 @@ import { indexTree, parseReport, type Claim } from "../src/council/claims.js";
 import { consolidate, cweFamily } from "../src/council/consolidate.js";
 import { classifyFailure, digestOpencode, isContractShaped } from "../src/council/events.js";
 import { loadLedger } from "../src/council/ledger.js";
-import { placeholderArtefacts, REDACTED, redactJsonLine, redactSecrets } from "../src/council/redact.js";
+import { placeholderArtefacts, redactJsonLine, redactReviewerText } from "../src/council/redact.js";
 import type { CouncilSpawner } from "../src/council/runner.js";
 import { councilEnv, createSnapshot, snapshotFiles } from "../src/council/snapshot.js";
 import { countBySeverity, loadDossier, writeDossier } from "../src/store.js";
@@ -567,7 +567,7 @@ describe("claim parsing", () => {
     expect(r4.artefacts).toEqual(["SECRETGATE_9f3a2…"]);
     // Secrets never survive into a claim.
     expect(r2.excerpt).not.toContain("hunter2hunter2xyz");
-    expect(r2.excerpt).toContain(`DB_PASSWORD=${REDACTED}`);
+    expect(r2.excerpt).toContain("DB_PASSWORD=hunt…");
   });
 
   it("parses a French devil's-advocate report into contestations and new findings", () => {
@@ -596,7 +596,7 @@ describe("claim parsing", () => {
 
 describe("redaction", () => {
   it("masks a modular-crypt hash, NAME=secret, quoted secrets, JWTs and long tokens", () => {
-    const s = redactSecrets(
+    const s = redactReviewerText(
       [
         "hash $argon2id$v=19$m=65536,t=3,p=4$c2FsdHNhbHQ$aGFzaGhhc2hoYXNo",
         "HASURA_GRAPHQL_ADMIN_SECRET=adminsecret123",
@@ -607,7 +607,7 @@ describe("redaction", () => {
     );
     expect(s).toContain("$argon2id$v=19$m=65536,t=3,p=4$…");
     expect(s).not.toContain("aGFzaGhhc2hoYXNo");
-    expect(s).toContain(`HASURA_GRAPHQL_ADMIN_SECRET=${REDACTED}`);
+    expect(s).toContain("HASURA_GRAPHQL_ADMIN_SECRET=admi…");
     expect(s).not.toContain("my-very-secret");
     expect(s).not.toContain("eyJzdWIiOiIxMjM0NTYifQ");
     expect(s).not.toContain("a1b2c3d4e5f6a7b8c9d0");
@@ -615,7 +615,7 @@ describe("redaction", () => {
 
   it("leaves references and ordinary code readable", () => {
     const code = "const s = process.env.JWT_SECRET;\nDB_PASSWORD=$DB_PASSWORD\npassword: req.body.password\nsrc/components/Button/index.tsx";
-    expect(redactSecrets(code)).toBe(code);
+    expect(redactReviewerText(code)).toBe(code);
   });
 
   it("keeps a JSONL event valid when a secret follows an escaped newline", () => {
@@ -626,7 +626,7 @@ describe("redaction", () => {
   });
 
   it("our own marker is not mistaken for a masking placeholder on re-parse", () => {
-    expect(placeholderArtefacts(redactSecrets("PASSWORD=hunter2"))).toEqual([]);
+    expect(placeholderArtefacts(redactReviewerText("PASSWORD=hunter2"))).toEqual([]);
     expect(placeholderArtefacts("set to REDACTED")).toEqual(["REDACTED"]);
     expect(placeholderArtefacts("**bold** and ***strong***")).toEqual([]);
   });

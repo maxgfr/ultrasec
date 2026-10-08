@@ -5,7 +5,7 @@ import { CATEGORIES, normalizeCategory, SEVERITIES, type Finding, type Severity 
 import { findingCitations } from "./brief.js";
 import { familyCategory, type Candidate, type CouncilTodo } from "./consolidate.js";
 import type { Decision } from "./ledger.js";
-import { redactSecrets } from "./redact.js";
+import { redactReviewerText } from "./redact.js";
 
 // `council --apply <decisions.json>` — the orchestrator's verdicts on the
 // candidates, folded back.
@@ -103,10 +103,10 @@ function toDiscovery(c: Candidate, row: DecisionRow): Discovery | string {
   const line = row.line ?? c.primary?.line;
   if (!file || line === undefined) return "no resolvable citation on the candidate and none in the decision";
   const credit = `Second opinion (council): raised by ${c.sources.join(", ")} — corroboration ${c.corroboration} is a prior, not a verdict.`;
-  const message = redactSecrets(row.message ?? [c.scenario, credit, row.reason ? `Orchestrator: ${row.reason}` : ""].filter(Boolean).join("\n\n"));
+  const message = redactReviewerText(row.message ?? [c.scenario, credit, row.reason ? `Orchestrator: ${row.reason}` : ""].filter(Boolean).join("\n\n"));
   const cwe = row.cwe ?? c.cwe;
   return {
-    title: redactSecrets(row.title ?? c.title),
+    title: redactReviewerText(row.title ?? c.title),
     category: row.category ?? familyCategory(c.family),
     severity,
     ...(cwe ? { cwe } : {}),
@@ -151,7 +151,7 @@ export function applyCouncil(
       continue;
     }
     if (row.decision === "reject") {
-      rejected.push({ candidate: c.id, title: c.title, sources: c.sources, reason: redactSecrets(row.reason), by: "orchestrator" });
+      rejected.push({ candidate: c.id, title: c.title, sources: c.sources, reason: redactReviewerText(row.reason), by: "orchestrator" });
       continue;
     }
     const d = toDiscovery(c, row);

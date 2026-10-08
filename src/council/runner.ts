@@ -5,7 +5,7 @@ import { ADAPTERS, onPath, type CouncilCli, type ModelSpec, type Reviewer } from
 import { argvMessage, finalizeMessage, type Lang, type Phase } from "./brief.js";
 import { addUsage, digest, emptyUsage, isContractShaped, watchLine, type Digest, type Failure } from "./events.js";
 import { reviewerDir, type Attempt, type ReviewerRecord, type ReviewerStatus } from "./ledger.js";
-import { redactJsonLine, redactSecrets } from "./redact.js";
+import { redactJsonLine, redactReviewerText } from "./redact.js";
 import { councilEnv } from "./snapshot.js";
 
 // Running the reviewers: in parallel, each on the snapshot, each with an
@@ -172,7 +172,7 @@ async function attempt(ctx: RunnerContext, reviewer: Reviewer, spec: ModelSpec, 
     const lines = res.stdout.split("\n").filter((l) => l.trim());
     appendFileSync(join(dir, "events.jsonl"), [marker, ...lines.map(redactJsonLine)].join("\n") + "\n");
   }
-  if (res.stderr.trim()) appendFileSync(join(dir, "err.log"), `--- ${spec.cli}:${spec.model}${resume ? " (resume)" : ""}\n${redactSecrets(res.stderr)}\n`);
+  if (res.stderr.trim()) appendFileSync(join(dir, "err.log"), `--- ${spec.cli}:${spec.model}${resume ? " (resume)" : ""}\n${redactReviewerText(res.stderr)}\n`);
 
   const status = statusOf(d, res);
   return {
@@ -182,7 +182,7 @@ async function attempt(ctx: RunnerContext, reviewer: Reviewer, spec: ModelSpec, 
       exit: res.code,
       durationMs: res.durationMs,
       usage: d.usage,
-      ...(d.failure ? { failure: { ...d.failure, message: redactSecrets(d.failure.message) } } : {}),
+      ...(d.failure ? { failure: { ...d.failure, message: redactReviewerText(d.failure.message) } } : {}),
     },
     digest: d,
   };
@@ -238,7 +238,7 @@ export async function runReviewer(ctx: RunnerContext, reviewer: Reviewer, prior?
   const status = done ? "ok" : (last() ?? "failed");
   let report = prior?.report;
   if (best?.text) {
-    writeFileSync(join(dir, "out.md"), `${redactSecrets(best.text)}\n`);
+    writeFileSync(join(dir, "out.md"), `${redactReviewerText(best.text)}\n`);
     report = relative(ctx.run, join(dir, "out.md")).split("\\").join("/");
   }
   const allAttempts = [...(prior?.attempts ?? []), ...attempts];

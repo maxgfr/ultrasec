@@ -2,7 +2,7 @@ import type { Finding, Severity } from "../types.js";
 import { SEVERITIES } from "../types.js";
 import { stageNotes } from "../util.js";
 import { BRIEF_PREFIX } from "./snapshot.js";
-import { redactSecrets } from "./redact.js";
+import { redactReviewerText } from "./redact.js";
 
 // The brief every reviewer reads — the SAME text for every model, so their
 // reports can be parsed by one parser and compared claim for claim.
@@ -73,7 +73,7 @@ export function buildDevilList(
     id: f.id,
     severity: f.severity,
     status: f.status,
-    title: redactSecrets(f.title),
+    title: redactReviewerText(f.title),
     at: findingCitations(f).slice(0, 3),
   }));
   // Adjudicated dismissals only — an advisory nobody read was not "rejected".
@@ -82,12 +82,12 @@ export function buildDevilList(
     .slice(0, MAX_REJECTED)
     .map((f) => ({
       id: f.id,
-      title: redactSecrets(f.title),
-      reason: redactSecrets([f.brocard, f.verdict, stageNotes(f.message)].filter(Boolean).join(" · ")).slice(0, 200),
+      title: redactReviewerText(f.title),
+      reason: redactReviewerText([f.brocard, f.verdict, stageNotes(f.message)].filter(Boolean).join(" · ")).slice(0, 200),
     }));
   return {
     items,
-    rejected: [...dismissed, ...councilRejected.map((r) => ({ ...r, title: redactSecrets(r.title), reason: redactSecrets(r.reason) }))],
+    rejected: [...dismissed, ...councilRejected.map((r) => ({ ...r, title: redactReviewerText(r.title), reason: redactReviewerText(r.reason) }))],
     truncated: Math.max(0, standing.length - MAX_DEVIL_ITEMS),
   };
 }
@@ -252,7 +252,7 @@ export function renderBrief(b: BriefInput): string {
   for (const r of s.rules) L.push(`- ${r.replace("{commit}", b.commit.slice(0, 12))}`);
   L.push("", b.focus ? s.focus(b.focus) : s.noFocus, "");
   if (b.context?.trim()) {
-    const ctx = redactSecrets(b.context.trim());
+    const ctx = redactReviewerText(b.context.trim());
     L.push(`## ${s.trust}`, "", ctx.length > MAX_CONTEXT_CHARS ? `${ctx.slice(0, MAX_CONTEXT_CHARS)}\n…` : ctx, "");
   }
   if (b.phase === "devil" && b.devil) {
