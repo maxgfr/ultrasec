@@ -1,7 +1,8 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { mergeGraphs, type Graph } from "./graph.js";
-import { byStr, eprintln } from "./util.js";
+import { byStr, carryStageNotes, eprintln } from "./util.js";
+import { redactSecrets } from "./redact.js";
 import { SEVERITIES, type Finding, type Manifest, type Severity } from "./types.js";
 import { proposedFor, renderProposalSummary } from "./noise.js";
 import { sortFindings } from "./rank.js";
@@ -119,8 +120,9 @@ export function writeDossier(outDir: string, d: Dossier): void {
 /**
  * Fold a scoped/incremental pass (`next`) into an existing run (`prev`).
  *  - findings already adjudicated in `prev` (status ≠ open) keep their lifecycle
- *    (status/verdict/exploitPath/confidence/edited message) but refresh their
- *    deterministic fields from `next`;
+ *    (status/verdict/exploitPath/confidence and the stage notes in their message)
+ *    but refresh their deterministic fields — the engine's message included —
+ *    from `next`;
  *  - genuinely new findings are appended;
  *  - findings only in `prev` (outside this pass's scope) are KEPT — a scoped
  *    re-scan must never delete what it didn't look at.
@@ -140,20 +142,28 @@ export function writeDossier(outDir: string, d: Dossier): void {
  *
  * One function, one list: a new authored field is added once and both callers
  * get it.
+ *
+ * `message` is half authored, half not: the engine's prose and evidence, then
+ * the stage notes the applies appended. Only the notes are carried — see
+ * `carryStageNotes` for the hash that survived its own detector's fix when the
+ * whole old message was kept.
  */
 export function preserveAdjudication(next: Finding, old: Finding): Finding {
   const merged: Finding = {
     ...next,
     status: old.status,
     verdict: old.verdict,
-    exploitPath: old.exploitPath,
+    exploitPath: old.exploitPath === undefined ? undefined : redactSecrets(old.exploitPath),
     confidence: old.confidence,
-    message: old.message,
+    message: carryStageNotes(next.message, old.message),
   };
   // Optional authored fields: only set when present, so a merge never
   // introduces an explicit `undefined` the JSON round-trip would drop anyway.
   if (old.brocard) merged.brocard = old.brocard;
   if (old.fixedIn) merged.fixedIn = old.fixedIn;
+  // Blame is opt-in (`--blame`): a scoped re-scan run without it would otherwise
+  // erase the commit `revalidate` counts "commits since the finding" from.
+  if (!next.provenance && old.provenance) merged.provenance = old.provenance;
   return merged;
 }
 

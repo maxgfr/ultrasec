@@ -205,7 +205,11 @@ import { byStr } from "./vendor/codeindex-engine.mjs";
 
 /** Stage labels allowed to append a trailing note block to a finding message. */
 const STAGE_LABELS = ["Verdict", "Revalidation"] as const;
-const STAGE_SPLIT = new RegExp(`\\n\\n(?=(?:${STAGE_LABELS.join("|")}) \\()`);
+// `triage --apply` writes its own fixed block ("Triage: dismissed as noise.")
+// rather than a labelled one. It is an adjudication all the same, and a merge
+// that kept the labelled blocks but not this one would reopen nothing yet erase
+// why the finding was dismissed.
+const STAGE_SPLIT = new RegExp(`\\n\\n(?=(?:(?:${STAGE_LABELS.join("|")}) \\(|Triage: ))`);
 
 /**
  * Append `stage`'s note to a finding message, REPLACING that stage's previous
@@ -226,6 +230,27 @@ export function withStageNote(message: string, stage: (typeof STAGE_LABELS)[numb
   const kept = parts.filter((part, i) => i === 0 || !part.startsWith(`${stage} (`));
   const safe = note ? redactSecrets(note) : "";
   return `${kept.join("\n\n")}\n\n${stage} (${label})${safe ? `: ${safe}` : ""}`;
+}
+
+/**
+ * A freshly-scanned message with a prior message's stage blocks carried onto it.
+ *
+ * `scan --merge` used to keep the prior message whole, to keep the verdicts in
+ * it. That kept the prior EVIDENCE too: on a real run the committed-hash
+ * detector was fixed to mask the hash it quotes, the re-scan re-detected the
+ * same finding under the same id, and the merge kept the old message — full
+ * argon2 hash included — so the leak outlived the fix, and the only way out was
+ * a fresh scan and a replay of every verdict file. The engine's prose is the
+ * engine's: it is re-derived. The adjudication is the auditor's: it is kept,
+ * and redacted again, so a dossier written before the redaction heals on merge.
+ */
+export function carryStageNotes(fresh: string, prior: string): string {
+  const base = fresh.split(STAGE_SPLIT)[0] ?? "";
+  const blocks = prior
+    .split(STAGE_SPLIT)
+    .slice(1)
+    .map((block) => redactSecrets(block));
+  return [base, ...blocks].join("\n\n");
 }
 
 /**

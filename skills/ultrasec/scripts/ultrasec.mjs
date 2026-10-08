@@ -27491,7 +27491,7 @@ function shortHash2(input, len = 12) {
   return createHash4("sha256").update(input).digest("hex").slice(0, len);
 }
 var STAGE_LABELS = ["Verdict", "Revalidation"];
-var STAGE_SPLIT = new RegExp(`\\n\\n(?=(?:${STAGE_LABELS.join("|")}) \\()`);
+var STAGE_SPLIT = new RegExp(`\\n\\n(?=(?:(?:${STAGE_LABELS.join("|")}) \\(|Triage: ))`);
 function withStageNote(message, stage, label, note) {
   const parts2 = message.split(STAGE_SPLIT);
   const kept = parts2.filter((part, i2) => i2 === 0 || !part.startsWith(`${stage} (`));
@@ -27499,6 +27499,11 @@ function withStageNote(message, stage, label, note) {
   return `${kept.join("\n\n")}
 
 ${stage} (${label})${safe ? `: ${safe}` : ""}`;
+}
+function carryStageNotes(fresh3, prior) {
+  const base = fresh3.split(STAGE_SPLIT)[0] ?? "";
+  const blocks = prior.split(STAGE_SPLIT).slice(1).map((block) => redactSecrets(block));
+  return [base, ...blocks].join("\n\n");
 }
 function stageNotes(message) {
   const parts2 = String(message ?? "").split(STAGE_SPLIT);
@@ -32438,12 +32443,13 @@ function preserveAdjudication(next, old) {
     ...next,
     status: old.status,
     verdict: old.verdict,
-    exploitPath: old.exploitPath,
+    exploitPath: old.exploitPath === void 0 ? void 0 : redactSecrets(old.exploitPath),
     confidence: old.confidence,
-    message: old.message
+    message: carryStageNotes(next.message, old.message)
   };
   if (old.brocard) merged.brocard = old.brocard;
   if (old.fixedIn) merged.fixedIn = old.fixedIn;
+  if (!next.provenance && old.provenance) merged.provenance = old.provenance;
   return merged;
 }
 function mergeDossier(prev, next) {
