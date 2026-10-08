@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.60.1](https://github.com/maxgfr/ultrasec/compare/v1.60.0...v1.60.1) (2026-10-08)
+
+
+### Bug Fixes
+
+* **catalog:** stop filing state setters and modal open() as sinks ([1cf1987](https://github.com/maxgfr/ultrasec/commit/1cf1987d1247a13bf293280128b3ffc4ea4397b6))
+* **correlate:** fold semgrep's mutable-action-tag into agentic-CI vector J ([788e624](https://github.com/maxgfr/ultrasec/commit/788e6248be87e7abf3e4d20071c913230f673408))
+* **dossier:** compact CONTEXT.md in --brief packets ([5879515](https://github.com/maxgfr/ultrasec/commit/58795156b84363b9f285ff7b31ea5d4931a5a361))
+* **map:** keep the test harness counted but out of the ranking ([465e4b5](https://github.com/maxgfr/ultrasec/commit/465e4b57514d6e4043ff29575f838b0b41474645))
+* **tools:** report osv-scanner with no package sources as skipped ([998efcb](https://github.com/maxgfr/ultrasec/commit/998efcbad7eaf27b7e8d56fc66f5350309556370))
+
 # [1.60.0](https://github.com/maxgfr/ultrasec/compare/v1.59.0...v1.60.0) (2026-10-08)
 
 
