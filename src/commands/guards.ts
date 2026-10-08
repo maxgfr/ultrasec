@@ -11,6 +11,7 @@ import {
   renderGuardsMd,
   GUARD_LENSES,
   LENSES,
+  NOT_A_HANDLER,
   type GuardInput,
   type GuardLens,
   type GuardRow,
@@ -93,6 +94,7 @@ export function runGuards(args: ParsedArgs): number {
     const discoveries = [];
     let confirmedPresent = 0;
     let waivedRows = 0;
+    let notHandlers = 0;
     for (const row of parsed.rows) {
       const at = byId.get(row.id);
       if (!at) {
@@ -101,6 +103,7 @@ export function runGuards(args: ParsedArgs): number {
       }
       if (row.verdict === present) confirmedPresent++;
       else if (row.verdict === waived) waivedRows++;
+      else if (row.verdict === NOT_A_HANDLER) notHandlers++;
       else discoveries.push(guardDiscovery(at, row.note, lens));
     }
 
@@ -109,7 +112,7 @@ export function runGuards(args: ParsedArgs): number {
 
     println(`ultrasec guards --apply → ${run}`);
     println(
-      `  ${res.ingested} ${absent} handler(s) filed as findings · ${res.folded} folded into existing · ${confirmedPresent} confirmed ${present} · ${waivedRows} ${waived}`,
+      `  ${res.ingested} ${absent} handler(s) filed as findings · ${res.folded} folded into existing · ${confirmedPresent} confirmed ${present} · ${waivedRows} ${waived}${notHandlers ? ` · ${notHandlers} ${NOT_A_HANDLER} (dropped)` : ""}`,
     );
     for (const r of res.rejected) eprintln(`  ✗ rejected ${r.discovery.file}:${r.discovery.line} — ${r.reason}`);
     for (const id of unknown)

@@ -44273,13 +44273,14 @@ var LENSES2 = {
     pass: "throttle"
   }
 };
+var NOT_A_HANDLER = "not-a-handler";
 var GUARD_VERDICTS = LENSES2.auth.verdicts;
 function parseGuardVerdicts(raw, lens = "auth") {
   const spec = LENSES2[lens];
   return parseIdVerdictRows(raw, {
     wrapperKeys: ["guards", "verdicts"],
     label: `${lens === "auth" ? "guard" : "throttle"} verdicts`,
-    verdicts: spec.verdicts,
+    verdicts: [...spec.verdicts, NOT_A_HANDLER],
     build: (row, verdict) => ({
       id: row.id,
       verdict,
@@ -44477,11 +44478,13 @@ function renderGuardsMd(rows, context, lens = "auth") {
   L.push(`For each row set a \`verdict\`:`);
   if (throttling) {
     L.push(`\`${present}\` (a real limit applies) \xB7 \`${absent}\` (nothing bounds request volume \u2014 a finding) \xB7`);
-    L.push(`\`${waived}\` (idempotent, cheap and non-enumerable \u2014 nothing to gain by repeating it).`);
+    L.push(`\`${waived}\` (idempotent, cheap and non-enumerable \u2014 nothing to gain by repeating it) \xB7`);
+    L.push(`\`${NOT_A_HANDLER}\` (no inbound route here: a schema, a barrel, an outbound client \u2014 dropped).`);
     L.push(`Save as THROTTLE.json (array of {id, verdict, note?}) and run \`ultrasec guards --lens throttle --apply THROTTLE.json\`.`);
   } else {
     L.push(`\`${present}\` (a real check protects it) \xB7 \`${absent}\` (nothing does \u2014 a finding) \xB7`);
-    L.push(`\`${waived}\` (health check, login, webhook with its own signature check).`);
+    L.push(`\`${waived}\` (health check, login, webhook with its own signature check) \xB7`);
+    L.push(`\`${NOT_A_HANDLER}\` (no inbound route here: a schema, a barrel, an outbound client \u2014 dropped).`);
     L.push(`Save as GUARDS.json (array of {id, verdict, note?}) and run \`ultrasec guards --apply GUARDS.json\`.`);
   }
   L.push("");
@@ -44651,6 +44654,7 @@ function runGuards(args2) {
     const discoveries = [];
     let confirmedPresent = 0;
     let waivedRows = 0;
+    let notHandlers = 0;
     for (const row of parsed2.rows) {
       const at = byId.get(row.id);
       if (!at) {
@@ -44659,13 +44663,14 @@ function runGuards(args2) {
       }
       if (row.verdict === present) confirmedPresent++;
       else if (row.verdict === waived) waivedRows++;
+      else if (row.verdict === NOT_A_HANDLER) notHandlers++;
       else discoveries.push(guardDiscovery(at, row.note, lens));
     }
     const res = ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run2) });
     persistFindings(run2, dossier, res.findings);
     println(`ultrasec guards --apply \u2192 ${run2}`);
     println(
-      `  ${res.ingested} ${absent} handler(s) filed as findings \xB7 ${res.folded} folded into existing \xB7 ${confirmedPresent} confirmed ${present} \xB7 ${waivedRows} ${waived}`
+      `  ${res.ingested} ${absent} handler(s) filed as findings \xB7 ${res.folded} folded into existing \xB7 ${confirmedPresent} confirmed ${present} \xB7 ${waivedRows} ${waived}${notHandlers ? ` \xB7 ${notHandlers} ${NOT_A_HANDLER} (dropped)` : ""}`
     );
     for (const r of res.rejected) eprintln(`  \u2717 rejected ${r.discovery.file}:${r.discovery.line} \u2014 ${r.reason}`);
     for (const id of unknown)
@@ -46896,7 +46901,7 @@ var STAGES = {
       }).filter((d) => !!d);
       return ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run2) }).findings;
     },
-    instruction: (repo, run2, worklist, outPath) => `Read the guard matrix at ${worklist}. It lists every handler that reads request data and the auth/authorization markers visible in its scope. For each row READ THE HANDLER and decide guarded|unguarded|intentionally-public, writing a JSON array of {id, verdict, note} to ${outPath}. A marker in scope is a CANDIDATE \u2014 confirm it runs before the object is touched and that it checks authorization, not just authentication. A route can also be protected by middleware or an ingress rule this pass cannot see. ${UNTRUSTED}`
+    instruction: (repo, run2, worklist, outPath) => `Read the guard matrix at ${worklist}. It lists every handler that reads request data and the auth/authorization markers visible in its scope. For each row READ THE HANDLER and decide guarded|unguarded|intentionally-public (or not-a-handler when the row has no inbound route), writing a JSON array of {id, verdict, note} to ${outPath}. A marker in scope is a CANDIDATE \u2014 confirm it runs before the object is touched and that it checks authorization, not just authentication. A route can also be protected by middleware or an ingress rule this pass cannot see. ${UNTRUSTED}`
   },
   // The same crossing, of rate limiting. Runs beside `guards` rather than after
   // `investigate`, because an unthrottled AUTH route is a region investigate

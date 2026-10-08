@@ -126,6 +126,17 @@ export const LENSES: Record<GuardLens, LensSpec> = {
   },
 };
 
+/**
+ * Accepted by both lenses: the row is not a request handler at all. The matrix
+ * is built from request-data reads, so it also lists what merely mentions them —
+ * a zod schema of a body, a barrel re-export, an outbound client, a Next.js
+ * `config` object, a React component. On a real Next.js + Express monorepo that
+ * was 26 of 53 rows, and with only `intentionally-public` to answer them the
+ * report claimed 32 deliberately public routes where there were 6. Such a row is
+ * dropped: neither a finding nor a waiver, and counted on its own.
+ */
+export const NOT_A_HANDLER = "not-a-handler";
+
 /** The auth lens's vocabulary, kept under its original name — it is what every
  *  existing GUARDS.json and every doc says. */
 export const GUARD_VERDICTS = LENSES.auth.verdicts;
@@ -147,7 +158,7 @@ export function parseGuardVerdicts(raw: string, lens: GuardLens = "auth"): Parse
   return parseIdVerdictRows<GuardVerdict, GuardInput>(raw, {
     wrapperKeys: ["guards", "verdicts"],
     label: `${lens === "auth" ? "guard" : "throttle"} verdicts`,
-    verdicts: spec.verdicts,
+    verdicts: [...spec.verdicts, NOT_A_HANDLER],
     build: (row, verdict) => ({
       id: row.id as string,
       verdict,
@@ -551,11 +562,13 @@ export function renderGuardsMd(rows: GuardRow[], context?: string, lens: GuardLe
   L.push(`For each row set a \`verdict\`:`);
   if (throttling) {
     L.push(`\`${present}\` (a real limit applies) · \`${absent}\` (nothing bounds request volume — a finding) ·`);
-    L.push(`\`${waived}\` (idempotent, cheap and non-enumerable — nothing to gain by repeating it).`);
+    L.push(`\`${waived}\` (idempotent, cheap and non-enumerable — nothing to gain by repeating it) ·`);
+    L.push(`\`${NOT_A_HANDLER}\` (no inbound route here: a schema, a barrel, an outbound client — dropped).`);
     L.push(`Save as THROTTLE.json (array of {id, verdict, note?}) and run \`ultrasec guards --lens throttle --apply THROTTLE.json\`.`);
   } else {
     L.push(`\`${present}\` (a real check protects it) · \`${absent}\` (nothing does — a finding) ·`);
-    L.push(`\`${waived}\` (health check, login, webhook with its own signature check).`);
+    L.push(`\`${waived}\` (health check, login, webhook with its own signature check) ·`);
+    L.push(`\`${NOT_A_HANDLER}\` (no inbound route here: a schema, a barrel, an outbound client — dropped).`);
     L.push(`Save as GUARDS.json (array of {id, verdict, note?}) and run \`ultrasec guards --apply GUARDS.json\`.`);
   }
   L.push("");

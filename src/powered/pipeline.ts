@@ -173,7 +173,7 @@ const STAGES: Record<StageName, StageDef> = {
       return ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run) }).findings;
     },
     instruction: (repo, run, worklist, outPath) =>
-      `Read the guard matrix at ${worklist}. It lists every handler that reads request data and the auth/authorization markers visible in its scope. For each row READ THE HANDLER and decide guarded|unguarded|intentionally-public, writing a JSON array of {id, verdict, note} to ${outPath}. A marker in scope is a CANDIDATE — confirm it runs before the object is touched and that it checks authorization, not just authentication. A route can also be protected by middleware or an ingress rule this pass cannot see. ${UNTRUSTED}`,
+      `Read the guard matrix at ${worklist}. It lists every handler that reads request data and the auth/authorization markers visible in its scope. For each row READ THE HANDLER and decide guarded|unguarded|intentionally-public (or not-a-handler when the row has no inbound route), writing a JSON array of {id, verdict, note} to ${outPath}. A marker in scope is a CANDIDATE — confirm it runs before the object is touched and that it checks authorization, not just authentication. A route can also be protected by middleware or an ingress rule this pass cannot see. ${UNTRUSTED}`,
   },
   // The same crossing, of rate limiting. Runs beside `guards` rather than after
   // `investigate`, because an unthrottled AUTH route is a region investigate

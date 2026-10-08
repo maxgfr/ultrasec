@@ -237,7 +237,8 @@ You write:
 ```
 
 `guarded` · `unguarded` · `intentionally-public` (a health check, a login route, a webhook with its
-own signature check). An `unguarded` verdict becomes a cited `authz` finding (CWE-306) through the
+own signature check) · `not-a-handler` (the row has no inbound route — a zod schema of a body, a
+barrel re-export, an outbound client, a `config` object; it is dropped, not counted as public). An `unguarded` verdict becomes a cited `authz` finding (CWE-306) through the
 same citation gate as any discovery. **A marker in scope is a candidate, not a proof** — it may
 guard a different branch, run after the object is read, or check authentication where the route
 needs authorization; and a route protected by framework middleware this pass cannot see will show
@@ -261,7 +262,7 @@ failure response distinguishes an unknown account from a wrong password — in t
 or the timing — **account enumeration (CWE-204)**. Ordinary handlers file as CWE-770.
 
 You write `throttled` · `unthrottled` · `not-abusable` (idempotent, cheap, and nothing to learn by
-repeating it). The ids differ from the auth lens's, so both worklists can be filled independently
+repeating it) · `not-a-handler` (as for the auth lens: no inbound route, dropped). The ids differ from the auth lens's, so both worklists can be filled independently
 in one run.
 
 When **no** marker of the chosen kind appears anywhere in the tree, both lenses say so once, at the
