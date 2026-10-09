@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.64.1](https://github.com/maxgfr/ultrasec/compare/v1.64.0...v1.64.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* **dossier:** no crash on an entry symbol named like an Object.prototype member ([887893b](https://github.com/maxgfr/ultrasec/commit/887893b11dacc1fd5857a195b6e2e1e7c423e3d7))
+* **orchestrate:** contracts name the brocard vocabulary ([d32d9f5](https://github.com/maxgfr/ultrasec/commit/d32d9f5a6dc729fa92489dc36c74672fba7029f2))
+
 # [1.64.0](https://github.com/maxgfr/ultrasec/compare/v1.63.0...v1.64.0) (2026-10-09)
 
 
