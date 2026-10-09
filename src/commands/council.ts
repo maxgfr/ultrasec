@@ -6,7 +6,7 @@ import { headCommit } from "../git.js";
 import { loadDossier, type Dossier } from "../store.js";
 import { persistFindings, readApply } from "../stage.js";
 import type { Finding } from "../types.js";
-import { eprintln, flagBool, flagStr, numFlag, println, type ParsedArgs } from "../util.js";
+import { eprintln, flagBool, flagStr, numFlag, println, type ParsedArgs, linesCapped } from "../util.js";
 import { applyCouncil, mergeDecisions, parseDecisions } from "../council/apply.js";
 import { briefName, buildDevilList, LANGS, PHASES, renderBrief, type Lang, type Phase } from "../council/brief.js";
 import { indexTree, parseReport, type Claim } from "../council/claims.js";
@@ -476,10 +476,15 @@ function applyMode(
   println(
     `  accepted ${res.accepted.length} (ingested ${res.ingested} new ultrasec-ai candidate(s), folded ${res.folded}) · rejected ${res.rejected.length} · refused ${res.refused.length} · dropped ${parsed.dropped.length}`,
   );
-  for (const a of res.accepted) println(`  ✓ ${a.candidate} → ${a.findingId ?? "folded into an existing finding"} — ${a.title}`);
-  for (const r of res.rejected) println(`  ✗ ${r.candidate} ${r.by === "citation-gate" ? "refused by the citation gate" : "rejected"}: ${r.reason}`);
-  for (const r of res.refused) println(`  ✗ ${r.id}: ${r.reason}`);
-  for (const line of formatDropped(parsed.dropped)) println(line);
+  // Each list capped; `--json` carries every row.
+  for (const line of linesCapped(res.accepted.map((a) => `  ✓ ${a.candidate} → ${a.findingId ?? "folded into an existing finding"} — ${a.title}`)))
+    println(line);
+  for (const line of linesCapped(
+    res.rejected.map((r) => `  ✗ ${r.candidate} ${r.by === "citation-gate" ? "refused by the citation gate" : "rejected"}: ${r.reason}`),
+  ))
+    println(line);
+  for (const line of linesCapped(res.refused.map((r) => `  ✗ ${r.id}: ${r.reason}`))) println(line);
+  for (const line of linesCapped(formatDropped(parsed.dropped))) println(line);
   if (todo.contested.length)
     println(`  ${todo.contested.length} contested finding(s) stay a worklist (COUNCIL.md) — re-verify those findings; nothing was changed for them.`);
   if (res.ingested) println(`  next: \`ultrasec verify --run ${run}\` — accepted candidates are open, and are adjudicated like any other.`);

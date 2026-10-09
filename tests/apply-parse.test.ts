@@ -219,6 +219,54 @@ describe("verify --apply", () => {
   });
 });
 
+describe("verify --apply — capped console lists, everything in --json", () => {
+  it("prints ten ignored ids and how many more; --json lists every one", () => {
+    const run = seed();
+    const file = join(run, "verdicts.json");
+    const ghosts = Array.from({ length: 15 }, (_, i) => ({ id: `ghost${String(i).padStart(2, "0")}`, verdict: "refuted" }));
+    writeFileSync(file, JSON.stringify([{ id: "f1", verdict: "supported", exploitPath: "x" }, ...ghosts]));
+    const { code, out } = capture(() => runVerify(parseArgs(["--run", run, "--apply", file])));
+    expect(code).toBe(0);
+    expect(out).toContain("15 verdict(s) ignored (unknown id): ghost00, ");
+    expect(out).toContain("ghost09 … and 5 more (--json for all)");
+    expect(out).not.toContain("ghost10");
+    const json = capture(() => runVerify(parseArgs(["--run", seed(), "--apply", file, "--json"])));
+    expect((JSON.parse(json.out) as { ignored: string[] }).ignored).toHaveLength(15);
+  });
+
+  it("an untouched worklist is refused in one line per distinct reason, not one per row", () => {
+    const run = seed();
+    const file = join(run, "VERIFY.todo.json");
+    writeFileSync(file, `[\n${Array.from({ length: 40 }, (_, i) => JSON.stringify({ id: `r${i}`, severity: "high" })).join(",\n")}\n]`);
+    const err: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((c: any) => {
+      err.push(String(c));
+      return true;
+    });
+    try {
+      expect(runVerify(parseArgs(["--run", run, "--apply", file]))).toBe(2);
+    } finally {
+      spy.mockRestore();
+    }
+    const msg = err.join("");
+    expect(msg).toContain("40 row(s), none usable");
+    expect(msg).toContain("rows 0, 1, 2, 3, 4, 5, 6, 7, 8, 9 (+30 more): verdict missing is not one of");
+    expect(msg.split("is not one of").length - 1).toBe(1);
+  });
+});
+
+describe("verify emit --json — where and how much, not the worklist again", () => {
+  it("prints {todo, items, counts}", () => {
+    const run = seed();
+    const { code, out } = capture(() => runVerify(parseArgs(["--run", run, "--json"])));
+    expect(code).toBe(0);
+    const j = JSON.parse(out) as { todo: string; items: number; counts: { fresh: number } };
+    expect(j.todo).toBe(join(run, "VERIFY.todo.json"));
+    expect(j.items).toBe(1);
+    expect(j.counts.fresh).toBe(1);
+  });
+});
+
 // `--apply -` reads fd 0, which only exists meaningfully in a real process — so
 // this one runs against the built bundle with a piped stdin, the way a user
 // would actually do `… | ultrasec verify --apply -`.

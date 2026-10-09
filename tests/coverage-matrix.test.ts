@@ -150,6 +150,27 @@ describe("runCoverage — standard selection", () => {
     restore();
   });
 
+  it("prints the counts by default; --full prints the matrix", () => {
+    const run = seed();
+    const out: string[] = [];
+    const o = vi.spyOn(process.stdout, "write").mockImplementation((c: unknown) => {
+      out.push(String(c));
+      return true;
+    });
+    try {
+      expect(runCoverage(parseArgs(["coverage", "--run", run]))).toBe(0);
+      const short = out.join("");
+      expect(short).toMatch(/examined · \d+ engine-enumerated · \d+ not examined/);
+      expect(short).toContain("--full prints the matrix");
+      expect(short).not.toContain("| V1");
+      out.length = 0;
+      expect(runCoverage(parseArgs(["coverage", "--run", run, "--full"]))).toBe(0);
+      expect(out.join("").length).toBeGreaterThan(short.length * 3);
+    } finally {
+      o.mockRestore();
+    }
+  });
+
   it("exit 2 on an unknown --standard instead of silently scoring ASVS", () => {
     const run = seed();
     const restore = silence();

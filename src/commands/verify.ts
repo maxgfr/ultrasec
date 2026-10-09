@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
+import { flagStr, flagBool, linesCapped, listCapped, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { surfaceDropped } from "../apply-parse.js";
@@ -46,8 +46,11 @@ export function runVerify(args: ParsedArgs): number {
     md: wroteMd,
   });
 
+  const outside = dossier.findings.filter((f) => (f.status === "open" || f.status === "needs-human") && !inSurface(f, surface)).length;
+  // The worklist is on disk; `--json` reports where and how much rather than
+  // printing it a second time.
   if (flagBool(args, "json")) {
-    println(JSON.stringify(items, null, 2));
+    println(JSON.stringify({ todo: todoPath, items: items.length, counts: { ...counts, outsideSurface: outside, surface } }));
     return 0;
   }
   println(`ultrasec verify → ${todoPath} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
@@ -56,7 +59,6 @@ export function runVerify(args: ParsedArgs): number {
   // shape. Silence here is what let a "delta" batch re-verdict everything.
   if (counts.withheld) println(`  ${counts.fresh} new · ${counts.withheld} already adjudicated as needs-human, not shown — pass --all to re-open them`);
   else if (counts.reOpened) println(`  ${counts.fresh} new · ${counts.reOpened} re-opened (--all)`);
-  const outside = dossier.findings.filter((f) => (f.status === "open" || f.status === "needs-human") && !inSurface(f, surface)).length;
   if (outside)
     println(
       `  ${outside} pending finding(s) outside --surface ${surface}${surface === ADJUDICATION_SURFACE ? " (dependency advisories: the report ranks them per package)" : ""} — --surface all to include them`,
@@ -85,7 +87,7 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
   // discard the whole adjudication.
   if (res.applied === 0 && res.ignored.length > 0) {
     eprintln(
-      `ultrasec verify --apply: all ${res.ignored.length} verdict(s) target unknown ids (${res.ignored.join(", ")}) — stale fragment? Re-emit the worklist and re-adjudicate; nothing was folded.`,
+      `ultrasec verify --apply: all ${res.ignored.length} verdict(s) target unknown ids (${listCapped("", res.ignored)}) — stale fragment? Re-emit the worklist and re-adjudicate; nothing was folded.`,
     );
     return 2;
   }
@@ -112,17 +114,19 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
   }
   println(`ultrasec verify --apply → updated ${join(run, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed · ${res.dismissed} dismissed · ${res.needsHuman} needs-human`);
-  if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
-  if (res.keptForHuman.length) {
-    println(`  kept for human (high-severity, only 'unsupported' — not auto-dismissed):`);
-    for (const k of res.keptForHuman) println(`    - ${k.id} [${k.severity}]`);
-  }
+  if (res.ignored.length) println(`  ${listCapped(`${res.ignored.length} verdict(s) ignored (unknown id)`, res.ignored)}`);
+  if (res.keptForHuman.length)
+    println(
+      `  ${listCapped(
+        `${res.keptForHuman.length} kept for human (high-severity, only 'unsupported' — not auto-dismissed)`,
+        res.keptForHuman.map((k) => `${k.id} [${k.severity}]`),
+      )}`,
+    );
   // Never let a batch re-decide already-argued findings in silence. Reported
   // always; under --strict it also fails, so CI cannot rubber-stamp it.
   if (res.reVerdicted.length) {
     println(`  ⚠ ${res.reVerdicted.length} verdict(s) CHANGED an already-adjudicated finding:`);
-    for (const r of res.reVerdicted.slice(0, 10)) println(`    - ${r.id} [${r.wasStatus}] ${r.from ?? "(none)"} → ${r.to}`);
-    if (res.reVerdicted.length > 10) println(`    … and ${res.reVerdicted.length - 10} more`);
+    for (const line of linesCapped(res.reVerdicted.map((r) => `    - ${r.id} [${r.wasStatus}] ${r.from ?? "(none)"} → ${r.to}`))) println(line);
     println(`    Re-verifying an escalation is legitimate; doing it by accident is not. Pass --re-verdict to accept under --strict.`);
   }
   if (strict && res.reVerdicted.length > 0 && !reVerdictOk) {

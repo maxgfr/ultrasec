@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
+import { flagStr, flagBool, listCapped, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { surfaceDropped } from "../apply-parse.js";
@@ -40,7 +40,7 @@ export function runRevalidate(args: ParsedArgs): number {
     // outside the revalidation scope means the false-positive cut never engaged.
     if (res.applied === 0 && res.ignored.length > 0) {
       eprintln(
-        `ultrasec revalidate --apply: all ${res.ignored.length} verdict(s) target unknown ids (${res.ignored.join(", ")}) — stale fragment? Re-emit the worklist (\`revalidate --run ${run}\`) and re-adjudicate; nothing was folded.`,
+        `ultrasec revalidate --apply: all ${res.ignored.length} verdict(s) target unknown ids (${listCapped("", res.ignored)}) — stale fragment? Re-emit the worklist (\`revalidate --run ${run}\`) and re-adjudicate; nothing was folded.`,
       );
       return 2;
     }
@@ -69,8 +69,11 @@ export function runRevalidate(args: ParsedArgs): number {
     println(
       `  applied ${res.applied} verdict(s): ${res.stillValid} still-valid · ${res.fixed} fixed · ${res.dismissed} dismissed · ${res.needsHuman} needs-human`,
     );
-    if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
-    for (const fl of res.flagged) println(`  ⚠️  ${fl.id}: ${fl.reason}`);
+    if (res.ignored.length) println(`  ${listCapped(`${res.ignored.length} verdict(s) ignored (unknown id)`, res.ignored)}`);
+    // One line per REASON with its ids — the reasons are a short fixed set.
+    const byReason = new Map<string, string[]>();
+    for (const fl of res.flagged) byReason.set(fl.reason, [...(byReason.get(fl.reason) ?? []), fl.id]);
+    for (const [reason, ids] of byReason) println(`  ⚠️  ${listCapped(reason, ids)}`);
     return surfaceDropped(parsed.dropped, strict, println);
   }
 
@@ -86,8 +89,9 @@ export function runRevalidate(args: ParsedArgs): number {
   const wroteMd = wantsMdTwin(args);
   const todoPath = emitWorklist(run, files, items, () => renderRevalidateMd(items, loadContextDoc(run)), { md: wroteMd });
 
+  // The worklist is on disk; `--json` says where and how much.
   if (flagBool(args, "json")) {
-    println(JSON.stringify(items, null, 2));
+    println(JSON.stringify({ todo: todoPath, items: items.length, counts: { surface } }));
     return 0;
   }
   println(`ultrasec revalidate → ${todoPath} (${items.length} item${items.length === 1 ? "" : "s"})`);

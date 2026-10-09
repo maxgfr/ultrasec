@@ -61,4 +61,26 @@ describe("not-a-handler verdict", () => {
     expect(printed).toContain("0 unguarded handler(s) filed as findings");
     expect(findings()).toBe(before);
   });
+
+  it("guards takes --json, on emit and on apply", async () => {
+    const repo = tmp("ultrasec-gjson-repo-");
+    cpSync(resolve("tests/fixtures/vuln-express"), repo, { recursive: true });
+    const run = tmp("ultrasec-gjson-run-");
+    vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+    const out = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    expect(await runScan(parseArgs(["scan", "--repo", repo, "--out", run, "--offline", "--no-tools", "--quiet"]))).toBe(0);
+    out.mockClear();
+    expect(runGuards(parseArgs(["guards", "--run", run, "--json"]))).toBe(0);
+    const emit = JSON.parse(out.mock.calls.map((c) => String(c[0])).join("")) as { todo: string; items: number; counts: { handlers: number } };
+    expect(emit.todo).toBe(join(run, "GUARDS.todo.json"));
+    expect(emit.items).toBe(emit.counts.handlers);
+    const rows = JSON.parse(readFileSync(emit.todo, "utf8")) as GuardRow[];
+    const apply = join(run, "GUARDS.json");
+    writeFileSync(apply, JSON.stringify([...rows.map((r) => ({ id: r.id, verdict: NOT_A_HANDLER })), { id: "nope", verdict: NOT_A_HANDLER }]));
+    out.mockClear();
+    expect(runGuards(parseArgs(["guards", "--run", run, "--apply", apply, "--json"]))).toBe(0);
+    const res = JSON.parse(out.mock.calls.map((c) => String(c[0])).join("")) as { unknown: string[]; [k: string]: unknown };
+    expect(res.unknown).toEqual(["nope"]);
+    expect(res[NOT_A_HANDLER]).toBe(rows.length);
+  });
 });

@@ -36,11 +36,28 @@ describe("audit — one command, one report", () => {
     const { code, stdout } = await audit(run);
     expect(code).toBe(0);
     expect(listing(run)).toEqual(["REPORT.md", "findings.json", "manifest.json"]);
-    // One line with the path, one line of status — nothing else on stdout.
+    // The path, the status, and — on a DRAFT — what to run next. Nothing else.
     const lines = stdout.split("\n").filter(Boolean);
-    expect(lines).toHaveLength(2);
+    expect(lines).toHaveLength(3);
     expect(lines[0]).toBe(join(run, "REPORT.md"));
     expect(lines[1]).toMatch(/DRAFT — /);
+    expect(lines[2]).toMatch(/^ {2}next: /);
+  });
+
+  it("a DRAFT's next: line names the real paths, and --json carries it as `next`", async () => {
+    const run = tmpRun();
+    const { stdout } = await audit(run);
+    const next = stdout.split("\n").find((l) => l.startsWith("  next: "))!;
+    // The worklists were removed, so the first step keeps them; then the fold.
+    expect(next).toContain(`audit --repo ${FIXTURE} --out ${run} --keep-work`);
+    expect(next).toContain(`verify --apply ${join(run, "VERIFY.todo.json")} --run ${run}`);
+    expect(next).toMatch(/node \/\S+ /); // the engine by its absolute path
+    expect(next).not.toContain("<");
+    const kept = tmpRun();
+    const j = JSON.parse((await audit(kept, ["--keep-work", "--json"])).stdout) as { draft: boolean; next?: string };
+    expect(j.draft).toBe(true);
+    expect(j.next).toContain(`fill ${join(kept, "VERIFY.todo.json")}`);
+    expect(j.next).not.toContain("--keep-work");
   });
 
   it("never claims a clean audit when nothing was adjudicated: the report opens DRAFT, with why", async () => {

@@ -12,6 +12,7 @@
 // caused it, and the commands surface those alongside the ingest counters.
 
 import { CATEGORIES, SEVERITIES, normalizeCategory, type Category, type Severity } from "./types.js";
+import { LIST_CAP, linesCapped } from "./util.js";
 
 /** One row the parser refused, and why. */
 export interface DroppedRow {
@@ -85,7 +86,16 @@ export function coerceRows(data: unknown, wrapperKeys: readonly string[], label:
  */
 export function requireUsable<T>(result: ParseResult<T>, sourceLength: number, requirement: string): ParseResult<T> {
   if (sourceLength > 0 && result.rows.length === 0) {
-    const detail = result.dropped.map((d) => `row ${d.index}: ${d.reason}`).join("; ");
+    // One entry per distinct reason, with the rows it hit: 652 untouched rows
+    // used to print 652 copies of "verdict null is not one of …" on one line.
+    const byReason = new Map<string, number[]>();
+    for (const d of result.dropped) byReason.set(d.reason, [...(byReason.get(d.reason) ?? []), d.index]);
+    const detail = [...byReason]
+      .map(([reason, rows]) => {
+        const shown = rows.slice(0, LIST_CAP).join(", ");
+        return `${rows.length === 1 ? "row" : "rows"} ${shown}${rows.length > LIST_CAP ? ` (+${rows.length - LIST_CAP} more)` : ""}: ${reason}`;
+      })
+      .join("; ");
     throw new Error(`${sourceLength} row(s), none usable — each needs ${requirement} (fail-closed)${detail ? ` — ${detail}` : ""}`);
   }
   return result;
@@ -109,7 +119,8 @@ export function formatDropped(dropped: readonly DroppedRow[]): string[] {
  * should be able to refuse it even though the valid rows were applied.
  */
 export function surfaceDropped(dropped: readonly DroppedRow[], strict: boolean, emit: (line: string) => void): number {
-  for (const line of formatDropped(dropped)) emit(line);
+  // Capped: every refused row is in `--json`'s `dropped[]`, and the count below.
+  for (const line of linesCapped(formatDropped(dropped))) emit(line);
   if (strict && dropped.length > 0) {
     emit(`  --strict: ${dropped.length} malformed row(s) refused — failing so the loss isn't absorbed silently.`);
     return 1;

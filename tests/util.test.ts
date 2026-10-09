@@ -1,7 +1,22 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { parseArgs, flagStr, flagBool, listFlag, own, shortHash, byStr, BOOLEAN_FLAGS } from "../src/util.js";
+import {
+  parseArgs,
+  flagStr,
+  flagBool,
+  listFlag,
+  own,
+  shortHash,
+  byStr,
+  BOOLEAN_FLAGS,
+  LIST_CAP,
+  linesCapped,
+  listCapped,
+  eprintln,
+  releaseQuiet,
+  setQuiet,
+} from "../src/util.js";
 
 describe("parseArgs", () => {
   it("collects positionals", () => {
@@ -80,6 +95,71 @@ describe("parseArgs", () => {
   it("does not treat a lone dash or a negative number as a short flag", () => {
     expect(parseArgs(["scan", "-"])._).toEqual(["scan", "-"]);
     expect(parseArgs(["x", "-1"])._).toEqual(["x", "-1"]);
+  });
+});
+
+describe("listCapped / linesCapped — console lists say how many they left out", () => {
+  const ids = Array.from({ length: 25 }, (_, i) => `id${i}`);
+
+  it("shows the first LIST_CAP, then how many more and where they are", () => {
+    expect(LIST_CAP).toBe(10);
+    expect(listCapped("ignored", ids)).toBe(`ignored: ${ids.slice(0, 10).join(", ")} … and 15 more (--json for all)`);
+    expect(listCapped("ignored", ids.slice(0, 3))).toBe("ignored: id0, id1, id2");
+    expect(listCapped("", ids.slice(0, 2))).toBe("id0, id1");
+    expect(listCapped("x", ids, 2)).toBe("x: id0, id1 … and 23 more (--json for all)");
+  });
+
+  it("caps a one-per-line list with a closing line", () => {
+    const lines = ids.map((i) => `  - ${i}`);
+    const out = linesCapped(lines);
+    expect(out).toHaveLength(11);
+    expect(out.at(-1)).toBe("    … and 15 more (--json for all)");
+    expect(linesCapped(lines.slice(0, 4))).toEqual(lines.slice(0, 4));
+  });
+});
+
+describe("--quiet — stderr held back, printed only on failure", () => {
+  function stderr(fn: () => void): string {
+    const out: string[] = [];
+    const spy = vi.spyOn(process.stderr, "write").mockImplementation((c: unknown) => {
+      out.push(String(c));
+      return true;
+    });
+    try {
+      fn();
+    } finally {
+      spy.mockRestore();
+    }
+    return out.join("");
+  }
+
+  it("a green command says nothing on stderr", () => {
+    expect(
+      stderr(() => {
+        setQuiet(true);
+        eprintln("progress");
+        releaseQuiet(false);
+      }),
+    ).toBe("");
+  });
+
+  it("a failing command still prints what it held", () => {
+    expect(
+      stderr(() => {
+        setQuiet(true);
+        eprintln("why it failed");
+        releaseQuiet(true);
+      }),
+    ).toBe("why it failed\n");
+  });
+
+  it("without --quiet stderr is written as it comes", () => {
+    expect(
+      stderr(() => {
+        setQuiet(false);
+        eprintln("now");
+      }),
+    ).toBe("now\n");
   });
 });
 

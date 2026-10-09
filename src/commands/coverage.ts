@@ -5,7 +5,7 @@ import { loadDossier } from "../store.js";
 import { buildCoverage, renderCoverageMd, enumeratedKindsOf, STANDARDS, DEFAULT_STANDARD } from "../coverage.js";
 import { withHuntProgress } from "../classes/coverage.js";
 
-// `ultrasec coverage --run <dir> [--standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25] [--classes]`
+// `ultrasec coverage --run <dir> [--standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25] [--classes] [--full] [--write]`
 //
 // The honest complement to "only report what you can exploit": a short report
 // reads as "nothing there" when it means "nothing there, in what I looked at".
@@ -50,7 +50,22 @@ export function runCoverage(args: ParsedArgs): number {
     writeFileSync(p, md);
     println(`ultrasec coverage → ${p}`);
   }
-  println(md);
+  // The matrix is a document — 14 standard rows and a class × framework grid —
+  // and it was printed whole on every call. By default the counts, which are
+  // what decide the next step; `--full` prints it, `--write` saves it.
+  if (flagBool(args, "full")) println(md);
+  else {
+    const by = (state: string) => rows.filter((r) => r.state === state).length;
+    const cells = (state: string) => classCells.filter((c) => c.state === state).length;
+    println(
+      `ultrasec coverage — ${STANDARDS[standardId]!.title}: ${by("examined")} examined · ${by("engine")} engine-enumerated · ${by("unexamined")} not examined`,
+    );
+    if (classCells.length)
+      println(
+        `  weakness classes: ${cells("deterministic")} by a pack · ${cells("not-applicable")} n/a · ${cells("not-covered")} not covered · ${cells("ai-hunt")} hunting · ${cells("ai-hunted")} hunted`,
+      );
+    if (!flagBool(args, "write")) println(`  --full prints the matrix, --write saves it to COVERAGE.md`);
+  }
   const gaps = rows.filter((r) => r.state === "unexamined").length;
   const judgment = rows.filter((r) => r.judgment && r.state !== "examined").length;
   println(`${gaps} categor${gaps === 1 ? "y" : "ies"} not examined · ${judgment} needing an explicit answer.`);

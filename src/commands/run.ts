@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs } from "../util.js";
+import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs, listCapped } from "../util.js";
 import { wantsMdTwin } from "../stage.js";
 import { CliAgentRunner } from "../powered/agent.js";
 import { runPipeline, ALL_STAGES, type StageName, type PipelineOptions } from "../powered/pipeline.js";
@@ -68,8 +68,22 @@ export function runRun(args: ParsedArgs): number {
     return 2;
   }
 
+  // The summary, not the transcript: the worklists are on disk, and `actions`
+  // repeated every one of them by name.
   if (flagBool(args, "json")) {
-    println(JSON.stringify(res, null, 2));
+    println(
+      JSON.stringify({
+        powered,
+        stages,
+        externalCalls: res.externalCalls,
+        emitted: res.emitted.map((e) => ({ stage: e.stage, worklist: e.worklist })),
+        escalated: res.escalated.length,
+        errors: res.errors,
+        notices: res.notices,
+        report: res.report,
+        grounded: res.grounded,
+      }),
+    );
     return powered && res.errors.length ? 1 : 0;
   }
 
@@ -97,7 +111,7 @@ export function runRun(args: ParsedArgs): number {
 
   println(`ultrasec run --powered → ${run} (agent: ${agent}${crossCheck ? `, cross-check: ${crossCheck}` : ""})`);
   println(`  stages: ${stages.join(" → ")}  ·  external agent calls: ${res.externalCalls}`);
-  if (res.escalated.length) println(`  ⚠️  cross-check escalated ${res.escalated.length} finding(s) to needs-human: ${res.escalated.join(", ")}`);
+  if (res.escalated.length) println(`  ⚠️  ${listCapped(`cross-check escalated ${res.escalated.length} finding(s) to needs-human`, res.escalated)}`);
   printNotices();
   for (const err of res.errors) println(`  ✗ ${err}`);
   println(`  report: ${res.report.written.join(" · ")}`);

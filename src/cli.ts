@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 import { warmGrammars } from "./vendor/codeindex-engine.mjs";
 import { VERSION } from "./types.js";
 import { parseArgs, flagBool, flagStr, numFlag, println, eprintln, type ParsedArgs } from "./util.js";
-import { teeOutput } from "./util.js";
+import { releaseQuiet, setQuiet, teeOutput } from "./util.js";
 import { extname } from "node:path";
 import { appendJournal, writeReport, UnknownReportFormat, REPORT_FORMATS, type Transcript } from "./transcript.js";
 import { COMMAND_HANDLERS, type CommandHandler } from "./commands/registry.js";
@@ -167,7 +167,7 @@ COMMANDS
              are declared once in CONTEXT.md — 'Auth markers: a, b.c' /
              'Throttle markers: …' — or ad hoc with --marker.
              Flags: --run · --repo · --lens auth|throttle · --marker <name>[,…] ·
-             --apply · --strict.
+             --apply · --strict · --json.
   variants   Hunt other instances of a CONFIRMED bug's root cause: emit one seed
              per confirmed finding with its mechanical neighbours (same sink
              callee / file / CWE), you state the root cause and generalize a
@@ -205,9 +205,10 @@ COMMANDS
              Top 10, the OWASP API Top 10, MASVS or the CWE Top 25. Also the
              weakness-class × framework matrix: matched by a pack, degraded
              (no pack, version outside testedWith), AI-hunted, or not covered.
-             Read-only. Flags: --run ·
+             Read-only; prints the counts — --full prints the matrix.
+             Flags: --run ·
              --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25 ·
-             --write (COVERAGE.md) · --json (--classes: the class matrix).
+             --full · --write (COVERAGE.md) · --json (--classes: the class matrix).
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
              READ-ONLY — it writes nothing and changes no status; --semantic ALSO
              fails when a HIGH/CRITICAL candidate outside the dependency surface
@@ -298,7 +299,11 @@ GLOBAL
                         Skipped/failed/missing outcome exits 1; artifacts are kept.
   --help, -h     Show this help.
   --version, -v  Print the version.
-  --json         Machine-readable output (every command above except render/dossier).
+  --json         Machine-readable output (every command above except render, dossier
+                 and mcp). An emitting stage prints {todo, items, counts}, not the
+                 worklist it just wrote.
+  --quiet        Hold stderr (progress, notes) back; it is printed only if the
+                 command fails. stdout is unchanged.
   --report <p>   ALSO archive this command's output to <p>; the extension picks the
                  format (.md, .html, .json, .txt/.log). stdout is unchanged; an
                  unknown extension exits 2 before the command runs.
@@ -437,7 +442,11 @@ async function main(): Promise<void> {
   // regex fallback, and warmGrammars says so rather than degrading in silence.
   if (SCANNING_COMMANDS.has(args._[0] ?? "")) await warmGrammars({ label: "ultrasec" });
 
+  // `--quiet` holds stderr back for every command (scan also mutes its own
+  // progress stream with it); a failing command still prints what it held.
+  setQuiet(flagBool(args, "quiet"));
   const code = await withArchiving(args, argv, () => dispatch(args._[0], args));
+  releaseQuiet(code !== 0);
   process.exit(code);
 }
 

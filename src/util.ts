@@ -280,6 +280,29 @@ export function stageNotes(message: string | undefined | null): string {
   return parts.slice(1).join(" · ").trim();
 }
 
+// ── Capped lists ─────────────────────────────────────────────────────────────
+// An `--apply` folding 652 rows printed every id it ignored, kept or flagged:
+// one line of 49 KB on a real run, read by an agent that wanted the counts.
+// Lists in console output show the first LIST_CAP and say how many were left
+// out and where the rest is — `--json` always carries every one.
+
+/** How many items a console list shows before it says "and N more". */
+export const LIST_CAP = 10;
+
+/** `label: a, b, c, … and N more (--json for all)` — `label` may be empty. */
+export function listCapped(label: string, ids: readonly string[], n = LIST_CAP): string {
+  const shown = ids.slice(0, n).join(", ");
+  const more = ids.length > n ? ` … and ${ids.length - n} more (--json for all)` : "";
+  return `${label ? `${label}: ` : ""}${shown}${more}`;
+}
+
+/** The first `n` of a list printed one per line, then one "and N more" line
+ *  with the given indent. */
+export function linesCapped(lines: readonly string[], n = LIST_CAP, indent = "    "): string[] {
+  if (lines.length <= n) return [...lines];
+  return [...lines.slice(0, n), `${indent}… and ${lines.length - n} more (--json for all)`];
+}
+
 /** The engine's own prose — the part of a message BEFORE any stage block. */
 export function engineProse(message: string | undefined | null): string {
   return (String(message ?? "").split(STAGE_SPLIT)[0] ?? "").trim();
@@ -310,11 +333,34 @@ interface OutputSink {
 
 const outputSink = new AsyncLocalStorage<OutputSink>();
 
+/**
+ * `--quiet`: stderr — progress, notes, warnings — is held back for the whole
+ * invocation and printed only if the command FAILS. A green run says nothing on
+ * stderr; a failing one still explains itself. stdout, the result, is
+ * untouched, and a captured sink (MCP, `--report`) still collects everything.
+ * Set once by `main` from the global flag.
+ */
+let quietHeld: string[] | null = null;
+export function setQuiet(on: boolean): void {
+  quietHeld = on ? [] : null;
+}
+
+/** End of a `--quiet` invocation: write what was held back if it failed. */
+export function releaseQuiet(failed: boolean): void {
+  const held = quietHeld;
+  quietHeld = null;
+  if (failed && held) for (const line of held) process.stderr.write(line + "\n");
+}
+
 export function eprintln(msg: string): void {
   const sink = outputSink.getStore();
   if (sink) {
     sink.err.push(msg);
     if (!sink.tee && !sink.errThrough) return;
+  }
+  if (quietHeld) {
+    quietHeld.push(msg);
+    return;
   }
   process.stderr.write(msg + "\n");
 }

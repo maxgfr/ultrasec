@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs } from "../util.js";
+import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs, linesCapped } from "../util.js";
 import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { formatNormalized, surfaceDropped } from "../apply-parse.js";
@@ -83,14 +83,14 @@ export function runInvestigate(args: ParsedArgs): number {
     println(
       `  ingested ${res.ingested} new ${"ultrasec-ai"} finding(s) · folded ${res.folded} into existing · rejected ${res.rejected.length} · dropped ${parsed.dropped.length}`,
     );
-    for (const line of formatNormalized(parsed.normalized ?? [])) println(line);
-    for (const r of res.rejected) println(`  ✗ rejected "${r.discovery.title}": ${r.reason}`);
+    for (const line of linesCapped(formatNormalized(parsed.normalized ?? []))) println(line);
+    for (const line of linesCapped(res.rejected.map((r) => `  ✗ rejected "${r.discovery.title}": ${r.reason}`))) println(line);
     if (rec.path)
       println(
         `  pack suggestions: ${rec.accepted} new idiom(s) · ${rec.hunted.length} hunt(s) recorded → ${rec.path} (proposals — the engine never applies them)`,
       );
-    for (const d of idiomDrops) println(`  ✗ dropped ${d.reason}`);
-    for (const r of rec.rejected) println(`  ✗ rejected idiom "${r.idiom.pattern.slice(0, 60)}": ${r.reason}`);
+    for (const line of linesCapped(idiomDrops.map((d) => `  ✗ dropped ${d.reason}`))) println(line);
+    for (const line of linesCapped(rec.rejected.map((r) => `  ✗ rejected idiom "${r.idiom.pattern.slice(0, 60)}": ${r.reason}`))) println(line);
     // A citation the repo doesn't have is a refused row exactly like a malformed
     // one — the discovery is gone either way — so `--strict` has to count both.
     // Counting only `dropped` let a schema-valid discovery citing an invented
@@ -156,12 +156,13 @@ export function runInvestigate(args: ParsedArgs): number {
   const wroteMd = wantsMdTwin(args);
   const todoPath = emitWorklist(run, files, investigateTodo(regions), () => renderInvestigateMd(regions, loadContextDoc(run)), { md: wroteMd });
 
-  if (flagBool(args, "json")) {
-    println(JSON.stringify(regions, null, 2));
-    return 0;
-  }
   const hunts = regions.filter((r) => r.hunt).length;
   const areas = regions.length - hunts;
+  // The worklist is on disk; `--json` says where and how much.
+  if (flagBool(args, "json")) {
+    println(JSON.stringify({ todo: todoPath, items: regions.length, counts: { regions: areas, hunts } }));
+    return 0;
+  }
   println(
     `ultrasec investigate → ${todoPath} (${areas} region${areas === 1 ? "" : "s"}${hunts ? ` · ${hunts} weakness-class hunt${hunts === 1 ? "" : "s"}` : ""})`,
   );

@@ -1,4 +1,5 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join, resolve } from "node:path";
 import { flagBool, flagStr, isScannableDir, listFlag, println, eprintln, quietStdout, type ParsedArgs, type FlagValue } from "../util.js";
 import { runScan } from "./scan.js";
@@ -145,6 +146,7 @@ export async function runAudit(args: ParsedArgs): Promise<number> {
   for (const e of res.errors) eprintln(`ultrasec audit: ✗ ${e}`);
   for (const n of notes) eprintln(`ultrasec audit: ⚠️  ${n}`);
   const code = !res.grounded || (powered && res.errors.length) || (flagBool(args, "strict") && res.report.status.draft) ? 1 : 0;
+  const next = res.report.status.draft ? nextStep(repo, run, keepWork, dossier.manifest.scannerPolicy?.complete === false) : undefined;
 
   if (json) {
     println(
@@ -158,6 +160,7 @@ export async function runAudit(args: ParsedArgs): Promise<number> {
           externalCalls: res.externalCalls,
           worklists: keepWork ? res.emitted.map((e) => e.worklist) : [],
           removed: removed.length,
+          ...(next ? { next } : {}),
         },
         null,
         2,
@@ -167,7 +170,32 @@ export async function runAudit(args: ParsedArgs): Promise<number> {
   }
   println(res.report.written.join(" · "));
   println(`  ${status}`);
+  // A DRAFT says what to run next, with this run's real paths — not a pointer
+  // to the docs. One line: the third, after the report and its status.
+  if (next) println(`  next: ${next}`);
   if (keepWork && res.emitted.length)
     println(`  worklists kept: fill the *.todo.json in ${run}, \`--apply\` each, then \`ultrasec render --run ${run}\` and \`ultrasec clean --run ${run}\``);
   return code;
+}
+
+/**
+ * The command line that moves a DRAFT forward. The engine is named by its
+ * absolute path (an agent shares no cwd with it), the run and repo by theirs.
+ * Without `--keep-work` the worklists were removed, so the first step is the
+ * audit that keeps them.
+ */
+export function nextStep(repo: string, run: string, keepWork: boolean, scannersIncomplete: boolean): string {
+  const engine = `node ${engineAbs()}`;
+  if (scannersIncomplete) return `install or fix the required scanner(s), then ${engine} audit --repo ${repo} --out ${run}`;
+  const keep = keepWork ? "" : `${engine} audit --repo ${repo} --out ${run} --keep-work  →  `;
+  return `${keep}fill ${join(run, "VERIFY.todo.json")}  →  ${engine} verify --apply ${join(run, "VERIFY.todo.json")} --run ${run}  →  ${engine} render --run ${run}`;
+}
+
+/** This engine's own path: the bundle in a release, the module under test. */
+function engineAbs(): string {
+  try {
+    return realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return fileURLToPath(import.meta.url);
+  }
 }

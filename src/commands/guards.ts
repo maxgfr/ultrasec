@@ -1,5 +1,5 @@
 import { resolve } from "node:path";
-import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
+import { flagStr, flagBool, println, eprintln, type ParsedArgs, linesCapped, listCapped } from "../util.js";
 import { loadDossier, writeDossier } from "../store.js";
 import { scanRepo } from "../scan.js";
 import {
@@ -110,14 +110,29 @@ export function runGuards(args: ParsedArgs): number {
     const res = ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run) });
     persistFindings(run, dossier, res.findings);
 
+    if (flagBool(args, "json")) {
+      println(
+        JSON.stringify({
+          filed: res.ingested,
+          folded: res.folded,
+          [present]: confirmedPresent,
+          [waived]: waivedRows,
+          [NOT_A_HANDLER]: notHandlers,
+          rejected: res.rejected.map((r) => ({ file: r.discovery.file, line: r.discovery.line, reason: r.reason })),
+          unknown,
+          dropped: parsed.dropped,
+        }),
+      );
+      return strict && (unknown.length || res.rejected.length || parsed.dropped.length) ? 1 : 0;
+    }
     println(`ultrasec guards --apply → ${run}`);
     println(
       `  ${res.ingested} ${absent} handler(s) filed as findings · ${res.folded} folded into existing · ${confirmedPresent} confirmed ${present} · ${waivedRows} ${waived}${notHandlers ? ` · ${notHandlers} ${NOT_A_HANDLER} (dropped)` : ""}`,
     );
-    for (const r of res.rejected) eprintln(`  ✗ rejected ${r.discovery.file}:${r.discovery.line} — ${r.reason}`);
-    for (const id of unknown)
+    for (const line of linesCapped(res.rejected.map((r) => `  ✗ rejected ${r.discovery.file}:${r.discovery.line} — ${r.reason}`))) eprintln(line);
+    if (unknown.length)
       eprintln(
-        `  ✗ dropped ${id}: no handler with that id in the current matrix (re-run \`ultrasec guards${lens === "auth" ? "" : " --lens " + lens}\` and refill)`,
+        `  ✗ ${listCapped(`dropped ${unknown.length} row(s) naming no handler in the current matrix (re-run \`ultrasec guards${lens === "auth" ? "" : " --lens " + lens}\` and refill)`, unknown)}`,
       );
     const code = surfaceDropped(parsed.dropped, strict, eprintln);
     if (strict && (unknown.length || res.rejected.length)) return 1;
@@ -135,6 +150,11 @@ export function runGuards(args: ParsedArgs): number {
   // apply: the enumeration is what the coverage claim is about, and an
   // unadjudicated row is reported as the open question it is.
   writeDossier(run, { ...dossier, manifest: { ...dossier.manifest, passes: { ...dossier.manifest.passes, [spec.pass]: true } } });
+
+  if (flagBool(args, "json")) {
+    println(JSON.stringify({ todo: todoPath, items: rows.length, counts: t }));
+    return 0;
+  }
 
   println(`ultrasec guards${lens === "auth" ? "" : ` --lens ${lens}`} → ${run}`);
   println(
