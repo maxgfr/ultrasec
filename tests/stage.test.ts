@@ -22,8 +22,29 @@ describe("emitWorklist", () => {
     const items = [{ id: "x", verdict: null }];
     const path = emitWorklist(run, stageFiles("TRIAGE"), items, "# brief\n", { md: true });
     expect(path).toBe(join(run, "TRIAGE.todo.json"));
-    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual(items);
+    // The empty answer slot is not written (see the compact-worklist tests).
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual([{ id: "x" }]);
     expect(readFileSync(join(run, "TRIAGE.md"), "utf8")).toBe("# brief\n");
+  });
+
+  it("writes one compact row per line and leaves empty answer slots out — filled ones and evidence stay", () => {
+    const run = join(tmp(), "compact");
+    const items = [
+      { id: "a", currentLine: null, verdict: null, note: "", brocard: null, guarantees: [], files: [] },
+      { id: "b", verdict: "refuted", note: "guard at x:1", brocard: "outside-usage", files: ["x:1"] },
+    ];
+    const path = emitWorklist(run, stageFiles("VERIFY"), items, "", { md: false });
+    const raw = readFileSync(path, "utf8");
+    expect(raw).toBe(
+      '[\n{"id":"a","currentLine":null,"files":[]},\n{"id":"b","verdict":"refuted","note":"guard at x:1","brocard":"outside-usage","files":["x:1"]}\n]\n',
+    );
+    expect(raw).not.toMatch(/\n {2}/); // no indentation
+  });
+
+  it("a header-plus-rows worklist keeps its header and writes its rows one per line", () => {
+    const run = join(tmp(), "header");
+    const path = emitWorklist(run, stageFiles("INVESTIGATE"), { prompt: "p", regions: [{ region: "a" }, { region: "b", verdict: null }] }, "", { md: false });
+    expect(readFileSync(path, "utf8")).toBe('{"prompt":"p",\n"regions":[\n{"region":"a"},\n{"region":"b"}\n]}\n');
   });
 
   // Every worklist used to be written twice, and agents read both: on a real

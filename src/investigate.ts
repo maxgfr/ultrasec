@@ -34,6 +34,9 @@ import { isHuntOnlyPayload } from "./classes/hunt.js";
 
 const MAX_FILES_PER_REGION = 8;
 const MAX_NEIGHBORS_PER_REGION = 12;
+/** Attack-surface regions per worklist; past it the smallest are merged. The
+ *  same ceiling as the fan-out's agents, so one region is never split. */
+export const MAX_REGIONS = 12;
 export const AI_TOOL = "ultrasec-ai";
 
 export interface InvestigateRegion {
@@ -54,6 +57,9 @@ export interface InvestigateRegion {
    * Absent unless that stage has run.
    */
   leads?: string[];
+  /** The regions merged into this one when the worklist passed MAX_REGIONS —
+   *  named, so a region folded away is never silently dropped. */
+  merged?: string[];
   /**
    * Present on a weakness-class HUNT rather than an attack-surface region: a
    * class × framework cell no pack settles (src/classes/hunt.ts). Its `region`
@@ -136,7 +142,78 @@ export function buildInvestigateWorklist(
   }
   // Weakness-class hunts come after the regions: same worklist, same ingest,
   // same orchestration ids — one more kind of item, not a second pipeline.
-  return [...regions, ...classHunts];
+  return [...capRegions(regions), ...classHunts];
+}
+
+/**
+ * At most MAX_REGIONS regions: the best-ranked first MAX_REGIONS − 1 as they
+ * are, the rest merged into one — files taken round-robin from each so every
+ * small region keeps a representative, neighbours and leads pooled, the merged
+ * names listed. A monorepo with forty packages otherwise got forty regions and
+ * forty agents, most of them reading one file.
+ */
+function capRegions(regions: InvestigateRegion[]): InvestigateRegion[] {
+  if (regions.length <= MAX_REGIONS) return regions;
+  const head = regions.slice(0, MAX_REGIONS - 1);
+  const tail = regions.slice(MAX_REGIONS - 1);
+  const files: string[] = [];
+  for (let i = 0; files.length < MAX_FILES_PER_REGION; i++) {
+    let added = false;
+    for (const r of tail) {
+      const f = r.files[i];
+      if (f !== undefined && files.length < MAX_FILES_PER_REGION && !files.includes(f)) {
+        files.push(f);
+        added = true;
+      }
+    }
+    if (!added && tail.every((r) => r.files.length <= i)) break;
+  }
+  const nb = new Set(tail.flatMap((r) => r.neighbors));
+  for (const f of files) nb.delete(f);
+  const leads = tail.flatMap((r) => r.leads ?? []);
+  const merged: InvestigateRegion = {
+    region: `${tail[0]!.region} +${tail.length - 1} smaller`,
+    score: tail.reduce((n, r) => n + r.score, 0),
+    sinks: tail.reduce((n, r) => n + r.sinks, 0),
+    sources: tail.reduce((n, r) => n + r.sources, 0),
+    files,
+    neighbors: [...nb].sort(byStr).slice(0, MAX_NEIGHBORS_PER_REGION),
+    prompt: tail[0]!.prompt,
+    ...(leads.length ? { leads } : {}),
+    merged: tail.map((r) => r.region),
+  };
+  return [...head, merged];
+}
+
+/**
+ * The worklist as written: the hunt prompt every region shares, ONCE, then the
+ * regions without it. Nine regions repeated the same 322-character prompt on
+ * a real run, and a hunter fan-out handed each agent every copy. A region (or
+ * a weakness-class hunt) whose prompt differs keeps its own.
+ */
+export interface InvestigateTodo {
+  prompt: string;
+  regions: (Omit<InvestigateRegion, "prompt"> & { prompt?: string })[];
+}
+
+export function investigateTodo(items: readonly InvestigateRegion[]): InvestigateTodo {
+  const counts = new Map<string, number>();
+  for (const r of items) counts.set(r.prompt, (counts.get(r.prompt) ?? 0) + 1);
+  let prompt = "";
+  for (const [p, n] of counts) if (n > (counts.get(prompt) ?? 0)) prompt = p;
+  return { prompt, regions: items.map(({ prompt: own, ...rest }) => (own === prompt ? rest : { ...rest, prompt: own })) };
+}
+
+/** Read an INVESTIGATE.todo.json body — the `{prompt, regions}` shape, or the
+ *  plain array an older run wrote — back into regions that each carry their
+ *  prompt. Anything else is no regions. */
+export function readInvestigateTodo(raw: unknown): InvestigateRegion[] {
+  if (Array.isArray(raw)) return raw as InvestigateRegion[];
+  if (raw !== null && typeof raw === "object" && Array.isArray((raw as InvestigateTodo).regions)) {
+    const t = raw as InvestigateTodo;
+    return t.regions.map((r) => ({ ...r, prompt: r.prompt ?? t.prompt ?? "" }));
+  }
+  return [];
 }
 
 export function renderInvestigateMd(items: InvestigateRegion[], context?: string): string {

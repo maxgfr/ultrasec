@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildClassHunts, parseHuntResults, recordHuntResults } from "../src/classes/hunt.js";
 import { classCoverage, huntId, withHuntProgress, PACK_SUGGESTIONS_FILE } from "../src/classes/coverage.js";
-import { parseDiscoveries } from "../src/investigate.js";
+import { parseDiscoveries, readInvestigateTodo } from "../src/investigate.js";
 import { runInvestigate } from "../src/commands/investigate.js";
 import { writeDossier } from "../src/store.js";
 import { parseArgs } from "../src/util.js";
@@ -179,7 +179,8 @@ describe("investigate — weakness-class hunts end to end", () => {
     const emit = capture(() => runInvestigate(parseArgs(["--run", run, "--repo", repo, "--md"])));
     expect(emit.code).toBe(0);
     expect(emit.out).toContain("3 weakness-class hunt");
-    const todo = JSON.parse(readFileSync(join(run, "INVESTIGATE.todo.json"), "utf8")) as { region: string; hunt?: { id: string } }[];
+    // The worklist writes the shared hunt prompt once: `{prompt, regions}`.
+    const todo = readInvestigateTodo(JSON.parse(readFileSync(join(run, "INVESTIGATE.todo.json"), "utf8")));
     const id = huntId({ class: "unbounded-public-export", framework: "koa", dir: "" });
     expect(todo.filter((r) => r.hunt).map((r) => r.region)).toEqual([
       id,

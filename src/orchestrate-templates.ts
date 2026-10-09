@@ -195,10 +195,15 @@ function oneLine(s: string): string {
  * family for the finding phases. This replaces `ITEMS=<ids>` plus a worklist
  * every agent had to open and search — the lines ARE the worklist rows.
  */
-export function batchText(phase: string, families: readonly string[][], lines: Readonly<Record<string, string>>): string {
+export function batchText(phase: string, families: readonly string[][], lines: Readonly<Record<string, string>>, header?: string): string {
   const n = families.reduce((k, g) => k + g.length, 0);
   const line = (id: string) => lines[id] ?? JSON.stringify({ id });
-  if (phase === "investigate") return [`Your ${n} region(s), one compact JSON line each:`, ...families.flat().map(line)].join("\n");
+  if (phase === "investigate")
+    return [
+      ...(header ? [`Hunt prompt — every region below unless it carries its own \`prompt\`: ${header}`] : []),
+      `Your ${n} region(s), one compact JSON line each:`,
+      ...families.flat().map(line),
+    ].join("\n");
   const L = [
     `Your ${n} item(s), one compact JSON line each, in ${families.length} famil${families.length === 1 ? "y" : "ies"}. A family is ONE judgment: read its first member in depth, the others for their location only (\`dossier <id>,<id>,… --brief --no-context\` prints exactly that). Still ONE verdict row per id.`,
   ];
@@ -223,7 +228,7 @@ export function phaseWorkflowScript(ph: PhaseInfo, runAbs: string, engineAbs: st
   const fragmentKey = ph.name === "investigate" ? "discoveries" : "verdicts";
   const plan = extras.plan ?? { batches: toBatches(ph.ids, batchSize).map((b) => b.map((id) => [id])), lines: {} };
   const batches = plan.batches.map((fams) => fams.flat());
-  const texts = plan.batches.map((fams) => batchText(ph.name, fams, plan.lines));
+  const texts = plan.batches.map((fams) => batchText(ph.name, fams, plan.lines, plan.header));
   return [
     `export const meta = ${JSON.stringify(meta)}`,
     ``,
@@ -331,7 +336,7 @@ ${footer}`,
 
 You hunt the bugs the deterministic engine can't enumerate — missing/incorrect **authz** & **IDOR**, **business-logic** flaws, and multi-hop taint — one attack-surface region at a time.
 
-Your regions are in your prompt: one compact JSON line each (\`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). If a region is no longer in the worklist, skip it and say so in your note.
+Your regions are in your prompt: one compact JSON line each (\`region\`, \`files[]\`, \`neighbors[]\`, and \`prompt\` when it differs from the shared hunt prompt printed above them; paths are relative to the repo root \`${repoAbs}\`). If a region is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your regions:
 

@@ -34,7 +34,7 @@ export function runRevalidate(args: ParsedArgs): number {
     const strict = flagBool(args, "strict");
     // Recompute git facts from CURRENT repo state so the drift guard + inferred
     // fixing commits reflect HEAD, not whatever was emitted earlier.
-    const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo, { surface: "all" }));
+    const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo, { surface: "all", ids: new Set(parsed.rows.map((r) => r.id)) }));
     const res = applyRevalidations(dossier, parsed.rows, facts);
     // Fail closed on an entirely stale fragment: every verdict targeting an id
     // outside the revalidation scope means the false-positive cut never engaged.

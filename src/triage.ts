@@ -1,8 +1,8 @@
 import type { Dossier } from "./store.js";
-import type { Finding, Status } from "./types.js";
+import type { Finding, NoiseClass, Status } from "./types.js";
 import { isHigh } from "./verify.js";
 import { byStr } from "./util.js";
-import { proposedFor, renderProposalSummary, type ProposedAdjudication } from "./noise.js";
+import { proposalOf, renderProposalSummary } from "./noise.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 import { compareWithinStatus } from "./rank.js";
 import { groupFamilies } from "./family.js";
@@ -26,9 +26,10 @@ export interface TriageItem {
   at: string;
   /** Filled by the agent. */
   verdict: TriageVerdict | null;
-  /** Machine-proposed ground for a noise-by-construction finding. A suggestion
-   *  to accept or refuse — never a filled-in verdict. */
-  proposed?: ProposedAdjudication;
+  /** The noise-by-construction class the engine proposes (its ground and why
+   *  are the class's own — schemas.md). A suggestion to accept or refuse —
+   *  never a filled-in verdict. */
+  proposed?: NoiseClass;
 }
 
 export interface TriageInput {
@@ -47,7 +48,9 @@ function citedAt(f: Finding): string {
 export function buildTriageWorklist(dossier: Dossier): TriageItem[] {
   return (
     dossier.findings
-      .filter((f) => f.status === "open")
+      // A `noise` verdict on high/critical is ignored at apply (below), so a row
+      // for one asked for a decision that could not count. They go to verify.
+      .filter((f) => f.status === "open" && !isHigh(f.severity))
       .slice()
       // Ranked, not alphabetical. The worklist is read top-down and abandoned when
       // attention runs out, so the order decides what actually gets triaged — and
@@ -55,8 +58,7 @@ export function buildTriageWorklist(dossier: Dossier): TriageItem[] {
       .sort(compareWithinStatus)
       .map((f) => {
         const item: TriageItem = { id: f.id, severity: f.severity, category: f.category, title: f.title, at: citedAt(f), verdict: null };
-        const proposed = proposedFor(f);
-        if (proposed) item.proposed = proposed;
+        if (f.noise) item.proposed = f.noise;
         return item;
       })
   );
@@ -81,7 +83,7 @@ export function renderTriageMd(items: TriageItem[], context?: string): string {
     L.push(context);
     L.push("");
   }
-  L.push(...renderProposalSummary(items));
+  L.push(...renderProposalSummary(items.map((it) => ({ id: it.id, proposed: it.proposed ? proposalOf(it.proposed) : undefined }))));
   L.push(...groupedWorklist(items));
   L.push("");
   return L.join("\n") + "\n";

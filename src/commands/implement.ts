@@ -1,7 +1,7 @@
 import { resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { emitWorklist, stageFiles } from "../stage.js";
+import { emitWorklist, stageFiles, wantsMdTwin } from "../stage.js";
 import { loadContextDoc } from "../context.js";
 import { buildImplementWorklist, loadNarrative, renderImplementMd } from "../implement.js";
 
@@ -24,9 +24,11 @@ export function runImplement(args: ParsedArgs): number {
   const narrFile = flagStr(args, "narrative");
   const narrative = loadNarrative(run, dossier, narrFile ? resolve(narrFile) : undefined);
   const wl = buildImplementWorklist(dossier, narrative);
-  // IMPLEMENT.md is not a twin of the JSON: it is the remediation-PRD draft this
-  // command exists to produce, so it is always written.
-  const todoPath = emitWorklist(run, stageFiles("IMPLEMENT"), wl, () => renderImplementMd(wl, loadContextDoc(run)), { md: true });
+  // IMPLEMENT.md, the remediation-PRD draft, restates the JSON in prose; like
+  // every other brief it is written on request (`--md` / ULTRASEC_MD=1). The
+  // powered pipeline, whose agent reads the draft, still writes it.
+  const wroteMd = wantsMdTwin(args);
+  const todoPath = emitWorklist(run, stageFiles("IMPLEMENT"), wl, () => renderImplementMd(wl, loadContextDoc(run)), { md: wroteMd });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(wl, null, 2));
@@ -38,7 +40,11 @@ export function runImplement(args: ParsedArgs): number {
   if (!wl.fixes.length && !wl.investigations.length) {
     println(`  nothing confirmed/needs-human yet — run \`verify --apply\` first.`);
   } else {
-    println(`  next: feed ${run}/IMPLEMENT.md to the \`to-prd\` skill to author the remediation PRD, or hand it to an implementer.`);
+    println(
+      wroteMd
+        ? `  next: feed ${run}/IMPLEMENT.md to the \`to-prd\` skill to author the remediation PRD, or hand it to an implementer.`
+        : `  next: author the remediation PRD from ${todoPath} (\`--md\` also writes the IMPLEMENT.md draft for the \`to-prd\` skill).`,
+    );
   }
   return 0;
 }

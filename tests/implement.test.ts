@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Dossier } from "../src/store.js";
+import { writeDossier, type Dossier } from "../src/store.js";
+import { runImplement } from "../src/commands/implement.js";
+import { captureOutput, parseArgs } from "../src/util.js";
 import type { Finding, Narrative } from "../src/types.js";
 import { buildImplementWorklist, loadNarrative, renderImplementMd } from "../src/implement.js";
 
@@ -179,5 +181,26 @@ describe("loadNarrative", () => {
     const n = loadNarrative(dir, d);
     expect(n?.remediations?.map((r) => r.id)).toEqual(["c1"]); // non-confirmed nh1 dropped by grounding
     expect(loadNarrative(join(dir, "absent"), d)).toBeUndefined();
+  });
+});
+
+describe("implement command — the PRD draft is a brief like the others", () => {
+  it("writes IMPLEMENT.todo.json only, and IMPLEMENT.md with --md", async () => {
+    const prev = process.env.ULTRASEC_MD;
+    delete process.env.ULTRASEC_MD;
+    try {
+      const run = mkdtempSync(join(tmpdir(), "ultrasec-impl-cmd-"));
+      writeDossier(run, dossier([f("c1", "confirmed")]));
+      const plain = await captureOutput(() => runImplement(parseArgs(["implement", "--run", run])));
+      expect(plain.result).toBe(0);
+      expect(existsSync(join(run, "IMPLEMENT.todo.json"))).toBe(true);
+      expect(existsSync(join(run, "IMPLEMENT.md"))).toBe(false);
+      expect(plain.stdout).toContain("--md");
+      const withMd = await captureOutput(() => runImplement(parseArgs(["implement", "--run", run, "--md"])));
+      expect(withMd.result).toBe(0);
+      expect(existsSync(join(run, "IMPLEMENT.md"))).toBe(true);
+    } finally {
+      if (prev !== undefined) process.env.ULTRASEC_MD = prev;
+    }
   });
 });

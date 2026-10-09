@@ -40,6 +40,65 @@ export function wantsMdTwin(args?: ParsedArgs): boolean {
   return (args !== undefined && flagBool(args, "md")) || process.env.ULTRASEC_MD === "1";
 }
 
+// ── Why the JSON is compact ─────────────────────────────────────────────────
+//
+// Indented, a worklist row paid for its whitespace on every line, and for every
+// answer slot left empty for the adjudicator — `"verdict": null`, `"note": ""`,
+// `"brocard": null`, four empty arrays per assumption unit. Neither is
+// evidence. So a worklist is one row per line, no indentation, and an EMPTY
+// answer field is not written: the fields to add are named by the emitting
+// command and in schemas.md, and every `--apply` parser accepts a row without
+// them. An older, indented worklist still parses — it is the same JSON.
+
+/** Fields a row carries EMPTY for the adjudicator to fill. Only a row's own
+ *  top-level keys are considered, and only when empty. */
+export const ANSWER_FIELDS: ReadonlySet<string> = new Set([
+  "verdict",
+  "note",
+  "brocard",
+  "fixedIn",
+  "guarantees",
+  "assumptions",
+  "calls",
+  "openQuestions",
+  "rootCause",
+  "patterns",
+  "variants",
+  "regressionRule",
+]);
+
+function isEmptyAnswer(v: unknown): boolean {
+  return v === null || v === "" || (Array.isArray(v) && v.length === 0);
+}
+
+/** A row without its empty answer slots. Anything that is not a plain object
+ *  is returned as-is. */
+export function withoutEmptyAnswers<T>(row: T): T {
+  if (row === null || typeof row !== "object" || Array.isArray(row)) return row;
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(row)) if (!(ANSWER_FIELDS.has(k) && isEmptyAnswer(v))) out[k] = v;
+  return out as T;
+}
+
+/** A worklist as written: an array is one compact row per line, any other
+ *  shape compact JSON. Empty answer slots are left out either way. */
+export function worklistJson(items: unknown): string {
+  return `${jsonRows(items)}\n`;
+}
+
+function jsonRows(v: unknown): string {
+  if (Array.isArray(v)) return v.length ? `[\n${v.map((r) => JSON.stringify(withoutEmptyAnswers(r))).join(",\n")}\n]` : "[]";
+  // `{header…, rows: [...]}`-shaped worklists (INVESTIGATE's shared prompt,
+  // NARRATIVE, IMPLEMENT): each array member gets the same one-row-per-line form.
+  if (v !== null && typeof v === "object") {
+    const parts = Object.entries(v as Record<string, unknown>)
+      .filter(([, x]) => x !== undefined)
+      .map(([k, x]) => `${JSON.stringify(k)}:${Array.isArray(x) ? jsonRows(x) : JSON.stringify(x)}`);
+    return `{${parts.join(",\n")}}`;
+  }
+  return JSON.stringify(v);
+}
+
 /**
  * Write a stage's worklist: the JSON todo, plus the human Markdown brief when
  * `md` is on (default: `ULTRASEC_MD=1`). The brief is passed as a thunk so a
@@ -48,7 +107,7 @@ export function wantsMdTwin(args?: ParsedArgs): boolean {
 export function emitWorklist(run: string, files: StageFiles, items: unknown, md: string | (() => string), opts: { md?: boolean } = {}): string {
   mkdirSync(run, { recursive: true });
   const todoPath = join(run, files.todo);
-  writeFileSync(todoPath, JSON.stringify(items, null, 2));
+  writeFileSync(todoPath, worklistJson(items));
   if (opts.md ?? wantsMdTwin()) writeFileSync(join(run, files.md), typeof md === "function" ? md() : md);
   return todoPath;
 }

@@ -1,10 +1,10 @@
 import type { Dossier } from "./store.js";
-import { BROCARDS, VERDICTS, type Brocard, type Finding, type Status, type Verdict } from "./types.js";
-import { byStr, withStageNote } from "./util.js";
+import { BROCARDS, VERDICTS, type Brocard, type Finding, type NoiseClass, type Status, type Verdict } from "./types.js";
+import { byStr, engineProse, withStageNote } from "./util.js";
 import { redactSecrets } from "./redact.js";
-import { proposedFor, renderProposalSummary, type ProposedAdjudication } from "./noise.js";
+import { proposalOf, renderProposalSummary } from "./noise.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
-import { ADJUDICATION_SURFACE, inSurface, type SurfaceFilter } from "./surface.js";
+import { ADJUDICATION_SURFACE, inSurface, surfaceOf, type SurfaceFilter } from "./surface.js";
 
 // The adversarial verification gate. The engine emits a claim↔evidence worklist;
 // the AI (skeptic subagents) adjudicates each finding by reading the dossier's
@@ -20,8 +20,11 @@ export interface VerifyItem {
   cwe?: string;
   title: string;
   category: string;
-  /** What must hold for this to be a real, exploitable issue. */
-  claim: string;
+  /** What must hold for this to be a real, exploitable issue: the first
+   *  sentence of the engine's own prose and its evidence (`claimOf`), without
+   *  the stage notes an earlier pass appended. Absent on a dependency
+   *  advisory, whose message is the advisory text the report already carries. */
+  claim?: string;
   /** Files the adjudicator should open. */
   files: string[];
   /** Filled by the adjudicator. */
@@ -38,9 +41,10 @@ export interface VerifyItem {
    */
   brocard: Brocard | null;
   exploitPath?: string;
-  /** Machine-proposed ground for a noise-by-construction finding. A suggestion
-   *  to accept or refuse — never a filled-in verdict. */
-  proposed?: ProposedAdjudication;
+  /** The noise-by-construction class the engine proposes; its ground and why
+   *  are the class's own (schemas.md). A suggestion to accept or refuse — never
+   *  a filled-in verdict. */
+  proposed?: NoiseClass;
   /** What the engine saw about whether the value actually ARRIVES at the sink —
    *  scope tier, def-use verdict, and (for an assignment sink) whether anything
    *  tracked appears in the assigned value. Evidence, never a verdict. */
@@ -138,6 +142,32 @@ function reachabilityLine(f: Finding): string | undefined {
   return bits.length ? bits.join(" · ") : undefined;
 }
 
+/** The longest a claim's statement (or its evidence) runs in a worklist row. */
+export const CLAIM_CAP = 240;
+
+function cap(text: string): string {
+  return text.length > CLAIM_CAP ? `${text.slice(0, CLAIM_CAP - 1)}…` : text;
+}
+
+/**
+ * What a worklist row says the finding claims: the FIRST SENTENCE of the
+ * engine's own prose (stage notes dropped), then its `Evidence:` line, each
+ * capped at CLAIM_CAP.
+ *
+ * The rest of an engine message is the class's explanation and advice — the
+ * same paragraph on every member of a rule: 133 unpinned-action rows on one
+ * monorepo carried the same 330 characters each, and every taint row ends on
+ * the same "Heuristic — verify…" sentence. The row is an index for
+ * adjudication; `dossier <id>` prints the whole message under "What to decide".
+ */
+export function claimOf(message: string): string {
+  const [body = "", ...evidence] = engineProse(message).split(/\n\n(?=Evidence:)/);
+  const flat = body.replace(/\s+/g, " ").trim();
+  const first = /^(.+?[.!?])(?:\s|$)/.exec(flat)?.[1] ?? flat;
+  const ev = evidence.join(" ").replace(/\s+/g, " ").trim();
+  return ev ? `${cap(first)} ${cap(ev)}` : cap(first);
+}
+
 /** One finding as a verify item — the row the worklist holds and the line a
  *  fan-out prompt carries. */
 export function verifyItemOf(f: Finding): VerifyItem {
@@ -151,14 +181,13 @@ export function verifyItemOf(f: Finding): VerifyItem {
     cwe: f.cwe,
     title: f.title,
     category: f.category,
-    claim: f.message,
+    ...(surfaceOf(f) === "deps" ? {} : { claim: claimOf(f.message) }),
     files: [...files],
     verdict: null,
     note: "",
     brocard: null,
   };
-  const proposed = proposedFor(f);
-  if (proposed) item.proposed = proposed;
+  if (f.noise) item.proposed = f.noise;
   const reach = reachabilityLine(f);
   if (reach) item.reachability = reach;
   const pa = f.priorAnalysis;
@@ -219,16 +248,18 @@ export function renderWorklistMd(items: VerifyItem[], context?: string, counts?:
     L.push(context);
     L.push("");
   }
-  L.push(...renderProposalSummary(items));
+  L.push(...renderProposalSummary(items.map((it) => ({ id: it.id, proposed: it.proposed ? proposalOf(it.proposed) : undefined }))));
   for (const it of items) {
     L.push(`## ${it.id} — [${it.severity}] ${it.title}`);
     if (it.cwe) L.push(`- ${it.cwe} · ${it.category}`);
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
-    L.push(`- claim: ${it.claim}`);
+    if (it.claim) L.push(`- claim: ${it.claim}`);
     if (it.reachability) L.push(`- reachability (engine evidence, not a verdict): ${it.reachability}`);
     if (it.priorSignal) L.push(`- signal (not a verdict — adjudicate yourself): ${it.priorSignal}`);
-    if (it.proposed)
-      L.push(`- proposed ground \`${it.proposed.ground}\` (${it.proposed.class}) — ${it.proposed.why}. Accept it or refuse it; it is not a verdict.`);
+    if (it.proposed) {
+      const p = proposalOf(it.proposed);
+      L.push(`- proposed ground \`${p.ground}\` (${p.class}) — ${p.why}. Accept it or refuse it; it is not a verdict.`);
+    }
     if (it.priorVerdict) L.push(`- **re-opened** — an earlier pass ruled \`${it.priorVerdict}\` and escalated it. Not new work.`);
     L.push("");
   }

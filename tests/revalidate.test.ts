@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Dossier } from "../src/store.js";
 import type { Finding, Severity } from "../src/types.js";
-import { buildRevalidateWorklist, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../src/revalidate.js";
+import { buildRevalidateWorklist, applyRevalidations, parseRevalidations, revalFactsFromWorklist, CURRENT_LINE_CAP } from "../src/revalidate.js";
 
 function finding(id: string, severity: Severity, status: Finding["status"]): Finding {
   return {
@@ -59,6 +60,67 @@ describe("buildRevalidateWorklist — surface (dependencies out by default)", ()
     const repo = mkdtempSync(join(tmpdir(), "ultrasec-reval-"));
     expect(buildRevalidateWorklist(d, repo).map((i) => i.id)).toEqual(["conf"]);
     expect(buildRevalidateWorklist(d, repo, { surface: "all" }).map((i) => i.id)).toEqual(["conf", "dep"]);
+  });
+});
+
+function hasGit(): boolean {
+  try {
+    execFileSync("git", ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+describe.skipIf(!hasGit())("buildRevalidateWorklist — compact git facts", () => {
+  // A repo whose `big.js` line 2 is a 5 000-character minified line, and whose
+  // `gone.js` existed at the first commit only.
+  function repo(): { dir: string; first: string } {
+    const dir = mkdtempSync(join(tmpdir(), "ultrasec-reval-git-"));
+    const git = (...a: string[]) => execFileSync("git", ["-C", dir, ...a], { stdio: "ignore" });
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    writeFileSync(join(dir, "big.js"), `ok\n${"x".repeat(5000)}\n`);
+    writeFileSync(join(dir, "gone.js"), "a\nconst KEY = 'k';\n");
+    git("add", "-A");
+    git("commit", "-qm", "one");
+    const first = execFileSync("git", ["-C", dir, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+    rmSync(join(dir, "gone.js"));
+    git("add", "-A");
+    git("commit", "-qm", "two");
+    return { dir, first };
+  }
+
+  it("caps currentLine at CURRENT_LINE_CAP characters", () => {
+    const { dir } = repo();
+    const f = { ...finding("big", "high", "confirmed"), sink: { file: "big.js", line: 2 } };
+    const [item] = buildRevalidateWorklist(dossier([f]), dir);
+    expect(item!.currentLine!.length).toBe(CURRENT_LINE_CAP + 1); // + the ellipsis
+    expect(item!.currentLine!.endsWith("…")).toBe(true);
+  });
+
+  it("reads a history-scanned finding at its own commit and does not count it unresolved", () => {
+    const { dir, first } = repo();
+    const f: Finding = { ...finding("hist", "high", "confirmed"), category: "other", sink: { file: "gone.js", line: 1 }, atCommit: first };
+    const [item] = buildRevalidateWorklist(dossier([f]), dir);
+    expect(item!.fileExists).toBe(false);
+    expect(item!.atCommit).toBe(first);
+    expect(item!.currentLine).toBe("a");
+    expect(item!.renamedTo).toBeNull();
+    expect(revalFactsFromWorklist([item!]).unresolved?.has("hist")).toBe(false);
+    // The same citation without atCommit is drift.
+    const [head] = buildRevalidateWorklist(dossier([{ ...f, atCommit: undefined }]), dir);
+    expect(revalFactsFromWorklist([head!]).unresolved?.has("hist")).toBe(true);
+  });
+
+  it("--apply recomputes the facts of the ids it folds only", () => {
+    const { dir } = repo();
+    const d = dossier([
+      { ...finding("a", "high", "confirmed"), sink: { file: "big.js", line: 1 } },
+      { ...finding("b", "high", "confirmed"), sink: { file: "big.js", line: 2 } },
+    ]);
+    expect(buildRevalidateWorklist(d, dir, { ids: new Set(["b"]) }).map((i) => i.id)).toEqual(["b"]);
   });
 });
 

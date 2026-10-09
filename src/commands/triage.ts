@@ -7,6 +7,7 @@ import { loadContextDoc } from "../context.js";
 import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from "../triage.js";
 import { SURFACE_FILTERS, type SurfaceFilter } from "../orchestrate.js";
 import { inSurface } from "../surface.js";
+import { isHigh } from "../verify.js";
 
 // `ultrasec triage --run <dir> [--surface code]`          → emit the open-candidate worklist
 // `ultrasec triage --apply <file|dir|a,b,c> --run <dir>`  → fold noise/keep back in
@@ -69,6 +70,8 @@ export function runTriage(args: ParsedArgs): number {
   }
   println(`ultrasec triage → ${todoPath} (${items.length} open candidate${items.length === 1 ? "" : "s"}${surface === "all" ? "" : `, surface ${surface}`})`);
   println(worklistNote(files, wroteMd));
+  const high = scoped.findings.filter((f) => f.status === "open" && isHigh(f.severity)).length;
+  if (high) println(`  ${high} high/critical open candidate(s) not listed — a noise verdict cannot dismiss them; they go to verify.`);
   if (!items.length) {
     println(`  no open candidates to triage.`);
   } else {

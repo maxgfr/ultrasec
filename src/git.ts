@@ -127,9 +127,42 @@ function worktreePrefix(repo: string): string {
   return p;
 }
 
+/**
+ * A memo for ONE batch of revalidation facts.
+ *
+ * Every fact used to be its own git process: `cat-file`, then `show HEAD:<file>`
+ * for the line, then `show HEAD:<file>` again for the size guard of `log -L`,
+ * per finding — and a whole `log --all --name-status` per deleted file. On a
+ * worklist where forty findings sit in one file that is the same blob read
+ * eighty times. Scoped to a batch rather than the module, so a long-lived
+ * process (the MCP server) never reads a HEAD that has since moved.
+ */
+export interface GitMemo {
+  /** `HEAD:<file>` blobs; `null` when the file is not at HEAD. */
+  blobs: Map<string, string | null>;
+  /** `rev-parse --verify <ref>^{commit}` outcomes. */
+  refs: Map<string, boolean>;
+  /** `logSince` results, keyed by `ref\0file`. */
+  since: Map<string, string[] | null>;
+  /** The `log --all` rename listing, read once. */
+  renames?: string | null;
+}
+
+export function gitMemo(): GitMemo {
+  return { blobs: new Map(), refs: new Map(), since: new Map() };
+}
+
+function headBlob(repo: string, file: string, memo?: GitMemo): string | null {
+  if (!memo) return git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
+  if (!memo.blobs.has(file)) memo.blobs.set(file, git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]));
+  return memo.blobs.get(file) ?? null;
+}
+
 /** True when `file` exists in the committed tree at HEAD. (`HEAD:<file>` is a single
  *  argv rev-expression, never a shell string — same injection-hardening as blame.) */
-export function fileExistsAtHead(repo: string, file: string): boolean {
+export function fileExistsAtHead(repo: string, file: string, memo?: GitMemo): boolean {
+  // With a memo the blob is read once and answers the line lookups too.
+  if (memo) return headBlob(repo, file, memo) !== null;
   return git(repo, ["cat-file", "-e", `HEAD:${worktreePrefix(repo)}${file}`]) !== null;
 }
 
@@ -174,9 +207,9 @@ export function lineContentAtCommit(repo: string, commit: string, file: string, 
 }
 
 /** The content of `file` line `line` at HEAD, or `null` if the file/line is gone. */
-export function lineContentAtHead(repo: string, file: string, line: number): string | null {
+export function lineContentAtHead(repo: string, file: string, line: number, memo?: GitMemo): string | null {
   if (!Number.isInteger(line) || line < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
+  const blob = headBlob(repo, file, memo);
   if (blob === null) return null;
   const lines = blob.split(/\r?\n/);
   return line <= lines.length ? lines[line - 1]! : null;
@@ -187,14 +220,24 @@ export function lineContentAtHead(repo: string, file: string, line: number): str
  * first, capped at {@link LOG_CAP}. `null` when git is unavailable or `sinceRef`
  * doesn't resolve — so a missing provenance ref yields "unknown", not "zero".
  */
-export function logSince(repo: string, file: string, sinceRef: string): string[] | null {
-  if (git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) === null) return null;
-  const out = git(repo, ["log", `--max-count=${LOG_CAP}`, "--format=%h", `${sinceRef}..HEAD`, "--", file]);
-  if (out === null) return null;
-  return out
-    .split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter(Boolean);
+export function logSince(repo: string, file: string, sinceRef: string, memo?: GitMemo): string[] | null {
+  const key = `${sinceRef}\u0000${file}`;
+  if (memo?.since.has(key)) return memo.since.get(key) ?? null;
+  let resolves = memo?.refs.get(sinceRef);
+  if (resolves === undefined) {
+    resolves = git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) !== null;
+    memo?.refs.set(sinceRef, resolves);
+  }
+  const out = resolves ? git(repo, ["log", `--max-count=${LOG_CAP}`, "--format=%h", `${sinceRef}..HEAD`, "--", file]) : null;
+  const res =
+    out === null
+      ? null
+      : out
+          .split(/\r?\n/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+  memo?.since.set(key, res);
+  return res;
 }
 
 export interface LineChange {
@@ -221,9 +264,9 @@ export function parseLineLog(raw: string): LineChange | null {
  * or `null`. Guards against pathological cost: skips files larger than
  * {@link HUGE_FILE_LINES} lines or a line past EOF, degrading to `null`.
  */
-export function lineLastChanged(repo: string, file: string, line: number): LineChange | null {
+export function lineLastChanged(repo: string, file: string, line: number, memo?: GitMemo): LineChange | null {
   if (!Number.isInteger(line) || line < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
+  const blob = headBlob(repo, file, memo);
   if (blob === null) return null;
   const total = blob.split(/\r?\n/).length;
   if (line > total || total > HUGE_FILE_LINES) return null;
@@ -251,9 +294,11 @@ export function parseRenameStatus(raw: string, oldPath: string): string | null {
  * renamed to. Bounded (scans the last {@link LOG_CAP}×4 rename events). `null`
  * when the file still exists, git is unavailable, or no rename is found.
  */
-export function fileRenamedTo(repo: string, file: string): string | null {
-  if (fileExistsAtHead(repo, file)) return null;
-  const out = git(repo, ["log", "--all", "-M", "--diff-filter=R", "--name-status", "--format=", `--max-count=${LOG_CAP * 4}`]);
-  if (out === null) return null;
+export function fileRenamedTo(repo: string, file: string, memo?: GitMemo): string | null {
+  if (fileExistsAtHead(repo, file, memo)) return null;
+  const read = () => git(repo, ["log", "--all", "-M", "--diff-filter=R", "--name-status", "--format=", `--max-count=${LOG_CAP * 4}`]);
+  if (memo && memo.renames === undefined) memo.renames = read();
+  const out = memo ? memo.renames : read();
+  if (out === null || out === undefined) return null;
   return parseRenameStatus(out, file);
 }

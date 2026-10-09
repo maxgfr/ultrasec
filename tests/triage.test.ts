@@ -35,7 +35,7 @@ function dossier(findings: Finding[]): Dossier {
 
 describe("buildTriageWorklist", () => {
   it("includes only OPEN candidates and carries no code field", () => {
-    const items = buildTriageWorklist(dossier([f("a", "high"), f("b", "low", "confirmed"), f("c", "medium")]));
+    const items = buildTriageWorklist(dossier([f("a", "low"), f("b", "low", "confirmed"), f("c", "medium")]));
     expect(items.map((i) => i.id).sort()).toEqual(["a", "c"]);
     for (const it of items) {
       expect(it.at).toBe("src/x.js:3");
@@ -43,6 +43,15 @@ describe("buildTriageWorklist", () => {
       expect(it).not.toHaveProperty("code");
       expect(it.verdict).toBeNull();
     }
+  });
+});
+
+describe("buildTriageWorklist — no high/critical rows", () => {
+  // A `noise` verdict on high/critical is ignored at apply, so a row for one
+  // asked for a decision that could never count. They go straight to verify.
+  it("lists low/medium/info only", () => {
+    const items = buildTriageWorklist(dossier([f("h", "high"), f("c", "critical"), f("m", "medium"), f("i", "info")]));
+    expect(items.map((i) => i.id).sort()).toEqual(["i", "m"]);
   });
 });
 
@@ -126,7 +135,8 @@ describe("triage — machine proposals ride along, never pre-filled", () => {
   it("carries the proposed ground on a demoted finding, with verdict still null", () => {
     const demoted = { ...f("a", "low"), noise: "vendored-artifact" as const };
     const item = buildTriageWorklist(dossier([demoted]))[0]!;
-    expect(item.proposed).toEqual({ class: "vendored-artifact", ground: "no-threat-model", why: expect.any(String) });
+    // The class name only: its ground and why are the class's own (schemas.md).
+    expect(item.proposed).toBe("vendored-artifact");
     expect(item.verdict).toBeNull();
   });
 });

@@ -33,11 +33,13 @@ export interface UnitSignals {
 }
 
 export interface AssumptionItem {
-  /** `file:line` of the function, or the file when the extractor found no symbols. */
+  /** The FILE. Answer rows still name a unit: `file:line` of a symbol, or the
+   *  file itself for a file of anonymous handlers. */
   at: string;
   file: string;
-  /** Function name, when known. Anonymous handlers legitimately have none. */
-  symbol?: string;
+  /** The file's named functions, as `name:line` — the units to answer for.
+   *  Absent when the extractor found none (an Express router). */
+  symbols?: string[];
   signals: UnitSignals;
   /** Why the engine put this unit in front of you. */
   why: string;
@@ -79,27 +81,23 @@ export function buildAssumptionWorklist(scan: RepoScan): AssumptionItem[] {
     const why =
       sources && sinks ? "reads untrusted input AND performs a dangerous operation" : sources ? "reads untrusted input" : "performs a dangerous operation";
 
-    // One entry per named symbol, so the agent records per-function facts; a file
-    // whose functions are anonymous (an Express router) gets one file-level entry
-    // rather than nothing.
+    // One entry per FILE, its named symbols listed: the agent still records
+    // per-function facts (an answer row names `file:line`), but the signals and
+    // the reason — the same for every symbol of a file — are written once, not
+    // twelve times. A file whose functions are anonymous (an Express router)
+    // is one file-level unit rather than nothing.
     const named = f.symbols.filter((s) => s.name).slice(0, 12);
-    if (named.length) {
-      for (const s of named) {
-        items.push({
-          at: `${f.rel}:${s.line}`,
-          file: f.rel,
-          symbol: s.name,
-          signals: { sources, sinks },
-          why,
-          guarantees: [],
-          assumptions: [],
-          calls: [],
-          openQuestions: [],
-        });
-      }
-    } else {
-      items.push({ at: f.rel, file: f.rel, signals: { sources, sinks }, why, guarantees: [], assumptions: [], calls: [], openQuestions: [] });
-    }
+    items.push({
+      at: f.rel,
+      file: f.rel,
+      ...(named.length ? { symbols: named.map((s) => `${s.name}:${s.line}`) } : {}),
+      signals: { sources, sinks },
+      why,
+      guarantees: [],
+      assumptions: [],
+      calls: [],
+      openQuestions: [],
+    });
   }
 
   // Shipped code first, test harness last.
@@ -115,9 +113,19 @@ export function buildAssumptionWorklist(scan: RepoScan): AssumptionItem[] {
   // assumption is understanding, and a repo with room left in the budget loses
   // nothing by reading its harness. A test-only repo still gets a worklist.
   const testLast = (i: AssumptionItem): number => (isTestPath(i.file) ? 1 : 0);
-  return items
-    .sort((a, b) => testLast(a) - testLast(b) || b.signals.sources + b.signals.sinks - (a.signals.sources + a.signals.sinks) || byStr(a.at, b.at))
-    .slice(0, MAX_UNITS);
+  items.sort((a, b) => testLast(a) - testLast(b) || b.signals.sources + b.signals.sinks - (a.signals.sources + a.signals.sinks) || byStr(a.at, b.at));
+  // The budget is still MAX_UNITS units (a symbol, or a file of anonymous
+  // handlers); the last file in may be cut to the units that fit.
+  const out: AssumptionItem[] = [];
+  let units = 0;
+  for (const it of items) {
+    if (units >= MAX_UNITS) break;
+    const room = MAX_UNITS - units;
+    if (it.symbols && it.symbols.length > room) it.symbols = it.symbols.slice(0, room);
+    units += it.symbols?.length ?? 1;
+    out.push(it);
+  }
+  return out;
 }
 
 export function renderAssumptionsMd(items: AssumptionItem[], context?: string): string {
@@ -152,8 +160,9 @@ export function renderAssumptionsMd(items: AssumptionItem[], context?: string): 
     L.push("");
   }
   for (const it of items) {
-    L.push(`## \`${it.at}\`${it.symbol ? ` — ${it.symbol}()` : ""}`);
+    L.push(`## \`${it.at}\``);
     L.push(`- ${it.why} (${it.signals.sources} source(s), ${it.signals.sinks} sink(s) in this file)`);
+    if (it.symbols?.length) L.push(`- units: ${it.symbols.map((u) => `\`${u}()\``).join(", ")} — answer each as \`${it.file}:<line>\``);
     L.push("");
   }
   return L.join("\n") + "\n";

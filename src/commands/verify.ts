@@ -61,7 +61,9 @@ export function runVerify(args: ParsedArgs): number {
     println(
       `  ${outside} pending finding(s) outside --surface ${surface}${surface === ADJUDICATION_SURFACE ? " (dependency advisories: the report ranks them per package)" : ""} — --surface all to include them`,
     );
-  println(`  adjudicate each (\`ultrasec dossier <id> --run ${run}\`), save verdicts.json, then:`);
+  println(
+    `  adjudicate each (\`ultrasec dossier <id> --run ${run}\`) and write rows {id, verdict, note} — exploitPath on supported, brocard on refuted — to verdicts.json, then:`,
+  );
   println(`  ultrasec verify --apply verdicts.json --run ${run}`);
   return 0;
 }

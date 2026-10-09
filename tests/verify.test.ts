@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import type { Dossier } from "../src/store.js";
 import type { Finding, Severity } from "../src/types.js";
-import { buildWorklist, shard, applyVerdicts, parseVerdicts, renderWorklistMd, worklistCounts } from "../src/verify.js";
+import { buildWorklist, claimOf, CLAIM_CAP, shard, applyVerdicts, parseVerdicts, renderWorklistMd, worklistCounts } from "../src/verify.js";
 
 function finding(id: string, severity: Severity, status: Finding["status"] = "open"): Finding {
   return {
@@ -92,11 +92,10 @@ describe("buildWorklist — the brocard field exists in the file being filled", 
   it("carries a machine proposal for a demoted finding — without filling the verdict", () => {
     const f = { ...finding("a", "low"), noise: "test-only-path" as const };
     const item = buildWorklist(dossier([f]))[0]!;
-    expect(item.proposed).toEqual({
-      class: "test-only-path",
-      ground: "outside-usage",
-      why: expect.stringContaining("test path"),
-    });
+    // The class name only — its ground and why are the class's own, expanded
+    // in the brief and in schemas.md, not repeated on every row.
+    expect(item.proposed).toBe("test-only-path");
+    expect(renderWorklistMd([item])).toMatch(/proposed ground `outside-usage` \(test-only-path\) — .*test path/);
     // The whole point: a suggestion, not an adjudication.
     expect(item.verdict).toBeNull();
     expect(item.brocard).toBeNull();
@@ -109,6 +108,35 @@ describe("buildWorklist — the brocard field exists in the file being filled", 
   it("the brief says a note is not a ground", () => {
     const md = renderWorklistMd(buildWorklist(dossier([finding("a", "high")])));
     expect(md).toMatch(/A prose `note` is not a ground/);
+  });
+});
+
+describe("buildWorklist — compact claims", () => {
+  it("the claim is the engine's prose, without the stage notes an earlier pass appended", () => {
+    const f = { ...finding("a", "high", "needs-human"), message: "taint reaches query()\n\nVerdict (partial): narrower than claimed" };
+    expect(buildWorklist(dossier([f]))[0]!.claim).toBe("taint reaches query()");
+  });
+
+  it("keeps the first sentence and the evidence line, each capped — the rest is in `dossier <id>`", () => {
+    const msg = `A moves. Whoever controls it can replace the job. Pin it.\n\nEvidence: \`uses: a@v4\``;
+    expect(claimOf(msg)).toBe("A moves. Evidence: `uses: a@v4`");
+    const long = `${"x".repeat(500)}. Next.`;
+    expect(claimOf(long)).toHaveLength(CLAIM_CAP);
+    expect(claimOf(long).endsWith("…")).toBe(true);
+    expect(claimOf("no sentence end at all")).toBe("no sentence end at all");
+  });
+
+  it("a dependency advisory carries no claim (its text is in the report)", () => {
+    const dep: Finding = { ...finding("d", "high"), category: "dep", message: "lodash@4.17.20: prototype pollution (fixed in 4.17.21)" };
+    expect(buildWorklist(dossier([dep]), { surface: "all" })[0]).not.toHaveProperty("claim");
+  });
+});
+
+describe("parseVerdicts — rows without the empty answer slots", () => {
+  it("a compact worklist row filled in place folds; an untouched one is refused, not folded", () => {
+    const r = parseVerdicts('[\n{"id":"a","severity":"high","verdict":"supported","exploitPath":"GET /x"},\n{"id":"b","severity":"low"}\n]');
+    expect(r.rows.map((x) => x.id)).toEqual(["a"]);
+    expect(r.dropped).toHaveLength(1);
   });
 });
 

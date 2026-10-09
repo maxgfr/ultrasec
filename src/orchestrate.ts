@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
-import type { InvestigateRegion } from "./investigate.js";
+import { investigateTodo, readInvestigateTodo } from "./investigate.js";
 import { agentContracts, phaseWorkflowScript, runbookMd } from "./orchestrate-templates.js";
 import type { RevalidateItem } from "./revalidate.js";
 import { ADJUDICATION_SURFACE, inSurface, type SurfaceFilter } from "./surface.js";
@@ -9,6 +9,7 @@ import { verifyItemOf, type VerifyItem } from "./verify.js";
 import { workPath } from "./runlayout.js";
 import { adjudicationFamilies } from "./family.js";
 import { compactContextDoc, loadContextDoc } from "./context.js";
+import { withoutEmptyAnswers } from "./stage.js";
 
 // ---------------------------------------------------------------------------
 // `ultrasec orchestrate` — emit the run's multi-agent orchestration from its
@@ -102,6 +103,19 @@ function readIds<T>(path: string, id: (item: T) => string): string[] | null {
   }
 }
 
+/** The region ids of an INVESTIGATE worklist — `{prompt, regions}` or an older
+ *  run's plain array (null = not ready). */
+function readRegionIds(path: string): string[] | null {
+  if (!existsSync(path)) return null;
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!Array.isArray(raw) && !(raw !== null && typeof raw === "object" && Array.isArray((raw as { regions?: unknown }).regions))) return null;
+    return readInvestigateTodo(raw).map((r) => String(r.region));
+  } catch {
+    return null; // unreadable worklist = not ready
+  }
+}
+
 // Re-exported: the commands that take `--surface` imported it from here first.
 export { SURFACE_FILTERS, type SurfaceFilter } from "./surface.js";
 
@@ -144,7 +158,7 @@ export function listPhases(runDir: string, engineAbs: string, surface: SurfaceFi
   const revIds = scoped(readIds<RevalidateItem>(revPath, (i) => i.id));
 
   const invPath = join(run, "INVESTIGATE.todo.json");
-  const invIds = readIds<InvestigateRegion>(invPath, (r) => r.region);
+  const invIds = readRegionIds(invPath);
 
   return [
     {
@@ -188,15 +202,14 @@ export function listPhases(runDir: string, engineAbs: string, surface: SurfaceFi
 export interface BatchPlan {
   batches: string[][][];
   lines: Record<string, string>;
+  /** Text every agent of the phase needs once (INVESTIGATE's shared prompt). */
+  header?: string;
 }
 
-/** Fields a worklist row carries EMPTY for the adjudicator to fill. Not
- *  evidence, so a prompt line leaves them out; a filled one is kept. */
-const ANSWER_FIELDS = new Set(["verdict", "note", "brocard", "fixedIn"]);
-
-/** One item as the single JSON line its agent reads. */
+/** One item as the single JSON line its agent reads — the worklist row, minus
+ *  its empty answer slots (stage.ts). */
 export function compactLine(item: object): string {
-  return JSON.stringify(item, (k, v) => (ANSWER_FIELDS.has(k) && (v === null || v === "") ? undefined : v));
+  return JSON.stringify(withoutEmptyAnswers(item));
 }
 
 function readArray<T>(path: string): T[] {
@@ -217,8 +230,18 @@ function readArray<T>(path: string): T[] {
 export function planPhase(ph: PhaseInfo, findingsById: ReadonlyMap<string, Finding>): BatchPlan {
   const lines: Record<string, string> = {};
   let groups: string[][];
+  let header: string | undefined;
   if (ph.name === "investigate") {
-    const regions = new Map(readArray<InvestigateRegion>(ph.worklist).map((r) => [String(r.region), r]));
+    let raw: unknown = [];
+    try {
+      raw = JSON.parse(readFileSync(ph.worklist, "utf8"));
+    } catch {
+      /* listPhases vetted it; a racing rewrite leaves bare ids */
+    }
+    // The shared hunt prompt once per agent, each region without it.
+    const todo = investigateTodo(readInvestigateTodo(raw));
+    header = todo.prompt || undefined;
+    const regions = new Map(todo.regions.map((r) => [String(r.region), r]));
     for (const id of ph.ids) lines[id] = compactLine(regions.get(id) ?? { region: id });
     groups = ph.ids.map((id) => [id]);
   } else {
@@ -230,7 +253,7 @@ export function planPhase(ph: PhaseInfo, findingsById: ReadonlyMap<string, Findi
     }
     groups = adjudicationFamilies(ph.ids, (id) => findingsById.get(id));
   }
-  return { batches: packFamilies(groups), lines };
+  return { batches: packFamilies(groups), lines, ...(header ? { header } : {}) };
 }
 
 export interface OrchestrateOptions {

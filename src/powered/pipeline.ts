@@ -14,7 +14,7 @@ import type { ReportStatus } from "../render/audit-report.js";
 
 import { buildContextScaffold, renderContextScaffoldMd, loadContextDoc, CONTEXT_OUTLINE } from "../context.js";
 import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from "../triage.js";
-import { buildInvestigateWorklist, renderInvestigateMd, ingestDiscoveries, parseDiscoveries } from "../investigate.js";
+import { buildInvestigateWorklist, investigateTodo, renderInvestigateMd, ingestDiscoveries, parseDiscoveries } from "../investigate.js";
 import { buildClassHunts, parseHuntResults, recordHuntResults } from "../classes/hunt.js";
 import { PACKS } from "../classes/packs/index.js";
 import { buildWorklist, renderWorklistMd, applyVerdicts, parseVerdicts } from "../verify.js";
@@ -209,7 +209,7 @@ const STAGES: Record<StageName, StageDef> = {
       const surface = buildAttackSurface(scanRepo(repo));
       const regions = buildInvestigateWorklist(surface, dossier.graph, [], undefined, buildClassHunts(dossier.manifest, surface));
       const f = stageFiles("INVESTIGATE");
-      const worklist = emitWorklist(run, f, regions, () => renderInvestigateMd(regions, loadContextDoc(run)), { md });
+      const worklist = emitWorklist(run, f, investigateTodo(regions), () => renderInvestigateMd(regions, loadContextDoc(run)), { md });
       return { worklist, outName: "INVESTIGATE.json" };
     },
     applyPure: (repo, run, dossier, raw) =>
@@ -248,12 +248,11 @@ const STAGES: Record<StageName, StageDef> = {
       const worklist = emitWorklist(run, f, items, () => renderRevalidateMd(items, loadContextDoc(run)), { md });
       return { worklist, outName: "REVALIDATE.json" };
     },
-    applyPure: (repo, _run, dossier, raw) =>
-      applyRevalidations(
-        dossier,
-        rowsOf("revalidate", parseRevalidations(raw)),
-        revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo, { surface: "all" })),
-      ).findings,
+    applyPure: (repo, _run, dossier, raw) => {
+      const rows = rowsOf("revalidate", parseRevalidations(raw));
+      const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo, { surface: "all", ids: new Set(rows.map((r) => r.id)) }));
+      return applyRevalidations(dossier, rows, facts).findings;
+    },
     instruction: (repo, run, worklist, outPath) =>
       `Read the revalidation worklist at ${worklist}. Using the git facts, decide still-valid|fixed|false-positive|uncertain per finding and write a JSON array of {id, verdict, fixedIn?, note?} to ${outPath}. ${UNTRUSTED}`,
   },

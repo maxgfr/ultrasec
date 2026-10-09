@@ -2,8 +2,16 @@ import { describe, it, expect } from "vitest";
 import { join } from "node:path";
 import { scanRepo } from "../src/scan.js";
 import { buildGraph } from "../src/graph.js";
-import { buildAttackSurface } from "../src/map.js";
-import { buildInvestigateWorklist, ingestDiscoveries, parseDiscoveries, type Discovery } from "../src/investigate.js";
+import { buildAttackSurface, type AttackSurface } from "../src/map.js";
+import {
+  buildInvestigateWorklist,
+  ingestDiscoveries,
+  investigateTodo,
+  MAX_REGIONS,
+  parseDiscoveries,
+  readInvestigateTodo,
+  type Discovery,
+} from "../src/investigate.js";
 import type { Dossier } from "../src/store.js";
 import type { Finding } from "../src/types.js";
 
@@ -36,6 +44,49 @@ describe("buildInvestigateWorklist — region grouping with neighbours", () => {
     // server.js imports db.js + report.js → those are 1-hop neighbours
     expect(src!.neighbors.length).toBeGreaterThan(0);
     expect(src!.files).not.toContain(undefined);
+  });
+});
+
+describe("INVESTIGATE worklist — the shared prompt once, small regions merged past the cap", () => {
+  function surfaceOf(n: number): AttackSurface {
+    const regions = Array.from({ length: n }, (_, i) => `pkg/r${String(i).padStart(2, "0")}`);
+    return {
+      totals: { files: n, sources: n, sinks: n, truncated: false },
+      entryPoints: [],
+      sinks: [],
+      byLanguage: [],
+      byTopDir: [],
+      byFile: regions.flatMap((r, i) =>
+        Array.from({ length: i < 3 ? 3 : 1 }, (_, k) => ({ file: `${r}/f${k}.ts`, region: r, sources: 1, sinks: 1, score: n - i })),
+      ),
+      suggestedTargets: regions.map((r, i) => ({ scope: r, sinks: 1, sources: 1, score: n - i, covered: false, reason: "" })),
+    };
+  }
+  const graph = { files: [], edges: [], symbolDefs: {} };
+
+  it("keeps up to MAX_REGIONS regions as they are", () => {
+    expect(buildInvestigateWorklist(surfaceOf(MAX_REGIONS), graph).map((r) => r.region)).toHaveLength(MAX_REGIONS);
+  });
+
+  it("past MAX_REGIONS, merges the lowest-ranked into one region that names them all", () => {
+    const regions = buildInvestigateWorklist(surfaceOf(20), graph);
+    expect(regions).toHaveLength(MAX_REGIONS);
+    const merged = regions.at(-1)!;
+    expect(merged.merged).toEqual(Array.from({ length: 20 - (MAX_REGIONS - 1) }, (_, i) => `pkg/r${String(i + MAX_REGIONS - 1).padStart(2, "0")}`));
+    // one representative file per merged region, round-robin, under the per-region cap
+    expect(merged.files.length).toBe(8);
+    expect(merged.files[0]).toBe("pkg/r11/f0.ts");
+  });
+
+  it("writes the hunt prompt once and reads either shape back", () => {
+    const regions = buildInvestigateWorklist(surfaceOf(3), graph);
+    const todo = investigateTodo(regions);
+    expect(todo.prompt).toBe(regions[0]!.prompt);
+    expect(todo.regions.every((r) => r.prompt === undefined)).toBe(true);
+    expect(readInvestigateTodo(JSON.parse(JSON.stringify(todo)))).toEqual(regions);
+    // An older run's plain array is still a worklist.
+    expect(readInvestigateTodo(JSON.parse(JSON.stringify(regions)))).toEqual(regions);
+    expect(readInvestigateTodo({ nope: 1 })).toEqual([]);
   });
 });
 

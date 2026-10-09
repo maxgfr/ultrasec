@@ -5,7 +5,7 @@ import { byStr, withStageNote } from "./util.js";
 import { isCredentialFinding, redactCredentialLine } from "./redact.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
 import { ADJUDICATION_SURFACE, inSurface, type SurfaceFilter } from "./surface.js";
-import { fileExistsAtHead, lineContentAtHead, lineLastChanged, fileRenamedTo, logSince, type LineChange } from "./git.js";
+import { fileExistsAtHead, gitMemo, lineContentAtCommit, lineContentAtHead, lineLastChanged, fileRenamedTo, logSince, type LineChange } from "./git.js";
 
 // The git-history revalidation stage (Phase 2 — the biggest accuracy win, mirrors
 // deepsec's "revalidate" pass that cuts false positives 50%+). For each finding
@@ -41,19 +41,38 @@ export interface RevalidateItem {
   at: string;
   /** Does the cited file still exist at HEAD? */
   fileExists: boolean;
-  /** The current content of the cited line at HEAD (null if file/line is gone). */
+  /** The current content of the cited line at HEAD (null if file/line is gone),
+   *  trimmed and capped at CURRENT_LINE_CAP characters — or, for a finding cited
+   *  at a historical commit, the line at THAT commit. */
   currentLine: string | null;
+  /** Set when the finding was scanned from git history: the commit its citation
+   *  belongs to. Its file need not exist at HEAD, and that is not drift. */
+  atCommit?: string;
   /** Commits to the file since the finding's provenance commit (null if unknown). */
   commitsSinceFinding: number | null;
   /** The commit that last changed the cited line (null if unavailable/huge file). */
   lineLastChanged: LineChange | null;
   /** If the file was deleted, the path it was likely renamed to (best-effort). */
   renamedTo: string | null;
-  /** Filled by the agent. */
+  /** Filled by the agent (an empty slot is not written to the worklist file). */
   verdict: RevalidationVerdict | null;
   /** Optional: the fixing commit (else inferred from lineLastChanged on apply). */
   fixedIn?: string;
   note: string;
+}
+
+/**
+ * The cited line, as much of it as decides "is it still there?".
+ *
+ * Uncapped, one minified bundle line put 100 KB into a single row of a real
+ * worklist. Two hundred characters answer the question; the file is a
+ * `dossier` away for anything more.
+ */
+export const CURRENT_LINE_CAP = 200;
+
+function capLine(line: string): string {
+  const t = line.trim();
+  return t.length > CURRENT_LINE_CAP ? `${t.slice(0, CURRENT_LINE_CAP)}…` : t;
 }
 
 export interface RevalidationInput {
@@ -67,41 +86,50 @@ export interface RevalidateWorklistOptions {
   /** Which surface to emit. Default `code+supply`: an advisory's lockfile line
    *  says nothing git history can settle. `all` restores the old scope. */
   surface?: SurfaceFilter;
+  /** Only these ids — `--apply` recomputes the facts of the rows it folds, not
+   *  of the whole scope. */
+  ids?: ReadonlySet<string>;
 }
 
 /** Build the revalidation worklist from a run's confirmed/needs-human findings. */
 export function buildRevalidateWorklist(dossier: Dossier, repo: string, opts: RevalidateWorklistOptions = {}): RevalidateItem[] {
   const surface = opts.surface ?? ADJUDICATION_SURFACE;
+  const memo = gitMemo();
   return dossier.findings
-    .filter((f) => inScope(f) && inSurface(f, surface))
+    .filter((f) => inScope(f) && inSurface(f, surface) && (!opts.ids || opts.ids.has(f.id)))
     .slice()
     .sort((a, b) => byStr(a.id, b.id))
     .map((f) => {
       const loc = citedLoc(f);
       const file = loc?.file ?? "";
       const line = loc?.line ?? 0;
-      const fileExists = file ? fileExistsAtHead(repo, file) : false;
-      const atHead = fileExists && line ? lineContentAtHead(repo, file, line) : null;
+      const fileExists = file ? fileExistsAtHead(repo, file, memo) : false;
+      // A history-scanned finding cites a file AT A COMMIT (see check.ts): its
+      // line is read there, and a file gone from HEAD is the expected state.
+      const historical = f.atCommit && file && line ? lineContentAtCommit(repo, f.atCommit, file, line) : null;
+      const atHead = f.atCommit ? historical : fileExists && line ? lineContentAtHead(repo, file, line, memo) : null;
       // For a credential finding the cited line IS the credential. The worklist
       // is read by agents and humans, and on a real run the revalidator quoted
       // this field into its note — a seed row's full argon2 hash went from here
       // into REPORT.md. Masked, the line still answers "is it still there?".
-      const currentLine = atHead !== null && isCredentialFinding(f) ? redactCredentialLine(atHead) : atHead;
+      const shown = atHead !== null && isCredentialFinding(f) ? redactCredentialLine(atHead) : atHead;
       const sinceRef = f.provenance?.commit;
-      const since = sinceRef && file ? logSince(repo, file, sinceRef) : null;
-      return {
+      const since = sinceRef && file ? logSince(repo, file, sinceRef, memo) : null;
+      const item: RevalidateItem = {
         id: f.id,
         severity: f.severity,
         title: f.title,
         at: `${file}:${line}`,
         fileExists,
-        currentLine,
+        currentLine: shown === null ? null : capLine(shown),
         commitsSinceFinding: since ? since.length : null,
-        lineLastChanged: fileExists && line ? lineLastChanged(repo, file, line) : null,
-        renamedTo: file && !fileExists ? fileRenamedTo(repo, file) : null,
+        lineLastChanged: fileExists && line ? lineLastChanged(repo, file, line, memo) : null,
+        renamedTo: file && !fileExists && !f.atCommit ? fileRenamedTo(repo, file, memo) : null,
         verdict: null,
         note: "",
       };
+      if (f.atCommit) item.atCommit = f.atCommit;
+      return item;
     });
 }
 
@@ -129,6 +157,7 @@ export function renderRevalidateMd(items: RevalidateItem[], context?: string): s
   for (const it of items) {
     L.push(`## ${it.id} — [${it.severity}] ${it.title}`);
     L.push(`- at: \`${it.at}\` · file exists at HEAD: ${it.fileExists ? "yes" : "**NO**"}`);
+    if (it.atCommit) L.push(`- cited at commit \`${it.atCommit.slice(0, 10)}\` (history scan) — the line below is read there`);
     if (it.currentLine !== null) L.push(`- current line: \`${it.currentLine.trim().slice(0, 200)}\``);
     else if (it.fileExists) L.push(`- current line: **cited line is out of range now (drifted/removed)**`);
     if (it.commitsSinceFinding !== null) L.push(`- commits to file since finding: ${it.commitsSinceFinding}`);
@@ -268,7 +297,11 @@ export function revalFactsFromWorklist(items: RevalidateItem[]): ApplyRevalOptio
     // the file existing at HEAD is the whole of "still resolves". `check` already
     // accepts it; flagging it here asked for a re-confirmation nothing could give.
     const wholeFile = it.at.endsWith(":0");
-    if (!it.fileExists || (it.currentLine === null && !wholeFile)) unresolved.add(it.id);
+    // A history-scanned finding resolves against its own commit; HEAD not
+    // holding the file is what "deleted since" means, not a drifted citation.
+    if (it.atCommit) {
+      if (it.currentLine === null && !wholeFile) unresolved.add(it.id);
+    } else if (!it.fileExists || (it.currentLine === null && !wholeFile)) unresolved.add(it.id);
     if (it.lineLastChanged?.commit) fixedInById.set(it.id, it.lineLastChanged.commit);
   }
   return { unresolved, fixedInById };

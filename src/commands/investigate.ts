@@ -7,7 +7,7 @@ import { formatNormalized, surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { scanRepo } from "../scan.js";
 import { buildAttackSurface } from "../map.js";
-import { buildInvestigateWorklist, renderInvestigateMd, ingestDiscoveries, parseDiscoveries, LENSES } from "../investigate.js";
+import { buildInvestigateWorklist, investigateTodo, renderInvestigateMd, ingestDiscoveries, parseDiscoveries, LENSES } from "../investigate.js";
 import { LEADS_FILE } from "../assumptions.js";
 import { buildClassHunts, parseHuntResults, recordHuntResults, type HuntResults } from "../classes/hunt.js";
 import { PACKS } from "../classes/packs/index.js";
@@ -154,7 +154,7 @@ export function runInvestigate(args: ParsedArgs): number {
   }
   const files = stageFiles("INVESTIGATE");
   const wroteMd = wantsMdTwin(args);
-  const todoPath = emitWorklist(run, files, regions, () => renderInvestigateMd(regions, loadContextDoc(run)), { md: wroteMd });
+  const todoPath = emitWorklist(run, files, investigateTodo(regions), () => renderInvestigateMd(regions, loadContextDoc(run)), { md: wroteMd });
 
   if (flagBool(args, "json")) {
     println(JSON.stringify(regions, null, 2));

@@ -372,7 +372,19 @@ const SUMMARY_IDS = 8;
 /** The proposal for a finding, if the engine classified it. */
 export function proposedFor(f: Finding): ProposedAdjudication | undefined {
   if (!f.noise) return undefined;
-  return { class: f.noise, ground: NOISE_GROUND[f.noise], why: PROPOSAL_WHY[f.noise] };
+  return proposalOf(f.noise);
+}
+
+/**
+ * The full proposal a class name stands for.
+ *
+ * A worklist row carries only the class name: the ground and the one-line
+ * "why" are the same for every member of a class — the vocabulary in
+ * references/schemas.md — and repeating them on each of hundreds of rows was
+ * text nobody read twice. The Markdown brief expands it back.
+ */
+export function proposalOf(c: NoiseClass): ProposedAdjudication {
+  return { class: c, ground: NOISE_GROUND[c], why: PROPOSAL_WHY[c] };
 }
 
 /** One line per class, phrased as the claim a reviewer would have to refute. */

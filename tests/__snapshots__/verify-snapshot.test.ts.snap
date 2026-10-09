@@ -102,37 +102,10 @@ is \`unsupported\`. See references/dismissal-brocards.md.
 
 exports[`verify command — byte-identical output (Phase 0 harness refactor guard) > emit --shards writes a sharded todo + the full MD > VERIFY.todo.0.json 1`] = `
 "[
-  {
-    "id": "a",
-    "severity": "high",
-    "cwe": "CWE-89",
-    "title": "finding a",
-    "category": "taint",
-    "claim": "candidate",
-    "files": [
-      "src/server.js:10",
-      "src/db.js:6"
-    ],
-    "verdict": null,
-    "note": "",
-    "brocard": null
-  },
-  {
-    "id": "c",
-    "severity": "medium",
-    "cwe": "CWE-89",
-    "title": "finding c",
-    "category": "taint",
-    "claim": "candidate",
-    "files": [
-      "src/server.js:10",
-      "src/db.js:6"
-    ],
-    "verdict": null,
-    "note": "",
-    "brocard": null
-  }
-]"
+{"id":"a","severity":"high","cwe":"CWE-89","title":"finding a","category":"taint","claim":"candidate","files":["src/server.js:10","src/db.js:6"]},
+{"id":"c","severity":"medium","cwe":"CWE-89","title":"finding c","category":"taint","claim":"candidate","files":["src/server.js:10","src/db.js:6"]}
+]
+"
 `;
 
 exports[`verify command — byte-identical output (Phase 0 harness refactor guard) > emit writes a stable VERIFY.todo.json + VERIFY.md > VERIFY.md 1`] = `
@@ -170,35 +143,8 @@ is \`unsupported\`. See references/dismissal-brocards.md.
 
 exports[`verify command — byte-identical output (Phase 0 harness refactor guard) > emit writes a stable VERIFY.todo.json + VERIFY.md > VERIFY.todo.json 1`] = `
 "[
-  {
-    "id": "a",
-    "severity": "high",
-    "cwe": "CWE-89",
-    "title": "finding a",
-    "category": "taint",
-    "claim": "candidate",
-    "files": [
-      "src/server.js:10",
-      "src/db.js:6"
-    ],
-    "verdict": null,
-    "note": "",
-    "brocard": null
-  },
-  {
-    "id": "b",
-    "severity": "low",
-    "cwe": "CWE-89",
-    "title": "finding b",
-    "category": "taint",
-    "claim": "candidate",
-    "files": [
-      "src/server.js:10",
-      "src/db.js:6"
-    ],
-    "verdict": null,
-    "note": "",
-    "brocard": null
-  }
-]"
+{"id":"a","severity":"high","cwe":"CWE-89","title":"finding a","category":"taint","claim":"candidate","files":["src/server.js:10","src/db.js:6"]},
+{"id":"b","severity":"low","cwe":"CWE-89","title":"finding b","category":"taint","claim":"candidate","files":["src/server.js:10","src/db.js:6"]}
+]
+"
 `;
