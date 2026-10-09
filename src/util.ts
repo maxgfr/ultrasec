@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createHash } from "node:crypto";
-import { statSync } from "node:fs";
+import { realpathSync, statSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { redactSecrets } from "./redact.js";
 
 // ── Tiny zero-dependency arg parser ──────────────────────────────────────────
@@ -192,6 +193,21 @@ export function isScannableDir(path: string): boolean {
     return statSync(path).isDirectory();
   } catch {
     return false; // missing, or a permission error we can't walk through
+  }
+}
+
+/**
+ * This engine's own absolute path — the bundle in a release (`scripts/ultrasec.mjs`),
+ * this module under test — for the command lines the engine prints or hands to
+ * an agent. An agent shares no cwd with it, so a placeholder like `<ultrasec>`
+ * was a command nobody could run.
+ */
+export function enginePath(): string {
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(self);
+  } catch {
+    return self;
   }
 }
 

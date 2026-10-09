@@ -27,7 +27,7 @@ import { buildNarrativeWorklist, renderNarrativeWorklistMd } from "../narrative.
 import { buildImplementWorklist, renderImplementMd, loadNarrative } from "../implement.js";
 import type { AgentRunner } from "./agent.js";
 import { formatDropped, type ParseResult } from "../apply-parse.js";
-import { eprintln } from "../util.js";
+import { enginePath, eprintln } from "../util.js";
 import { ADJUDICATION_SURFACE, inSurface } from "../surface.js";
 
 /** The stack the run's scan detected — the guard names only it uses come from its packs. */
@@ -237,8 +237,10 @@ const STAGES: Record<StageName, StageDef> = {
       return { worklist, outName: "verdicts.json" };
     },
     applyPure: (_repo, _run, dossier, raw) => applyVerdicts(dossier, rowsOf("verify", parseVerdicts(raw))).findings,
+    // The engine by its absolute path: the agent CLI shares no cwd with it, and
+    // a `<ultrasec>` placeholder here was a command it could not run.
     instruction: (repo, run, worklist, outPath) =>
-      `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node <ultrasec> dossier <id> --run ${run}\`) and write a verdicts.json array of {id, verdict, note, exploitPath} to ${outPath}. Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`,
+      `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node ${enginePath()} dossier <id>[,<id>…] --run ${run} --brief --no-context\` — a comma list prints one packet for a family) and write a verdicts.json array of {id, verdict, note, exploitPath, brocard} to ${outPath} — exploitPath on supported, brocard (the named ground) on refuted. Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`,
   },
   revalidate: {
     crossCheckable: true,

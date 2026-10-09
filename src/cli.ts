@@ -25,7 +25,8 @@ COMMANDS
              the stage pipeline → check → <run>/REPORT.md (REPORT.html with
              --html; both with --html --md) → remove the intermediates. Prints
              the report path and a one-line status: adjudicated & grounded, or
-             DRAFT with why. ZERO agent calls unless --powered <cli> (drives
+             DRAFT with why and a 'next:' line. Exit 0 once the report is
+             written. ZERO agent calls unless --powered <cli> (drives
              that CLI per worklist; --cross-check <cli>) or --council
              "<reviewer:model,…>". --keep-work keeps .work/ and the JSON
              worklists for an agent to adjudicate (then render + clean).
@@ -190,12 +191,12 @@ COMMANDS
              package, hardening, coverage, remediation plan, annexes.
              Dismissals are SUMMARISED and repeated findings are one card;
              --full restores every exhaustive table. Folds <run>/NARRATIVE.json
-             (or --narrative <file>), grounding-checked. EXITS 1 when a
-             HIGH/CRITICAL source-code candidate was never read — the file is
-             still written, with a DRAFT banner; --draft exits 0. --legacy
-             writes the previous SUMMARY.md + tiered REPORT.md + index.html.
-             Flags: --run · --html · --md · --full · --narrative <file> ·
-             --draft · --legacy.
+             (or --narrative <file>), grounding-checked. A HIGH/CRITICAL
+             source-code candidate never read makes it a DRAFT (a banner says
+             why); a written report exits 0 — --strict exits 1 on a DRAFT.
+             --legacy writes the previous SUMMARY.md + tiered REPORT.md +
+             index.html. Flags: --run · --html · --md · --full · --narrative
+             <file> · --strict · --legacy.
   coverage   The honest complement to 'only report what you can exploit': a
              standards matrix of what this audit looked at and what it did NOT.
              A short report reads as "nothing there" when it means "nothing
@@ -219,7 +220,7 @@ COMMANDS
   clean      Remove the intermediates — .work/, worklists, DOSSIER.md,
              orchestration and council scratch — KEEPING REPORT.md/REPORT.html,
              findings.json, manifest.json, CONTEXT.md and NARRATIVE.json (and an
-             older run's SUMMARY.md / index.html / JOURNAL.md); --all wipes the
+             older run's top-level JOURNAL.md); --all wipes the
              whole run dir, --keep-output keeps everything. With --docker also
              removes the scanner images + toolbox image + trivy cache volume
              (--dry-run to preview). A run that was never scanned is removed whole.
@@ -295,7 +296,9 @@ COMMANDS
 
 GLOBAL
   --require-tools <a,b>  scan: require these scanners to execute successfully.
-                        Selects them if --tools is absent, including scoped scans.
+                        On a full scan it adds the obligation to --tools auto
+                        (every installed scanner still runs); on a scoped or
+                        --diff scan without --tools it selects them.
                         Skipped/failed/missing outcome exits 1; artifacts are kept.
   --help, -h     Show this help.
   --version, -v  Print the version.

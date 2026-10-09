@@ -59,9 +59,10 @@ export function readPath(run: string, ...parts: string[]): string {
 export const KEPT_FILES: readonly string[] = ["REPORT.md", "REPORT.html", "findings.json", "manifest.json", "CONTEXT.md", "NARRATIVE.json"];
 
 /**
- * Rendered outputs of the previous report layout. `clean` never deletes a
- * report someone already produced: an older run's SUMMARY.md / index.html /
- * top-level JOURNAL.md were the deliverables under the contract it was written
- * with, so they are preserved rather than silently removed.
+ * What an older run kept at its top level and `clean` still keeps: its
+ * JOURNAL.md, the record of what the audit covered. Its SUMMARY.md and
+ * index.html are NOT kept any more — `render` already removes them as the stale
+ * half of the previous three-file report, and `clean` keeping what `render`
+ * deletes left a run with two reports that disagreed.
  */
-export const LEGACY_DELIVERABLES: readonly string[] = ["SUMMARY.md", "index.html", "JOURNAL.md"];
+export const LEGACY_DELIVERABLES: readonly string[] = ["JOURNAL.md"];

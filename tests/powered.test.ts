@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildAgentArgv, resolveTemplate, CliAgentRunner, type AgentRunner, type AgentTask, type SpawnFn } from "../src/powered/agent.js";
 import { runPipeline, reconcileCrossCheck, ALL_STAGES, type StageName } from "../src/powered/pipeline.js";
-import { loadDossier } from "../src/store.js";
+import { loadDossier, writeDossier } from "../src/store.js";
 import type { Finding } from "../src/types.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
@@ -149,6 +149,52 @@ describe("runPipeline — non-powered (keyless default)", () => {
     expect(res.emitted.map((e) => e.stage)).toEqual([...ALL_STAGES]);
     expect(res.actions[0]).toBe("scan");
     expect(res.actions.at(-1)).toBe("render");
+  });
+});
+
+describe("runPipeline — the verify prompt names a command the agent can run", () => {
+  it("has the engine's absolute path, --brief --no-context and brocard, never `<ultrasec>`", () => {
+    const run = tmpRun();
+    const seen: AgentTask[] = [];
+    const recorder: AgentRunner = {
+      fill(task: AgentTask) {
+        seen.push(task);
+        writeFileSync(task.outPath, "[]");
+        return { ok: true };
+      },
+    };
+    runPipeline({ repo: FIXTURE, run, powered: true, stages: ["verify"], runner: recorder });
+    const prompt = seen.find((t) => t.stage === "verify")!.instruction;
+    expect(prompt).not.toContain("<ultrasec>");
+    expect(prompt).toMatch(/node \/\S+ dossier <id>/);
+    expect(prompt).toContain("--brief --no-context");
+    expect(prompt).toContain("brocard");
+  });
+
+  it("leaves dependency advisories out of the powered triage and verify worklists", () => {
+    const run = tmpRun();
+    const base = { confidence: "low", message: "m", tool: "x", status: "open" } as const;
+    const findings: Finding[] = [
+      { ...base, id: "code1", category: "taint", title: "t", severity: "medium", sink: { file: "src/db.js", line: 6 } },
+      { ...base, id: "dep1", category: "dep", title: "lodash", severity: "medium", pkg: "lodash", sink: { file: "package.json", line: 1 } },
+    ];
+    writeDossier(run, {
+      manifest: {
+        version: "0",
+        schemaVersion: 5,
+        repo: FIXTURE,
+        generatedNote: "",
+        languages: ["javascript"],
+        toolsRun: [],
+        counts: { findings: 2, bySeverity: { critical: 0, high: 0, medium: 2, low: 0, info: 0 } },
+      },
+      findings,
+      graph: { files: [], edges: [], symbolDefs: {} },
+    });
+    runPipeline({ repo: FIXTURE, run, powered: false, scan: false, stages: ["triage", "verify"] });
+    const ids = (f: string) => (JSON.parse(readFileSync(join(run, f), "utf8")) as { id: string }[]).map((r) => r.id);
+    expect(ids("TRIAGE.todo.json")).toEqual(["code1"]);
+    expect(ids("VERIFY.todo.json")).toEqual(["code1"]);
   });
 });
 

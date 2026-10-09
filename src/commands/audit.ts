@@ -1,7 +1,6 @@
-import { existsSync, realpathSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { flagBool, flagStr, isScannableDir, listFlag, println, eprintln, quietStdout, type ParsedArgs, type FlagValue } from "../util.js";
+import { enginePath, flagBool, flagStr, isScannableDir, listFlag, println, eprintln, quietStdout, type ParsedArgs, type FlagValue } from "../util.js";
 import { runScan } from "./scan.js";
 import { runCouncil } from "./council.js";
 import { cleanRunDir } from "./clean.js";
@@ -145,7 +144,11 @@ export async function runAudit(args: ParsedArgs): Promise<number> {
   for (const n of res.notices) eprintln(`ultrasec audit: ⚠️  ${n}`);
   for (const e of res.errors) eprintln(`ultrasec audit: ✗ ${e}`);
   for (const n of notes) eprintln(`ultrasec audit: ⚠️  ${n}`);
-  const code = !res.grounded || (powered && res.errors.length) || (flagBool(args, "strict") && res.report.status.draft) ? 1 : 0;
+  // A written report exits 0 — its DRAFT banner (unread candidates, an
+  // unresolved citation, an incomplete scanner) is what travels. `--strict`
+  // fails a DRAFT for CI; a powered stage that errored still fails, since the
+  // work that was asked for did not happen.
+  const code = (powered && res.errors.length) || (flagBool(args, "strict") && res.report.status.draft) ? 1 : 0;
   const next = res.report.status.draft ? nextStep(repo, run, keepWork, dossier.manifest.scannerPolicy?.complete === false) : undefined;
 
   if (json) {
@@ -185,17 +188,8 @@ export async function runAudit(args: ParsedArgs): Promise<number> {
  * audit that keeps them.
  */
 export function nextStep(repo: string, run: string, keepWork: boolean, scannersIncomplete: boolean): string {
-  const engine = `node ${engineAbs()}`;
+  const engine = `node ${enginePath()}`;
   if (scannersIncomplete) return `install or fix the required scanner(s), then ${engine} audit --repo ${repo} --out ${run}`;
   const keep = keepWork ? "" : `${engine} audit --repo ${repo} --out ${run} --keep-work  →  `;
   return `${keep}fill ${join(run, "VERIFY.todo.json")}  →  ${engine} verify --apply ${join(run, "VERIFY.todo.json")} --run ${run}  →  ${engine} render --run ${run}`;
-}
-
-/** This engine's own path: the bundle in a release, the module under test. */
-function engineAbs(): string {
-  try {
-    return realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return fileURLToPath(import.meta.url);
-  }
 }

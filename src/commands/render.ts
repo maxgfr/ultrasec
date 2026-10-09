@@ -8,7 +8,7 @@ import { deliverReport, runNarrative } from "../render/deliver.js";
 import { statusLine } from "../render/audit-report.js";
 import type { Narrative } from "../types.js";
 
-// `ultrasec render --run <dir> [--html] [--md] [--full] [--narrative <file>] [--draft] [--legacy]`
+// `ultrasec render --run <dir> [--html] [--md] [--full] [--narrative <file>] [--strict] [--draft] [--legacy]`
 //   → <run>/REPORT.md (or REPORT.html) — ONE file with the whole audit.
 //
 // The narrative is the run's own NARRATIVE.json unless `--narrative` names
@@ -31,7 +31,8 @@ import type { Narrative } from "../types.js";
 // The file is ALWAYS written. Refusing to produce it would trade a misleading
 // report for no report, and the DRAFT banner inside it is the part that
 // actually travels: an exit code is gone the moment the terminal scrolls, and
-// the report is what gets shared. `--draft` acknowledges the state and exits 0.
+// the report is what gets shared. So a written report exits 0, like `audit`;
+// `--strict` exits 1 on a DRAFT for CI. `--draft` is kept as a no-op.
 
 /** The citation gate, when the audited tree is here to check against. */
 export function groundingOf(dossier: Dossier, run: string): { ok: boolean; dangling: number } | undefined {
@@ -86,22 +87,24 @@ export function runRender(args: ParsedArgs): number {
 
   const unread = unadjudicatedCode(dossier.findings);
   const scannerPolicy = dossier.manifest.scannerPolicy;
-  const scannerIncomplete = scannerPolicy && !scannerPolicy.complete;
+  const scannerIncomplete = !!scannerPolicy && !scannerPolicy.complete;
   if (scannerPolicy && scannerIncomplete) {
     println(`  Required scanners incomplete: ${scannerPolicy.incomplete.join(", ")} — report marked incomplete.`);
   }
-  if (!unread.length) return scannerIncomplete && !flagBool(args, "draft") ? 1 : 0;
-
-  const draft = flagBool(args, "draft");
-  const crit = unread.filter((f) => f.severity === "critical").length;
-  println(`  ⚠️  ${unread.length} source-code candidate(s) at HIGH+ were never read (${crit} critical) — the report says so in a banner.`);
-  println(
-    `      next: ultrasec paths --run ${run} --surface code  →  ultrasec dossier <id> --run ${run}  →  ultrasec verify --apply verdicts.json --run ${run}`,
-  );
-  if (draft) {
-    println(`      --draft: exiting 0 on an acknowledged incomplete audit.`);
-    return 0;
+  if (unread.length) {
+    const crit = unread.filter((f) => f.severity === "critical").length;
+    println(`  ⚠️  ${unread.length} source-code candidate(s) at HIGH+ were never read (${crit} critical) — the report says so in a banner.`);
+    println(
+      `      next: ultrasec paths --run ${run} --surface code  →  ultrasec dossier <id> --run ${run}  →  ultrasec verify --apply verdicts.json --run ${run}`,
+    );
   }
-  println(`      exit 1 — rendered anyway; pass --draft when an incomplete audit is what you meant.`);
-  return 1;
+  // A report was written: exit 0, and the DRAFT banner is what travels.
+  // `--strict` makes a DRAFT a failing exit (CI); `--draft` is still accepted
+  // and changes nothing, since a written draft no longer fails.
+  const draft = legacy ? unread.length > 0 || scannerIncomplete : out.status.draft;
+  if (draft && flagBool(args, "strict")) {
+    println(`      --strict: exit 1 on a DRAFT report.`);
+    return 1;
+  }
+  return 0;
 }

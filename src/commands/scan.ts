@@ -75,7 +75,8 @@ export async function runScan(args: ParsedArgs): Promise<number> {
     return 2;
   }
 
-  // A required tool is an execution obligation, including in scoped scans.
+  // A required tool is an execution obligation, including in scoped scans —
+  // additive to `auto` on a full scan, the selection on a scoped/diff one.
   // Validate the complete policy before doing work; typos must not select zero tools.
   const rawRequired = args.flags["require-tools"];
   const requiredValues = rawRequired === undefined ? [] : Array.isArray(rawRequired) ? rawRequired : [rawRequired];
@@ -344,7 +345,11 @@ export async function runScan(args: ParsedArgs): Promise<number> {
   const scopedScan = !!((effectiveScope && effectiveScope.length) || include?.length || exclude?.length || diffRef);
   const toolsAutoSkipped = scopedScan && toolsFlag === undefined && !flagBool(args, "no-tools") && required.length === 0;
   const skipTools = flagBool(args, "no-tools") || toolsFlag === "none" || toolsAutoSkipped;
-  const which = selected ?? (toolsFlag === undefined && required.length ? required : undefined);
+  // `--require-tools` is an execution OBLIGATION on top of `auto` for a full
+  // scan: it used to select only the named scanners, so requiring gitleaks
+  // silently dropped semgrep, trivy and the rest of the belt. On a scoped or
+  // `--diff` pass, where tools are skipped by default, it stays the selection.
+  const which = selected ?? (toolsFlag === undefined && required.length && scopedScan ? required : undefined);
   const useDocker = flagBool(args, "docker");
   const offline = flagBool(args, "offline");
   // Produce the CycloneDX SBOM (when `syft` is installed) before running the

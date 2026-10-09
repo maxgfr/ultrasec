@@ -7,10 +7,11 @@ import { parseArgs } from "../src/util.js";
 import { ADAPTERS } from "../src/tools/index.js";
 
 // What a finished run keeps: the report, the dossier it renders from, and the
-// two authored documents. An older run's rendered SUMMARY.md / index.html stay
-// too — a report someone produced is never deleted by a tidy-up.
-const DELIVERABLES = ["REPORT.md", "REPORT.html", "findings.json", "manifest.json", "CONTEXT.md", "NARRATIVE.json", "SUMMARY.md", "index.html"];
-const INTERMEDIATES = ["DOSSIER.md", "VERIFY.todo.json", "VERIFY.md", "CONTEXT.scaffold.json", "graph.json", ".work"];
+// two authored documents. An older run's SUMMARY.md / index.html are NOT kept:
+// `render` removes them as the stale half of the previous report, and `clean`
+// is aligned on it (`render` re-renders the one report from the dossier).
+const DELIVERABLES = ["REPORT.md", "REPORT.html", "findings.json", "manifest.json", "CONTEXT.md", "NARRATIVE.json"];
+const INTERMEDIATES = ["DOSSIER.md", "VERIFY.todo.json", "VERIFY.md", "CONTEXT.scaffold.json", "graph.json", ".work", "SUMMARY.md", "index.html"];
 
 // A fully-rendered run: deliverables + intermediate scan artifacts + the `.work/` state dir.
 function makeRun(files: string[] = [...DELIVERABLES, ...INTERMEDIATES]): string {

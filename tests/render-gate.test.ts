@@ -63,20 +63,23 @@ function seed(findings: Finding[]): void {
 }
 
 describe("render gate", () => {
-  it.each([false, true])("announces both missing scanner coverage and unread candidates (draft=%s)", async (draft) => {
+  // A written report exits 0 — the DRAFT banner is what travels; `--strict`
+  // makes a DRAFT a failing exit for CI.
+  it.each([false, true])("announces both missing scanner coverage and unread candidates (strict=%s)", async (strict) => {
     seed([finding()]);
     const manifest = JSON.parse(readFileSync(join(run, "manifest.json"), "utf8"));
     manifest.scannerPolicy = { required: ["gitleaks"], complete: false, incomplete: ["gitleaks"] };
     writeFileSync(join(run, "manifest.json"), JSON.stringify(manifest));
-    const output = await captureOutput(() => runRender({ _: ["render"], flags: { run, draft, "no-journal": true } }));
-    expect(output.result).toBe(draft ? 0 : 1);
+    const output = await captureOutput(() => runRender({ _: ["render"], flags: { run, strict, "no-journal": true } }));
+    expect(output.result).toBe(strict ? 1 : 0);
     expect(output.stdout).toContain("Required scanners incomplete");
     expect(output.stdout).toContain("1 source-code candidate(s) at HIGH+ were never read");
   });
 
-  it("exits 1 when a HIGH source-code candidate was never read", () => {
+  it("exits 0 when a HIGH source-code candidate was never read (the report is a DRAFT); --strict exits 1", () => {
     seed([finding()]);
-    expect(runRender({ _: ["render"], flags: { run, "no-journal": true } })).toBe(1);
+    expect(runRender({ _: ["render"], flags: { run, "no-journal": true } })).toBe(0);
+    expect(runRender({ _: ["render"], flags: { run, strict: true, "no-journal": true } })).toBe(1);
   });
 
   it("writes the report anyway — a refused report is worse than a flagged one", () => {
@@ -97,7 +100,7 @@ describe("render gate", () => {
     }
   });
 
-  it("exits 0 with --draft, an acknowledged incomplete audit", () => {
+  it("still accepts --draft (a no-op now that a written draft exits 0)", () => {
     seed([finding()]);
     expect(runRender({ _: ["render"], flags: { run, draft: true, "no-journal": true } })).toBe(0);
   });

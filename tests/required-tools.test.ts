@@ -32,7 +32,10 @@ describe("required scanner completion policy", () => {
     expect(result.manifest.scannerPolicy).toEqual({ required: ["gitleaks"], complete: false, incomplete: ["gitleaks"] });
     expect(readFileSync(join(result.out, "DOSSIER.md"), "utf8")).toContain("INCOMPLETE");
     expect(runCheck(parseArgs(["check", "--run", result.out]))).toBe(1);
-    expect(runRender(parseArgs(["render", "--run", result.out]))).toBe(1);
+    // A report was written, so render exits 0 — the DRAFT banner is what
+    // travels; --strict turns the draft into a failing exit.
+    expect(runRender(parseArgs(["render", "--run", result.out]))).toBe(0);
+    expect(runRender(parseArgs(["render", "--run", result.out, "--strict"]))).toBe(1);
     // The one report carries it as a DRAFT reason — the banner is what travels.
     const report = readFileSync(join(result.out, "REPORT.md"), "utf8");
     expect(report).toContain("DRAFT");
@@ -43,6 +46,12 @@ describe("required scanner completion policy", () => {
     expect(result.code).toBe(0);
     expect(result.manifest.scannerPolicy.complete).toBe(true);
     expect(run.mock.calls[0]?.[2].which).toEqual(["gitleaks"]);
+  });
+  it("on a FULL scan the requirement is additive: every installed scanner still runs (auto)", async () => {
+    const result = await scan(["--require-tools", "gitleaks"], [{ name: "gitleaks", ran: true, ok: true, findings: [], note: "0 findings" }]);
+    expect(result.code).toBe(0);
+    expect(run.mock.calls[0]?.[2].which).toBeUndefined();
+    expect(result.manifest.scannerPolicy).toEqual({ required: ["gitleaks"], complete: true, incomplete: [] });
   });
   it.each([[{ name: "gitleaks", ran: true, ok: false, findings: [], note: "timeout" }], []])(
     "fails when a required scanner failed or produced no outcome",
@@ -85,7 +94,7 @@ describe("required scanner completion policy", () => {
     expect(required.manifest.toolStatus[0].workspaceCoverage).toEqual({ total: 2, completed: 1 });
     expect(required.manifest.scannerPolicy.complete).toBe(false);
     expect(runCheck(parseArgs(["check", "--run", required.out]))).toBe(1);
-    expect(runRender(parseArgs(["render", "--run", required.out]))).toBe(1);
+    expect(runRender(parseArgs(["render", "--run", required.out, "--strict"]))).toBe(1);
     expect((await scan([], [partial])).code).toBe(0);
   });
 
