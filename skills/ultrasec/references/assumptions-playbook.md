@@ -18,6 +18,10 @@ ultrasec assumptions --apply ASSUMPTIONS.json --run <dir>
 
 Run it after `context` and before `investigate`. Its leads land in the next `investigate` emit.
 
+The worklist has one row per FILE — its signals and the reason it was picked written once — with
+the file's named functions as `symbols: ["name:line", …]`. Answer per unit: `at` is
+`<file>:<line>` of a symbol, or the file itself when it lists none (anonymous handlers).
+
 ## What to record per unit
 
 ```json

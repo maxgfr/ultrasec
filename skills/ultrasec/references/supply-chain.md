@@ -18,8 +18,9 @@ what the ranking is for.
 > an advisory has no path, and the question is not "does this code do something dangerous" but
 > "does my deployment reach it". A per-CVE fan-out spends a subagent on something the ranking
 > already answered — on one monorepo that was 190 of 882 open candidates, a quarter of the
-> adjudication budget bought with nothing to read. Use `--surface deps` to keep this half out of
-> `paths`, `triage` and the `orchestrate` fan-out, and work it from the report instead.
+> adjudication budget bought with nothing to read. So `verify`, `revalidate` and the
+> `orchestrate` fan-out leave advisories out by default (`--surface code+supply`; `--surface all`
+> brings them back), and you work this half from the report instead.
 
 ### The report already groups them
 
@@ -29,10 +30,12 @@ advisory, the version to upgrade to, runtime or not, target and status, capped a
 `minimatch` with seven advisories is one row and one upgrade, not seven decisions. The individual
 CVEs stay in `findings.json` under their own ids; list them with `paths --surface deps`.
 
-The render gate does not count an `open` tail: it only fires on unread HIGH/CRITICAL candidates
-in code you wrote. `check --semantic` does count it, so adjudicate the tail per package from a
-reachability table — runtime vs dev/build — rather than leaving it open; the dev-only question
-below is the one that closes most rows.
+Neither gate counts an `open` tail: `render` and `check --semantic` both fire only on unread
+HIGH/CRITICAL candidates in code you wrote (the semantic gate reports the open advisories as
+information). Leaving the tail open below your bar is the prescribed outcome. When you do settle
+rows, do it per package from a reachability table — runtime vs dev/build; the dev-only question
+below is the one that closes most of them — never one CVE at a time. The narrative and the
+remediation draft see them the same way: one line per package.
 
 ### The prioritization ladder
 

@@ -131,7 +131,8 @@ enclosing function** at the source and the sink (up to 80 lines; a wider window 
   may be middleware, a proxy, the platform), but it names what was checked.
 - **sanitizers near the path** — the catalog's patterns within 12 lines of any hop.
 
-`--brief` restores the narrow packet for batch fan-out, where one subagent reads eight at once.
+`--brief` restores the narrow packet for batch fan-out, where one subagent reads a whole family:
+`dossier a,b,c --brief` prints the first member in full and a ±3-line window per other member.
 
 ### Budget by family, not by finding
 
@@ -155,9 +156,10 @@ count, the version to upgrade to and the KEV/EPSS/dev-only signals. The five que
 cannot answer, and the hostile-package class no CVE feed covers, are in
 [supply-chain.md](supply-chain.md).
 
-The render gate does not hold an `open` tail against you — it only counts unread HIGH/CRITICAL
-candidates in code you wrote. `check --semantic` does: it fails while any finding is open,
-advisories included. Close the tail per package, not per CVE — see
+**The dependencies are read in the report.** Neither gate holds an `open` advisory against you:
+`render` and `check --semantic` both count only unread HIGH/CRITICAL candidates in what you wrote
+and committed, and `verify`, `revalidate` and the `orchestrate` fan-out leave advisories out by
+default (`--surface all` brings them back). Close the tail per package, never per CVE — see
 [the lessons below](#lessons-from-a-multi-engine-audit).
 
 ## 6. Hunt what taint enumeration can't reach
@@ -240,10 +242,10 @@ One file, in the order a reader needs it — status line (and DRAFT banner with 
 `--full` restores the exhaustive annexes; `--legacy` the previous three-file, per-surface report.
 Priorities and the exact columns are in [commands.md](commands.md#render---run-dir).
 
-**`render` exits 1 while a HIGH/CRITICAL code candidate has no verdict.** It writes the report
-anyway, with the same warning as a DRAFT banner — an exit code is gone the moment the terminal
-scrolls, and the file is what gets shared. Go back to step 5, or pass `--draft` if an incomplete
-audit is genuinely what you meant, and say so when you present it.
+**While a HIGH/CRITICAL code candidate has no verdict, the report is a DRAFT.** `render` writes
+it with a banner saying why and exits 0 — an exit code is gone the moment the terminal scrolls,
+and the file is what gets shared; `--strict` exits 1 on a DRAFT for CI. Go back to step 5, or, if
+an incomplete audit is genuinely what you meant, say so when you present it.
 
 Present the status line and dashboard counts, each confirmed finding with its cross-file and exploit path, the
 needs-human list, the coverage caveats from step 3, and the report path. Then
@@ -259,11 +261,12 @@ needs-human list, the coverage caveats from step 3, and the report path. Then
 ## 11. Plan the fixes (optional)
 
 ```
-ultrasec implement --run .ultrasec    # → IMPLEMENT.md + IMPLEMENT.todo.json
+ultrasec implement --run .ultrasec --md   # → IMPLEMENT.todo.json + the IMPLEMENT.md draft
 ```
 
-Confirmed findings become fix stories grounded in their `[file:line]`, grouped by root cause;
-feed `IMPLEMENT.md` to the `to-prd` skill or an implementer. Per-class fix patterns:
+Confirmed findings become fix stories grounded in their `[file:line]`, grouped by root cause, and
+advisories one upgrade line per package; feed `IMPLEMENT.md` to the `to-prd` skill or an
+implementer. Per-class fix patterns:
 [implement-playbook.md](implement-playbook.md).
 
 ## Lessons from a multi-engine audit
@@ -271,19 +274,17 @@ feed `IMPLEMENT.md` to the `to-prd` skill or an implementer. Per-class fix patte
 One audit ran this engine beside several models reviewing the same repository freely. What it
 taught, and why:
 
-- **`--require-tools` alone narrows the belt.** Without `--tools`, it runs only the scanners it
-  names: bandit, checkov, hadolint and pip-audit silently did not run. Pass
-  `--tools auto --require-tools …` to require some and keep the rest.
 - **Adjudicate by family at scale.** 494 code candidates split into five families — high taint,
   orphan SQL sinks, other high sinks, low/medium SAST, low taint — one analyst each. "SQL
   injection: query() sink (no source path found)" on GraphQL clients passing variables was 70
   false positives out of 70: one read decides the family. Name the brocard
   (`report-not-dispositive`, `outside-usage`, `no-threat-model`, `documented-behavior`) on every
   high refutation, or `check --semantic` reports it as unargued.
-- **Open advisories fail `check --semantic`**, even though `render` does not count them. Rather
-  than leaving 280 open, adjudicate per package from a reachability table (runtime vs dev/build)
-  and refute the dev/build-only ones with `outside-usage` — after checking CI does not run them on
-  untrusted input ([supply-chain.md](supply-chain.md#then-apply-the-five-questions-the-score-cant-answer)).
+- **The dependencies are read in the report.** 280 advisories were once ruled one by one to get
+  `check --semantic` green; the gate no longer counts them, and the report rolls them up one row
+  per package. When you do settle some, work per package from a reachability table (runtime vs
+  dev/build) and refute the dev/build-only ones with `outside-usage` — after checking CI does not
+  run them on untrusted input ([supply-chain.md](supply-chain.md#then-apply-the-five-questions-the-score-cant-answer)).
 - **Never quote a cited line into a note on a secret or credential finding**
   ([revalidate-playbook.md](revalidate-playbook.md)). `--apply` now redacts notes, but your own
   consolidation notes are a leak path too: before sharing, search the run directory and the

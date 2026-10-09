@@ -103,7 +103,8 @@ try {
   ultrasec("narrative", "--run", "run");
   writeFileSync(join(run, "NARRATIVE.json"), readFileSync(join(outDir, "NARRATIVE.json"), "utf8"));
   ultrasec("render", "--run", "run", "--narrative", join(run, "NARRATIVE.json"), "--md", "--html");
-  ultrasec("implement", "--run", "run", "--narrative", join(run, "NARRATIVE.json"));
+  // `--md`: the PRD draft is a brief like the others now, written on request.
+  ultrasec("implement", "--run", "run", "--narrative", join(run, "NARRATIVE.json"), "--md");
 
   const sanitize = (s) =>
     s

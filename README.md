@@ -3,7 +3,8 @@
 ## Required scanners in CI
 
 `node scripts/ultrasec.mjs scan --repo . --out .ultrasec --require-tools gitleaks,bandit`
-selects those scanners (also in scoped scans). A missing, skipped, offline-incompatible,
+requires those scanners on top of `--tools auto` — every other installed scanner still runs; on a
+scoped or `--diff` scan without `--tools` it selects them. A missing, skipped, offline-incompatible,
 or failed required scanner exits **1**, while retaining the dossier and JSON
 `scannerPolicy` with the incomplete names. A successful scanner with zero findings
 satisfies this execution policy; this is **not** proof that the repository is secure.
@@ -21,8 +22,8 @@ not a fresh process execution. Omit `--resume` to require a fresh invocation.
 If gosec reports both issues and package-loading errors, the valid issues are
 retained, normalized and filtered, while the scanner stays `failed` and is not
 cached. `render` announces both missing required-scanner coverage and unread
-HIGH/CRITICAL code candidates when both apply; `--draft` acknowledges them
-without suppressing either warning.
+HIGH/CRITICAL code candidates when both apply, in a DRAFT banner; it exits 0 once
+the report is written, and `--strict` exits 1 on a DRAFT.
 
 ## Invocation
 
@@ -107,8 +108,12 @@ node scripts/ultrasec.mjs audit --repo . --out .ultrasec --keep-work   # keep th
 `audit` runs the real `scan` (every scan flag passes through), `check`, writes the report and
 removes the intermediates — what is left is `REPORT.md` (or `REPORT.html`), `findings.json` and
 `manifest.json`. Line 1 of its output is the report path, line 2 the status: `adjudicated &
-grounded`, or `DRAFT` with the reasons when candidates were never read. Re-running on the same
-`--out` merges, so applied verdicts survive (`--fresh` starts over).
+grounded`, or `DRAFT` with the reasons when candidates were never read — and then a line 3,
+`next:`, the command to run next with this run's real paths. It exits 0 once the report is
+written (`--strict`: 1 on a DRAFT). Re-running on the same `--out` merges, so applied verdicts
+survive (`--fresh` starts over). Dependency advisories are read in the report, one row per
+package: they never block `check --semantic`, and `verify`, `revalidate` and the `orchestrate`
+fan-out leave them out unless `--surface all`.
 
 Step by step:
 
@@ -122,11 +127,11 @@ node scripts/ultrasec.mjs investigate --run .ultrasec     # hunt authz/business-
 node scripts/ultrasec.mjs verify --run .ultrasec      # adversarial worklist → write verdicts.json
 node scripts/ultrasec.mjs verify --apply verdicts.json --run .ultrasec
 node scripts/ultrasec.mjs revalidate --run .ultrasec  # git-history false-positive cut (apply: REVALIDATE.json)
-node scripts/ultrasec.mjs check --run .ultrasec --semantic   # exit gate: grounded + adjudicated
+node scripts/ultrasec.mjs check --run .ultrasec --semantic   # exit gate: grounded + adjudicated (advisories never block)
 node scripts/ultrasec.mjs narrative --run .ultrasec   # author NARRATIVE.json (exec summary, fixes, chains)
 node scripts/ultrasec.mjs render --run .ultrasec      # REPORT.md, folding NARRATIVE.json (--html: REPORT.html)
-node scripts/ultrasec.mjs implement --run .ultrasec   # remediation-PRD draft (IMPLEMENT.md) → feed to the to-prd skill
-node scripts/ultrasec.mjs coverage --run .ultrasec --standard owasp-top10   # what was NOT looked at
+node scripts/ultrasec.mjs implement --run .ultrasec --md   # remediation-PRD draft (IMPLEMENT.md) → feed to the to-prd skill
+node scripts/ultrasec.mjs coverage --run .ultrasec --standard owasp-top10   # what was NOT looked at (counts; --full: the matrix)
 node scripts/ultrasec.mjs probe https://you-own-this --i-own-this   # live-site posture → PROBE.json (isolated)
 node scripts/ultrasec.mjs route app.apk                # out-of-scope target → methodology + tools (advisory)
 ```

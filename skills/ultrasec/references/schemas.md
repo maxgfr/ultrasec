@@ -173,9 +173,10 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
   caveat naming what to check before believing it (an encrypted file whose KEY is also committed
   is a real leak; a rule file that also configures the running system is both).
 
-  The worklists carry `proposed: {class, ground, why}` on such an item and a `## Proposed noise
-  classes` block naming each class once with its members — reading, never verdicts. `verdict` stays
-  `null`: a pre-filled one would make copying the worklist to the apply file a passing adjudication.
+  The worklists carry `proposed: "<class>"` — the class NAME — on such an item; its ground and
+  its caveat are the class's own (the table above), and the `--md` brief's `## Proposed noise
+  classes` block names each class once with its members — reading, never verdicts. No `verdict` is
+  pre-filled: one would make copying the worklist to the apply file a passing adjudication.
 
   The
   engine's rule is that nothing disappears quietly: a secret finding inside a file that is
@@ -198,13 +199,19 @@ Written by `scan`/`import`/`logs`. Three fields answer "did this audit run at fu
 
 ## `TRIAGE.todo.json` → `TRIAGE.json`
 
-`triage --run <dir>` emits one line per OPEN candidate — cited location, **no code excerpt**
-(triage is a glance). You fill `verdict`; `triage --apply` folds it.
+`triage --run <dir>` emits one line per OPEN **low/medium/info** candidate — cited location, **no
+code excerpt** (triage is a glance). A high/critical one is not listed: a `noise` verdict cannot
+dismiss it, so it goes straight to verify. You add `verdict`; `triage --apply` folds it.
+
+**Every worklist is compact**: one row per line, no indentation, and an empty answer slot
+(`verdict`, `note`, `brocard`, `fixedIn`, the assumption and variant arrays) is not written — you
+add the field. Every `--apply` reads rows with or without it, and an older indented worklist still
+parses.
 
 ```json
-[ { "id": "409b0c792964", "severity": "medium", "category": "taint",
-    "title": "Cross-site scripting (reflected): untrusted input reaches send()",
-    "at": "src/routes.js:26", "verdict": null } ]
+[
+{"id":"409b0c792964","severity":"medium","category":"taint","title":"Cross-site scripting (reflected): untrusted input reaches send()","at":"src/routes.js:26"}
+]
 ```
 
 You write (only `id` + `verdict` are read):
@@ -280,20 +287,28 @@ than N identical verdicts.
 ## `VERIFY.todo.json` → `verdicts.json`
 
 `verify --run <dir>` emits every finding still `open` **or `needs-human`** (a re-verify picks up
-what an earlier pass escalated). `--shards n --shard i` writes `VERIFY.todo.<i>.json` instead;
+what an earlier pass escalated) on the `--surface` it covers — default `code+supply`: dependency
+advisories are ranked per package in the report and never block `check --semantic`;
+`--surface all` brings them back. `--shards n --shard i` writes `VERIFY.todo.<i>.json` instead;
 the `--md` brief, when asked for, describes the full worklist.
 
 ```json
-[ { "id": "7e51071c4783", "severity": "high", "cwe": "CWE-89", "category": "taint",
-    "title": "SQL injection: untrusted input reaches query()",
-    "claim": "What must hold for this to be a real, exploitable issue…",
-    "files": ["src/routes.js:12", "src/service.js:6", "src/db.js:7"],
-    "verdict": null, "note": "", "priorSignal": "deepsec: true-positive (signal, not a verdict)" } ]
+[
+{"id":"7e51071c4783","severity":"high","cwe":"CWE-89","title":"SQL injection: untrusted input reaches query()","category":"taint","claim":"Cross-file candidate: http input at src/routes.js:12 may reach the sql sink query() at src/db.js:7 through 2 hop(s).","files":["src/routes.js:12","src/service.js:6","src/db.js:7"],"priorSignal":"deepsec revalidation: true-positive"}
+]
 ```
 
-You write an array of `{id, verdict, note?, exploitPath?, brocard?}`. The emitted
-`VERIFY.todo.json` carries `verdict: null`, `note: ""` **and `brocard: null`**, so every field you
-are expected to fill is visible in the file you are filling:
+`claim` is the FIRST SENTENCE of the engine's message plus its `Evidence:` line, each capped at
+240 characters, without the notes an earlier pass appended; the rest of the message (the class's
+explanation and advice) is printed by `dossier <id>` under "What to decide". A dependency advisory
+carries no `claim`. `proposed`, when present, is a noise class name (see `downgraded` above).
+For a family of rows (same category, CWE, sink and title under one path root),
+`dossier <id>,<id>,… --brief` prints one packet: the first member in full, a ±3-line window per
+other member — still one verdict per id.
+
+You write an array of `{id, verdict, note?, exploitPath?, brocard?}` — or add those fields to the
+rows in place. The emitting command names them (`exploitPath` on supported, `brocard` on refuted),
+and the orchestrated fan-out's schema carries `brocard` too:
 
 ```json
 [ { "id": "7e51071c4783", "verdict": "supported",
@@ -310,11 +325,12 @@ unrecognized name is dropped rather than failing the fold (a typo must not cost 
 
 `brocard` is the only field read as a ground. A refutation argued at length in `note` still
 reports as unargued — on the first real-world audit that was 96 dismissals, 0 brocards, because
-the worklist offered a `note` field and no `brocard` field at all. Both are now emitted.
+nothing named a `brocard` field at all. The emit line, the agent contracts and the fan-out schema
+now name it.
 
-Where the engine recognised a noise class it also emits `proposed: {class, ground, why}` on the
-item — a suggestion to accept or refuse, never a filled-in verdict. A pre-filled `verdict` would
-make copying the worklist to the apply file a passing adjudication.
+Where the engine recognised a noise class it also emits `proposed: "<class>"` on the item — a
+suggestion to accept or refuse, never a filled-in verdict. A pre-filled `verdict` would make
+copying the worklist to the apply file a passing adjudication.
 
 It is optional and never blocks: `check --semantic` simply **lists** the high/critical dismissals
 that name no ground, so a reviewer can see which refutations were argued. Making it a hard gate
@@ -330,13 +346,16 @@ stale (no id matches the dossier) it **exits 2** rather than silently folding no
 
 ## `INVESTIGATE.todo.json` → `INVESTIGATE.json`
 
-`investigate --run <dir>` groups the attack surface into regions:
+`investigate --run <dir>` groups the attack surface into regions — at most 12: past that the
+lowest-ranked are merged into one region whose `merged` lists them. The hunt prompt they share is
+written ONCE, at the top; a region (or a weakness-class hunt) whose prompt differs keeps its own.
+An older run's plain array of regions is still read.
 
 ```json
-[ { "region": "src", "score": 41, "sinks": 5, "sources": 4,
-    "files": ["src/routes.js", "src/db.js"],
-    "neighbors": ["src/service.js", "src/fetcher.js"],
-    "prompt": "What to hunt for here — the things the deterministic pass can't." } ]
+{"prompt":"What to hunt for here — the things the deterministic pass can't.",
+"regions":[
+{"region":"src","score":41,"sinks":5,"sources":4,"files":["src/routes.js","src/db.js"],"neighbors":["src/service.js","src/fetcher.js"]}
+]}
 ```
 
 You write a `Discovery[]` — this is how a bug the engine cannot enumerate (authz, business
@@ -382,17 +401,19 @@ pack data with fixtures. `hunted` marks a hunt worked even when it found nothing
 
 ## `REVALIDATE.todo.json` → `REVALIDATE.json`
 
-`revalidate --run <dir>` emits git facts for every `confirmed`/`needs-human` finding. Run it
-**after** `verify --apply` — before that, nothing is promoted and the worklist is empty.
+`revalidate --run <dir>` emits git facts for every `confirmed`/`needs-human` finding on its
+`--surface` (default `code+supply`, as for `verify`). Run it **after** `verify --apply` — before
+that, nothing is promoted and the worklist is empty.
 
 ```json
-[ { "id": "7e51071c4783", "severity": "high", "title": "SQL injection: …",
-    "at": "src/db.js:7", "fileExists": true,
-    "currentLine": "  return conn.query(sql);",
-    "commitsSinceFinding": 3,
-    "lineLastChanged": { "commit": "a1b2c3d", "author": "dev", "date": "2026-05-02" },
-    "renamedTo": null, "verdict": null, "note": "" } ]
+[
+{"id":"7e51071c4783","severity":"high","title":"SQL injection: …","at":"src/db.js:7","fileExists":true,"currentLine":"return conn.query(sql);","commitsSinceFinding":3,"lineLastChanged":{"commit":"a1b2c3d","author":"dev","date":"2026-05-02"},"renamedTo":null}
+]
 ```
+
+`currentLine` is trimmed and capped at 200 characters (one minified line used to put 100 KB in a
+row). A finding scanned from git history carries `atCommit`: its line is read at that commit, and
+its file being gone from HEAD is not drift. `--apply` recomputes the facts of the ids it folds only.
 
 You write `{id, verdict, fixedIn?, note?}`:
 
@@ -406,9 +427,10 @@ directory/comma-list apply, same fail-closed-on-all-stale behaviour as `verify`.
 
 ## `NARRATIVE.todo.json` → `NARRATIVE.json`
 
-`narrative --run <dir>` emits the reportable findings plus a scaffold. You author the prose in
-`<run>/NARRATIVE.json`; `render` and `implement` fold it in automatically (`--narrative <file>`
-points elsewhere).
+`narrative --run <dir>` emits the reportable findings plus a scaffold. Reportable dependency
+advisories are not rows: they come as `packages`, one line per package (worst severity, how many
+advisories, the version to upgrade to). You author the prose in `<run>/NARRATIVE.json`; `render`
+and `implement` fold it in automatically (`--narrative <file>` points elsewhere).
 
 ```json
 {
@@ -449,8 +471,8 @@ Nothing here ever changes a finding's status or severity.
 
 ## `IMPLEMENT.todo.json` (emit-only)
 
-`implement --run <dir>` — confirmed → `fixes`, needs-human → `investigations`. No `--apply`;
-it never changes a status.
+`implement --run <dir>` — confirmed → `fixes`, needs-human → `investigations`; dependency
+advisories become `upgrades`, one line per package. No `--apply`; it never changes a status.
 
 ```json
 { "fixes": [ { "id": "7e51071c4783", "title": "SQL injection: …", "severity": "high",

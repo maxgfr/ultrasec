@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import { realpathSync as realpathSync11 } from "fs";
+import { realpathSync as realpathSync12 } from "fs";
 import { pathToFileURL as pathToFileURL3 } from "url";
 
 // src/vendor/codeindex-engine.mjs
@@ -25171,9 +25171,9 @@ var Bytes = class {
   }
   grow(need) {
     if (this.len + need <= this.buf.length) return;
-    let cap = this.buf.length * 2 || 64;
-    while (cap < this.len + need) cap *= 2;
-    const next = new Uint8Array(cap);
+    let cap2 = this.buf.length * 2 || 64;
+    while (cap2 < this.len + need) cap2 *= 2;
+    const next = new Uint8Array(cap2);
     next.set(this.buf.subarray(0, this.len));
     this.buf = next;
   }
@@ -27251,7 +27251,8 @@ var SOURCE_SCOPES = ["symbol", "module", "file"];
 // src/util.ts
 import { AsyncLocalStorage } from "async_hooks";
 import { createHash as createHash4 } from "crypto";
-import { statSync as statSync13 } from "fs";
+import { realpathSync as realpathSync7, statSync as statSync13 } from "fs";
+import { fileURLToPath as fileURLToPath3 } from "url";
 
 // src/logs/secrets.ts
 var SECRET_PATTERNS = [
@@ -27565,6 +27566,14 @@ function isScannableDir(path) {
     return false;
   }
 }
+function enginePath() {
+  const self = fileURLToPath3(import.meta.url);
+  try {
+    return realpathSync7(self);
+  } catch {
+    return self;
+  }
+}
 function shortHash2(input, len = 12) {
   return createHash4("sha256").update(input).digest("hex").slice(0, len);
 }
@@ -27587,15 +27596,38 @@ function stageNotes(message) {
   const parts2 = String(message ?? "").split(STAGE_SPLIT);
   return parts2.slice(1).join(" \xB7 ").trim();
 }
+var LIST_CAP = 10;
+function listCapped(label2, ids, n = LIST_CAP) {
+  const shown = ids.slice(0, n).join(", ");
+  const more = ids.length > n ? ` \u2026 and ${ids.length - n} more (--json for all)` : "";
+  return `${label2 ? `${label2}: ` : ""}${shown}${more}`;
+}
+function linesCapped(lines5, n = LIST_CAP, indent = "    ") {
+  if (lines5.length <= n) return [...lines5];
+  return [...lines5.slice(0, n), `${indent}\u2026 and ${lines5.length - n} more (--json for all)`];
+}
 function engineProse(message) {
   return (String(message ?? "").split(STAGE_SPLIT)[0] ?? "").trim();
 }
 var outputSink = new AsyncLocalStorage();
+var quietHeld = null;
+function setQuiet(on) {
+  quietHeld = on ? [] : null;
+}
+function releaseQuiet(failed2) {
+  const held = quietHeld;
+  quietHeld = null;
+  if (failed2 && held) for (const line2 of held) process.stderr.write(line2 + "\n");
+}
 function eprintln(msg) {
   const sink = outputSink.getStore();
   if (sink) {
     sink.err.push(msg);
     if (!sink.tee && !sink.errThrough) return;
+  }
+  if (quietHeld) {
+    quietHeld.push(msg);
+    return;
   }
   process.stderr.write(msg + "\n");
 }
@@ -27647,7 +27679,7 @@ function readPath(run2, ...parts2) {
   return existsSync12(legacy) ? legacy : current;
 }
 var KEPT_FILES = ["REPORT.md", "REPORT.html", "findings.json", "manifest.json", "CONTEXT.md", "NARRATIVE.json"];
-var LEGACY_DELIVERABLES = ["SUMMARY.md", "index.html", "JOURNAL.md"];
+var LEGACY_DELIVERABLES = ["JOURNAL.md"];
 
 // src/transcript.ts
 var REPORT_FORMATS = ["md", "html", "json", "txt", "log"];
@@ -27726,7 +27758,7 @@ import { execFileSync as execFileSync3 } from "child_process";
 
 // src/tools/registry.ts
 import { execFileSync } from "child_process";
-import { realpathSync as realpathSync7 } from "fs";
+import { realpathSync as realpathSync8 } from "fs";
 import { delimiter, join as join30 } from "path";
 
 // src/vendor/package-checker-script.ts
@@ -27998,7 +28030,7 @@ function resolveBinaryPath(name2) {
   const shim = whichPath(name2);
   if (!shim) return void 0;
   try {
-    return realpathSync7(shim);
+    return realpathSync8(shim);
   } catch {
     return shim;
   }
@@ -32163,7 +32195,16 @@ function worktreePrefix(repo) {
   prefixCache.set(repo, p);
   return p;
 }
-function fileExistsAtHead(repo, file) {
+function gitMemo() {
+  return { blobs: /* @__PURE__ */ new Map(), refs: /* @__PURE__ */ new Map(), since: /* @__PURE__ */ new Map() };
+}
+function headBlob(repo, file, memo) {
+  if (!memo) return git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
+  if (!memo.blobs.has(file)) memo.blobs.set(file, git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]));
+  return memo.blobs.get(file) ?? null;
+}
+function fileExistsAtHead(repo, file, memo) {
+  if (memo) return headBlob(repo, file, memo) !== null;
   return git(repo, ["cat-file", "-e", `HEAD:${worktreePrefix(repo)}${file}`]) !== null;
 }
 function lineCountAtCommit(repo, commit, file) {
@@ -32184,18 +32225,25 @@ function lineContentAtCommit(repo, commit, file, line2) {
   const lines5 = blob.split(/\r?\n/);
   return line2 <= lines5.length ? lines5[line2 - 1] : null;
 }
-function lineContentAtHead(repo, file, line2) {
+function lineContentAtHead(repo, file, line2, memo) {
   if (!Number.isInteger(line2) || line2 < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
+  const blob = headBlob(repo, file, memo);
   if (blob === null) return null;
   const lines5 = blob.split(/\r?\n/);
   return line2 <= lines5.length ? lines5[line2 - 1] : null;
 }
-function logSince(repo, file, sinceRef) {
-  if (git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) === null) return null;
-  const out2 = git(repo, ["log", `--max-count=${LOG_CAP}`, "--format=%h", `${sinceRef}..HEAD`, "--", file]);
-  if (out2 === null) return null;
-  return out2.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+function logSince(repo, file, sinceRef, memo) {
+  const key = `${sinceRef}\0${file}`;
+  if (memo?.since.has(key)) return memo.since.get(key) ?? null;
+  let resolves = memo?.refs.get(sinceRef);
+  if (resolves === void 0) {
+    resolves = git(repo, ["rev-parse", "--verify", "--quiet", `${sinceRef}^{commit}`]) !== null;
+    memo?.refs.set(sinceRef, resolves);
+  }
+  const out2 = resolves ? git(repo, ["log", `--max-count=${LOG_CAP}`, "--format=%h", `${sinceRef}..HEAD`, "--", file]) : null;
+  const res = out2 === null ? null : out2.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  memo?.since.set(key, res);
+  return res;
 }
 function parseLineLog(raw) {
   const header3 = raw.split(/\r?\n/).find((l) => l.includes("\0"));
@@ -32204,9 +32252,9 @@ function parseLineLog(raw) {
   if (!commit || !commit.trim()) return null;
   return { commit: commit.trim(), author: author?.trim() || void 0, date: date?.trim() || void 0 };
 }
-function lineLastChanged(repo, file, line2) {
+function lineLastChanged(repo, file, line2, memo) {
   if (!Number.isInteger(line2) || line2 < 1) return null;
-  const blob = git(repo, ["show", `HEAD:${worktreePrefix(repo)}${file}`]);
+  const blob = headBlob(repo, file, memo);
   if (blob === null) return null;
   const total = blob.split(/\r?\n/).length;
   if (line2 > total || total > HUGE_FILE_LINES) return null;
@@ -32220,10 +32268,12 @@ function parseRenameStatus(raw, oldPath) {
   }
   return null;
 }
-function fileRenamedTo(repo, file) {
-  if (fileExistsAtHead(repo, file)) return null;
-  const out2 = git(repo, ["log", "--all", "-M", "--diff-filter=R", "--name-status", "--format=", `--max-count=${LOG_CAP * 4}`]);
-  if (out2 === null) return null;
+function fileRenamedTo(repo, file, memo) {
+  if (fileExistsAtHead(repo, file, memo)) return null;
+  const read = () => git(repo, ["log", "--all", "-M", "--diff-filter=R", "--name-status", "--format=", `--max-count=${LOG_CAP * 4}`]);
+  if (memo && memo.renames === void 0) memo.renames = read();
+  const out2 = memo ? memo.renames : read();
+  if (out2 === null || out2 === void 0) return null;
   return parseRenameStatus(out2, file);
 }
 
@@ -32408,7 +32458,10 @@ function renderProposalSummary(items) {
 var SUMMARY_IDS = 8;
 function proposedFor(f) {
   if (!f.noise) return void 0;
-  return { class: f.noise, ground: NOISE_GROUND[f.noise], why: PROPOSAL_WHY[f.noise] };
+  return proposalOf(f.noise);
+}
+function proposalOf(c2) {
+  return { class: c2, ground: NOISE_GROUND[c2], why: PROPOSAL_WHY[c2] };
 }
 var PROPOSAL_WHY = {
   "encrypted-at-rest": "the file is ciphertext by design \u2014 the blob is not the secret; check the KEY is not committed too",
@@ -33084,8 +33137,8 @@ wrote ${join38(resolve14(out2), "MAP.md")} + attack-surface.json`);
 }
 
 // src/commands/scan.ts
-import { resolve as resolve16, join as join57, relative as relative13 } from "path";
-import { existsSync as existsSync30 } from "fs";
+import { resolve as resolve17, join as join60, relative as relative13 } from "path";
+import { existsSync as existsSync32 } from "fs";
 
 // src/facts.ts
 import { join as join39 } from "path";
@@ -36845,6 +36898,15 @@ function groupAdvisoriesByPackage(findings) {
     (a, b) => b.worstRisk - a.worstRisk || SEVERITIES2.indexOf(a.worst) - SEVERITIES2.indexOf(b.worst) || b.count - a.count || byStr(a.pkg, b.pkg)
   );
 }
+function packageLines(findings) {
+  return groupAdvisoriesByPackage(findings).map((r) => {
+    const bits = [`${r.worst}`, `${r.count} advisor${r.count === 1 ? "y" : "ies"}`];
+    if (r.kev) bits.push(`${r.kev} KEV`);
+    if (r.reachability) bits.push(r.reachability);
+    bits.push(r.fixedVersion ? `upgrade to ${r.fixedVersion}` : "no fix published");
+    return `${r.pkg}${r.versions.length ? `@${r.versions.join(",")}` : ""} \u2014 ${bits.join(" \xB7 ")}`;
+  });
+}
 
 // src/stack.ts
 var ECOSYSTEM_LANGUAGES = {
@@ -37419,8 +37481,1449 @@ function satisfies(version, range) {
 }
 
 // src/classes/coverage.ts
-import { existsSync as existsSync19, readFileSync as readFileSync25 } from "fs";
+import { existsSync as existsSync23, readFileSync as readFileSync28 } from "fs";
+import { join as join48 } from "path";
+
+// src/tools/scoring.ts
+import { existsSync as existsSync19, mkdirSync as mkdirSync9, readFileSync as readFileSync25, statSync as statSync14, writeFileSync as writeFileSync11 } from "fs";
+import { gunzipSync as gunzipSync2 } from "zlib";
+import { homedir as homedir3 } from "os";
 import { join as join43 } from "path";
+var SEVERITY_WEIGHT = {
+  critical: 1,
+  high: 0.8,
+  medium: 0.5,
+  low: 0.25,
+  info: 0.1
+};
+var EXPOSURES = ["internet-facing", "internal", "build-time"];
+var EXPOSURE_WEIGHT = { "internet-facing": 1, internal: 0.6, "build-time": 0.3 };
+var CRITICALITIES = ["crown-jewel", "standard", "peripheral"];
+var CRITICALITY_WEIGHT = { "crown-jewel": 1, standard: 0.6, peripheral: 0.3 };
+var REACHABILITY_DAMP = {
+  runtime: 1,
+  unproven: 0.7,
+  toolchain: 0.55
+};
+function riskScore({ severity, epss, kev, exposure, criticality, reachability: reachability2 }) {
+  const e = Math.min(Math.max(epss ?? 0, 0), 1);
+  const sev = SEVERITY_WEIGHT[severity] ?? SEVERITY_WEIGHT.info;
+  let base;
+  if (exposure === void 0 && criticality === void 0) {
+    base = 0.6 * sev + 0.4 * e;
+  } else {
+    const x = exposure ? EXPOSURE_WEIGHT[exposure] : 0.6;
+    const c2 = criticality ? CRITICALITY_WEIGHT[criticality] : 0.6;
+    base = 0.4 * sev + 0.25 * e + 0.2 * x + 0.15 * c2;
+  }
+  let score = Math.round(100 * base);
+  if (kev) score = Math.max(score, 95);
+  if (reachability2) score = Math.round(score * REACHABILITY_DAMP[reachability2]);
+  return Math.min(Math.max(score, 0), 100);
+}
+function scoreFinding(f, deployment = {}) {
+  return riskScore({ severity: f.severity, epss: f.epss, kev: f.kev, reachability: f.reachability, ...deployment });
+}
+function deploymentFacts(context) {
+  if (!context) return {};
+  const ex = /^\s*(?:[-*]\s*)?(?:\*\*)?Exposure(?:\*\*)?\s*:\s*`?([a-z-]+)`?/im.exec(context);
+  const cr = /^\s*(?:[-*]\s*)?(?:\*\*)?Criticality(?:\*\*)?\s*:\s*`?([a-z-]+)`?/im.exec(context);
+  const exposure = EXPOSURES.includes(ex?.[1] ?? "") ? ex[1] : void 0;
+  const criticality = CRITICALITIES.includes(cr?.[1] ?? "") ? cr[1] : void 0;
+  return { ...exposure ? { exposure } : {}, ...criticality ? { criticality } : {} };
+}
+function parseEpssCsv(csv) {
+  const out2 = /* @__PURE__ */ new Map();
+  for (const line2 of csv.split("\n")) {
+    const row = line2.trim();
+    if (!row || row.startsWith("#")) continue;
+    const [cve, epss, pct] = row.split(",");
+    if (!cve || !/^CVE-/i.test(cve)) continue;
+    const e = Number(epss);
+    if (Number.isNaN(e)) continue;
+    out2.set(cve.toUpperCase(), { epss: e, percentile: pct !== void 0 ? Number(pct) : void 0 });
+  }
+  return out2;
+}
+function parseKev(json) {
+  const out2 = /* @__PURE__ */ new Map();
+  let data;
+  try {
+    data = JSON.parse(json || "{}");
+  } catch {
+    return out2;
+  }
+  for (const v of data?.vulnerabilities ?? []) {
+    if (v?.cveID) out2.set(String(v.cveID).toUpperCase(), v.dateAdded);
+  }
+  return out2;
+}
+function applyEnrichment(findings, feeds, deployment = {}) {
+  return findings.map((f) => {
+    const out2 = { ...f };
+    const cve = f.cve?.toUpperCase();
+    if (cve) {
+      const e = feeds.epss.get(cve);
+      if (e) out2.epss = e.epss;
+      if (feeds.kev.has(cve)) {
+        out2.kev = true;
+        const d = feeds.kev.get(cve);
+        if (d) out2.kevDateAdded = d;
+      }
+    }
+    out2.risk = scoreFinding(out2, deployment);
+    return out2;
+  });
+}
+var EPSS_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz";
+var KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
+var TTL_MS = 24 * 60 * 60 * 1e3;
+var FETCH_TIMEOUT_MS = 2e4;
+function cacheDir() {
+  return process.env.ULTRASEC_CACHE_DIR || join43(homedir3(), ".cache", "ultrasec");
+}
+function fresh2(path) {
+  try {
+    return existsSync19(path) && Date.now() - statSync14(path).mtimeMs < TTL_MS;
+  } catch {
+    return false;
+  }
+}
+async function fetchBuf(url) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(url, { signal: ctrl.signal, redirect: "follow" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  } finally {
+    clearTimeout(t);
+  }
+}
+async function loadCached(url, file, gz) {
+  const dir = cacheDir();
+  const path = join43(dir, file);
+  if (fresh2(path)) {
+    try {
+      return readFileSync25(path, "utf8");
+    } catch {
+    }
+  }
+  try {
+    const buf = await fetchBuf(url);
+    const text = (gz ? gunzipSync2(buf) : buf).toString("utf8");
+    try {
+      mkdirSync9(dir, { recursive: true });
+      writeFileSync11(path, text);
+    } catch {
+    }
+    return text;
+  } catch {
+    try {
+      if (existsSync19(path)) return readFileSync25(path, "utf8");
+    } catch {
+    }
+    return "";
+  }
+}
+async function loadFeeds() {
+  const [epssCsv, kevJson] = await Promise.all([loadCached(EPSS_URL, "epss.csv", true), loadCached(KEV_URL, "kev.json", false)]);
+  return { epss: parseEpssCsv(epssCsv), kev: parseKev(kevJson) };
+}
+async function enrichFindings(findings, opts = {}) {
+  const deployment = deploymentFacts(opts.context);
+  if (opts.enabled === false) {
+    return {
+      findings: applyEnrichment(findings, { epss: /* @__PURE__ */ new Map(), kev: /* @__PURE__ */ new Map() }, deployment),
+      note: `risk: severity-only (enrichment off)${deploymentNote(deployment)}`
+    };
+  }
+  let feeds;
+  try {
+    feeds = await loadFeeds();
+  } catch {
+    feeds = { epss: /* @__PURE__ */ new Map(), kev: /* @__PURE__ */ new Map() };
+  }
+  const enriched = applyEnrichment(findings, feeds, deployment);
+  const withCve = enriched.filter((f) => f.cve);
+  const kevHits = enriched.filter((f) => f.kev).length;
+  const note = feeds.epss.size || feeds.kev.size ? `risk: EPSS ${feeds.epss.size} CVEs \xB7 KEV ${feeds.kev.size} \xB7 ${withCve.length} finding(s) with CVE${kevHits ? ` \xB7 ${kevHits} in KEV` : ""}` : "risk: severity-only (feeds unavailable offline)";
+  return { findings: enriched, note: note + deploymentNote(deployment) };
+}
+function deploymentNote(d) {
+  const parts2 = [d.exposure && `exposure ${d.exposure}`, d.criticality && `criticality ${d.criticality}`].filter(Boolean);
+  return parts2.length ? ` \xB7 weighted by CONTEXT.md (${parts2.join(", ")})` : "";
+}
+
+// src/check.ts
+import { existsSync as existsSync21, openSync, readSync, closeSync } from "fs";
+import { join as join45, resolve as resolve15, sep as sep9 } from "path";
+
+// src/context.ts
+import { existsSync as existsSync20, readFileSync as readFileSync26 } from "fs";
+import { join as join44 } from "path";
+
+// src/classes/markers.ts
+var AUTH_FLOOR = {
+  words: [
+    "requireAuth",
+    "requiresAuth",
+    "isAuthenticated",
+    "ensureAuthenticated",
+    "ensureLoggedIn",
+    "ensureLogin",
+    "requireLogin",
+    "checkAuth",
+    "verifyToken",
+    "verifyJwt",
+    "jwtVerify",
+    "authenticateToken",
+    "authMiddleware",
+    "requireRole",
+    "requireAdmin",
+    "hasRole",
+    "hasPermission",
+    "checkPermission",
+    "authorize",
+    "authorization"
+  ]
+};
+var THROTTLE_FLOOR = {
+  patterns: [
+    /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/
+  ]
+};
+var FLOOR = { auth: AUTH_FLOOR, throttle: THROTTLE_FLOOR };
+var packActive = (p, detected2) => !p.framework && !p.library || detected2.has(p.framework ?? "") || detected2.has(p.library ?? "");
+function markerFor(lens, detected2 = [], packs = PACKS) {
+  const on = new Set(detected2);
+  const parts2 = [FLOOR[lens]];
+  for (const p of packs) {
+    const g = p.markers?.global?.[lens];
+    if (g) parts2.push(g);
+  }
+  for (const p of packs) {
+    const d = p.markers?.detected?.[lens];
+    if (d && packActive(p, on)) parts2.push(d);
+  }
+  const words = parts2.flatMap((v) => v.words ?? []);
+  const annotations = parts2.flatMap((v) => v.annotations ?? []);
+  const patterns = parts2.flatMap((v) => v.patterns ?? []);
+  const alts = [];
+  if (words.length) alts.push(`\\b(${words.join("|")})\\b`);
+  if (annotations.length) alts.push(`(?<![\\w@])@(?:${annotations.join("|")})\\b`);
+  for (const re of patterns) alts.push(re.source);
+  return new RegExp(alts.join("|"));
+}
+function detectedIds(stack) {
+  return (stack ?? []).map((f) => f.id);
+}
+
+// src/context.ts
+var MAX_SCAFFOLD = 40;
+var MAX_SCAFFOLD_ENTRIES = 80;
+var AUTH_MARKER = markerFor("auth");
+var THROTTLE_MARKER = markerFor("throttle");
+function detectStack(repo) {
+  const stack = detectFrameworks(repo);
+  return { labels: stackLabels(stack), ids: stack.map((f) => f.id) };
+}
+function appliesTo2(languages, langId) {
+  return languages.includes("*") || languages.includes(langId);
+}
+function inferTrustBoundaries(surface, authCount) {
+  const kinds2 = new Set(surface.entryPoints.map((g) => g.kind));
+  const out2 = [];
+  if (kinds2.has("http")) out2.push("HTTP request handlers receive untrusted client input (query/body/params/headers/cookies).");
+  if (kinds2.has("ws")) out2.push("WebSocket/stream messages are untrusted client data.");
+  if (kinds2.has("cli")) out2.push("CLI arguments are untrusted when the program is invoked with attacker-controlled args.");
+  if (kinds2.has("env")) out2.push("Environment variables \u2014 trust depends on the deployment / secret-management model.");
+  if (kinds2.has("stdin")) out2.push("Interactive/stdin input is untrusted.");
+  out2.push(
+    authCount > 0 ? `Authentication boundary: ${authCount} candidate auth/authorization site(s) detected \u2014 confirm which routes they actually protect.` : `No auth/authorization middleware detected \u2014 confirm whether endpoints are intentionally public.`
+  );
+  return out2;
+}
+var sinkIndexCache = /* @__PURE__ */ new WeakMap();
+function sinkKindsAt(fileScan, spec, lines5) {
+  const cached = sinkIndexCache.get(fileScan);
+  if (cached) return cached;
+  const index = /* @__PURE__ */ new Map();
+  const hits = [...findSinks(spec, fileScan.calls ?? [], void 0, fileScan.imports, void 0, lines5), ...findTextSinks(spec, lines5.join("\n"))];
+  for (const h of hits) {
+    let set = index.get(h.line);
+    if (!set) index.set(h.line, set = /* @__PURE__ */ new Set());
+    set.add(h.kind);
+  }
+  sinkIndexCache.set(fileScan, index);
+  return index;
+}
+function sanitizerWeight(kind) {
+  return kind === "*" ? 0 : 1;
+}
+function breadthFirstByKind(ranked) {
+  const rounds = /* @__PURE__ */ new Map();
+  for (const x of ranked) (rounds.get(x.kind) ?? rounds.set(x.kind, []).get(x.kind)).push(x);
+  const out2 = [];
+  for (let i2 = 0; out2.length < ranked.length; i2++) {
+    let any = false;
+    for (const list2 of rounds.values()) {
+      const at2 = list2[i2];
+      if (at2) {
+        out2.push(at2);
+        any = true;
+      }
+    }
+    if (!any) break;
+  }
+  return out2;
+}
+function capBySite(items, weight, bySite) {
+  const ranked = items.slice().sort((a, b) => weight(b) - weight(a) || bySite(a, b));
+  const spread = ranked[0]?.kind === void 0 ? ranked : breadthFirstByKind(ranked);
+  return spread.slice(0, MAX_SCAFFOLD).sort(bySite);
+}
+function buildContextScaffold(repo, scan2, surface) {
+  const stack = detectStack(repo);
+  const frameworks = stack.labels;
+  const authMarker = markerFor("auth", stack.ids);
+  const rank2 = new Map(surface.byFile.map((f) => [f.file, f.score]));
+  const perFile = /* @__PURE__ */ new Map();
+  for (const g of surface.entryPoints) {
+    for (const s of g.samples) {
+      const key = `${s.file}\0${s.kind}`;
+      const seen = perFile.get(key);
+      if (!seen || s.line < seen.line) perFile.set(key, { file: s.file, line: s.line, kind: s.kind });
+    }
+  }
+  const entryPoints = [...perFile.values()].sort(
+    (a, b) => (
+      // PRODUCTION first. This brief answers "where does untrusted input enter
+      // the shipped artifact?", and a test harness is not the artifact — a
+      // route mounted only by jest presumes an attacker who already runs the
+      // suite. Measured: 19 of 77 slots on a real monorepo went to
+      // `__tests__/*.test.ts` and `src/e2e/*.e2e.ts`, ranked level with the
+      // production routes they were crowding out.
+      //
+      // Ranked, never dropped: with room to spare they still appear, below the
+      // real surface. `--include-tests` is for auditing the suite itself.
+      (isTestPath(a.file) ? 1 : 0) - (isTestPath(b.file) ? 1 : 0) || // Kind next: in a capped brief, an HTTP route earns its slot ahead of
+      // an environment read, which presumes a much narrower attacker.
+      entryWeight(b.kind) - entryWeight(a.kind) || (rank2.get(b.file) ?? 0) - (rank2.get(a.file) ?? 0) || byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind)
+    )
+  ).slice(0, MAX_SCAFFOLD_ENTRIES).sort((a, b) => byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind));
+  const authMiddleware = [];
+  const sanitizers = [];
+  const seenSanitizer = /* @__PURE__ */ new Set();
+  for (const fileScan of scan2.files) {
+    const spec = langForFile(fileScan.rel);
+    if (!spec) continue;
+    const lines5 = readText2(join44(repo, fileScan.rel)).split(/\r?\n/);
+    for (let i2 = 0; i2 < lines5.length; i2++) {
+      const line2 = lines5[i2];
+      const am = authMarker.exec(line2);
+      if (am) authMiddleware.push({ file: fileScan.rel, line: i2 + 1, hint: am[0] });
+      for (const rule2 of SANITIZERS) {
+        if (!appliesTo2(rule2.languages, spec.id)) continue;
+        if (rule2.sinkLineOnly && !sinkKindsAt(fileScan, spec, lines5).get(i2 + 1)?.has(rule2.kind))
+          continue;
+        if (rule2.re.test(line2)) {
+          const key = `${fileScan.rel}\0${rule2.kind}`;
+          if (!seenSanitizer.has(key)) {
+            seenSanitizer.add(key);
+            sanitizers.push({ file: fileScan.rel, line: i2 + 1, kind: rule2.kind });
+          }
+          break;
+        }
+      }
+    }
+  }
+  const bySite = (a, b) => byStr(a.file, b.file) || a.line - b.line;
+  return {
+    frameworks,
+    entryPoints,
+    authMiddleware: capBySite(authMiddleware, () => 0, bySite),
+    // Rank BEFORE capping, for the same reason the entry-point brief does: a
+    // path-sorted `slice` is an alphabetical PREFIX, not a sample. On a real
+    // audit all 40 slots went to `.husky/`, `lighthouserc.cjs` and `app/a…`,
+    // while the repo's only HTML sanitizer — the subject of two of its five high
+    // findings — never appeared at all.
+    sanitizers: capBySite(sanitizers, (x) => sanitizerWeight(x.kind), bySite),
+    trustBoundaries: inferTrustBoundaries(surface, authMiddleware.length)
+  };
+}
+var CONTEXT_OUTLINE = [
+  "what the app does and who its users are",
+  "authentication & authorization model \u2014 who may do what, and where it is enforced",
+  "trust boundaries \u2014 where untrusted data enters, what is trusted",
+  "framework protections already in place (ORM parameterization, auto-escaping, CSRF\u2026)",
+  "known-safe sinks / accepted risks",
+  "`Exposure: internet-facing|internal|build-time` and `Criticality: crown-jewel|standard|peripheral` (the risk score reads them)",
+  "threat model \u2014 STRIDE per trust boundary, LINDDUN for personal data (references/threat-modeling.md)"
+];
+function renderContextScaffoldMd(repo, run2, s) {
+  const L = [];
+  L.push(`# ultrasec project-context primer`);
+  L.push("");
+  L.push(`- repo: \`${repo}\``);
+  L.push("");
+  L.push(`> The deterministic scaffold below is a STARTING POINT. Author **\`${join44(run2, "CONTEXT.md")}\`**`);
+  L.push(`> describing the project's purpose, trust model, auth/authorization scheme, and any`);
+  L.push(`> framework-provided protections. ultrasec injects CONTEXT.md into every \`dossier\` and the`);
+  L.push(`> \`verify\` worklist, so later stages reason WITH your threat model. CONTEXT.md is **additive`);
+  L.push(`> evidence only \u2014 it never gates or changes a verdict.**`);
+  L.push("");
+  L.push(`## Detected frameworks`);
+  L.push(s.frameworks.length ? s.frameworks.map((f) => `\`${f}\``).join(", ") : "_none detected \u2014 confirm the stack manually._");
+  L.push("");
+  L.push(`## Entry points (untrusted input) \u2014 ${s.entryPoints.length}${s.entryPoints.length >= MAX_SCAFFOLD_ENTRIES ? "+" : ""}`);
+  L.push("");
+  if (!s.entryPoints.length) L.push(`_none detected._`);
+  else L.push(`_One line per file, highest attack surface first (HTTP and cross-origin kinds before env/CLI)._`);
+  for (const e of s.entryPoints) L.push(`- \`${e.file}:${e.line}\` (${e.kind})${isTestPath(e.file) ? " \u2014 **test harness**, not the shipped artifact" : ""}`);
+  L.push("");
+  L.push(`## Auth / authorization sites (candidate protections) \u2014 ${s.authMiddleware.length}${s.authMiddleware.length >= MAX_SCAFFOLD ? "+" : ""}`);
+  if (!s.authMiddleware.length) L.push(`_none detected \u2014 confirm whether endpoints are intentionally public._`);
+  for (const a of s.authMiddleware) L.push(`- \`${a.file}:${a.line}\` \u2014 ${a.hint}`);
+  L.push("");
+  L.push(`## Sanitizers / validators present \u2014 ${s.sanitizers.length}${s.sanitizers.length >= MAX_SCAFFOLD ? "+" : ""}`);
+  if (!s.sanitizers.length) L.push(`_none detected._`);
+  for (const sa of s.sanitizers) L.push(`- \`${sa.file}:${sa.line}\` (${sa.kind})`);
+  L.push("");
+  L.push(`## Trust boundaries (inferred)`);
+  for (const t of s.trustBoundaries) L.push(`- ${t}`);
+  L.push("");
+  L.push(`## Suggested CONTEXT.md outline`);
+  L.push(`1. **What the app does** and who its users are.`);
+  L.push(`2. **Authentication & authorization model** \u2014 who is allowed to do what, and how it's enforced.`);
+  L.push(`3. **Trust boundaries** \u2014 where untrusted data enters; what is trusted.`);
+  L.push(`4. **Framework protections already in place** \u2014 ORM parameterization, template auto-escaping, CSRF tokens, etc.`);
+  L.push(`5. **Known-safe sinks / accepted risks** \u2014 so later stages don't re-litigate them.`);
+  L.push(`6. **Exposure** \u2014 one of \`internet-facing\` \xB7 \`internal\` \xB7 \`build-time\`, and`);
+  L.push(`   **asset criticality** \u2014 \`crown-jewel\` \xB7 \`standard\` \xB7 \`peripheral\`. Write them as a line`);
+  L.push(`   \`Exposure: internet-facing\` / \`Criticality: crown-jewel\`; the risk score reads them and`);
+  L.push(`   ranks accordingly. Absent, ranking is unchanged.`);
+  L.push(`7. **Threat model (STRIDE)** \u2014 per trust boundary, which of Spoofing / Tampering /`);
+  L.push(`   Repudiation / Information disclosure / Denial of service / Elevation of privilege you`);
+  L.push(`   actually care about, and which you have accepted. For personal data add LINDDUN`);
+  L.push(`   (Linking, Identifying, Non-repudiation, Detecting, Data disclosure, Unawareness,`);
+  L.push(`   Non-compliance). See references/threat-modeling.md \u2014 this is what stops the hunt`);
+  L.push(`   being a checklist walk.`);
+  L.push("");
+  return L.join("\n") + "\n";
+}
+var COMPACT_SECTIONS = /^##\s*(hunt list|exposure|criticality|trust model|trust boundaries|auth)/i;
+var RISK_LINE = /^\s*(exposure|criticality)\s*:/i;
+function compactContextDoc(doc) {
+  const lines5 = doc.split(/\r?\n/);
+  const out2 = [];
+  let keeping = false;
+  for (const line2 of lines5) {
+    if (/^##\s/.test(line2)) keeping = COMPACT_SECTIONS.test(line2);
+    if (keeping || RISK_LINE.test(line2)) out2.push(line2);
+  }
+  const kept = out2.join("\n").trim();
+  return kept.length ? kept : void 0;
+}
+function loadContextDoc(run2) {
+  const p = join44(run2, "CONTEXT.md");
+  if (!existsSync20(p)) return void 0;
+  try {
+    const s = readFileSync26(p, "utf8").trim();
+    return s.length ? s : void 0;
+  } catch {
+    return void 0;
+  }
+}
+var PRESENCE_NEGATION = /\b(?:aucune?s?|nulle\s+part|jamais|n['’]existe|n['’]ont|ne\s+contien\w*|n['’]a\s+aucun|pas\s+d['’]|pas\s+de\b|sans\b|z[ée]ro|no\b|none\b|never\b|nowhere\b|not\s+a\s+single|there\s+(?:is|are)\s+no|contains?\s+no|does\s+not\s+contain|do\s+not\s+contain)/gi;
+var CODE_SPAN = /`([^`\n]+)`/g;
+var NEGATION_WINDOW = 16;
+var isSearchable = (rel2) => langForFile(rel2) !== void 0;
+var ATTRIBUTIVE_NEGATION = /\b(?:with|avec)\s+$/i;
+var GENERIC_SUBJECT = /^[\s>*_-]*(?:a|an|any|every|each|if|when|whenever|unless|un|une|tout|toute|si|lorsqu['’]?\w*|quand)\s/i;
+function attributive(sentence, negationAt) {
+  const before = sentence.slice(0, negationAt);
+  return ATTRIBUTIVE_NEGATION.test(before) && GENERIC_SUBJECT.test(sentence);
+}
+var MIN_TOKEN = 4;
+var MAX_CLAIMS = 20;
+var MAX_HITS = 3;
+var isToken = (s) => s.length >= MIN_TOKEN && /^[\w$@][\w$.@/:-]*$/.test(s) && /[A-Za-z]/.test(s);
+function extractNegativeClaims(md) {
+  const claims = [];
+  const lines5 = md.split(/\r?\n/);
+  let block;
+  const flush = () => {
+    if (!block) return;
+    const { from, to } = block;
+    for (const sentence of block.text.split(/(?<=[.;!?])\s+/)) {
+      const tokens = [];
+      PRESENCE_NEGATION.lastIndex = 0;
+      let m = PRESENCE_NEGATION.exec(sentence);
+      while (m) {
+        if (attributive(sentence, m.index)) {
+          m = PRESENCE_NEGATION.exec(sentence);
+          continue;
+        }
+        const at2 = m.index + m[0].length;
+        const rest = sentence.slice(at2);
+        CODE_SPAN.lastIndex = 0;
+        let span = CODE_SPAN.exec(rest);
+        while (span && span.index <= NEGATION_WINDOW) {
+          const t = span[1].trim();
+          if (isToken(t) && !tokens.includes(t)) tokens.push(t);
+          span = CODE_SPAN.exec(rest);
+        }
+        m = PRESENCE_NEGATION.exec(sentence);
+      }
+      if (!tokens.length) continue;
+      let line2 = from;
+      for (let i2 = from; i2 <= to; i2++) {
+        if (lines5[i2 - 1]?.includes(tokens[0])) {
+          line2 = i2;
+          break;
+        }
+      }
+      claims.push({ sentence: sentence.trim(), line: line2, tokens });
+    }
+    block = void 0;
+  };
+  for (let i2 = 0; i2 < lines5.length; i2++) {
+    const line2 = lines5[i2];
+    if (!line2.trim() || /^#{1,6}\s/.test(line2)) {
+      flush();
+      continue;
+    }
+    if (block) {
+      block.text += ` ${line2.trim()}`;
+      block.to = i2 + 1;
+    } else block = { text: line2.trim(), from: i2 + 1, to: i2 + 1 };
+  }
+  flush();
+  return claims;
+}
+function contradictedClaims(repo, claims, opts = {}) {
+  const examined = claims.slice(0, MAX_CLAIMS);
+  const wanted = /* @__PURE__ */ new Map();
+  for (const claim of examined) {
+    for (const token of claim.tokens) {
+      const key = `${claim.line}:${token}`;
+      if (!wanted.has(key)) wanted.set(key, { claim, token, hits: [], total: 0 });
+    }
+  }
+  if (!wanted.size) return [];
+  const pruned = buildPruneMatcher(repo, { gitignore: opts.gitignore, exclude: opts.exclude, includeVendored: opts.includeVendored });
+  for (const file of walk2(repo, { gitignore: opts.gitignore, exclude: opts.exclude, maxFiles: opts.maxFiles })) {
+    if (pruned?.(file.rel) || !isSearchable(file.rel)) continue;
+    let text;
+    try {
+      text = readText2(file.abs);
+    } catch {
+      continue;
+    }
+    if (!text) continue;
+    let lines5;
+    for (const entry2 of wanted.values()) {
+      if (!text.includes(entry2.token)) continue;
+      lines5 ??= text.split(/\r?\n/);
+      for (let i2 = 0; i2 < lines5.length; i2++) {
+        if (!lines5[i2].includes(entry2.token)) continue;
+        entry2.total++;
+        if (entry2.hits.length < MAX_HITS) entry2.hits.push({ file: file.rel, line: i2 + 1 });
+      }
+    }
+  }
+  return [...wanted.values()].filter((e) => e.total > 0).sort((a, b) => a.claim.line - b.claim.line || byStr(a.token, b.token));
+}
+
+// src/surface.ts
+var SURFACES = ["code", "supply", "deps"];
+var SURFACE_TITLE = {
+  code: "Your source code",
+  supply: "Secrets & configuration",
+  deps: "Dependency advisories"
+};
+var SURFACE_OF_CATEGORY = {
+  taint: "code",
+  sast: "code",
+  authz: "code",
+  crypto: "code",
+  logs: "code",
+  privacy: "code",
+  other: "code",
+  secret: "supply",
+  config: "supply",
+  dep: "deps"
+};
+function surfaceOf(f) {
+  return SURFACE_OF_CATEGORY[f.category] ?? "code";
+}
+function bySurface(findings) {
+  const out2 = { code: [], supply: [], deps: [] };
+  for (const f of findings) out2[surfaceOf(f)].push(f);
+  return out2;
+}
+var SURFACE_FILTERS = [...SURFACES, "code+supply", "all"];
+var ADJUDICATION_SURFACE = "code+supply";
+function inSurface(f, filter) {
+  if (filter === "all") return true;
+  const s = surfaceOf(f);
+  return filter === "code+supply" ? s !== "deps" : s === filter;
+}
+function parseSurfaceFlag(value, fallback) {
+  if (value === void 0) return fallback;
+  return SURFACE_FILTERS.includes(value) ? value : null;
+}
+var MUST_READ = ["critical", "high"];
+function unadjudicatedCode(findings) {
+  return findings.filter((f) => f.status === "open" && surfaceOf(f) !== "deps" && MUST_READ.includes(f.severity));
+}
+
+// src/check.ts
+function insideRepo(repo, file) {
+  const base = resolve15(repo);
+  const abs = resolve15(base, file);
+  return abs === base || abs.startsWith(base + sep9);
+}
+var LINE_COUNT_CHUNK_BYTES = 1 << 20;
+function countNewlines(fd, chunkBytes = LINE_COUNT_CHUNK_BYTES) {
+  const buf = Buffer.alloc(chunkBytes);
+  let newlines = 0;
+  for (; ; ) {
+    const n = readSync(fd, buf, 0, chunkBytes, null);
+    if (n === 0) break;
+    for (let i2 = 0; i2 < n; i2++) if (buf[i2] === 10) newlines++;
+  }
+  return newlines;
+}
+function lineCountDetailed(repo, file) {
+  if (!insideRepo(repo, file)) return { status: "missing" };
+  const abs = join45(repo, file);
+  if (!existsSync21(abs)) return { status: "missing" };
+  let fd;
+  try {
+    fd = openSync(abs, "r");
+  } catch (e) {
+    return { status: "unreadable", error: e.message };
+  }
+  try {
+    return { status: "ok", lines: countNewlines(fd) + 1 };
+  } catch (e) {
+    return { status: "unreadable", error: e.message };
+  } finally {
+    closeSync(fd);
+  }
+}
+function lineCount(repo, file) {
+  const outcome3 = lineCountDetailed(repo, file);
+  return outcome3.status === "ok" ? outcome3.lines : null;
+}
+function locsOf(f) {
+  const locs = [];
+  if (f.source) locs.push(f.source);
+  if (f.sink) locs.push(f.sink);
+  for (const p of f.path ?? []) locs.push(p);
+  for (const e of f.locations ?? []) locs.push({ file: e.file, line: e.line ?? 0 });
+  return locs;
+}
+function atLeast(sev, floor) {
+  return SEVERITIES2.indexOf(sev) <= SEVERITIES2.indexOf(floor);
+}
+function check(dossier, opts = {}) {
+  const repo = opts.repo ?? dossier.manifest.repo;
+  const floor = opts.minSeverity;
+  const findings = floor ? dossier.findings.filter((f) => atLeast(f.severity, floor)) : dossier.findings;
+  const dangling = [];
+  const lineCache = /* @__PURE__ */ new Map();
+  const linesOf = (file) => {
+    if (!lineCache.has(file)) lineCache.set(file, lineCountDetailed(repo, file));
+    return lineCache.get(file);
+  };
+  let historical = 0;
+  for (const f of findings) {
+    if (f.status === "dismissed") continue;
+    for (const loc of locsOf(f)) {
+      if (!insideRepo(repo, loc.file)) continue;
+      if (f.atCommit) {
+        const at2 = lineCountAtCommit(repo, f.atCommit, loc.file);
+        if (at2 === null)
+          dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `file not found at ${f.atCommit.slice(0, 8)} (the commit the scanner cited)` });
+        else if (loc.line !== 0 && (loc.line < 1 || loc.line > at2))
+          dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range at ${f.atCommit.slice(0, 8)} (file had ${at2} lines)` });
+        else historical++;
+        continue;
+      }
+      const lc = linesOf(loc.file);
+      if (lc.status === "missing") dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
+      else if (lc.status === "unreadable") dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `file unreadable (${lc.error})` });
+      else if (loc.line === 0) continue;
+      else if (loc.line < 1 || loc.line > lc.lines)
+        dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range (file has ${lc.lines} lines)` });
+    }
+  }
+  const open = findings.filter((f) => f.status === "open").length;
+  const confirmed = findings.filter((f) => f.status === "confirmed").length;
+  const dismissed = findings.filter((f) => f.status === "dismissed").length;
+  const needsHuman = findings.filter((f) => f.status === "needs-human").length;
+  const KNOWN = /* @__PURE__ */ new Set(["open", "confirmed", "dismissed", "needs-human"]);
+  const unadjudicated = unadjudicatedCode(findings).length + findings.filter((f) => !KNOWN.has(f.status)).length;
+  const openAdvisories = findings.filter((f) => f.status === "open" && surfaceOf(f) === "deps").length;
+  const openBelow = findings.filter((f) => f.status === "open" && surfaceOf(f) !== "deps").length - unadjudicatedCode(findings).length;
+  const unargued = findings.filter((f) => f.status === "dismissed" && (f.severity === "critical" || f.severity === "high") && !f.brocard).map((f) => f.id).sort(byStr);
+  const messages = [];
+  let ok = true;
+  if (dossier.manifest.scannerPolicy && !dossier.manifest.scannerPolicy.complete) {
+    ok = false;
+    messages.push(`Required scanners incomplete: ${dossier.manifest.scannerPolicy.incomplete.join(", ")} \u2014 re-run scan with the required tools available.`);
+  }
+  if (dangling.length) {
+    ok = false;
+    messages.push(`${dangling.length} dangling citation(s) \u2014 a cited [file:line] does not resolve (hallucinated or stale).`);
+  }
+  if (historical > 0)
+    messages.push(
+      `${historical} citation(s) resolved against the commit that introduced them, not HEAD \u2014 history-scanned secrets in files since deleted. Still graded, just against the right tree.`
+    );
+  if (opts.semantic) {
+    if (unadjudicated > 0) {
+      ok = false;
+      messages.push(`${unadjudicated} candidate(s) still unadjudicated \u2014 run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
+    }
+    if (openAdvisories > 0) messages.push(`${openAdvisories} dependency advisory(ies) open \u2014 ranked per package in the report (info, not failing).`);
+    if (openBelow > 0) messages.push(`${openBelow} medium/low/info candidate(s) open in code or config (info, not failing).`);
+    if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human \u2014 review required (not auto-failing).`);
+    if (unargued.length > 0)
+      messages.push(
+        `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", \u2026" : ""}) \u2014 set the verdict's \`brocard\` field so the refutation can be reviewed. A prose \`note\` is not read as a ground, however carefully argued: references/dismissal-brocards.md.`
+      );
+  }
+  const claims = opts.run ? contradicted(repo, opts.run) : [];
+  if (claims.length && opts.semantic) {
+    ok = false;
+    messages.push(
+      `${claims.length} negation(s) in CONTEXT.md contradicted by the code \u2014 reconcile the sentence or the finding before trusting it as background.`
+    );
+  }
+  if (ok)
+    messages.push(`grounding OK${opts.semantic ? " \xB7 audit adjudicated" : ""} \u2014 ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
+  return {
+    ok,
+    dangling,
+    open,
+    confirmed,
+    dismissed,
+    needsHuman,
+    gated: findings.length,
+    openAdvisories,
+    unarguedDismissals: unargued,
+    historical,
+    contradictions: claims,
+    messages
+  };
+}
+function contradicted(repo, run2) {
+  const doc = loadContextDoc(run2);
+  if (!doc) return [];
+  try {
+    return contradictedClaims(repo, extractNegativeClaims(doc));
+  } catch {
+    return [];
+  }
+}
+
+// src/assumptions.ts
+import { join as join46 } from "path";
+
+// src/apply-parse.ts
+function describeValue(v) {
+  if (v === void 0) return "missing";
+  if (v === null) return "null";
+  if (typeof v === "string") return JSON.stringify(v.length > 40 ? `${v.slice(0, 40)}\u2026` : v);
+  if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return `array(${v.length})`;
+  return typeof v;
+}
+function notInVocabulary(field2, value, allowed) {
+  return `${field2} ${describeValue(value)} is not one of ${allowed.join("|")}`;
+}
+function badField(field2, value, expected) {
+  return `${field2} ${describeValue(value)} \u2014 expected ${expected}`;
+}
+function coerceRows(data, wrapperKeys, label2) {
+  if (Array.isArray(data)) return data;
+  for (const key of wrapperKeys) {
+    const nested = data?.[key];
+    if (Array.isArray(nested)) return nested;
+  }
+  const shapes = [`a JSON array`, ...wrapperKeys.map((k) => `{"${k}":[...]}`)].join(" or ");
+  throw new Error(`unrecognized ${label2} shape \u2014 expected ${shapes} (fail-closed)`);
+}
+function requireUsable(result, sourceLength, requirement) {
+  if (sourceLength > 0 && result.rows.length === 0) {
+    const byReason = /* @__PURE__ */ new Map();
+    for (const d of result.dropped) byReason.set(d.reason, [...byReason.get(d.reason) ?? [], d.index]);
+    const detail = [...byReason].map(([reason, rows]) => {
+      const shown = rows.slice(0, LIST_CAP).join(", ");
+      return `${rows.length === 1 ? "row" : "rows"} ${shown}${rows.length > LIST_CAP ? ` (+${rows.length - LIST_CAP} more)` : ""}: ${reason}`;
+    }).join("; ");
+    throw new Error(`${sourceLength} row(s), none usable \u2014 each needs ${requirement} (fail-closed)${detail ? ` \u2014 ${detail}` : ""}`);
+  }
+  return result;
+}
+function formatNormalized(normalized) {
+  return normalized.map((n) => `  \u21B7 row ${n.index}: ${n.note}`);
+}
+function formatDropped(dropped) {
+  return dropped.map((d) => `  \u2717 dropped ${d.file ? `${d.file} ` : ""}row ${d.index}: ${d.reason}`);
+}
+function surfaceDropped(dropped, strict, emit2) {
+  for (const line2 of linesCapped(formatDropped(dropped))) emit2(line2);
+  if (strict && dropped.length > 0) {
+    emit2(`  --strict: ${dropped.length} malformed row(s) refused \u2014 failing so the loss isn't absorbed silently.`);
+    return 1;
+  }
+  return 0;
+}
+function parseIdVerdictRows(raw, opts) {
+  const arr = coerceRows(JSON.parse(raw), opts.wrapperKeys, opts.label);
+  const rows = [];
+  const dropped = [];
+  for (const [index, row] of arr.entries()) {
+    if (!row || typeof row !== "object") {
+      dropped.push({ index, reason: badField("row", row, "an object") });
+      continue;
+    }
+    const r = row;
+    const bad = [];
+    if (typeof r.id !== "string") bad.push(badField("id", r.id, "a string"));
+    if (!opts.verdicts.includes(r.verdict)) bad.push(notInVocabulary("verdict", r.verdict, opts.verdicts));
+    if (bad.length) {
+      dropped.push({ index, reason: bad.join(", ") });
+      continue;
+    }
+    rows.push(opts.build(r, r.verdict));
+  }
+  return requireUsable({ rows, dropped }, arr.length, `a string "id" and a "verdict" among ${opts.verdicts.join("|")}`);
+}
+var DISCOVERY_REQUIREMENT = `title/message/file (strings), line \u2265 0, a category among ${CATEGORIES.join(
+  "|"
+)} (aliases accepted) and a severity among ${SEVERITIES2.join("|")}`;
+function parseDiscoveryRow(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { reason: badField("row", raw, "an object") };
+  const d = raw;
+  const bad = [];
+  for (const field2 of ["title", "message", "file"]) {
+    if (typeof d[field2] !== "string" || !d[field2].length) bad.push(badField(field2, d[field2], "a non-empty string"));
+  }
+  if (!Number.isInteger(d.line) || d.line < 0) bad.push(badField("line", d.line, "an integer \u2265 0 (0 = the whole file)"));
+  const cat = normalizeCategory(d.category);
+  if (!cat) bad.push(`${notInVocabulary("category", d.category, CATEGORIES)} (nor a known alias \u2014 see CATEGORY_ALIASES)`);
+  if (!SEVERITIES2.includes(d.severity)) bad.push(notInVocabulary("severity", d.severity, SEVERITIES2));
+  if (bad.length) return { reason: bad.join(", ") };
+  const path = Array.isArray(d.path) ? d.path.filter((p) => {
+    const s = p;
+    return !!s && typeof s === "object" && typeof s.file === "string" && Number.isInteger(s.line) && s.line >= 1;
+  }).map((p) => {
+    const s = p;
+    return { file: s.file, line: s.line, why: typeof s.why === "string" ? s.why : "" };
+  }) : void 0;
+  return {
+    row: {
+      title: d.title,
+      category: cat.category,
+      ...cat.folded ? { vulnClass: String(d.category) } : {},
+      severity: d.severity,
+      ...typeof d.cwe === "string" ? { cwe: d.cwe } : {},
+      message: d.message,
+      file: d.file,
+      line: d.line,
+      ...path && path.length ? { path } : {}
+    },
+    ...cat.folded ? { note: `category ${describeValue(d.category)} folded to "${cat.category}"` } : {}
+  };
+}
+
+// src/assumptions.ts
+var MAX_UNITS = 120;
+function buildAssumptionWorklist(scan2) {
+  const items = [];
+  for (const f of scan2.files) {
+    const lang = langForFile(f.rel);
+    if (!lang) continue;
+    const text = readText2(join46(scan2.repo, f.rel));
+    const sources = findSources(lang, text).length;
+    const sinks = findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols), text.split(/\r?\n/)).length;
+    if (!sources && !sinks) continue;
+    const why = sources && sinks ? "reads untrusted input AND performs a dangerous operation" : sources ? "reads untrusted input" : "performs a dangerous operation";
+    const named = f.symbols.filter((s) => s.name).slice(0, 12);
+    items.push({
+      at: f.rel,
+      file: f.rel,
+      ...named.length ? { symbols: named.map((s) => `${s.name}:${s.line}`) } : {},
+      signals: { sources, sinks },
+      why,
+      guarantees: [],
+      assumptions: [],
+      calls: [],
+      openQuestions: []
+    });
+  }
+  const testLast = (i2) => isTestPath(i2.file) ? 1 : 0;
+  items.sort((a, b) => testLast(a) - testLast(b) || b.signals.sources + b.signals.sinks - (a.signals.sources + a.signals.sinks) || byStr(a.at, b.at));
+  const out2 = [];
+  let units = 0;
+  for (const it of items) {
+    if (units >= MAX_UNITS) break;
+    const room = MAX_UNITS - units;
+    if (it.symbols && it.symbols.length > room) it.symbols = it.symbols.slice(0, room);
+    units += it.symbols?.length ?? 1;
+    out2.push(it);
+  }
+  return out2;
+}
+function renderAssumptionsMd(items, context) {
+  const L = [];
+  L.push(`# ultrasec assumption map (${items.length} unit${items.length === 1 ? "" : "s"})`);
+  L.push("");
+  L.push(`Read each unit and record what it **guarantees** and what it **assumes**. Build`);
+  L.push(`understanding, not verdicts: no severity here, and no finding \u2014 forcing a rating out`);
+  L.push(`of an observation this early is how an uncomfortable one gets talked away.`);
+  L.push("");
+  L.push(`For each unit:`);
+  L.push("");
+  L.push(`- **guarantees** \u2014 what holds when it returns, each with the line that establishes it.`);
+  L.push(`  If nothing establishes it, it is not a guarantee; it is an assumption.`);
+  L.push(`- **assumptions** \u2014 what it depends on and does not verify. Set \`enforcedAt\` to the`);
+  L.push(`  \`file:line\` that enforces it, or to the literal **\`nothing-found\`** when you looked`);
+  L.push(`  and there is none.`);
+  L.push(`- **calls** \u2014 what it calls and what it expects each callee to have already done.`);
+  L.push(`- **openQuestions** \u2014 what you could not resolve. List it; do not guess it.`);
+  L.push("");
+  L.push(`> **\`nothing-found\` is the output.** A function that trusts its caller to have checked`);
+  L.push(`> ownership, called by a caller that trusts the function to check it, is a vulnerability`);
+  L.push(`> present in NEITHER function's code. That is why taint enumeration cannot see it and`);
+  L.push(`> why reading file by file keeps missing it. \`--apply\` turns every \`nothing-found\` into`);
+  L.push(`> a prioritized \`investigate\` lead.`);
+  L.push("");
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` \u2014 the trust model these assumptions are measured against._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
+  for (const it of items) {
+    L.push(`## \`${it.at}\``);
+    L.push(`- ${it.why} (${it.signals.sources} source(s), ${it.signals.sinks} sink(s) in this file)`);
+    if (it.symbols?.length) L.push(`- units: ${it.symbols.map((u) => `\`${u}()\``).join(", ")} \u2014 answer each as \`${it.file}:<line>\``);
+    L.push("");
+  }
+  return L.join("\n") + "\n";
+}
+var NOTHING_FOUND = "nothing-found";
+function parseAssumptionResults(raw) {
+  const arr = coerceRows(JSON.parse(raw), ["assumptions", "units"], "assumption results");
+  const rows = [];
+  const dropped = [];
+  for (const [index, entry2] of arr.entries()) {
+    const v = entry2;
+    if (!v || typeof v !== "object") {
+      dropped.push({ index, reason: "not an object" });
+      continue;
+    }
+    if (typeof v.at !== "string" || !v.at) {
+      dropped.push({ index, reason: "missing `at` (which unit is this a record of?)" });
+      continue;
+    }
+    rows.push({
+      at: v.at,
+      guarantees: Array.isArray(v.guarantees) ? v.guarantees : void 0,
+      assumptions: Array.isArray(v.assumptions) ? v.assumptions : void 0,
+      calls: Array.isArray(v.calls) ? v.calls : void 0,
+      openQuestions: Array.isArray(v.openQuestions) ? v.openQuestions : void 0
+    });
+  }
+  if (rows.length === 0 && arr.length > 0) {
+    throw new Error(`assumption results: all ${arr.length} row(s) were unusable \u2014 nothing folded (fail-closed)`);
+  }
+  return { rows, dropped };
+}
+function unenforced(results) {
+  const out2 = [];
+  for (const r of results) {
+    for (const a of r.assumptions ?? []) {
+      if (a.enforcedAt?.trim().toLowerCase() === NOTHING_FOUND) out2.push({ at: r.at, claim: a.claim });
+    }
+  }
+  return out2;
+}
+function renderAssumptionMap(results) {
+  const leads = unenforced(results);
+  const L = [`# Assumption map`, ""];
+  L.push(`${results.length} unit(s) recorded \xB7 **${leads.length} unenforced assumption(s)**.`);
+  L.push("");
+  L.push(`> An unenforced assumption is not a vulnerability. It is the place to look for one:`);
+  L.push(`> the code is relying on something nobody wrote down.`);
+  L.push("");
+  if (leads.length) {
+    L.push(`## Trusted but never enforced (${leads.length})`);
+    L.push("");
+    for (const l of leads) L.push(`- \`${l.at}\` \u2014 ${l.claim}`);
+    L.push("");
+  }
+  const questions = results.flatMap((r) => (r.openQuestions ?? []).map((q) => ({ at: r.at, q })));
+  if (questions.length) {
+    L.push(`## Open questions (${questions.length})`);
+    L.push("");
+    for (const q of questions) L.push(`- \`${q.at}\` \u2014 ${q.q}`);
+    L.push("");
+  }
+  L.push(`## Per-unit records`);
+  L.push("");
+  for (const r of results) {
+    L.push(`### \`${r.at}\``);
+    if (r.guarantees?.length) {
+      L.push(`**Guarantees**`);
+      for (const g of r.guarantees) L.push(`- ${g.claim} \u2014 \`${g.file}:${g.line}\``);
+    }
+    if (r.assumptions?.length) {
+      L.push(`**Assumes**`);
+      for (const a of r.assumptions) L.push(`- ${a.claim} \u2014 ${a.enforcedAt === NOTHING_FOUND ? "**nothing found**" : `enforced at \`${a.enforcedAt}\``}`);
+    }
+    if (r.calls?.length) {
+      L.push(`**Calls**`);
+      for (const c2 of r.calls) L.push(`- \`${c2.callee}\` \u2014 expects: ${c2.expectedBehavior}`);
+    }
+    L.push("");
+  }
+  return L.join("\n") + "\n";
+}
+var LEADS_FILE = "ASSUMPTIONS.leads.json";
+function leadsForRegion(leads, region, files) {
+  const inRegion = (at2) => at2.startsWith(`${region}/`) || files.some((f) => at2.startsWith(f));
+  return leads.filter((l) => inRegion(l.at)).map((l) => `${l.at}: ${l.claim}`);
+}
+
+// src/classes/hunt.ts
+import { existsSync as existsSync22, mkdirSync as mkdirSync10, readFileSync as readFileSync27, writeFileSync as writeFileSync12 } from "fs";
+import { dirname as dirname12, join as join47 } from "path";
+var MAX_HUNT_FILES = 8;
+var MAX_EXAMPLES = 3;
+function huntPrompt(h) {
+  const subject = HUNT_SUBJECTS[h.class];
+  const what = h.class === CATALOG_ROW ? "Taint-catalog coverage" : `Weakness class \`${h.class}\` (${h.cwe})`;
+  return `${what} on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""} \u2014 ${h.reason}. INVARIANT: ${subject.invariant} A VALID GUARD: ${subject.guard} Find how THIS repository writes the class with ${h.framework} \u2014 its own helpers, middlewares, config and wrappers \u2014 and check every place the invariant can break. Each break is a Discovery (cite a resolvable [file:line], set "hunt": "${h.id}"). Each idiom you recognize \u2014 the unsafe call AND the guard the code relies on \u2014 goes to \`idioms[]\` ({hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}) so a maintainer can turn it into pack data. Looked and found nothing? Put "${h.id}" in \`hunted[]\` \u2014 an empty result is a result.`;
+}
+function buildClassHunts(manifest, surface) {
+  const cells = (manifest.weaknessClasses ?? []).filter(needsHunt);
+  const out2 = [];
+  for (const cell2 of cells) {
+    const cls = HUNT_SUBJECTS[cell2.class];
+    const fw = manifest.frameworks?.find((f) => f.id === cell2.framework && f.dir === cell2.dir);
+    const lang = ECOSYSTEM_LANGUAGES[cell2.ecosystem]?.[0];
+    const examples = [...cls.examples].sort((a, b) => Number(b.language === lang) - Number(a.language === lang)).slice(0, MAX_EXAMPLES);
+    const prefix = cell2.dir ? `${cell2.dir}/` : "";
+    const files = [...fw ? [fw.evidence.replace(/:\d+$/, "")] : [], ...(surface?.byFile ?? []).map((f) => f.file).filter((f) => f.startsWith(prefix))];
+    const hunt = {
+      id: huntId(cell2),
+      class: cell2.class,
+      title: cls.title,
+      cwe: cls.cwe,
+      framework: cell2.framework,
+      ecosystem: cell2.ecosystem,
+      ...cell2.version ? { version: cell2.version } : {},
+      dir: cell2.dir,
+      reason: cell2.degraded ?? "no pack covers this class here",
+      packsApplied: cell2.packs,
+      invariant: cls.invariant,
+      guard: cls.guard,
+      rubric: cls.rubric,
+      examples
+    };
+    out2.push({
+      region: hunt.id,
+      score: 0,
+      sinks: 0,
+      sources: 0,
+      files: [...new Set(files)].slice(0, MAX_HUNT_FILES),
+      neighbors: [],
+      prompt: huntPrompt(hunt),
+      hunt
+    });
+  }
+  return out2;
+}
+var HUNT_ID = /^hunt:[a-z-]+:[\w.-]+(?:@.+)?$/;
+var IDIOM_KINDS = ["unsafe", "guard"];
+function parseIdiom(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { reason: badField("idiom", raw, "an object") };
+  const d = raw;
+  const bad = [];
+  if (!MATRIX_ROW_IDS.includes(d.class)) bad.push(notInVocabulary("class", d.class, MATRIX_ROW_IDS));
+  if (!IDIOM_KINDS.includes(d.kind)) bad.push(notInVocabulary("kind", d.kind, IDIOM_KINDS));
+  for (const field2 of ["framework", "pattern", "file"]) {
+    if (typeof d[field2] !== "string" || !d[field2].trim()) bad.push(badField(field2, d[field2], "a non-empty string"));
+  }
+  if (!Number.isInteger(d.line) || d.line < 1) bad.push(badField("line", d.line, "an integer \u2265 1"));
+  if (d.hunt !== void 0 && (typeof d.hunt !== "string" || !HUNT_ID.test(d.hunt)))
+    bad.push(badField("hunt", d.hunt, "a worklist hunt id (hunt:<class>:<framework>[@dir])"));
+  if (d.regex !== void 0) {
+    if (typeof d.regex !== "string") bad.push(badField("regex", d.regex, "a string"));
+    else
+      try {
+        new RegExp(d.regex);
+      } catch {
+        bad.push(`regex ${describeValue(d.regex)} does not compile`);
+      }
+  }
+  if (bad.length) return { reason: bad.join(", ") };
+  return {
+    row: {
+      ...typeof d.hunt === "string" ? { hunt: d.hunt } : {},
+      class: d.class,
+      framework: d.framework.trim(),
+      kind: d.kind,
+      ...typeof d.language === "string" ? { language: d.language } : {},
+      pattern: d.pattern.trim(),
+      ...typeof d.regex === "string" ? { regex: d.regex } : {},
+      file: d.file,
+      line: d.line,
+      ...typeof d.note === "string" ? { note: d.note } : {}
+    }
+  };
+}
+function parseHuntResults(raw) {
+  const data = JSON.parse(raw);
+  const out2 = { idioms: [], hunted: [], dropped: [] };
+  if (!data || typeof data !== "object") return out2;
+  const obj = data;
+  const discoveries = Array.isArray(data) ? data : Array.isArray(obj.discoveries) ? obj.discoveries : [];
+  for (const d of discoveries) {
+    const h = d?.hunt;
+    if (typeof h === "string" && HUNT_ID.test(h)) out2.hunted.push(h);
+  }
+  if (Array.isArray(data)) return out2;
+  for (const h of Array.isArray(obj.hunted) ? obj.hunted : []) if (typeof h === "string" && HUNT_ID.test(h)) out2.hunted.push(h);
+  for (const [index, row] of (Array.isArray(obj.idioms) ? obj.idioms : []).entries()) {
+    const p = parseIdiom(row);
+    if (p.row) {
+      out2.idioms.push(p.row);
+      if (p.row.hunt) out2.hunted.push(p.row.hunt);
+    } else out2.dropped.push({ index, reason: `idioms[${index}]: ${p.reason}` });
+  }
+  return out2;
+}
+function isHuntOnlyPayload(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
+  const o = data;
+  return !Array.isArray(o.discoveries) && (Array.isArray(o.idioms) || Array.isArray(o.hunted));
+}
+var SUGGESTIONS_NOTE = "Proposals recognized by the AI hunt. The engine NEVER applies them: a maintainer promotes one by adding it to a pack in src/classes/packs with a vulnerable and a fixed fixture and a recall-matrix cell \u2014 see docs/weakness-classes.md.";
+function recordHuntResults(run2, repo, manifest, results, packIds) {
+  const path = workPath(run2, PACK_SUGGESTIONS_FILE);
+  const priorAt = readPath(run2, PACK_SUGGESTIONS_FILE);
+  const rejected = [];
+  const fresh3 = [];
+  const hunted = /* @__PURE__ */ new Set();
+  for (const r of results) {
+    for (const h of r.hunted) hunted.add(h);
+    for (const idiom of r.idioms) {
+      const problem = citationProblem(repo, { file: idiom.file, line: idiom.line });
+      if (problem) {
+        rejected.push({ idiom, reason: problem });
+        continue;
+      }
+      const text = readFileSync27(join47(repo, idiom.file), "utf8").split(/\r?\n/)[idiom.line - 1] ?? "";
+      const fw = manifest.frameworks?.find((f) => f.id === idiom.framework);
+      fresh3.push({
+        ...idiom,
+        evidence: text.trim().slice(0, 200),
+        ...fw?.version ? { seenOn: `${fw.id} ${fw.version}` } : {},
+        pack: packIds.includes(idiom.framework) ? idiom.framework : `new pack: ${idiom.framework}`
+      });
+    }
+  }
+  if (!fresh3.length && !hunted.size) return { accepted: 0, rejected, hunted: [] };
+  let prior = { schema: 1, note: SUGGESTIONS_NOTE, hunted: [], suggestions: [] };
+  if (existsSync22(priorAt)) {
+    try {
+      const p = JSON.parse(readFileSync27(priorAt, "utf8"));
+      prior = { ...prior, hunted: p.hunted ?? [], suggestions: p.suggestions ?? [] };
+    } catch {
+    }
+  }
+  const key = (s) => [s.class, s.framework, s.kind, s.pattern, s.file, s.line].join("\0");
+  const merged = new Map(prior.suggestions.map((s) => [key(s), s]));
+  let accepted = 0;
+  for (const s of fresh3)
+    if (!merged.has(key(s))) {
+      merged.set(key(s), s);
+      accepted++;
+    }
+  const file = {
+    schema: 1,
+    note: SUGGESTIONS_NOTE,
+    hunted: [.../* @__PURE__ */ new Set([...prior.hunted, ...hunted])].sort(byStr),
+    suggestions: [...merged.values()].sort((a, b) => byStr(a.class, b.class) || byStr(a.framework, b.framework) || byStr(a.file, b.file) || a.line - b.line)
+  };
+  mkdirSync10(dirname12(path), { recursive: true });
+  writeFileSync12(path, JSON.stringify(file, null, 2) + "\n");
+  return { accepted, rejected, hunted: [...hunted].sort(byStr), path };
+}
+
+// src/investigate.ts
+var MAX_FILES_PER_REGION = 8;
+var MAX_NEIGHBORS_PER_REGION = 12;
+var MAX_REGIONS = 12;
+var AI_TOOL = "ultrasec-ai";
+var ACCESS_CONTROL_LENS = "Access control \u2014 the highest-yield class, never enumerable by taint. For every route/handler in these files ask two questions. (1) Is there ANY authorization check before the object is read or written? A missing one is BFLA (broken function-level authz) \u2014 the classic shape is an admin/privileged action reachable by a normal role, or a method/version downgrade (GET\u2192PUT, /v2\u2192/v1) that skips the guard. (2) Does the check bind the CALLER to the SPECIFIC object in the request? Compare the guard to the object returned: an owner_id/tenant_id taken from the SESSION/token vs. an id taken from the URL/body/query. When they are not compared, an attacker swaps the id and reads another principal's data \u2014 IDOR/BOLA. Hunt horizontal escalation (user A reaching user B via a predictable/sequential/enumerable id), vertical escalation (a normal user reaching an admin object), and tenant-boundary crossing in multi-tenant code. Mass-assignment onto role/isAdmin/tenant/permissions is access control too \u2014 a body field that overwrites who you are. Cite resolvable [file:line] for the guard that is missing or the comparison that is absent. See references/access-control.md.";
+var LENSES = {
+  "sharp-edges": "Ask a DIFFERENT question here: not 'is this code vulnerable' but 'does this API make the insecure use easier than the secure one'. Six shapes: an algorithm/mode the caller picks; an insecure default or an ambiguous zero; raw bytes where a semantic type belongs; a config cliff that fails open; a verification that returns instead of throwing; permissions as strings. Model three users \u2014 the attacker, the copy-paster, the confused reader. Rate by how EASY the mistake is. See references/sharp-edges.md.",
+  "access-control": ACCESS_CONTROL_LENS,
+  idor: ACCESS_CONTROL_LENS,
+  crypto: "Crypto-specific: secrets compared with == or equals() rather than a constant-time helper; key material in a plain buffer never zeroed; a nonce or IV reused or derived from a counter the attacker sees; an algorithm read from attacker-supplied data. See references/attack-classes.md \xA7Cryptography.",
+  privacy: "Personal data: where it goes (a third-party processor, a log, an analytics beacon), how long it stays, and whether a control named 'anonymisation' actually prevents re-identification. See references/privacy-and-data-protection.md.",
+  cloud: "Cloud / container reachability, the half the IaC scan can't decide: can any user-controlled URL reach the instance-metadata endpoint (169.254.169.254 / metadata.google.internal) \u2014 SSRF to short-lived credentials? Is a wildcard/over-broad IAM role actually assumed on this path? Are instance/CI secrets read from env or a mounted file that a compromised container can exfiltrate? Does a container escape (privileged/hostPath/hostNetwork) turn a bug into node takeover? See references/frameworks.md \xA7Cloud."
+};
+function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens, classHunts = []) {
+  const filesByRegion = /* @__PURE__ */ new Map();
+  for (const fs2 of surface.byFile) {
+    const arr = filesByRegion.get(fs2.region) ?? filesByRegion.set(fs2.region, []).get(fs2.region);
+    if (arr.length < MAX_FILES_PER_REGION) arr.push(fs2.file);
+  }
+  const regions = [];
+  for (const t of surface.suggestedTargets) {
+    const files = [...filesByRegion.get(t.scope) ?? []];
+    const nb = /* @__PURE__ */ new Set();
+    for (const f of files) {
+      if (!graph.files.includes(f)) continue;
+      for (const l of neighbors(graph, f, 1).links) nb.add(l.node);
+    }
+    for (const f of files) nb.delete(f);
+    const leads = leadsForRegion(assumptionLeads, t.scope, files);
+    regions.push({
+      region: t.scope,
+      score: t.score,
+      sinks: t.sinks,
+      sources: t.sources,
+      files,
+      neighbors: [...nb].sort(byStr).slice(0, MAX_NEIGHBORS_PER_REGION),
+      prompt: "What the deterministic pass can't see: missing/incorrect authorization & IDOR, business-logic flaws, multi-hop taint that crosses these files, and personal-data handling (data leaving to a third-party processor, a control narrower than its name, reversible pseudonymisation, absent retention). Cite resolvable [file:line]." + (lens && LENSES[lens] ? `
+
+LENS \u2014 ${lens}: ${LENSES[lens]}` : ""),
+      ...leads.length ? { leads } : {}
+    });
+  }
+  return [...capRegions(regions), ...classHunts];
+}
+function capRegions(regions) {
+  if (regions.length <= MAX_REGIONS) return regions;
+  const head = regions.slice(0, MAX_REGIONS - 1);
+  const tail = regions.slice(MAX_REGIONS - 1);
+  const files = [];
+  for (let i2 = 0; files.length < MAX_FILES_PER_REGION; i2++) {
+    let added = false;
+    for (const r of tail) {
+      const f = r.files[i2];
+      if (f !== void 0 && files.length < MAX_FILES_PER_REGION && !files.includes(f)) {
+        files.push(f);
+        added = true;
+      }
+    }
+    if (!added && tail.every((r) => r.files.length <= i2)) break;
+  }
+  const nb = new Set(tail.flatMap((r) => r.neighbors));
+  for (const f of files) nb.delete(f);
+  const leads = tail.flatMap((r) => r.leads ?? []);
+  const merged = {
+    region: `${tail[0].region} +${tail.length - 1} smaller`,
+    score: tail.reduce((n, r) => n + r.score, 0),
+    sinks: tail.reduce((n, r) => n + r.sinks, 0),
+    sources: tail.reduce((n, r) => n + r.sources, 0),
+    files,
+    neighbors: [...nb].sort(byStr).slice(0, MAX_NEIGHBORS_PER_REGION),
+    prompt: tail[0].prompt,
+    ...leads.length ? { leads } : {},
+    merged: tail.map((r) => r.region)
+  };
+  return [...head, merged];
+}
+function investigateTodo(items) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const r of items) counts.set(r.prompt, (counts.get(r.prompt) ?? 0) + 1);
+  let prompt = "";
+  for (const [p, n] of counts) if (n > (counts.get(prompt) ?? 0)) prompt = p;
+  return { prompt, regions: items.map(({ prompt: own2, ...rest }) => own2 === prompt ? rest : { ...rest, prompt: own2 }) };
+}
+function readInvestigateTodo(raw) {
+  if (Array.isArray(raw)) return raw;
+  if (raw !== null && typeof raw === "object" && Array.isArray(raw.regions)) {
+    const t = raw;
+    return t.regions.map((r) => ({ ...r, prompt: r.prompt ?? t.prompt ?? "" }));
+  }
+  return [];
+}
+function renderInvestigateMd(items, context) {
+  const regions = items.filter((r) => !r.hunt);
+  const hunts = items.filter((r) => r.hunt);
+  const L = [];
+  L.push(
+    `# ultrasec investigation worklist (${regions.length} region${regions.length === 1 ? "" : "s"}${hunts.length ? ` \xB7 ${hunts.length} weakness-class hunt${hunts.length === 1 ? "" : "s"}` : ""})`
+  );
+  L.push("");
+  L.push(`Investigate each region for issues the deterministic engine can't enumerate, and emit`);
+  L.push(`grounded **Discovery[]** as INVESTIGATE.json (array of`);
+  L.push(`{title, category, severity, cwe?, message, file, line, path?}). Then:`);
+  L.push(`\`ultrasec investigate --apply INVESTIGATE.json --run <run>\`.`);
+  L.push("");
+  L.push(`> Every discovery is ingested as an \`${AI_TOOL}\` **open** candidate and must be verified`);
+  L.push(`> like any other. Citations are checked: a [file:line] that doesn't resolve is **rejected**.`);
+  L.push(`> A discovery at an existing finding's location folds into its \`sources\` (no duplicate).`);
+  L.push("");
+  if (context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\`._`);
+    L.push("");
+    L.push(context);
+    L.push("");
+  }
+  for (const r of regions) {
+    L.push(`## \`${r.region}\` \u2014 ${r.sinks} sink(s), ${r.sources} entry point(s)`);
+    if (r.files.length) L.push(`- files: ${r.files.map((f) => `\`${f}\``).join(", ")}`);
+    if (r.neighbors.length) L.push(`- neighbours: ${r.neighbors.map((f) => `\`${f}\``).join(", ")}`);
+    L.push(`- hunt: ${r.prompt}`);
+    if (r.leads?.length) {
+      L.push(`- **trusted but never enforced here** (from \`assumptions\`) \u2014 start with these:`);
+      for (const l of r.leads) L.push(`  - ${l}`);
+    }
+    L.push("");
+  }
+  if (hunts.length) L.push(...renderHuntsMd(hunts));
+  return L.join("\n") + "\n";
+}
+function renderHuntsMd(hunts) {
+  const L = [];
+  L.push(`## Weakness-class hunts`);
+  L.push("");
+  L.push(`Each hunt is a weakness class on a framework no pack settles (no pack for it, or a version`);
+  L.push(`outside the range the pack was validated on). Find how THIS repository writes the class and`);
+  L.push(`return, in the same INVESTIGATE.json \u2014 \`{ "discoveries": [...], "idioms": [...], "hunted": [...] }\`:`);
+  L.push(`- **discoveries** \u2014 every place the invariant breaks, with \`"hunt": "<hunt id>"\` (ingested like any discovery);`);
+  L.push(`- **idioms** \u2014 each unsafe call and each guard you recognized: \`{hunt, class, framework, kind: "unsafe"|"guard", pattern,`);
+  L.push(`  regex?, file, line, note}\`, citation checked, written to \`PACK-SUGGESTIONS.json\` (proposals \u2014 never applied);`);
+  L.push(`- **hunted** \u2014 the hunt ids you worked, including those where you found nothing.`);
+  L.push("");
+  for (const r of hunts) {
+    const h = r.hunt;
+    L.push(`### \`${h.id}\` \u2014 ${h.title} (${h.cwe}) on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""}`);
+    L.push(`- why: ${h.reason}${h.packsApplied.length ? ` (rules already run as a floor: ${h.packsApplied.join(", ")})` : ""}`);
+    L.push(`- invariant: ${h.invariant}`);
+    L.push(`- a valid guard: ${h.guard}`);
+    L.push(`- severity: ${h.rubric}`);
+    if (r.files.length) L.push(`- start in: ${r.files.map((f) => `\`${f}\``).join(", ")}`);
+    for (const e of h.examples) {
+      L.push(`- example (${e.language}) \u2014 vulnerable: \`${e.vulnerable.replace(/\n/g, " \u23CE ")}\``);
+      L.push(`  fixed: \`${e.fixed.replace(/\n/g, " \u23CE ")}\``);
+    }
+    L.push("");
+  }
+  return L;
+}
+function locOf(f) {
+  if (f.sink) return `${f.sink.file}:${f.sink.line}`;
+  const last = f.path?.[f.path.length - 1];
+  if (last) return `${last.file}:${last.line}`;
+  if (f.source) return `${f.source.file}:${f.source.line}`;
+  return "";
+}
+function dedupKey(category, ident, where) {
+  return `${category}::${(ident ?? "").trim().toLowerCase()}::${where}`;
+}
+function citationProblem(repo, d) {
+  const locs = [{ file: d.file, line: d.line }, ...(d.path ?? []).map((p) => ({ file: p.file, line: p.line }))];
+  for (const loc of locs) {
+    if (!insideRepo(repo, loc.file)) return `citation outside repo: ${loc.file}`;
+    const lc = lineCount(repo, loc.file);
+    if (lc === null) return `file not found: ${loc.file}`;
+    if (loc.line < 1 || loc.line > lc) return `line out of range: ${loc.file}:${loc.line} (file has ${lc} lines)`;
+  }
+  return null;
+}
+function ingestDiscoveries(dossier, discoveries, repo, opts = {}) {
+  const deployment = deploymentFacts(opts.context);
+  const result = /* @__PURE__ */ new Map();
+  const idByKey = /* @__PURE__ */ new Map();
+  for (const f of dossier.findings) {
+    result.set(f.id, f);
+    idByKey.set(dedupKey(f.category, f.cwe ?? f.title, locOf(f)), f.id);
+  }
+  let ingested = 0, folded = 0;
+  const rejected = [];
+  for (const d of discoveries) {
+    const problem = citationProblem(repo, d);
+    if (problem) {
+      rejected.push({ discovery: d, reason: problem });
+      continue;
+    }
+    const key = dedupKey(d.category, d.cwe ?? d.title, `${d.file}:${d.line}`);
+    const existingId = idByKey.get(key);
+    if (existingId) {
+      const prev = result.get(existingId);
+      const sources = [.../* @__PURE__ */ new Set([...prev.sources ?? [prev.tool], AI_TOOL])].sort(byStr);
+      result.set(existingId, { ...prev, sources });
+      folded++;
+      continue;
+    }
+    const f = makeToolFinding({
+      tool: AI_TOOL,
+      category: d.category,
+      ident: `${d.category}:${d.title}:${d.file}:${d.line}`,
+      title: d.title,
+      severity: d.severity,
+      // The hunter's own write-up, quoting what it found; a hard-coded key is
+      // reported by quoting it. Same mask as every other authored note.
+      message: redactSecrets(d.message),
+      file: d.file,
+      line: d.line,
+      cwe: d.cwe,
+      confidence: "low"
+      // AI-discovered + unverified — recall-oriented, adjudicate it
+    });
+    if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: redactSecrets(p.why) }));
+    if (d.vulnClass) f.vulnClass = d.vulnClass;
+    f.risk = scoreFinding(f, deployment);
+    result.set(f.id, f);
+    idByKey.set(key, f.id);
+    ingested++;
+  }
+  const findings = [...result.values()].sort((a, b) => byStr(a.id, b.id));
+  return { findings, ingested, folded, rejected };
+}
+function parseDiscoveries(raw) {
+  const data = JSON.parse(raw);
+  const arr = isHuntOnlyPayload(data) ? [] : coerceRows(data, ["discoveries"], "discoveries");
+  const rows = [];
+  const dropped = [];
+  const normalized = [];
+  const drop = (index, reason) => dropped.push({ index, reason });
+  for (const [index, raw2] of arr.entries()) {
+    const parsed2 = parseDiscoveryRow(raw2);
+    if (!parsed2.row) {
+      drop(index, parsed2.reason);
+      continue;
+    }
+    if (parsed2.note) normalized.push({ index, note: parsed2.note });
+    rows.push(parsed2.row);
+  }
+  return requireUsable(
+    // Presence-gated: no fold ⇒ the result is shape-identical to before.
+    { rows, dropped, ...normalized.length ? { normalized } : {} },
+    arr.length,
+    DISCOVERY_REQUIREMENT
+  );
+}
+
+// src/classes/coverage.ts
 var PACK_SUGGESTIONS_FILE = "PACK-SUGGESTIONS.json";
 function huntId(cell2) {
   return `hunt:${cell2.class}:${cell2.framework}${cell2.dir ? `@${cell2.dir}` : ""}`;
@@ -37513,15 +39016,15 @@ function huntProgress(run2) {
   const emitted = /* @__PURE__ */ new Set();
   const hunted = /* @__PURE__ */ new Set();
   try {
-    const todo = join43(run2, "INVESTIGATE.todo.json");
-    if (existsSync19(todo)) {
-      for (const r of JSON.parse(readFileSync25(todo, "utf8"))) if (r.hunt?.id) emitted.add(r.hunt.id);
+    const todo = join48(run2, "INVESTIGATE.todo.json");
+    if (existsSync23(todo)) {
+      for (const r of readInvestigateTodo(JSON.parse(readFileSync28(todo, "utf8")))) if (r.hunt?.id) emitted.add(r.hunt.id);
     }
   } catch {
   }
   try {
     const sug = readPath(run2, PACK_SUGGESTIONS_FILE);
-    if (existsSync19(sug)) for (const id of JSON.parse(readFileSync25(sug, "utf8")).hunted ?? []) hunted.add(id);
+    if (existsSync23(sug)) for (const id of JSON.parse(readFileSync28(sug, "utf8")).hunted ?? []) hunted.add(id);
   } catch {
   }
   return { emitted, hunted };
@@ -37573,8 +39076,8 @@ function renderClassCoverageMd(cells) {
 }
 
 // src/cloud.ts
-import { existsSync as existsSync20, readFileSync as readFileSync26 } from "fs";
-import { join as join44 } from "path";
+import { existsSync as existsSync24, readFileSync as readFileSync29 } from "fs";
+import { join as join49 } from "path";
 var CLOUD_SHAPES = {
   "k8s-privileged": {
     id: "k8s-privileged",
@@ -37816,10 +39319,10 @@ function scanDockerfile(repo, rel2, ls, out2) {
   const copy = ls.find((l) => copiesDirectory(l.text));
   if (!copy) return;
   const dir = rel2.includes("/") ? rel2.slice(0, rel2.lastIndexOf("/")) : "";
-  const candidates = [`${rel2}.dockerignore`, join44(dir, ".dockerignore"), ".dockerignore"];
+  const candidates = [`${rel2}.dockerignore`, join49(dir, ".dockerignore"), ".dockerignore"];
   for (const c2 of candidates) {
-    const abs = join44(repo, c2);
-    if (existsSync20(abs) && dockerignoreExcludesEnv(readFileSync26(abs, "utf8"))) return;
+    const abs = join49(repo, c2);
+    if (existsSync24(abs) && dockerignoreExcludesEnv(readFileSync29(abs, "utf8"))) return;
   }
   out2.push(hit5(rel2, copy.n, CLOUD_SHAPES["dockerignore-env"], copy.text));
 }
@@ -37879,8 +39382,8 @@ function auditCloud(repo, prune, tree) {
 }
 
 // src/provenance.ts
-import { existsSync as existsSync21, readFileSync as readFileSync27 } from "fs";
-import { join as join45 } from "path";
+import { existsSync as existsSync25, readFileSync as readFileSync30 } from "fs";
+import { join as join50 } from "path";
 function compileCodeowner(pattern) {
   const dirOnly = pattern.endsWith("/") && pattern.length > 1;
   let core = dirOnly ? pattern.slice(0, -1) : pattern;
@@ -37911,10 +39414,10 @@ function ownerFor(rules, file) {
 var CODEOWNERS_PATHS = [".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS"];
 function loadCodeowners(repo) {
   for (const p of CODEOWNERS_PATHS) {
-    const abs = join45(repo, p);
-    if (existsSync21(abs)) {
+    const abs = join50(repo, p);
+    if (existsSync25(abs)) {
       try {
-        return parseCodeowners(readFileSync27(abs, "utf8"));
+        return parseCodeowners(readFileSync30(abs, "utf8"));
       } catch {
         return [];
       }
@@ -37953,8 +39456,8 @@ function addProvenance(findings, repo, opts = {}) {
 
 // src/cache.ts
 import { createHash as createHash6 } from "crypto";
-import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync11, readFileSync as readFileSync28 } from "fs";
-import { join as join46 } from "path";
+import { mkdirSync as mkdirSync11, writeFileSync as writeFileSync13, readFileSync as readFileSync31 } from "fs";
+import { join as join51 } from "path";
 var CACHE_VERSION = 2;
 function cachePath(run2) {
   return workPath(run2, "cache", "scan-cache.json");
@@ -37974,7 +39477,7 @@ function isCacheEntry(key, v) {
 }
 function loadScanCache(run2) {
   try {
-    const data = JSON.parse(readFileSync28(readPath(run2, "cache", "scan-cache.json"), "utf8"));
+    const data = JSON.parse(readFileSync31(readPath(run2, "cache", "scan-cache.json"), "utf8"));
     if (!data || data.cacheVersion !== CACHE_VERSION || data.extractorVersion !== EXTRACTOR_VERSION) return /* @__PURE__ */ new Map();
     if (!data.entries || typeof data.entries !== "object" || Array.isArray(data.entries)) return /* @__PURE__ */ new Map();
     const out2 = /* @__PURE__ */ new Map();
@@ -37997,7 +39500,7 @@ function isToolCacheEntry(name2, v) {
 }
 function loadToolsCache(run2) {
   try {
-    const data = JSON.parse(readFileSync28(readPath(run2, "cache", "tools-cache.json"), "utf8"));
+    const data = JSON.parse(readFileSync31(readPath(run2, "cache", "tools-cache.json"), "utf8"));
     if (!data || data.cacheVersion !== CACHE_VERSION) return /* @__PURE__ */ new Map();
     if (!data.entries || typeof data.entries !== "object" || Array.isArray(data.entries)) return /* @__PURE__ */ new Map();
     const out2 = /* @__PURE__ */ new Map();
@@ -38009,10 +39512,10 @@ function loadToolsCache(run2) {
 }
 function saveToolsCache(run2, cache) {
   const dir = workPath(run2, "cache");
-  mkdirSync9(dir, { recursive: true });
+  mkdirSync11(dir, { recursive: true });
   const entries = {};
   for (const [k, v] of [...cache.entries()].sort((a, b) => byStr(a[0], b[0]))) entries[k] = v;
-  writeFileSync11(toolsCachePath(run2), JSON.stringify({ cacheVersion: CACHE_VERSION, entries }, null, 2));
+  writeFileSync13(toolsCachePath(run2), JSON.stringify({ cacheVersion: CACHE_VERSION, entries }, null, 2));
 }
 function treeDigest(files) {
   const h = createHash6("sha256");
@@ -38048,193 +39551,22 @@ function stageTimer(now = () => performance.now()) {
 }
 function saveTimings(run2, timings) {
   const dir = workPath(run2, "cache");
-  mkdirSync9(dir, { recursive: true });
-  writeFileSync11(join46(dir, "timings.json"), `${JSON.stringify(timings, null, 2)}
+  mkdirSync11(dir, { recursive: true });
+  writeFileSync13(join51(dir, "timings.json"), `${JSON.stringify(timings, null, 2)}
 `);
 }
 function saveScanCache(run2, cache) {
   const dir = workPath(run2, "cache");
-  mkdirSync9(dir, { recursive: true });
+  mkdirSync11(dir, { recursive: true });
   const entries = {};
   for (const [k, v] of [...cache.entries()].sort((a, b) => byStr(a[0], b[0]))) entries[k] = v;
-  writeFileSync11(cachePath(run2), JSON.stringify({ cacheVersion: CACHE_VERSION, extractorVersion: EXTRACTOR_VERSION, entries }, null, 2));
-}
-
-// src/tools/scoring.ts
-import { existsSync as existsSync22, mkdirSync as mkdirSync10, readFileSync as readFileSync29, statSync as statSync14, writeFileSync as writeFileSync12 } from "fs";
-import { gunzipSync as gunzipSync2 } from "zlib";
-import { homedir as homedir3 } from "os";
-import { join as join47 } from "path";
-var SEVERITY_WEIGHT = {
-  critical: 1,
-  high: 0.8,
-  medium: 0.5,
-  low: 0.25,
-  info: 0.1
-};
-var EXPOSURES = ["internet-facing", "internal", "build-time"];
-var EXPOSURE_WEIGHT = { "internet-facing": 1, internal: 0.6, "build-time": 0.3 };
-var CRITICALITIES = ["crown-jewel", "standard", "peripheral"];
-var CRITICALITY_WEIGHT = { "crown-jewel": 1, standard: 0.6, peripheral: 0.3 };
-var REACHABILITY_DAMP = {
-  runtime: 1,
-  unproven: 0.7,
-  toolchain: 0.55
-};
-function riskScore({ severity, epss, kev, exposure, criticality, reachability: reachability2 }) {
-  const e = Math.min(Math.max(epss ?? 0, 0), 1);
-  const sev = SEVERITY_WEIGHT[severity] ?? SEVERITY_WEIGHT.info;
-  let base;
-  if (exposure === void 0 && criticality === void 0) {
-    base = 0.6 * sev + 0.4 * e;
-  } else {
-    const x = exposure ? EXPOSURE_WEIGHT[exposure] : 0.6;
-    const c2 = criticality ? CRITICALITY_WEIGHT[criticality] : 0.6;
-    base = 0.4 * sev + 0.25 * e + 0.2 * x + 0.15 * c2;
-  }
-  let score = Math.round(100 * base);
-  if (kev) score = Math.max(score, 95);
-  if (reachability2) score = Math.round(score * REACHABILITY_DAMP[reachability2]);
-  return Math.min(Math.max(score, 0), 100);
-}
-function scoreFinding(f, deployment = {}) {
-  return riskScore({ severity: f.severity, epss: f.epss, kev: f.kev, reachability: f.reachability, ...deployment });
-}
-function deploymentFacts(context) {
-  if (!context) return {};
-  const ex = /^\s*(?:[-*]\s*)?(?:\*\*)?Exposure(?:\*\*)?\s*:\s*`?([a-z-]+)`?/im.exec(context);
-  const cr = /^\s*(?:[-*]\s*)?(?:\*\*)?Criticality(?:\*\*)?\s*:\s*`?([a-z-]+)`?/im.exec(context);
-  const exposure = EXPOSURES.includes(ex?.[1] ?? "") ? ex[1] : void 0;
-  const criticality = CRITICALITIES.includes(cr?.[1] ?? "") ? cr[1] : void 0;
-  return { ...exposure ? { exposure } : {}, ...criticality ? { criticality } : {} };
-}
-function parseEpssCsv(csv) {
-  const out2 = /* @__PURE__ */ new Map();
-  for (const line2 of csv.split("\n")) {
-    const row = line2.trim();
-    if (!row || row.startsWith("#")) continue;
-    const [cve, epss, pct] = row.split(",");
-    if (!cve || !/^CVE-/i.test(cve)) continue;
-    const e = Number(epss);
-    if (Number.isNaN(e)) continue;
-    out2.set(cve.toUpperCase(), { epss: e, percentile: pct !== void 0 ? Number(pct) : void 0 });
-  }
-  return out2;
-}
-function parseKev(json) {
-  const out2 = /* @__PURE__ */ new Map();
-  let data;
-  try {
-    data = JSON.parse(json || "{}");
-  } catch {
-    return out2;
-  }
-  for (const v of data?.vulnerabilities ?? []) {
-    if (v?.cveID) out2.set(String(v.cveID).toUpperCase(), v.dateAdded);
-  }
-  return out2;
-}
-function applyEnrichment(findings, feeds, deployment = {}) {
-  return findings.map((f) => {
-    const out2 = { ...f };
-    const cve = f.cve?.toUpperCase();
-    if (cve) {
-      const e = feeds.epss.get(cve);
-      if (e) out2.epss = e.epss;
-      if (feeds.kev.has(cve)) {
-        out2.kev = true;
-        const d = feeds.kev.get(cve);
-        if (d) out2.kevDateAdded = d;
-      }
-    }
-    out2.risk = scoreFinding(out2, deployment);
-    return out2;
-  });
-}
-var EPSS_URL = "https://epss.empiricalsecurity.com/epss_scores-current.csv.gz";
-var KEV_URL = "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json";
-var TTL_MS = 24 * 60 * 60 * 1e3;
-var FETCH_TIMEOUT_MS = 2e4;
-function cacheDir() {
-  return process.env.ULTRASEC_CACHE_DIR || join47(homedir3(), ".cache", "ultrasec");
-}
-function fresh2(path) {
-  try {
-    return existsSync22(path) && Date.now() - statSync14(path).mtimeMs < TTL_MS;
-  } catch {
-    return false;
-  }
-}
-async function fetchBuf(url) {
-  const ctrl = new AbortController();
-  const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
-  try {
-    const res = await fetch(url, { signal: ctrl.signal, redirect: "follow" });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return Buffer.from(await res.arrayBuffer());
-  } finally {
-    clearTimeout(t);
-  }
-}
-async function loadCached(url, file, gz) {
-  const dir = cacheDir();
-  const path = join47(dir, file);
-  if (fresh2(path)) {
-    try {
-      return readFileSync29(path, "utf8");
-    } catch {
-    }
-  }
-  try {
-    const buf = await fetchBuf(url);
-    const text = (gz ? gunzipSync2(buf) : buf).toString("utf8");
-    try {
-      mkdirSync10(dir, { recursive: true });
-      writeFileSync12(path, text);
-    } catch {
-    }
-    return text;
-  } catch {
-    try {
-      if (existsSync22(path)) return readFileSync29(path, "utf8");
-    } catch {
-    }
-    return "";
-  }
-}
-async function loadFeeds() {
-  const [epssCsv, kevJson] = await Promise.all([loadCached(EPSS_URL, "epss.csv", true), loadCached(KEV_URL, "kev.json", false)]);
-  return { epss: parseEpssCsv(epssCsv), kev: parseKev(kevJson) };
-}
-async function enrichFindings(findings, opts = {}) {
-  const deployment = deploymentFacts(opts.context);
-  if (opts.enabled === false) {
-    return {
-      findings: applyEnrichment(findings, { epss: /* @__PURE__ */ new Map(), kev: /* @__PURE__ */ new Map() }, deployment),
-      note: `risk: severity-only (enrichment off)${deploymentNote(deployment)}`
-    };
-  }
-  let feeds;
-  try {
-    feeds = await loadFeeds();
-  } catch {
-    feeds = { epss: /* @__PURE__ */ new Map(), kev: /* @__PURE__ */ new Map() };
-  }
-  const enriched = applyEnrichment(findings, feeds, deployment);
-  const withCve = enriched.filter((f) => f.cve);
-  const kevHits = enriched.filter((f) => f.kev).length;
-  const note = feeds.epss.size || feeds.kev.size ? `risk: EPSS ${feeds.epss.size} CVEs \xB7 KEV ${feeds.kev.size} \xB7 ${withCve.length} finding(s) with CVE${kevHits ? ` \xB7 ${kevHits} in KEV` : ""}` : "risk: severity-only (feeds unavailable offline)";
-  return { findings: enriched, note: note + deploymentNote(deployment) };
-}
-function deploymentNote(d) {
-  const parts2 = [d.exposure && `exposure ${d.exposure}`, d.criticality && `criticality ${d.criticality}`].filter(Boolean);
-  return parts2.length ? ` \xB7 weighted by CONTEXT.md (${parts2.join(", ")})` : "";
+  writeFileSync13(cachePath(run2), JSON.stringify({ cacheVersion: CACHE_VERSION, extractorVersion: EXTRACTOR_VERSION, entries }, null, 2));
 }
 
 // src/tools/sbom.ts
 import { execFileSync as execFileSync5 } from "child_process";
-import { mkdirSync as mkdirSync11, writeFileSync as writeFileSync13 } from "fs";
-import { join as join48, relative as relative11, resolve as resolve15 } from "path";
+import { mkdirSync as mkdirSync12, writeFileSync as writeFileSync14 } from "fs";
+import { join as join52, relative as relative11, resolve as resolve16 } from "path";
 function componentCount(cdxJson) {
   try {
     const data = JSON.parse(cdxJson);
@@ -38257,11 +39589,11 @@ function generateSbom(repo, outDir) {
       maxBuffer: MAX_BUFFER,
       stdio: ["ignore", "pipe", "ignore"]
     });
-    mkdirSync11(outDir, { recursive: true });
-    const path = join48(outDir, "sbom.cdx.json");
-    writeFileSync13(path, stdout);
+    mkdirSync12(outDir, { recursive: true });
+    const path = join52(outDir, "sbom.cdx.json");
+    writeFileSync14(path, stdout);
     const count2 = componentCount(stdout);
-    return { path: resolve15(path), note: `sbom.cdx.json${count2 !== void 0 ? ` (${count2} components)` : ""}` };
+    return { path: resolve16(path), note: `sbom.cdx.json${count2 !== void 0 ? ` (${count2} components)` : ""}` };
   } catch (e) {
     return { note: `syft failed: ${String(e instanceof Error ? e.message : e)}` };
   }
@@ -38336,14 +39668,14 @@ var trivy = {
 };
 
 // src/tools/gitleaks.ts
-import { existsSync as existsSync23 } from "fs";
-import { join as join50 } from "path";
+import { existsSync as existsSync26 } from "fs";
+import { join as join54 } from "path";
 
 // src/tools/snapshot.ts
 import { execFileSync as execFileSync6 } from "child_process";
-import { constants, copyFileSync, lstatSync as lstatSync4, mkdirSync as mkdirSync12, mkdtempSync as mkdtempSync5, rmSync as rmSync9 } from "fs";
+import { constants, copyFileSync, lstatSync as lstatSync4, mkdirSync as mkdirSync13, mkdtempSync as mkdtempSync5, rmSync as rmSync9 } from "fs";
 import { tmpdir as tmpdir3 } from "os";
-import { dirname as dirname12, join as join49 } from "path";
+import { dirname as dirname13, join as join53 } from "path";
 function trackedFiles(repo) {
   let raw;
   try {
@@ -38361,11 +39693,11 @@ function trackedFiles(repo) {
 function stageTrackedFiles(repo, degraded) {
   const files = trackedFiles(repo);
   if (!files) return null;
-  const dir = mkdtempSync5(join49(tmpdir3(), "ultrasec-snapshot-"));
+  const dir = mkdtempSync5(join53(tmpdir3(), "ultrasec-snapshot-"));
   let staged2 = 0;
   try {
     for (const rel2 of files) {
-      const src = join49(repo, rel2);
+      const src = join53(repo, rel2);
       let regular = false;
       try {
         regular = lstatSync4(src).isFile();
@@ -38373,8 +39705,8 @@ function stageTrackedFiles(repo, degraded) {
         continue;
       }
       if (!regular) continue;
-      const dst = join49(dir, rel2);
-      mkdirSync12(dirname12(dst), { recursive: true });
+      const dst = join53(dir, rel2);
+      mkdirSync13(dirname13(dst), { recursive: true });
       copyFileSync(src, dst, constants.COPYFILE_FICLONE);
       staged2++;
     }
@@ -38413,8 +39745,8 @@ var gitleaks = {
   // `--report-path -` is gitleaks' documented stdout sink (json to a file otherwise);
   // `--exit-code 0` so "leaks found" (normally exit 1) isn't treated as a tool failure.
   argv: (target, ctx) => {
-    const onHost = existsSync23(target);
-    const hasGit = !onHost || existsSync23(join50(target, ".git"));
+    const onHost = existsSync26(target);
+    const hasGit = !onHost || existsSync26(join54(target, ".git"));
     const legacy = onHost && gitleaksIsLegacy(detect("gitleaks").version);
     return gitleaksArgv(target, { history: !!ctx?.history && hasGit, legacy });
   },
@@ -38969,8 +40301,8 @@ var trufflehog = {
 };
 
 // src/tools/guarddog.ts
-import { existsSync as existsSync24 } from "fs";
-import { join as join51 } from "path";
+import { existsSync as existsSync27 } from "fs";
+import { join as join55 } from "path";
 var MANIFESTS2 = {
   npm: ["package.json"],
   pypi: ["requirements.txt", "pyproject.toml", "setup.py"],
@@ -38978,7 +40310,7 @@ var MANIFESTS2 = {
   github_action: [".github"]
 };
 function ecosystems(repo) {
-  return Object.entries(MANIFESTS2).filter(([, names]) => names.some((n) => existsSync24(join51(repo, n)) || findManifestDirs(repo, [n]).length > 0)).map(([eco]) => eco);
+  return Object.entries(MANIFESTS2).filter(([, names]) => names.some((n) => existsSync27(join55(repo, n)) || findManifestDirs(repo, [n]).length > 0)).map(([eco]) => eco);
 }
 var SEV2 = { critical: "critical", high: "high", medium: "medium" };
 var guarddog = {
@@ -39152,16 +40484,16 @@ var grype = {
 
 // src/tools/pip-audit.ts
 import { execFileSync as execFileSync7 } from "child_process";
-import { existsSync as existsSync25, mkdtempSync as mkdtempSync6, rmSync as rmSync10 } from "fs";
+import { existsSync as existsSync28, mkdtempSync as mkdtempSync6, rmSync as rmSync10 } from "fs";
 import { tmpdir as tmpdir4 } from "os";
-import { join as join52 } from "path";
+import { join as join56 } from "path";
 var PY_MANIFESTS = ["requirements.txt", "uv.lock"];
 function manifestIn(dir) {
-  return existsSync25(join52(dir, "uv.lock")) && !existsSync25(join52(dir, "requirements.txt")) ? "uv.lock" : "requirements.txt";
+  return existsSync28(join56(dir, "uv.lock")) && !existsSync28(join56(dir, "requirements.txt")) ? "uv.lock" : "requirements.txt";
 }
 function exportUvLock(dir) {
-  const tmp = mkdtempSync6(join52(tmpdir4(), "ultrasec-uv-export-"));
-  const file = join52(tmp, "requirements.txt");
+  const tmp = mkdtempSync6(join56(tmpdir4(), "ultrasec-uv-export-"));
+  const file = join56(tmp, "requirements.txt");
   try {
     execFileSync7("uv", ["export", "--frozen", "--no-hashes", "--no-emit-workspace", "--format", "requirements-txt", "-o", file], {
       cwd: dir,
@@ -39198,7 +40530,7 @@ var pipAudit = {
     }
     const deps = Array.isArray(data) ? data : Array.isArray(data?.dependencies) ? data.dependencies : [];
     const ws = ctx?.workspace ?? "";
-    const manifest = manifestIn(join52(repo, ws));
+    const manifest = manifestIn(join56(repo, ws));
     const file = ws ? `${ws}/${manifest}` : manifest;
     const out2 = [];
     for (const dep of deps) {
@@ -39231,8 +40563,8 @@ var pipAudit = {
 };
 
 // src/tools/pm-audit.ts
-import { existsSync as existsSync26 } from "fs";
-import { join as join53 } from "path";
+import { existsSync as existsSync29 } from "fs";
+import { join as join57 } from "path";
 import { execFileSync as execFileSync8 } from "child_process";
 var NPM_LOCKFILES = ["package-lock.json", "npm-shrinkwrap.json"];
 var PNPM_LOCKFILES = ["pnpm-lock.yaml"];
@@ -39319,7 +40651,7 @@ function parseNpmV7(data, lockfile) {
   return out2;
 }
 function npmLockfileName(dir) {
-  if (!existsSync26(join53(dir, "package-lock.json")) && existsSync26(join53(dir, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
+  if (!existsSync29(join57(dir, "package-lock.json")) && existsSync29(join57(dir, "npm-shrinkwrap.json"))) return "npm-shrinkwrap.json";
   return "package-lock.json";
 }
 function lockfileIn(ctx, name2) {
@@ -39327,7 +40659,7 @@ function lockfileIn(ctx, name2) {
   return ws ? `${ws}/${name2}` : name2;
 }
 function auditedDir(repo, ctx) {
-  return ctx?.workspace ? join53(repo, ctx.workspace) : repo;
+  return ctx?.workspace ? join57(repo, ctx.workspace) : repo;
 }
 var npmAudit = {
   name: "npm-audit",
@@ -39440,23 +40772,23 @@ var yarnAudit = {
 // src/tools/package-checker.ts
 import { execFileSync as execFileSync9 } from "child_process";
 import { createHash as createHash7 } from "crypto";
-import { existsSync as existsSync27, mkdirSync as mkdirSync13, readFileSync as readFileSync30, readdirSync as readdirSync4, rmSync as rmSync11, writeFileSync as writeFileSync14 } from "fs";
-import { isAbsolute as isAbsolute11, join as join54, relative as relative12 } from "path";
+import { existsSync as existsSync30, mkdirSync as mkdirSync14, readFileSync as readFileSync32, readdirSync as readdirSync4, rmSync as rmSync11, writeFileSync as writeFileSync15 } from "fs";
+import { isAbsolute as isAbsolute11, join as join58, relative as relative12 } from "path";
 function hasRepoLocalPurlFeed(repo) {
   let entries;
   try {
-    entries = readdirSync4(join54(repo, "data"));
+    entries = readdirSync4(join58(repo, "data"));
   } catch {
     return false;
   }
   return entries.some((e) => e.toLowerCase().endsWith(".purl"));
 }
 function scriptPath() {
-  const dir = join54(cacheDir(), "package-checker");
-  const path = join54(dir, `script-${PACKAGE_CHECKER_SHA256.slice(0, 12)}.sh`);
-  if (!existsSync27(path)) {
-    mkdirSync13(dir, { recursive: true });
-    writeFileSync14(path, PACKAGE_CHECKER_SH);
+  const dir = join58(cacheDir(), "package-checker");
+  const path = join58(dir, `script-${PACKAGE_CHECKER_SHA256.slice(0, 12)}.sh`);
+  if (!existsSync30(path)) {
+    mkdirSync14(dir, { recursive: true });
+    writeFileSync15(path, PACKAGE_CHECKER_SH);
   }
   return path;
 }
@@ -39493,12 +40825,12 @@ function fetchAndCacheScript(tag) {
   const buf = curlFetch(`${rawBase()}/${UPSTREAM_REPO}/${tag}/script.sh`);
   if (!buf?.length) return null;
   const sha12 = createHash7("sha256").update(buf).digest("hex").slice(0, 12);
-  const dir = join54(cacheDir(), "package-checker");
-  const path = join54(dir, `script-${tag}-${sha12}.sh`);
+  const dir = join58(cacheDir(), "package-checker");
+  const path = join58(dir, `script-${tag}-${sha12}.sh`);
   try {
-    if (!existsSync27(path)) {
-      mkdirSync13(dir, { recursive: true });
-      writeFileSync14(path, buf);
+    if (!existsSync30(path)) {
+      mkdirSync14(dir, { recursive: true });
+      writeFileSync15(path, buf);
     }
     return path;
   } catch {
@@ -39518,7 +40850,7 @@ function resolveScriptSource() {
 }
 var cachedExportPath;
 function exportPath() {
-  if (!cachedExportPath) cachedExportPath = join54(cacheDir(), "package-checker", `export-${process.pid}.json`);
+  if (!cachedExportPath) cachedExportPath = join58(cacheDir(), "package-checker", `export-${process.pid}.json`);
   return cachedExportPath;
 }
 function splitPkgVersion(raw) {
@@ -39631,7 +40963,7 @@ var packageChecker = {
     const path = exportPath();
     let raw;
     try {
-      raw = readFileSync30(path, "utf8");
+      raw = readFileSync32(path, "utf8");
     } catch {
       return [];
     }
@@ -39672,386 +41004,9 @@ var ADAPTERS = [
   cppcheck
 ];
 
-// src/context.ts
-import { existsSync as existsSync28, readFileSync as readFileSync31 } from "fs";
-import { join as join55 } from "path";
-
-// src/classes/markers.ts
-var AUTH_FLOOR = {
-  words: [
-    "requireAuth",
-    "requiresAuth",
-    "isAuthenticated",
-    "ensureAuthenticated",
-    "ensureLoggedIn",
-    "ensureLogin",
-    "requireLogin",
-    "checkAuth",
-    "verifyToken",
-    "verifyJwt",
-    "jwtVerify",
-    "authenticateToken",
-    "authMiddleware",
-    "requireRole",
-    "requireAdmin",
-    "hasRole",
-    "hasPermission",
-    "checkPermission",
-    "authorize",
-    "authorization"
-  ]
-};
-var THROTTLE_FLOOR = {
-  patterns: [
-    /\b(rateLimit\w*|rate_limit\w*|RateLimit\w*|ratelimit\w*|express-rate-limit|rate-limiter-flexible|slowDown|slow_down|throttle\w*|Throttle\w*|@Throttle|ThrottlerGuard|limiter|Bottleneck|leakyBucket|tokenBucket|TooManyRequests|too_many_requests|TOO_MANY_REQUESTS)\b|\b(?:status|statusCode|code|HTTP_429\w*)\b[^\n]{0,12}\b429\b|\b429\b[^\n]{0,12}\b(?:TooManyRequests|Too Many Requests)\b/
-  ]
-};
-var FLOOR = { auth: AUTH_FLOOR, throttle: THROTTLE_FLOOR };
-var packActive = (p, detected2) => !p.framework && !p.library || detected2.has(p.framework ?? "") || detected2.has(p.library ?? "");
-function markerFor(lens, detected2 = [], packs = PACKS) {
-  const on = new Set(detected2);
-  const parts2 = [FLOOR[lens]];
-  for (const p of packs) {
-    const g = p.markers?.global?.[lens];
-    if (g) parts2.push(g);
-  }
-  for (const p of packs) {
-    const d = p.markers?.detected?.[lens];
-    if (d && packActive(p, on)) parts2.push(d);
-  }
-  const words = parts2.flatMap((v) => v.words ?? []);
-  const annotations = parts2.flatMap((v) => v.annotations ?? []);
-  const patterns = parts2.flatMap((v) => v.patterns ?? []);
-  const alts = [];
-  if (words.length) alts.push(`\\b(${words.join("|")})\\b`);
-  if (annotations.length) alts.push(`(?<![\\w@])@(?:${annotations.join("|")})\\b`);
-  for (const re of patterns) alts.push(re.source);
-  return new RegExp(alts.join("|"));
-}
-function detectedIds(stack) {
-  return (stack ?? []).map((f) => f.id);
-}
-
-// src/context.ts
-var MAX_SCAFFOLD = 40;
-var MAX_SCAFFOLD_ENTRIES = 80;
-var AUTH_MARKER = markerFor("auth");
-var THROTTLE_MARKER = markerFor("throttle");
-function detectStack(repo) {
-  const stack = detectFrameworks(repo);
-  return { labels: stackLabels(stack), ids: stack.map((f) => f.id) };
-}
-function appliesTo2(languages, langId) {
-  return languages.includes("*") || languages.includes(langId);
-}
-function inferTrustBoundaries(surface, authCount) {
-  const kinds2 = new Set(surface.entryPoints.map((g) => g.kind));
-  const out2 = [];
-  if (kinds2.has("http")) out2.push("HTTP request handlers receive untrusted client input (query/body/params/headers/cookies).");
-  if (kinds2.has("ws")) out2.push("WebSocket/stream messages are untrusted client data.");
-  if (kinds2.has("cli")) out2.push("CLI arguments are untrusted when the program is invoked with attacker-controlled args.");
-  if (kinds2.has("env")) out2.push("Environment variables \u2014 trust depends on the deployment / secret-management model.");
-  if (kinds2.has("stdin")) out2.push("Interactive/stdin input is untrusted.");
-  out2.push(
-    authCount > 0 ? `Authentication boundary: ${authCount} candidate auth/authorization site(s) detected \u2014 confirm which routes they actually protect.` : `No auth/authorization middleware detected \u2014 confirm whether endpoints are intentionally public.`
-  );
-  return out2;
-}
-var sinkIndexCache = /* @__PURE__ */ new WeakMap();
-function sinkKindsAt(fileScan, spec, lines5) {
-  const cached = sinkIndexCache.get(fileScan);
-  if (cached) return cached;
-  const index = /* @__PURE__ */ new Map();
-  const hits = [...findSinks(spec, fileScan.calls ?? [], void 0, fileScan.imports, void 0, lines5), ...findTextSinks(spec, lines5.join("\n"))];
-  for (const h of hits) {
-    let set = index.get(h.line);
-    if (!set) index.set(h.line, set = /* @__PURE__ */ new Set());
-    set.add(h.kind);
-  }
-  sinkIndexCache.set(fileScan, index);
-  return index;
-}
-function sanitizerWeight(kind) {
-  return kind === "*" ? 0 : 1;
-}
-function breadthFirstByKind(ranked) {
-  const rounds = /* @__PURE__ */ new Map();
-  for (const x of ranked) (rounds.get(x.kind) ?? rounds.set(x.kind, []).get(x.kind)).push(x);
-  const out2 = [];
-  for (let i2 = 0; out2.length < ranked.length; i2++) {
-    let any = false;
-    for (const list2 of rounds.values()) {
-      const at2 = list2[i2];
-      if (at2) {
-        out2.push(at2);
-        any = true;
-      }
-    }
-    if (!any) break;
-  }
-  return out2;
-}
-function capBySite(items, weight, bySite) {
-  const ranked = items.slice().sort((a, b) => weight(b) - weight(a) || bySite(a, b));
-  const spread = ranked[0]?.kind === void 0 ? ranked : breadthFirstByKind(ranked);
-  return spread.slice(0, MAX_SCAFFOLD).sort(bySite);
-}
-function buildContextScaffold(repo, scan2, surface) {
-  const stack = detectStack(repo);
-  const frameworks = stack.labels;
-  const authMarker = markerFor("auth", stack.ids);
-  const rank2 = new Map(surface.byFile.map((f) => [f.file, f.score]));
-  const perFile = /* @__PURE__ */ new Map();
-  for (const g of surface.entryPoints) {
-    for (const s of g.samples) {
-      const key = `${s.file}\0${s.kind}`;
-      const seen = perFile.get(key);
-      if (!seen || s.line < seen.line) perFile.set(key, { file: s.file, line: s.line, kind: s.kind });
-    }
-  }
-  const entryPoints = [...perFile.values()].sort(
-    (a, b) => (
-      // PRODUCTION first. This brief answers "where does untrusted input enter
-      // the shipped artifact?", and a test harness is not the artifact — a
-      // route mounted only by jest presumes an attacker who already runs the
-      // suite. Measured: 19 of 77 slots on a real monorepo went to
-      // `__tests__/*.test.ts` and `src/e2e/*.e2e.ts`, ranked level with the
-      // production routes they were crowding out.
-      //
-      // Ranked, never dropped: with room to spare they still appear, below the
-      // real surface. `--include-tests` is for auditing the suite itself.
-      (isTestPath(a.file) ? 1 : 0) - (isTestPath(b.file) ? 1 : 0) || // Kind next: in a capped brief, an HTTP route earns its slot ahead of
-      // an environment read, which presumes a much narrower attacker.
-      entryWeight(b.kind) - entryWeight(a.kind) || (rank2.get(b.file) ?? 0) - (rank2.get(a.file) ?? 0) || byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind)
-    )
-  ).slice(0, MAX_SCAFFOLD_ENTRIES).sort((a, b) => byStr(a.file, b.file) || a.line - b.line || byStr(a.kind, b.kind));
-  const authMiddleware = [];
-  const sanitizers = [];
-  const seenSanitizer = /* @__PURE__ */ new Set();
-  for (const fileScan of scan2.files) {
-    const spec = langForFile(fileScan.rel);
-    if (!spec) continue;
-    const lines5 = readText2(join55(repo, fileScan.rel)).split(/\r?\n/);
-    for (let i2 = 0; i2 < lines5.length; i2++) {
-      const line2 = lines5[i2];
-      const am = authMarker.exec(line2);
-      if (am) authMiddleware.push({ file: fileScan.rel, line: i2 + 1, hint: am[0] });
-      for (const rule2 of SANITIZERS) {
-        if (!appliesTo2(rule2.languages, spec.id)) continue;
-        if (rule2.sinkLineOnly && !sinkKindsAt(fileScan, spec, lines5).get(i2 + 1)?.has(rule2.kind))
-          continue;
-        if (rule2.re.test(line2)) {
-          const key = `${fileScan.rel}\0${rule2.kind}`;
-          if (!seenSanitizer.has(key)) {
-            seenSanitizer.add(key);
-            sanitizers.push({ file: fileScan.rel, line: i2 + 1, kind: rule2.kind });
-          }
-          break;
-        }
-      }
-    }
-  }
-  const bySite = (a, b) => byStr(a.file, b.file) || a.line - b.line;
-  return {
-    frameworks,
-    entryPoints,
-    authMiddleware: capBySite(authMiddleware, () => 0, bySite),
-    // Rank BEFORE capping, for the same reason the entry-point brief does: a
-    // path-sorted `slice` is an alphabetical PREFIX, not a sample. On a real
-    // audit all 40 slots went to `.husky/`, `lighthouserc.cjs` and `app/a…`,
-    // while the repo's only HTML sanitizer — the subject of two of its five high
-    // findings — never appeared at all.
-    sanitizers: capBySite(sanitizers, (x) => sanitizerWeight(x.kind), bySite),
-    trustBoundaries: inferTrustBoundaries(surface, authMiddleware.length)
-  };
-}
-var CONTEXT_OUTLINE = [
-  "what the app does and who its users are",
-  "authentication & authorization model \u2014 who may do what, and where it is enforced",
-  "trust boundaries \u2014 where untrusted data enters, what is trusted",
-  "framework protections already in place (ORM parameterization, auto-escaping, CSRF\u2026)",
-  "known-safe sinks / accepted risks",
-  "`Exposure: internet-facing|internal|build-time` and `Criticality: crown-jewel|standard|peripheral` (the risk score reads them)",
-  "threat model \u2014 STRIDE per trust boundary, LINDDUN for personal data (references/threat-modeling.md)"
-];
-function renderContextScaffoldMd(repo, run2, s) {
-  const L = [];
-  L.push(`# ultrasec project-context primer`);
-  L.push("");
-  L.push(`- repo: \`${repo}\``);
-  L.push("");
-  L.push(`> The deterministic scaffold below is a STARTING POINT. Author **\`${join55(run2, "CONTEXT.md")}\`**`);
-  L.push(`> describing the project's purpose, trust model, auth/authorization scheme, and any`);
-  L.push(`> framework-provided protections. ultrasec injects CONTEXT.md into every \`dossier\` and the`);
-  L.push(`> \`verify\` worklist, so later stages reason WITH your threat model. CONTEXT.md is **additive`);
-  L.push(`> evidence only \u2014 it never gates or changes a verdict.**`);
-  L.push("");
-  L.push(`## Detected frameworks`);
-  L.push(s.frameworks.length ? s.frameworks.map((f) => `\`${f}\``).join(", ") : "_none detected \u2014 confirm the stack manually._");
-  L.push("");
-  L.push(`## Entry points (untrusted input) \u2014 ${s.entryPoints.length}${s.entryPoints.length >= MAX_SCAFFOLD_ENTRIES ? "+" : ""}`);
-  L.push("");
-  if (!s.entryPoints.length) L.push(`_none detected._`);
-  else L.push(`_One line per file, highest attack surface first (HTTP and cross-origin kinds before env/CLI)._`);
-  for (const e of s.entryPoints) L.push(`- \`${e.file}:${e.line}\` (${e.kind})${isTestPath(e.file) ? " \u2014 **test harness**, not the shipped artifact" : ""}`);
-  L.push("");
-  L.push(`## Auth / authorization sites (candidate protections) \u2014 ${s.authMiddleware.length}${s.authMiddleware.length >= MAX_SCAFFOLD ? "+" : ""}`);
-  if (!s.authMiddleware.length) L.push(`_none detected \u2014 confirm whether endpoints are intentionally public._`);
-  for (const a of s.authMiddleware) L.push(`- \`${a.file}:${a.line}\` \u2014 ${a.hint}`);
-  L.push("");
-  L.push(`## Sanitizers / validators present \u2014 ${s.sanitizers.length}${s.sanitizers.length >= MAX_SCAFFOLD ? "+" : ""}`);
-  if (!s.sanitizers.length) L.push(`_none detected._`);
-  for (const sa of s.sanitizers) L.push(`- \`${sa.file}:${sa.line}\` (${sa.kind})`);
-  L.push("");
-  L.push(`## Trust boundaries (inferred)`);
-  for (const t of s.trustBoundaries) L.push(`- ${t}`);
-  L.push("");
-  L.push(`## Suggested CONTEXT.md outline`);
-  L.push(`1. **What the app does** and who its users are.`);
-  L.push(`2. **Authentication & authorization model** \u2014 who is allowed to do what, and how it's enforced.`);
-  L.push(`3. **Trust boundaries** \u2014 where untrusted data enters; what is trusted.`);
-  L.push(`4. **Framework protections already in place** \u2014 ORM parameterization, template auto-escaping, CSRF tokens, etc.`);
-  L.push(`5. **Known-safe sinks / accepted risks** \u2014 so later stages don't re-litigate them.`);
-  L.push(`6. **Exposure** \u2014 one of \`internet-facing\` \xB7 \`internal\` \xB7 \`build-time\`, and`);
-  L.push(`   **asset criticality** \u2014 \`crown-jewel\` \xB7 \`standard\` \xB7 \`peripheral\`. Write them as a line`);
-  L.push(`   \`Exposure: internet-facing\` / \`Criticality: crown-jewel\`; the risk score reads them and`);
-  L.push(`   ranks accordingly. Absent, ranking is unchanged.`);
-  L.push(`7. **Threat model (STRIDE)** \u2014 per trust boundary, which of Spoofing / Tampering /`);
-  L.push(`   Repudiation / Information disclosure / Denial of service / Elevation of privilege you`);
-  L.push(`   actually care about, and which you have accepted. For personal data add LINDDUN`);
-  L.push(`   (Linking, Identifying, Non-repudiation, Detecting, Data disclosure, Unawareness,`);
-  L.push(`   Non-compliance). See references/threat-modeling.md \u2014 this is what stops the hunt`);
-  L.push(`   being a checklist walk.`);
-  L.push("");
-  return L.join("\n") + "\n";
-}
-var COMPACT_SECTIONS = /^##\s*(hunt list|exposure|criticality|trust model|trust boundaries|auth)/i;
-var RISK_LINE = /^\s*(exposure|criticality)\s*:/i;
-function compactContextDoc(doc) {
-  const lines5 = doc.split(/\r?\n/);
-  const out2 = [];
-  let keeping = false;
-  for (const line2 of lines5) {
-    if (/^##\s/.test(line2)) keeping = COMPACT_SECTIONS.test(line2);
-    if (keeping || RISK_LINE.test(line2)) out2.push(line2);
-  }
-  const kept = out2.join("\n").trim();
-  return kept.length ? kept : void 0;
-}
-function loadContextDoc(run2) {
-  const p = join55(run2, "CONTEXT.md");
-  if (!existsSync28(p)) return void 0;
-  try {
-    const s = readFileSync31(p, "utf8").trim();
-    return s.length ? s : void 0;
-  } catch {
-    return void 0;
-  }
-}
-var PRESENCE_NEGATION = /\b(?:aucune?s?|nulle\s+part|jamais|n['’]existe|n['’]ont|ne\s+contien\w*|n['’]a\s+aucun|pas\s+d['’]|pas\s+de\b|sans\b|z[ée]ro|no\b|none\b|never\b|nowhere\b|not\s+a\s+single|there\s+(?:is|are)\s+no|contains?\s+no|does\s+not\s+contain|do\s+not\s+contain)/gi;
-var CODE_SPAN = /`([^`\n]+)`/g;
-var NEGATION_WINDOW = 16;
-var isSearchable = (rel2) => langForFile(rel2) !== void 0;
-var ATTRIBUTIVE_NEGATION = /\b(?:with|avec)\s+$/i;
-var GENERIC_SUBJECT = /^[\s>*_-]*(?:a|an|any|every|each|if|when|whenever|unless|un|une|tout|toute|si|lorsqu['’]?\w*|quand)\s/i;
-function attributive(sentence, negationAt) {
-  const before = sentence.slice(0, negationAt);
-  return ATTRIBUTIVE_NEGATION.test(before) && GENERIC_SUBJECT.test(sentence);
-}
-var MIN_TOKEN = 4;
-var MAX_CLAIMS = 20;
-var MAX_HITS = 3;
-var isToken = (s) => s.length >= MIN_TOKEN && /^[\w$@][\w$.@/:-]*$/.test(s) && /[A-Za-z]/.test(s);
-function extractNegativeClaims(md) {
-  const claims = [];
-  const lines5 = md.split(/\r?\n/);
-  let block;
-  const flush = () => {
-    if (!block) return;
-    const { from, to } = block;
-    for (const sentence of block.text.split(/(?<=[.;!?])\s+/)) {
-      const tokens = [];
-      PRESENCE_NEGATION.lastIndex = 0;
-      let m = PRESENCE_NEGATION.exec(sentence);
-      while (m) {
-        if (attributive(sentence, m.index)) {
-          m = PRESENCE_NEGATION.exec(sentence);
-          continue;
-        }
-        const at2 = m.index + m[0].length;
-        const rest = sentence.slice(at2);
-        CODE_SPAN.lastIndex = 0;
-        let span = CODE_SPAN.exec(rest);
-        while (span && span.index <= NEGATION_WINDOW) {
-          const t = span[1].trim();
-          if (isToken(t) && !tokens.includes(t)) tokens.push(t);
-          span = CODE_SPAN.exec(rest);
-        }
-        m = PRESENCE_NEGATION.exec(sentence);
-      }
-      if (!tokens.length) continue;
-      let line2 = from;
-      for (let i2 = from; i2 <= to; i2++) {
-        if (lines5[i2 - 1]?.includes(tokens[0])) {
-          line2 = i2;
-          break;
-        }
-      }
-      claims.push({ sentence: sentence.trim(), line: line2, tokens });
-    }
-    block = void 0;
-  };
-  for (let i2 = 0; i2 < lines5.length; i2++) {
-    const line2 = lines5[i2];
-    if (!line2.trim() || /^#{1,6}\s/.test(line2)) {
-      flush();
-      continue;
-    }
-    if (block) {
-      block.text += ` ${line2.trim()}`;
-      block.to = i2 + 1;
-    } else block = { text: line2.trim(), from: i2 + 1, to: i2 + 1 };
-  }
-  flush();
-  return claims;
-}
-function contradictedClaims(repo, claims, opts = {}) {
-  const examined = claims.slice(0, MAX_CLAIMS);
-  const wanted = /* @__PURE__ */ new Map();
-  for (const claim of examined) {
-    for (const token of claim.tokens) {
-      const key = `${claim.line}:${token}`;
-      if (!wanted.has(key)) wanted.set(key, { claim, token, hits: [], total: 0 });
-    }
-  }
-  if (!wanted.size) return [];
-  const pruned = buildPruneMatcher(repo, { gitignore: opts.gitignore, exclude: opts.exclude, includeVendored: opts.includeVendored });
-  for (const file of walk2(repo, { gitignore: opts.gitignore, exclude: opts.exclude, maxFiles: opts.maxFiles })) {
-    if (pruned?.(file.rel) || !isSearchable(file.rel)) continue;
-    let text;
-    try {
-      text = readText2(file.abs);
-    } catch {
-      continue;
-    }
-    if (!text) continue;
-    let lines5;
-    for (const entry2 of wanted.values()) {
-      if (!text.includes(entry2.token)) continue;
-      lines5 ??= text.split(/\r?\n/);
-      for (let i2 = 0; i2 < lines5.length; i2++) {
-        if (!lines5[i2].includes(entry2.token)) continue;
-        entry2.total++;
-        if (entry2.hits.length < MAX_HITS) entry2.hits.push({ file: file.rel, line: i2 + 1 });
-      }
-    }
-  }
-  return [...wanted.values()].filter((e) => e.total > 0).sort((a, b) => a.claim.line - b.claim.line || byStr(a.token, b.token));
-}
-
 // src/reachability.ts
-import { existsSync as existsSync29, readFileSync as readFileSync32 } from "fs";
-import { join as join56 } from "path";
+import { existsSync as existsSync31, readFileSync as readFileSync33 } from "fs";
+import { join as join59 } from "path";
 var NPM_LOCKFILES2 = ["package-lock.json", "npm-shrinkwrap.json"];
 function packageNameFromLockKey(key) {
   const at2 = key.lastIndexOf("node_modules/");
@@ -40065,11 +41020,11 @@ function devOnlyPackages(repo) {
   const sources = [];
   for (const dir of findManifestDirs(repo, NPM_LOCKFILES2)) {
     for (const file of NPM_LOCKFILES2) {
-      const path = join56(dir, file);
-      if (!existsSync29(path)) continue;
+      const path = join59(dir, file);
+      if (!existsSync31(path)) continue;
       let lock;
       try {
-        lock = JSON.parse(readFileSync32(path, "utf8"));
+        lock = JSON.parse(readFileSync33(path, "utf8"));
       } catch {
         continue;
       }
@@ -40088,7 +41043,7 @@ function devOnlyPackages(repo) {
   for (const dir of manifestDirs) {
     let pkg;
     try {
-      pkg = JSON.parse(readFileSync32(join56(dir, "package.json"), "utf8"));
+      pkg = JSON.parse(readFileSync33(join59(dir, "package.json"), "utf8"));
     } catch {
       continue;
     }
@@ -40126,8 +41081,8 @@ var BUDGETS = {
 };
 var REVDEP_DEPTH = 2;
 async function runScan2(args2) {
-  const repo = resolve16(flagStr(args2, "repo") ?? ".");
-  const out2 = resolve16(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve17(flagStr(args2, "repo") ?? ".");
+  const out2 = resolve17(flagStr(args2, "out") ?? ".ultrasec");
   resetDetectCache();
   if (!isScannableDir(repo)) {
     eprintln(`ultrasec: --repo '${repo}' is not a directory. Aborting \u2014 an unscannable path must not report a clean audit.`);
@@ -40172,7 +41127,7 @@ async function runScan2(args2) {
     const relOut = relative13(repo, out2);
     const changed = relOut && relOut !== "." && !relOut.startsWith("..") ? changedRaw.filter((f) => f !== relOut && !f.startsWith(relOut + "/")) : changedRaw;
     let targets = changed;
-    if (existsSync30(readPath(out2, "graph.json"))) {
+    if (existsSync32(readPath(out2, "graph.json"))) {
       try {
         targets = reverseDependents(loadDossier(out2).graph, changed, REVDEP_DEPTH);
         const downstream = targets.length - changed.length;
@@ -40255,7 +41210,7 @@ async function runScan2(args2) {
   const scopedScan = !!(effectiveScope && effectiveScope.length || include2?.length || exclude2?.length || diffRef);
   const toolsAutoSkipped = scopedScan && toolsFlag === void 0 && !flagBool(args2, "no-tools") && required.length === 0;
   const skipTools = flagBool(args2, "no-tools") || toolsFlag === "none" || toolsAutoSkipped;
-  const which = selected ?? (toolsFlag === void 0 && required.length ? required : void 0);
+  const which = selected ?? (toolsFlag === void 0 && required.length && scopedScan ? required : void 0);
   const useDocker = flagBool(args2, "docker");
   const offline = flagBool(args2, "offline");
   timer.mark("sbom");
@@ -40363,7 +41318,7 @@ async function runScan2(args2) {
   const nextDossier = { manifest, findings, graph };
   let final = nextDossier;
   let mergedNote = "";
-  if (flagBool(args2, "merge") && existsSync30(join57(out2, "findings.json"))) {
+  if (flagBool(args2, "merge") && existsSync32(join60(out2, "findings.json"))) {
     try {
       const prev = loadDossier(out2);
       final = mergeDossier(prev, nextDossier);
@@ -40485,38 +41440,75 @@ async function runScan2(args2) {
 }
 
 // src/commands/context.ts
-import { mkdirSync as mkdirSync15, writeFileSync as writeFileSync16 } from "fs";
-import { join as join59, resolve as resolve18 } from "path";
+import { mkdirSync as mkdirSync16, writeFileSync as writeFileSync17 } from "fs";
+import { join as join62, resolve as resolve19 } from "path";
 
 // src/stage.ts
-import { mkdirSync as mkdirSync14, writeFileSync as writeFileSync15, readFileSync as readFileSync33, readdirSync as readdirSync5, statSync as statSync15 } from "fs";
-import { join as join58, resolve as resolve17 } from "path";
+import { mkdirSync as mkdirSync15, writeFileSync as writeFileSync16, readFileSync as readFileSync34, readdirSync as readdirSync5, statSync as statSync15 } from "fs";
+import { join as join61, resolve as resolve18 } from "path";
 function stageFiles(stem2) {
   return { todo: `${stem2}.todo.json`, md: `${stem2}.md` };
 }
 function wantsMdTwin(args2) {
   return args2 !== void 0 && flagBool(args2, "md") || process.env.ULTRASEC_MD === "1";
 }
+var ANSWER_FIELDS = /* @__PURE__ */ new Set([
+  "verdict",
+  "note",
+  "brocard",
+  "fixedIn",
+  "guarantees",
+  "assumptions",
+  "calls",
+  "openQuestions",
+  "rootCause",
+  "patterns",
+  "variants",
+  "regressionRule"
+]);
+function isEmptyAnswer(v) {
+  return v === null || v === "" || Array.isArray(v) && v.length === 0;
+}
+function withoutEmptyAnswers(row) {
+  if (row === null || typeof row !== "object" || Array.isArray(row)) return row;
+  const out2 = {};
+  for (const [k, v] of Object.entries(row)) if (!(ANSWER_FIELDS.has(k) && isEmptyAnswer(v))) out2[k] = v;
+  return out2;
+}
+function worklistJson(items) {
+  return `${jsonRows(items)}
+`;
+}
+function jsonRows(v) {
+  if (Array.isArray(v)) return v.length ? `[
+${v.map((r) => JSON.stringify(withoutEmptyAnswers(r))).join(",\n")}
+]` : "[]";
+  if (v !== null && typeof v === "object") {
+    const parts2 = Object.entries(v).filter(([, x]) => x !== void 0).map(([k, x]) => `${JSON.stringify(k)}:${Array.isArray(x) ? jsonRows(x) : JSON.stringify(x)}`);
+    return `{${parts2.join(",\n")}}`;
+  }
+  return JSON.stringify(v);
+}
 function emitWorklist(run2, files, items, md, opts = {}) {
-  mkdirSync14(run2, { recursive: true });
-  const todoPath = join58(run2, files.todo);
-  writeFileSync15(todoPath, JSON.stringify(items, null, 2));
-  if (opts.md ?? wantsMdTwin()) writeFileSync15(join58(run2, files.md), typeof md === "function" ? md() : md);
+  mkdirSync15(run2, { recursive: true });
+  const todoPath = join61(run2, files.todo);
+  writeFileSync16(todoPath, worklistJson(items));
+  if (opts.md ?? wantsMdTwin()) writeFileSync16(join61(run2, files.md), typeof md === "function" ? md() : md);
   return todoPath;
 }
 function worklistNote(files, wroteMd) {
   return wroteMd ? `  brief: ${files.md} (human copy of ${files.todo})` : `  fill ${files.todo} directly \u2014 field-by-field format in references/schemas.md (\`--md\` also writes ${files.md})`;
 }
 function collectApplyFiles(applyPath, dirRegex) {
-  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve17(s.trim()));
-  const abs = resolve17(applyPath);
+  if (applyPath.includes(",")) return applyPath.split(",").map((s) => resolve18(s.trim()));
+  const abs = resolve18(applyPath);
   let isDir = false;
   try {
     isDir = statSync15(abs).isDirectory();
   } catch {
   }
   if (isDir) {
-    const matches = readdirSync5(abs).filter((n) => dirRegex.test(n)).sort().map((n) => join58(abs, n));
+    const matches = readdirSync5(abs).filter((n) => dirRegex.test(n)).sort().map((n) => join61(abs, n));
     if (matches.length === 0) throw new Error(`${abs}: no apply file matching ${dirRegex} in this directory \u2014 nothing to fold (fail-closed)`);
     return matches;
   }
@@ -40526,7 +41518,7 @@ function readApply(applyPath, dirRegex, parse) {
   if (applyPath === "-") {
     let raw;
     try {
-      raw = readFileSync33(0, "utf8");
+      raw = readFileSync34(0, "utf8");
     } catch (e) {
       throw new Error(`<stdin>: ${e.message}`);
     }
@@ -40543,7 +41535,7 @@ function readApply(applyPath, dirRegex, parse) {
   for (const f of files) {
     let parsed2;
     try {
-      parsed2 = parse(readFileSync33(f, "utf8"));
+      parsed2 = parse(readFileSync34(f, "utf8"));
     } catch (e) {
       throw new Error(`${f}: ${e.message}`);
     }
@@ -40560,8 +41552,8 @@ function persistFindings(run2, dossier, findings) {
 
 // src/commands/context.ts
 function runContext(args2) {
-  const repo = resolve18(flagStr(args2, "repo") ?? ".");
-  const out2 = resolve18(flagStr(args2, "out") ?? ".ultrasec");
+  const repo = resolve19(flagStr(args2, "repo") ?? ".");
+  const out2 = resolve19(flagStr(args2, "out") ?? ".ultrasec");
   if (!isScannableDir(repo)) {
     eprintln(`ultrasec context: --repo '${repo}' is not a directory.`);
     return 2;
@@ -40586,28 +41578,28 @@ function runContext(args2) {
   }
   const shown = scaffold.entryPoints.length;
   const entryNote = shown < totalSources ? `${shown} file(s) shown of ${totalSources} site(s)` : `${shown}`;
-  mkdirSync15(out2, { recursive: true });
-  writeFileSync16(join59(out2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
+  mkdirSync16(out2, { recursive: true });
+  writeFileSync17(join62(out2, "CONTEXT.scaffold.json"), JSON.stringify(scaffold, null, 2));
   const wroteMd = wantsMdTwin(args2);
-  if (wroteMd) writeFileSync16(join59(out2, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out2, scaffold));
+  if (wroteMd) writeFileSync17(join62(out2, "CONTEXT.todo.md"), renderContextScaffoldMd(repo, out2, scaffold));
   if (flagBool(args2, "json")) {
     println(JSON.stringify(scaffold, null, 2));
     return 0;
   }
   println(`ultrasec context \u2192 ${out2}`);
-  println(`  ${join59(out2, "CONTEXT.scaffold.json")}${wroteMd ? `  \xB7  ${join59(out2, "CONTEXT.todo.md")}` : ""}`);
+  println(`  ${join62(out2, "CONTEXT.scaffold.json")}${wroteMd ? `  \xB7  ${join62(out2, "CONTEXT.todo.md")}` : ""}`);
   println(
     `  frameworks: ${scaffold.frameworks.join(", ") || "\u2014"}  \xB7  entry points: ${entryNote}  \xB7  auth sites: ${scaffold.authMiddleware.length}  \xB7  sanitizers: ${scaffold.sanitizers.length}`
   );
-  println(`  next: author ${join59(out2, "CONTEXT.md")} from the scaffold, covering:`);
+  println(`  next: author ${join62(out2, "CONTEXT.md")} from the scaffold, covering:`);
   CONTEXT_OUTLINE.forEach((line2, i2) => println(`    ${i2 + 1}. ${line2}`));
   println(`  then run \`scan\`/\`verify\` \u2014 it's injected into every dossier.`);
   return 0;
 }
 
 // src/commands/import.ts
-import { resolve as resolve19, join as join60 } from "path";
-import { existsSync as existsSync31, readFileSync as readFileSync34 } from "fs";
+import { resolve as resolve20, join as join63 } from "path";
+import { existsSync as existsSync33, readFileSync as readFileSync35 } from "fs";
 
 // src/tools/deepsec.ts
 function slugToCategory(slug2) {
@@ -40678,7 +41670,7 @@ async function runImport(args2) {
     eprintln("ultrasec import: need a findings file \u2014 `ultrasec import <findings.json> --run <dir>`.");
     return 2;
   }
-  const run2 = resolve19(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve20(flagStr(args2, "run") ?? ".ultrasec");
   const format = flagStr(args2, "format") ?? "deepsec-json";
   if (format !== "deepsec-json") {
     eprintln(`ultrasec import: unknown --format '${format}' (supported: deepsec-json).`);
@@ -40686,7 +41678,7 @@ async function runImport(args2) {
   }
   let raw;
   try {
-    raw = readFileSync34(resolve19(file), "utf8");
+    raw = readFileSync35(resolve20(file), "utf8");
   } catch (e) {
     eprintln(`ultrasec import: cannot read ${file} (${e instanceof Error ? e.message : String(e)}).`);
     return 2;
@@ -40697,7 +41689,7 @@ async function runImport(args2) {
     return 1;
   }
   let prev;
-  if (existsSync31(join60(run2, "findings.json"))) {
+  if (existsSync33(join63(run2, "findings.json"))) {
     try {
       prev = loadDossier(run2);
     } catch (e) {
@@ -40707,7 +41699,7 @@ async function runImport(args2) {
   }
   const prevFindings = prev?.findings ?? [];
   const correlated = correlate([...prevFindings, ...imported]);
-  const repo = prev?.manifest.repo ?? resolve19(flagStr(args2, "repo") ?? ".");
+  const repo = prev?.manifest.repo ?? resolve20(flagStr(args2, "repo") ?? ".");
   const enrichOn = !(flagBool(args2, "no-enrich") || flagBool(args2, "offline"));
   const { findings: enriched, note: riskNote } = await enrichFindings(correlated, { enabled: enrichOn, context: loadContextDoc(run2) });
   const blameOn = flagBool(args2, "blame") || flagBool(args2, "provenance");
@@ -40745,13 +41737,13 @@ async function runImport(args2) {
 }
 
 // src/commands/logs.ts
-import { resolve as resolve20, join as join61, dirname as dirname13, extname as extname5, sep as sep10 } from "path";
-import { existsSync as existsSync32, statSync as statSync17, readdirSync as readdirSync6, mkdirSync as mkdirSync16, writeFileSync as writeFileSync17, openSync, readSync, closeSync } from "fs";
+import { resolve as resolve21, join as join64, dirname as dirname14, extname as extname5, sep as sep11 } from "path";
+import { existsSync as existsSync34, statSync as statSync17, readdirSync as readdirSync6, mkdirSync as mkdirSync17, writeFileSync as writeFileSync18, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
 
 // src/logs/analyze.ts
 import { createReadStream, statSync as statSync16 } from "fs";
 import { createInterface as createInterface2 } from "readline";
-import { relative as relative14, sep as sep9 } from "path";
+import { relative as relative14, sep as sep10 } from "path";
 
 // src/logs/detect.ts
 var LOG_FORMATS = ["nginx-combined", "common", "json-lines", "syslog", "generic", "raw"];
@@ -41068,8 +42060,8 @@ function escalateOnce(sev) {
   return sev;
 }
 var BoundedCounter = class {
-  constructor(cap) {
-    this.cap = cap;
+  constructor(cap2) {
+    this.cap = cap2;
   }
   cap;
   counts = /* @__PURE__ */ new Map();
@@ -41167,8 +42159,8 @@ function newIpBehaviorState(windowSeconds) {
   };
 }
 var BoundedIpStates = class {
-  constructor(cap, windowSeconds) {
-    this.cap = cap;
+  constructor(cap2, windowSeconds) {
+    this.cap = cap2;
     this.windowSeconds = windowSeconds;
   }
   cap;
@@ -41530,7 +42522,7 @@ async function analyzeLogs(paths, opts) {
   const windowSeconds = opts.windowSec ?? DEFAULT_WINDOW_SECONDS;
   const state = newState(maxLines, windowSeconds);
   for (const absPath of paths) {
-    const relPath = relative14(opts.base, absPath).split(sep9).join("/");
+    const relPath = relative14(opts.base, absPath).split(sep10).join("/");
     if (state.budgetRemaining <= 0) {
       state.truncation.push(`${relPath}: not read \u2014 the ${maxLines.toLocaleString("en-US")}-line run budget was already exhausted`);
       continue;
@@ -41667,7 +42659,7 @@ async function runLogs(args2) {
     eprintln(`ultrasec logs: ${e instanceof Error ? e.message : String(e)}`);
     return 2;
   }
-  const out2 = resolve20(flagStr(args2, "out") ?? ".ultrasec-logs");
+  const out2 = resolve21(flagStr(args2, "out") ?? ".ultrasec-logs");
   const budget = flagStr(args2, "budget") ?? "standard";
   if (!["quick", "standard", "thorough"].includes(budget)) {
     eprintln(`ultrasec logs: unknown --budget '${budget}' (expected quick|standard|thorough).`);
@@ -41712,15 +42704,15 @@ async function runLogs(args2) {
     } : {}
   };
   writeDossier(out2, { manifest, findings, graph });
-  mkdirSync16(out2, { recursive: true });
-  writeFileSync17(join61(out2, "LOGSTATS.json"), JSON.stringify(stats, null, 2));
+  mkdirSync17(out2, { recursive: true });
+  writeFileSync18(join64(out2, "LOGSTATS.json"), JSON.stringify(stats, null, 2));
   const sigmaOn = flagBool(args2, "sigma");
   let sigmaPath;
   if (sigmaOn) {
     const rules = renderSigmaRules();
     if (rules) {
-      sigmaPath = join61(out2, "ultrasec-logs.sigma.yml");
-      writeFileSync17(sigmaPath, rules);
+      sigmaPath = join64(out2, "ultrasec-logs.sigma.yml");
+      writeFileSync18(sigmaPath, rules);
     }
   }
   if (flagBool(args2, "json")) {
@@ -41762,36 +42754,36 @@ async function runLogs(args2) {
     if (truncation.length > 10) println(`    - \u2026and ${truncation.length - 10} more`);
   }
   if (sigmaPath) println(`  sigma rules \u2192 ${sigmaPath}  (import into your SIEM; thresholds/correlation are the SIEM's job)`);
-  println(`  next: read ${join61(out2, "DOSSIER.md")}; triage with the log-forensics playbook; verify with \`ultrasec verify --run ${out2}\`.`);
+  println(`  next: read ${join64(out2, "DOSSIER.md")}; triage with the log-forensics playbook; verify with \`ultrasec verify --run ${out2}\`.`);
   return 0;
 }
 var LOG_EXTENSIONS = /* @__PURE__ */ new Set([".log", ".jsonl", ".txt"]);
 function looksLikeText(path) {
   let fd;
   try {
-    fd = openSync(path, "r");
+    fd = openSync2(path, "r");
   } catch {
     return false;
   }
   try {
     const buf = Buffer.alloc(1024);
-    const n = readSync(fd, buf, 0, buf.length, 0);
+    const n = readSync2(fd, buf, 0, buf.length, 0);
     return !buf.subarray(0, n).includes(0);
   } catch {
     return false;
   } finally {
-    closeSync(fd);
+    closeSync2(fd);
   }
 }
 function expandInputs(inputs) {
   const out2 = /* @__PURE__ */ new Set();
   for (const raw of inputs) {
-    const p = resolve20(raw);
-    if (!existsSync32(p)) throw new Error(`path not found: ${raw}`);
+    const p = resolve21(raw);
+    if (!existsSync34(p)) throw new Error(`path not found: ${raw}`);
     const st = statSync17(p);
     if (st.isDirectory()) {
       for (const entry2 of readdirSync6(p).sort(byStr)) {
-        const full = join61(p, entry2);
+        const full = join64(p, entry2);
         let est;
         try {
           est = statSync17(full);
@@ -41812,34 +42804,34 @@ function expandInputs(inputs) {
 }
 function strictCommonAncestor(dirs) {
   if (!dirs.length) return void 0;
-  let common = dirs[0].split(sep10);
+  let common = dirs[0].split(sep11);
   for (const d of dirs.slice(1)) {
-    const parts2 = d.split(sep10);
+    const parts2 = d.split(sep11);
     let i2 = 0;
     while (i2 < common.length && i2 < parts2.length && common[i2] === parts2[i2]) i2++;
     common = common.slice(0, i2);
     if (!common.length) return void 0;
   }
-  const joined = common.join(sep10);
-  return joined === "" ? sep10 : joined;
+  const joined = common.join(sep11);
+  return joined === "" ? sep11 : joined;
 }
 function computeBase(absFiles) {
-  const cwd = resolve20(process.cwd());
-  if (absFiles.every((f) => f.startsWith(cwd + sep10))) return cwd;
-  const common = strictCommonAncestor(absFiles.map((f) => dirname13(f)));
+  const cwd = resolve21(process.cwd());
+  if (absFiles.every((f) => f.startsWith(cwd + sep11))) return cwd;
+  const common = strictCommonAncestor(absFiles.map((f) => dirname14(f)));
   if (!common) throw new Error("input log paths share no common ancestor directory \u2014 pass paths under one common root.");
   return common;
 }
 
 // src/commands/dossier.ts
-import { resolve as resolve21 } from "path";
+import { resolve as resolve22 } from "path";
 
 // src/dossier.ts
-import { extname as extname6, join as join62 } from "path";
+import { extname as extname6, join as join65 } from "path";
 var CTX = 12;
 var MAX_ENCLOSING = 80;
 function fileLines(repo, file) {
-  return readText2(join62(repo, file)).split(/\r?\n/);
+  return readText2(join65(repo, file)).split(/\r?\n/);
 }
 function numbered(lines5, from, to, mark) {
   const out2 = [];
@@ -41848,6 +42840,10 @@ function numbered(lines5, from, to, mark) {
     out2.push(`${marker} ${String(n).padStart(4)} | ${lines5[n - 1] ?? ""}`);
   }
   return out2.join("\n");
+}
+function excerpt(repo, step, ctx = CTX) {
+  const lines5 = fileLines(repo, step.file);
+  return numbered(lines5, Math.max(1, step.line - ctx), Math.min(lines5.length, step.line + ctx), step.line);
 }
 var NOT_A_BODY = /* @__PURE__ */ new Set(["import", "export", "reexport", "type", "interface"]);
 function enclosingOf(repo, file, line2, lines5) {
@@ -41914,7 +42910,7 @@ function reachability(repo, graph, f) {
   if (entry2) {
     let routes = [];
     try {
-      routes = findRouteEntryPoints(entry2.file, readText2(join62(repo, entry2.file)));
+      routes = findRouteEntryPoints(entry2.file, readText2(join65(repo, entry2.file)));
     } catch {
     }
     if (routes.length) {
@@ -41947,7 +42943,7 @@ function reachability(repo, graph, f) {
       said = true;
     }
     try {
-      const text = readText2(join62(repo, entry2.file));
+      const text = readText2(join65(repo, entry2.file));
       const hit6 = text.split(/\r?\n/).findIndex((l) => AUTH_MARKER.test(l));
       L.push(
         hit6 >= 0 ? `- **auth marker in this file**: \`${entry2.file}:${hit6 + 1}\` \u2014 a CANDIDATE guard; confirm it runs before the object is touched, on this path.` : `- **auth marker in this file**: NONE. Not proof the route is public \u2014 the guard may be middleware, a proxy or the platform \u2014 but nothing in this file authenticates the caller.`
@@ -41982,6 +42978,17 @@ function reachability(repo, graph, f) {
   if (!said) return [];
   L.push("");
   return L;
+}
+function howToVerify() {
+  return [
+    `## How to verify`,
+    `1. Confirm the SOURCE is genuinely attacker-controlled.`,
+    `2. Follow each HOP \u2014 does the tainted value actually pass through unchanged?`,
+    `3. Check for a sanitizer/validator/authz guard anywhere on the path.`,
+    `4. Confirm the SINK is exploitable with the value that arrives.`,
+    `5. Record \`supported\` / \`partial\` / \`unsupported\` / \`refuted\` via \`ultrasec verify\`.`,
+    `   If unsure and severity is high, leave it **needs-human** \u2014 do not dismiss.`
+  ];
 }
 function renderFindingDossier(repo, graph, f, options = {}) {
   const opts = typeof options === "string" ? { context: options } : options;
@@ -42051,19 +43058,49 @@ function renderFindingDossier(repo, graph, f, options = {}) {
       L.push("");
     }
   }
-  L.push(`## How to verify`);
-  L.push(`1. Confirm the SOURCE is genuinely attacker-controlled.`);
-  L.push(`2. Follow each HOP \u2014 does the tainted value actually pass through unchanged?`);
-  L.push(`3. Check for a sanitizer/validator/authz guard anywhere on the path.`);
-  L.push(`4. Confirm the SINK is exploitable with the value that arrives.`);
-  L.push(`5. Record \`supported\` / \`partial\` / \`unsupported\` / \`refuted\` via \`ultrasec verify\`.`);
-  L.push(`   If unsure and severity is high, leave it **needs-human** \u2014 do not dismiss.`);
+  if (opts.howToVerify !== false) L.push(...howToVerify());
+  return L.join("\n") + "\n";
+}
+var MEMBER_CTX = 3;
+function renderFamilyDossier(repo, graph, members, options = {}) {
+  const [first, ...rest] = members;
+  if (!first) return "";
+  const L = [];
+  if (rest.length) {
+    L.push(`# Family of ${members.length} \u2014 ${first.title}`);
+    L.push(`_The first member in full; the others are judged on their location. One verdict per id._`);
+    L.push("");
+  }
+  if (options.context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` \u2014 background to judge reachability/exploitability; not a verdict._`);
+    L.push("");
+    L.push(options.context);
+    L.push("");
+  }
+  L.push(renderFindingDossier(repo, graph, first, { brief: options.brief, howToVerify: false }).trimEnd());
+  L.push("");
+  if (rest.length) {
+    L.push(`## Other members (${rest.length})`);
+    L.push("");
+    for (const f of rest) {
+      const at2 = f.sink ?? f.path?.[f.path.length - 1] ?? f.source;
+      L.push(`### ${f.id} \u2014 [${f.severity}] ${f.title}${at2 ? ` \xB7 ${at2.file}:${at2.line}` : ""}`);
+      if (at2) {
+        L.push("```");
+        L.push(excerpt(repo, { file: at2.file, line: at2.line, why: "" }, MEMBER_CTX));
+        L.push("```");
+      }
+      L.push("");
+    }
+  }
+  if (options.howToVerify !== false) L.push(...howToVerify());
   return L.join("\n") + "\n";
 }
 
 // src/commands/dossier.ts
 function runDossier(args2) {
-  const run2 = resolve21(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve22(flagStr(args2, "run") ?? ".ultrasec");
   const id = args2._[1];
   if (!id) {
     eprintln("ultrasec dossier: need a <finding-id>. List them in DOSSIER.md or with `paths`.");
@@ -42076,7 +43113,17 @@ function runDossier(args2) {
     eprintln(`ultrasec dossier: ${e.message}`);
     return 2;
   }
-  const f = d.findings.find((x) => x.id === id || x.id.startsWith(id));
+  const wanted = id.split(",").map((x) => x.trim()).filter(Boolean);
+  const found = [];
+  for (const w of wanted) {
+    const hit6 = d.findings.find((x) => x.id === w || x.id.startsWith(w));
+    if (!hit6) {
+      eprintln(`ultrasec dossier: no finding "${w}" in ${run2}.`);
+      return 2;
+    }
+    found.push(hit6);
+  }
+  const f = found[0];
   if (!f) {
     eprintln(`ultrasec dossier: no finding "${id}" in ${run2}.`);
     return 2;
@@ -42088,7 +43135,9 @@ function runDossier(args2) {
     compact: flagBool(args2, "compact"),
     noContext: flagBool(args2, "no-context")
   });
-  println(renderFindingDossier(repo, d.graph, f, { context: shown, brief }));
+  println(
+    found.length > 1 ? renderFamilyDossier(repo, d.graph, found, { context: shown, brief }) : renderFindingDossier(repo, d.graph, f, { context: shown, brief })
+  );
   return 0;
 }
 function dossierContext(doc, opts) {
@@ -42097,121 +43146,17 @@ function dossierContext(doc, opts) {
 }
 
 // src/commands/triage.ts
-import { resolve as resolve23 } from "path";
-
-// src/apply-parse.ts
-function describeValue(v) {
-  if (v === void 0) return "missing";
-  if (v === null) return "null";
-  if (typeof v === "string") return JSON.stringify(v.length > 40 ? `${v.slice(0, 40)}\u2026` : v);
-  if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (Array.isArray(v)) return `array(${v.length})`;
-  return typeof v;
-}
-function notInVocabulary(field2, value, allowed) {
-  return `${field2} ${describeValue(value)} is not one of ${allowed.join("|")}`;
-}
-function badField(field2, value, expected) {
-  return `${field2} ${describeValue(value)} \u2014 expected ${expected}`;
-}
-function coerceRows(data, wrapperKeys, label2) {
-  if (Array.isArray(data)) return data;
-  for (const key of wrapperKeys) {
-    const nested = data?.[key];
-    if (Array.isArray(nested)) return nested;
-  }
-  const shapes = [`a JSON array`, ...wrapperKeys.map((k) => `{"${k}":[...]}`)].join(" or ");
-  throw new Error(`unrecognized ${label2} shape \u2014 expected ${shapes} (fail-closed)`);
-}
-function requireUsable(result, sourceLength, requirement) {
-  if (sourceLength > 0 && result.rows.length === 0) {
-    const detail = result.dropped.map((d) => `row ${d.index}: ${d.reason}`).join("; ");
-    throw new Error(`${sourceLength} row(s), none usable \u2014 each needs ${requirement} (fail-closed)${detail ? ` \u2014 ${detail}` : ""}`);
-  }
-  return result;
-}
-function formatNormalized(normalized) {
-  return normalized.map((n) => `  \u21B7 row ${n.index}: ${n.note}`);
-}
-function formatDropped(dropped) {
-  return dropped.map((d) => `  \u2717 dropped ${d.file ? `${d.file} ` : ""}row ${d.index}: ${d.reason}`);
-}
-function surfaceDropped(dropped, strict, emit2) {
-  for (const line2 of formatDropped(dropped)) emit2(line2);
-  if (strict && dropped.length > 0) {
-    emit2(`  --strict: ${dropped.length} malformed row(s) refused \u2014 failing so the loss isn't absorbed silently.`);
-    return 1;
-  }
-  return 0;
-}
-function parseIdVerdictRows(raw, opts) {
-  const arr = coerceRows(JSON.parse(raw), opts.wrapperKeys, opts.label);
-  const rows = [];
-  const dropped = [];
-  for (const [index, row] of arr.entries()) {
-    if (!row || typeof row !== "object") {
-      dropped.push({ index, reason: badField("row", row, "an object") });
-      continue;
-    }
-    const r = row;
-    const bad = [];
-    if (typeof r.id !== "string") bad.push(badField("id", r.id, "a string"));
-    if (!opts.verdicts.includes(r.verdict)) bad.push(notInVocabulary("verdict", r.verdict, opts.verdicts));
-    if (bad.length) {
-      dropped.push({ index, reason: bad.join(", ") });
-      continue;
-    }
-    rows.push(opts.build(r, r.verdict));
-  }
-  return requireUsable({ rows, dropped }, arr.length, `a string "id" and a "verdict" among ${opts.verdicts.join("|")}`);
-}
-var DISCOVERY_REQUIREMENT = `title/message/file (strings), line \u2265 0, a category among ${CATEGORIES.join(
-  "|"
-)} (aliases accepted) and a severity among ${SEVERITIES2.join("|")}`;
-function parseDiscoveryRow(raw) {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { reason: badField("row", raw, "an object") };
-  const d = raw;
-  const bad = [];
-  for (const field2 of ["title", "message", "file"]) {
-    if (typeof d[field2] !== "string" || !d[field2].length) bad.push(badField(field2, d[field2], "a non-empty string"));
-  }
-  if (!Number.isInteger(d.line) || d.line < 0) bad.push(badField("line", d.line, "an integer \u2265 0 (0 = the whole file)"));
-  const cat = normalizeCategory(d.category);
-  if (!cat) bad.push(`${notInVocabulary("category", d.category, CATEGORIES)} (nor a known alias \u2014 see CATEGORY_ALIASES)`);
-  if (!SEVERITIES2.includes(d.severity)) bad.push(notInVocabulary("severity", d.severity, SEVERITIES2));
-  if (bad.length) return { reason: bad.join(", ") };
-  const path = Array.isArray(d.path) ? d.path.filter((p) => {
-    const s = p;
-    return !!s && typeof s === "object" && typeof s.file === "string" && Number.isInteger(s.line) && s.line >= 1;
-  }).map((p) => {
-    const s = p;
-    return { file: s.file, line: s.line, why: typeof s.why === "string" ? s.why : "" };
-  }) : void 0;
-  return {
-    row: {
-      title: d.title,
-      category: cat.category,
-      ...cat.folded ? { vulnClass: String(d.category) } : {},
-      severity: d.severity,
-      ...typeof d.cwe === "string" ? { cwe: d.cwe } : {},
-      message: d.message,
-      file: d.file,
-      line: d.line,
-      ...path && path.length ? { path } : {}
-    },
-    ...cat.folded ? { note: `category ${describeValue(d.category)} folded to "${cat.category}"` } : {}
-  };
-}
+import { resolve as resolve24 } from "path";
 
 // src/verify.ts
 function reOpened(f) {
   return f.status === "needs-human" && f.verdict !== void 0;
 }
-function pending(findings) {
-  return findings.filter((f) => f.status === "open" || f.status === "needs-human");
+function pending(findings, surface) {
+  return findings.filter((f) => (f.status === "open" || f.status === "needs-human") && inSurface(f, surface));
 }
 function worklistCounts(dossier, opts = {}) {
-  const p = pending(dossier.findings);
+  const p = pending(dossier.findings, opts.surface ?? ADJUDICATION_SURFACE);
   const re = p.filter(reOpened).length;
   return { fresh: p.length - re, reOpened: opts.all ? re : 0, withheld: opts.all ? 0 : re };
 }
@@ -42229,33 +43174,44 @@ function reachabilityLine(f) {
   }
   return bits.length ? bits.join(" \xB7 ") : void 0;
 }
+var CLAIM_CAP = 240;
+function cap(text) {
+  return text.length > CLAIM_CAP ? `${text.slice(0, CLAIM_CAP - 1)}\u2026` : text;
+}
+function claimOf(message) {
+  const [body2 = "", ...evidence] = engineProse(message).split(/\n\n(?=Evidence:)/);
+  const flat = body2.replace(/\s+/g, " ").trim();
+  const first = /^(.+?[.!?])(?:\s|$)/.exec(flat)?.[1] ?? flat;
+  const ev = evidence.join(" ").replace(/\s+/g, " ").trim();
+  return ev ? `${cap(first)} ${cap(ev)}` : cap(first);
+}
+function verifyItemOf(f) {
+  const files = /* @__PURE__ */ new Set();
+  for (const p of f.path ?? []) files.add(`${p.file}:${p.line}`);
+  if (f.sink) files.add(`${f.sink.file}:${f.sink.line}`);
+  if (f.source) files.add(`${f.source.file}:${f.source.line}`);
+  const item = {
+    id: f.id,
+    severity: f.severity,
+    cwe: f.cwe,
+    title: f.title,
+    category: f.category,
+    ...surfaceOf(f) === "deps" ? {} : { claim: claimOf(f.message) },
+    files: [...files],
+    verdict: null,
+    note: "",
+    brocard: null
+  };
+  if (f.noise) item.proposed = f.noise;
+  const reach = reachabilityLine(f);
+  if (reach) item.reachability = reach;
+  const pa = f.priorAnalysis;
+  if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
+  if (reOpened(f)) item.priorVerdict = f.verdict;
+  return item;
+}
 function buildWorklist(dossier, opts = {}) {
-  return pending(dossier.findings).filter((f) => opts.all || !reOpened(f)).slice().sort((a, b) => byStr(a.id, b.id)).map((f) => {
-    const files = /* @__PURE__ */ new Set();
-    for (const p of f.path ?? []) files.add(`${p.file}:${p.line}`);
-    if (f.sink) files.add(`${f.sink.file}:${f.sink.line}`);
-    if (f.source) files.add(`${f.source.file}:${f.source.line}`);
-    const item = {
-      id: f.id,
-      severity: f.severity,
-      cwe: f.cwe,
-      title: f.title,
-      category: f.category,
-      claim: f.message,
-      files: [...files],
-      verdict: null,
-      note: "",
-      brocard: null
-    };
-    const proposed = proposedFor(f);
-    if (proposed) item.proposed = proposed;
-    const reach = reachabilityLine(f);
-    if (reach) item.reachability = reach;
-    const pa = f.priorAnalysis;
-    if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
-    if (reOpened(f)) item.priorVerdict = f.verdict;
-    return item;
-  });
+  return pending(dossier.findings, opts.surface ?? ADJUDICATION_SURFACE).filter((f) => opts.all || !reOpened(f)).slice().sort((a, b) => byStr(a.id, b.id)).map(verifyItemOf);
 }
 function shard(items, n, i2) {
   return items.filter((_, idx) => idx % n === i2);
@@ -42294,16 +43250,18 @@ function renderWorklistMd(items, context, counts) {
     L.push(context);
     L.push("");
   }
-  L.push(...renderProposalSummary(items));
+  L.push(...renderProposalSummary(items.map((it) => ({ id: it.id, proposed: it.proposed ? proposalOf(it.proposed) : void 0 }))));
   for (const it of items) {
     L.push(`## ${it.id} \u2014 [${it.severity}] ${it.title}`);
     if (it.cwe) L.push(`- ${it.cwe} \xB7 ${it.category}`);
     L.push(`- files: ${it.files.map((f) => `\`${f}\``).join(", ")}`);
-    L.push(`- claim: ${it.claim}`);
+    if (it.claim) L.push(`- claim: ${it.claim}`);
     if (it.reachability) L.push(`- reachability (engine evidence, not a verdict): ${it.reachability}`);
     if (it.priorSignal) L.push(`- signal (not a verdict \u2014 adjudicate yourself): ${it.priorSignal}`);
-    if (it.proposed)
-      L.push(`- proposed ground \`${it.proposed.ground}\` (${it.proposed.class}) \u2014 ${it.proposed.why}. Accept it or refuse it; it is not a verdict.`);
+    if (it.proposed) {
+      const p = proposalOf(it.proposed);
+      L.push(`- proposed ground \`${p.ground}\` (${p.class}) \u2014 ${p.why}. Accept it or refuse it; it is not a verdict.`);
+    }
     if (it.priorVerdict) L.push(`- **re-opened** \u2014 an earlier pass ruled \`${it.priorVerdict}\` and escalated it. Not new work.`);
     L.push("");
   }
@@ -42418,6 +43376,23 @@ function familyCount(f) {
 function collapsedCount(grouped2) {
   return grouped2.families.reduce((n, f) => n + f.members.length - 1, 0);
 }
+function adjudicationKey(f) {
+  const at2 = locationOf(f);
+  const root = at2 ? pathRoot(at2) : UNPLACED + f.id;
+  if (f.noise) return ["noise", f.noise, root].join(KEY_SEP);
+  return [f.category, f.cwe ?? "", f.sink?.kind ?? "", f.title, root].join(KEY_SEP);
+}
+function adjudicationFamilies(ids, lookup2) {
+  const byKey2 = /* @__PURE__ */ new Map();
+  for (const id of ids) {
+    const f = lookup2(id);
+    const key = f ? adjudicationKey(f) : UNPLACED + id;
+    const list2 = byKey2.get(key);
+    if (list2) list2.push(id);
+    else byKey2.set(key, [id]);
+  }
+  return [...byKey2.values()];
+}
 
 // src/triage.ts
 var TRIAGE_VERDICTS = ["noise", "keep"];
@@ -42429,10 +43404,9 @@ function citedAt(f) {
   return "\u2014";
 }
 function buildTriageWorklist(dossier) {
-  return dossier.findings.filter((f) => f.status === "open").slice().sort(compareWithinStatus).map((f) => {
+  return dossier.findings.filter((f) => f.status === "open" && !isHigh(f.severity)).slice().sort(compareWithinStatus).map((f) => {
     const item = { id: f.id, severity: f.severity, category: f.category, title: f.title, at: citedAt(f), verdict: null };
-    const proposed = proposedFor(f);
-    if (proposed) item.proposed = proposed;
+    if (f.noise) item.proposed = f.noise;
     return item;
   });
 }
@@ -42455,7 +43429,7 @@ function renderTriageMd(items, context) {
     L.push(context);
     L.push("");
   }
-  L.push(...renderProposalSummary(items));
+  L.push(...renderProposalSummary(items.map((it) => ({ id: it.id, proposed: it.proposed ? proposalOf(it.proposed) : void 0 }))));
   L.push(...groupedWorklist(items));
   L.push("");
   return L.join("\n") + "\n";
@@ -42526,11 +43500,11 @@ function parseTriage(raw) {
 }
 
 // src/orchestrate.ts
-import { existsSync as existsSync33, mkdirSync as mkdirSync17, readFileSync as readFileSync35, writeFileSync as writeFileSync18 } from "fs";
-import { join as join64, resolve as resolve22 } from "path";
+import { existsSync as existsSync35, mkdirSync as mkdirSync18, readFileSync as readFileSync36, writeFileSync as writeFileSync19 } from "fs";
+import { join as join67, resolve as resolve23 } from "path";
 
 // src/orchestrate-templates.ts
-import { join as join63 } from "path";
+import { join as join66 } from "path";
 
 // src/revalidate.ts
 var REVALIDATION_VERDICTS = ["still-valid", "fixed", "false-positive", "uncertain"];
@@ -42544,29 +43518,39 @@ function citedLoc(f) {
   if (f.source) return { file: f.source.file, line: f.source.line };
   return null;
 }
-function buildRevalidateWorklist(dossier, repo) {
-  return dossier.findings.filter(inScope).slice().sort((a, b) => byStr(a.id, b.id)).map((f) => {
+var CURRENT_LINE_CAP = 200;
+function capLine(line2) {
+  const t = line2.trim();
+  return t.length > CURRENT_LINE_CAP ? `${t.slice(0, CURRENT_LINE_CAP)}\u2026` : t;
+}
+function buildRevalidateWorklist(dossier, repo, opts = {}) {
+  const surface = opts.surface ?? ADJUDICATION_SURFACE;
+  const memo = gitMemo();
+  return dossier.findings.filter((f) => inScope(f) && inSurface(f, surface) && (!opts.ids || opts.ids.has(f.id))).slice().sort((a, b) => byStr(a.id, b.id)).map((f) => {
     const loc = citedLoc(f);
     const file = loc?.file ?? "";
     const line2 = loc?.line ?? 0;
-    const fileExists = file ? fileExistsAtHead(repo, file) : false;
-    const atHead = fileExists && line2 ? lineContentAtHead(repo, file, line2) : null;
-    const currentLine = atHead !== null && isCredentialFinding(f) ? redactCredentialLine(atHead) : atHead;
+    const fileExists = file ? fileExistsAtHead(repo, file, memo) : false;
+    const historical = f.atCommit && file && line2 ? lineContentAtCommit(repo, f.atCommit, file, line2) : null;
+    const atHead = f.atCommit ? historical : fileExists && line2 ? lineContentAtHead(repo, file, line2, memo) : null;
+    const shown = atHead !== null && isCredentialFinding(f) ? redactCredentialLine(atHead) : atHead;
     const sinceRef = f.provenance?.commit;
-    const since = sinceRef && file ? logSince(repo, file, sinceRef) : null;
-    return {
+    const since = sinceRef && file ? logSince(repo, file, sinceRef, memo) : null;
+    const item = {
       id: f.id,
       severity: f.severity,
       title: f.title,
       at: `${file}:${line2}`,
       fileExists,
-      currentLine,
+      currentLine: shown === null ? null : capLine(shown),
       commitsSinceFinding: since ? since.length : null,
-      lineLastChanged: fileExists && line2 ? lineLastChanged(repo, file, line2) : null,
-      renamedTo: file && !fileExists ? fileRenamedTo(repo, file) : null,
+      lineLastChanged: fileExists && line2 ? lineLastChanged(repo, file, line2, memo) : null,
+      renamedTo: file && !fileExists && !f.atCommit ? fileRenamedTo(repo, file, memo) : null,
       verdict: null,
       note: ""
     };
+    if (f.atCommit) item.atCommit = f.atCommit;
+    return item;
   });
 }
 function renderRevalidateMd(items, context) {
@@ -42593,6 +43577,7 @@ function renderRevalidateMd(items, context) {
   for (const it of items) {
     L.push(`## ${it.id} \u2014 [${it.severity}] ${it.title}`);
     L.push(`- at: \`${it.at}\` \xB7 file exists at HEAD: ${it.fileExists ? "yes" : "**NO**"}`);
+    if (it.atCommit) L.push(`- cited at commit \`${it.atCommit.slice(0, 10)}\` (history scan) \u2014 the line below is read there`);
     if (it.currentLine !== null) L.push(`- current line: \`${it.currentLine.trim().slice(0, 200)}\``);
     else if (it.fileExists) L.push(`- current line: **cited line is out of range now (drifted/removed)**`);
     if (it.commitsSinceFinding !== null) L.push(`- commits to file since finding: ${it.commitsSinceFinding}`);
@@ -42679,7 +43664,9 @@ function revalFactsFromWorklist(items) {
   const fixedInById = /* @__PURE__ */ new Map();
   for (const it of items) {
     const wholeFile = it.at.endsWith(":0");
-    if (!it.fileExists || it.currentLine === null && !wholeFile) unresolved.add(it.id);
+    if (it.atCommit) {
+      if (it.currentLine === null && !wholeFile) unresolved.add(it.id);
+    } else if (!it.fileExists || it.currentLine === null && !wholeFile) unresolved.add(it.id);
     if (it.lineLastChanged?.commit) fixedInById.set(it.id, it.lineLastChanged.commit);
   }
   return { unresolved, fixedInById };
@@ -42704,7 +43691,8 @@ var VERDICT_SCHEMA = {
           id: { type: "string" },
           verdict: { enum: [...VERDICTS] },
           note: { type: "string", description: "one line grounded in the source you read, citing [file:line]" },
-          exploitPath: { type: "string", description: "REQUIRED for supported: who \xB7 what they send \xB7 what they get" }
+          exploitPath: { type: "string", description: "REQUIRED for supported: who \xB7 what they send \xB7 what they get" },
+          brocard: { enum: [...BROCARDS], description: "REQUIRED for refuted: the named ground of the dismissal (references/dismissal-brocards.md)" }
         }
       }
     }
@@ -42828,11 +43816,32 @@ function toBatches(ids, batchSize) {
 function oneLine(s) {
   return s.replace(/[\r\n\u2028\u2029]+/g, " ");
 }
-function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize) {
+function batchText(phase, families, lines5, header3) {
+  const n = families.reduce((k, g) => k + g.length, 0);
+  const line2 = (id) => lines5[id] ?? JSON.stringify({ id });
+  if (phase === "investigate")
+    return [
+      ...header3 ? [`Hunt prompt \u2014 every region below unless it carries its own \`prompt\`: ${header3}`] : [],
+      `Your ${n} region(s), one compact JSON line each:`,
+      ...families.flat().map(line2)
+    ].join("\n");
+  const L = [
+    `Your ${n} item(s), one compact JSON line each, in ${families.length} famil${families.length === 1 ? "y" : "ies"}. A family is ONE judgment: read its first member in depth, the others for their location only (\`dossier <id>,<id>,\u2026 --brief --no-context\` prints exactly that). Still ONE verdict row per id.`
+  ];
+  families.forEach((g, i2) => {
+    L.push(`# family ${i2 + 1} (${g.length})`);
+    for (const id of g) L.push(line2(id));
+  });
+  return L.join("\n");
+}
+function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize, extras = {}) {
   const spec = phaseSpec(ph.name);
   const scriptPath2 = workPath(runAbs, "orchestration", `${ph.name}.workflow.mjs`);
   const meta = { name: `ultrasec-${ph.name}`, description: spec.description(ph.items), phases: [{ title: spec.title }] };
   const fragmentKey = ph.name === "investigate" ? "discoveries" : "verdicts";
+  const plan = extras.plan ?? { batches: toBatches(ph.ids, batchSize).map((b) => b.map((id) => [id])), lines: {} };
+  const batches = plan.batches.map((fams) => fams.flat());
+  const texts = plan.batches.map((fams) => batchText(ph.name, fams, plan.lines, plan.header));
   return [
     `export const meta = ${JSON.stringify(meta)}`,
     ``,
@@ -42843,15 +43852,21 @@ function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize) {
     `// Constants for THIS run (injected at emit time; no Date.now/Math.random in this harness).`,
     `const RUN = ${JSON.stringify(runAbs)}`,
     `const ENGINE = ${JSON.stringify(engineAbs)}`,
+    `// The worklist the items came from \u2014 for the orchestrator's merge, never handed to an agent.`,
     `const WORKLIST = ${JSON.stringify(ph.worklist)}`,
     `const AGENTS = RUN + '/.work/orchestration/agents'`,
-    `const BATCHES = ${JSON.stringify(toBatches(ph.ids, batchSize))}`,
+    `// The ids each agent rules on (families kept whole, the agent count capped), and the`,
+    `// items themselves as compact JSON lines \u2014 the agent opens no worklist.`,
+    `const BATCHES = ${JSON.stringify(batches)}`,
+    `const ITEMS = ${JSON.stringify(texts)}`,
+    `const CONTEXT = ${JSON.stringify(extras.context ?? "")}`,
     `const SCHEMA = ${JSON.stringify(spec.schema)}`,
     ``,
     `function contract(name, extra) {`,
     `  return 'Read and follow the dispatch contract at ' + AGENTS + '/' + name + '.md VERBATIM.\\n'`,
-    `    + 'Constants: RUN=' + RUN + '  ENGINE=' + ENGINE + '  WORKLIST=' + WORKLIST + '.\\n'`,
-    `    + 'Invoke the engine only by its ABSOLUTE path: node ' + ENGINE + ' <cmd> \u2014 read-only commands only.'`,
+    `    + 'Constants: RUN=' + RUN + '  ENGINE=' + ENGINE + '.\\n'`,
+    `    + 'Invoke the engine only by its ABSOLUTE path: node ' + ENGINE + ' <cmd> \u2014 read-only commands only; dossier always with --brief --no-context.'`,
+    `    + (CONTEXT ? '\\nProject context (CONTEXT.md, compacted \u2014 background for judging reachability, never a verdict):\\n' + CONTEXT : '')`,
     `    + (extra ? '\\n' + extra : '')`,
     `}`,
     ``,
@@ -42859,7 +43874,7 @@ function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize) {
     ``,
     `phase(${JSON.stringify(spec.title)})`,
     `const results = await pipeline(BATCHES, (batch, _item, i) =>`,
-    `  agent(contract('${spec.role}', 'ITEMS=' + batch.join(',')), { label: '${ph.name}:' + (i + 1), phase: ${JSON.stringify(spec.title)}, agentType: 'general-purpose', schema: SCHEMA }))`,
+    `  agent(contract('${spec.role}', ITEMS[i]), { label: '${ph.name}:' + (i + 1), phase: ${JSON.stringify(spec.title)}, agentType: 'general-purpose', schema: SCHEMA }))`,
     ``,
     `// One-writer rule: this workflow only COLLECTS ${fragmentKey} fragments. The main agent merges`,
     `// the returned \`${fragmentKey}\` arrays into ${oneLine(spec.fragmentFile(runAbs))}${ph.name === "investigate" ? " (and the `idioms`/`hunted` arrays of weakness-class hunts under the same keys)" : ""}, then runs the conservative fold:`,
@@ -42875,50 +43890,50 @@ function agentContracts(runAbs, engineAbs, repoAbs) {
 
 You are auditing ONE batch of candidates of an ultrasec security review \u2014 the OPEN candidates the deterministic engine enumerated. They are recall-oriented: many are false positives by design; you decide, from the real code.
 
-Worklist: \`${join63(runAbs, "findings.json")}\` (the audit dossier's candidate list; repo root: \`${repoAbs}\`). Handle ONLY the findings whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Your items are in your prompt: one compact JSON line per candidate (\`id\`, \`severity\`, \`title\`, \`cwe\`, \`category\`, \`claim\`, \`files[]\`, and \`proposed\` / \`reachability\` when the engine has them), grouped by family. Repo root: \`${repoAbs}\`. If an id is no longer in the worklist \u2014 \`dossier\` cannot find it \u2014 skip it and say so in your note.
 
-For EACH of your candidate ids:
+For EACH family:
 
-1. Run \`node ${engineAbs} dossier <id> --run ${runAbs}\` (read-only) \u2014 the grounding packet: the real code along the cross-file path, graph neighbours, and how to verify.
-2. Read the code along EVERY hop of the printed path (open the cited files when the excerpts alone cannot decide). Decide: is the SOURCE attacker-controlled? does the value reach the SINK through every hop unchanged? is there a sanitizer/validator/authz guard on the path? is the SINK exploitable with the value that arrives (write the PoC)?
-3. Rule it:
+1. Run \`node ${engineAbs} dossier <id>,<id>,\u2026 --run ${runAbs} --brief --no-context\` (read-only) \u2014 ONE call per family: the first member's grounding packet in full, then one line and a \xB13-line window per other member. The project context is already in your prompt; do not reprint it.
+2. Read the code along EVERY hop of the first member's path (open a cited file only when the packet cannot decide). Decide: is the SOURCE attacker-controlled? does the value reach the SINK through every hop unchanged? is there a sanitizer/validator/authz guard on the path? is the SINK exploitable with the value that arrives (write the PoC)? For each other member, check only that its window has the same shape; a member that differs gets its own reading.
+3. Rule EVERY id:
    - \`supported\` \u2014 the flow is real and exploitable. REQUIRES \`exploitPath\` (who \xB7 what they send \xB7 what they get).
    - \`partial\` \u2014 a real issue, but weaker or narrower than claimed.
    - \`unsupported\` \u2014 the evidence does not establish the claim.
-   - \`refuted\` \u2014 the source positively contradicts the claim (name the guard/sanitizer \`[file:line]\`).
+   - \`refuted\` \u2014 the source positively contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\`).
    Default to the harsher verdict ONLY when you can disprove it; otherwise mark \`partial\`/leave it for a human.
 4. Be conservative. The fold never auto-dismisses a high/critical finding on anything short of an explicit \`refuted\` \u2014 an uncertain high-severity finding stays **needs-human**, never dropped. Every claim in your \`note\` must cite resolvable \`[file:line]\` hops you actually read.
 
-Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath" }] }\` \u2014 your ITEMS only.
+Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath", "brocard" }] }\` \u2014 one row per id in your prompt, family members included.
 ${footer}`,
     skeptic: `# Contract: skeptic
 
 You are an adversarial skeptic verifying the pending findings of an ultrasec audit. Assume each claim is wrong until the source proves it \u2014 try to REFUTE it.
 
-Worklist: \`${join63(runAbs, "VERIFY.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Your items are in your prompt: one compact JSON line per finding (\`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`), grouped by family. Repo root: \`${repoAbs}\`. If an id is no longer in the worklist \u2014 \`dossier\` cannot find it \u2014 skip it and say so in your note.
 
-For EACH of your entries:
+For EACH family:
 
-1. Open every cited \`file:line\` in \`files[]\` and read it in context; run \`node ${engineAbs} dossier <id> --run ${runAbs}\` (read-only) for the full cross-file packet.
-2. Judge the claim against the source \u2014 is the flow **real and exploitable**?
+1. Run \`node ${engineAbs} dossier <id>,<id>,\u2026 --run ${runAbs} --brief --no-context\` (read-only) \u2014 the first member's cross-file packet in full, a \xB13-line window per other member. Open a cited \`file:line\` only when the packet cannot decide.
+2. Judge the first member's claim against the source \u2014 is the flow **real and exploitable**? Then check each other member's window has the same shape (a member that differs gets its own reading):
    - \`supported\` \u2014 real and exploitable exactly as claimed (include \`exploitPath\`).
    - \`partial\` \u2014 a real issue, but the claim overstates it (wrong hop, narrower reach, weaker impact).
    - \`unsupported\` \u2014 the source does not establish the claim.
-   - \`refuted\` \u2014 the source contradicts the claim (name the guard/sanitizer \`[file:line]\`).
+   - \`refuted\` \u2014 the source contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\`).
 3. Be skeptical, but do NOT dismiss a high/critical finding unless you can positively **refute** it \u2014 the fold sends an \`unsupported\`/\`partial\` high-severity finding to **needs-human**, never auto-dropped. Uncertain \u21D2 leave it for a human.
 4. \`note\` is REQUIRED \u2014 one line grounded in what you read, citing resolvable \`[file:line]\`. If the entry carries a \`priorSignal\`, it is a HINT, never a verdict \u2014 adjudicate yourself.
 
-Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath" }] }\` \u2014 your ITEMS only.
+Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath", "brocard" }] }\` \u2014 one row per id in your prompt.
 ${footer}`,
     revalidator: `# Contract: revalidator
 
 You revalidate findings already ranked real (confirmed / needs-human) against git history \u2014 the false-positive cut.
 
-Worklist: \`${join63(runAbs, "REVALIDATE.todo.json")}\` (a JSON array; each entry has \`id\`, \`severity\`, \`title\`, \`at\`, plus compact git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`; repo root: \`${repoAbs}\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,\u2026>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Your items are in your prompt: one compact JSON line per finding (\`id\`, \`severity\`, \`title\`, \`at\`, plus git facts: \`fileExists\`, \`currentLine\`, \`commitsSinceFinding\`, \`lineLastChanged\`, \`renamedTo\`), grouped by family. Repo root: \`${repoAbs}\`. If an id is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your entries:
 
-1. Read the git facts, then open the cited file at HEAD (\`at\`, or \`renamedTo\` when the file moved) and check whether the vulnerable code is still there.
+1. Read the git facts; open the cited file at HEAD (\`at\`, or \`renamedTo\` when the file moved) only when they cannot settle whether the vulnerable code is still there.
 2. Decide whether the issue is still live:
    - \`still-valid\` \u2014 the cited code is still vulnerable at HEAD.
    - \`fixed\` \u2014 the code was corrected; include \`fixedIn\` (the fixing commit sha \u2014 else the fold infers it from \`lineLastChanged\`).
@@ -42927,13 +43942,13 @@ For EACH of your entries:
 3. The fold is conservative: \`fixed\` \u2192 dismissed recording the fixing commit; a high/critical \`false-positive\` \u2192 **needs-human** (never auto-dismissed); \`uncertain\`/unknown \u2192 needs-human; \`still-valid\` keeps the finding (flagged if the cited location drifted at HEAD).
 4. \`note\` is REQUIRED \u2014 one line grounded in the git facts / code you read, citing resolvable \`[file:line]\`.
 
-Return (structured output): \`{ "verdicts": [{ "id", "verdict", "fixedIn", "note" }] }\` \u2014 your ITEMS only.
+Return (structured output): \`{ "verdicts": [{ "id", "verdict", "fixedIn", "note" }] }\` \u2014 one row per id in your prompt.
 ${footer}`,
     hunter: `# Contract: hunter
 
 You hunt the bugs the deterministic engine can't enumerate \u2014 missing/incorrect **authz** & **IDOR**, **business-logic** flaws, and multi-hop taint \u2014 one attack-surface region at a time.
 
-Worklist: \`${join63(runAbs, "INVESTIGATE.todo.json")}\` (a JSON array; each entry has \`region\`, \`files[]\`, \`neighbors[]\`, \`prompt\`; paths are relative to the repo root \`${repoAbs}\`). Handle ONLY the regions named in your prompt (\`ITEMS=<region,\u2026>\`). If an \`ITEMS\` region is no longer in the worklist, skip it and say so in your note.
+Your regions are in your prompt: one compact JSON line each (\`region\`, \`files[]\`, \`neighbors[]\`, and \`prompt\` when it differs from the shared hunt prompt printed above them; paths are relative to the repo root \`${repoAbs}\`). If a region is no longer in the worklist, skip it and say so in your note.
 
 For EACH of your regions:
 
@@ -42944,7 +43959,7 @@ For EACH of your regions:
 
 5. An item whose \`region\` starts with \`hunt:\` is a **weakness-class hunt**, not a region: its \`hunt\` object carries the class invariant, a valid guard, examples, and the framework/version no pack covers. Find how THIS repo writes the class: every break is a Discovery with \`"hunt": "<id>"\`; every unsafe call and guard you recognize goes to \`idioms[]\` (\`{hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}\`, citation-checked); list the hunt id in \`hunted[]\` even when you found nothing.
 
-Return (structured output): \`{ "discoveries": [{ "title", "category", "severity", "cwe", "message", "file", "line", "path", "hunt"? }], "idioms": [...], "hunted": [...] }\` \u2014 your ITEMS only.
+Return (structured output): \`{ "discoveries": [{ "title", "category", "severity", "cwe", "message", "file", "line", "path", "hunt"? }], "idioms": [...], "hunted": [...] }\` \u2014 your regions only.
 
 > **Merge before you fold (orchestrator).** Regions overlap, so two hunters routinely report ONE bug from two angles \u2014 the same missing check cited at the guard and at the call it fails to protect. The mechanical dedup on ingest only collapses an EXACT \`category + cwe/title + file:line\` match, so a same-bug-different-line pair survives as two findings and the report reads as twice the problem. Merge near-duplicates into one Discovery (keep the most precise citation, put the others in \`path\`) BEFORE running \`--apply\`, and do it before any false-positive pass: a de-duplication that runs after adjudication has already inflated the count it was meant to fix.
 ${footer}`
@@ -42971,11 +43986,11 @@ ${status}
 
 ## The loop (play every role yourself, one item at a time)
 
-1. **Scan** (if not done): \`${engine} scan --repo ${repoAbs} --out ${runAbs}\` \u2192 \`${join63(runAbs, "findings.json")}\` (+ optionally prime \`${engine} context\`).
-2. **Investigate the attack surface** (discovery) \u2014 \`${engine} investigate --run ${runAbs}\` writes \`${join63(runAbs, "INVESTIGATE.todo.json")}\`. For EVERY region, apply \`${agents("hunter")}\` yourself; merge the grounded Discovery[] into \`${frag("investigate")}\`. Then ingest (citation-checked): \`${phaseSpec("investigate").applyHint(engineAbs, "", runAbs)}\`.
-3. **Adjudicate the open candidates** \u2014 the worklist is \`${join63(runAbs, "findings.json")}\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`${agents("analyzer")}\` yourself (\`${engine} dossier <id> --run ${runAbs}\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`${frag("adjudicate")}\`. Then fold, conservatively: \`${phaseSpec("adjudicate").applyHint(engineAbs, "", runAbs)}\`.
-4. **Verify adversarially** \u2014 \`${engine} verify --run ${runAbs}\` writes \`${join63(runAbs, "VERIFY.todo.json")}\` (the still-pending findings). For EVERY entry, apply \`${agents("skeptic")}\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`${frag("verify")}\`. Then: \`${phaseSpec("verify").applyHint(engineAbs, "", runAbs)}\`.
-5. **Revalidate against git history** \u2014 \`${engine} revalidate --run ${runAbs}\` writes \`${join63(runAbs, "REVALIDATE.todo.json")}\`. For EVERY entry, apply \`${agents("revalidator")}\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`${frag("revalidate")}\`. Then: \`${phaseSpec("revalidate").applyHint(engineAbs, "", runAbs)}\`.
+1. **Scan** (if not done): \`${engine} scan --repo ${repoAbs} --out ${runAbs}\` \u2192 \`${join66(runAbs, "findings.json")}\` (+ optionally prime \`${engine} context\`).
+2. **Investigate the attack surface** (discovery) \u2014 \`${engine} investigate --run ${runAbs}\` writes \`${join66(runAbs, "INVESTIGATE.todo.json")}\`. For EVERY region, apply \`${agents("hunter")}\` yourself; merge the grounded Discovery[] into \`${frag("investigate")}\`. Then ingest (citation-checked): \`${phaseSpec("investigate").applyHint(engineAbs, "", runAbs)}\`.
+3. **Adjudicate the open candidates** \u2014 the worklist is \`${join66(runAbs, "findings.json")}\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`${agents("analyzer")}\` yourself, one family at a time \u2014 same category, CWE, sink and title under the same path root (\`${engine} dossier <id>,<id>,\u2026 --run ${runAbs} --brief --no-context\`, read every hop of the first member, the others for their location; one verdict per id, supported/partial/unsupported/refuted + note, exploitPath when supported, brocard when refuted); merge the verdicts into \`${frag("adjudicate")}\`. Then fold, conservatively: \`${phaseSpec("adjudicate").applyHint(engineAbs, "", runAbs)}\`.
+4. **Verify adversarially** \u2014 \`${engine} verify --run ${runAbs}\` writes \`${join66(runAbs, "VERIFY.todo.json")}\` (the still-pending findings). For EVERY entry, apply \`${agents("skeptic")}\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`${frag("verify")}\`. Then: \`${phaseSpec("verify").applyHint(engineAbs, "", runAbs)}\`.
+5. **Revalidate against git history** \u2014 \`${engine} revalidate --run ${runAbs}\` writes \`${join66(runAbs, "REVALIDATE.todo.json")}\`. For EVERY entry, apply \`${agents("revalidator")}\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`${frag("revalidate")}\`. Then: \`${phaseSpec("revalidate").applyHint(engineAbs, "", runAbs)}\`.
 6. **Gate**: \`${engine} check --run ${runAbs} --semantic\` must exit 0 before presenting anything.
 7. **Render**: \`${engine} render --run ${runAbs}\` (optionally author the narrative first: \`${engine} narrative --run ${runAbs}\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
 
@@ -42983,71 +43998,67 @@ With subagents available, prefer the emitted workflows instead: \`orchestrate --
 `;
 }
 
-// src/surface.ts
-var SURFACES = ["code", "supply", "deps"];
-var SURFACE_TITLE = {
-  code: "Your source code",
-  supply: "Secrets & configuration",
-  deps: "Dependency advisories"
-};
-var SURFACE_OF_CATEGORY = {
-  taint: "code",
-  sast: "code",
-  authz: "code",
-  crypto: "code",
-  logs: "code",
-  privacy: "code",
-  other: "code",
-  secret: "supply",
-  config: "supply",
-  dep: "deps"
-};
-function surfaceOf(f) {
-  return SURFACE_OF_CATEGORY[f.category] ?? "code";
-}
-function bySurface(findings) {
-  const out2 = { code: [], supply: [], deps: [] };
-  for (const f of findings) out2[surfaceOf(f)].push(f);
-  return out2;
-}
-var MUST_READ = ["critical", "high"];
-function unadjudicatedCode(findings) {
-  return findings.filter((f) => f.status === "open" && surfaceOf(f) !== "deps" && MUST_READ.includes(f.severity));
-}
-
 // src/orchestrate.ts
 var PHASES = ["adjudicate", "verify", "revalidate", "investigate"];
 var SMALL_WORKLIST = 3;
 var BATCH_SIZE = 8;
+var MAX_AGENTS = 12;
+function packFamilies(groups, maxAgents = MAX_AGENTS, minBatch = BATCH_SIZE) {
+  const live = groups.map((g, i2) => ({ g, i: i2 })).filter((x) => x.g.length > 0);
+  const total = live.reduce((n, x) => n + x.g.length, 0);
+  if (!total) return [];
+  const k = Math.max(1, Math.min(maxAgents, Math.ceil(total / minBatch), live.length));
+  const bins = Array.from({ length: k }, () => ({ load: 0, members: [] }));
+  const bySize = live.slice().sort((a, b) => b.g.length - a.g.length || a.i - b.i);
+  for (const x of bySize) {
+    let best = bins[0];
+    for (const b of bins) if (b.load < best.load) best = b;
+    best.load += x.g.length;
+    best.members.push(x);
+  }
+  return bins.filter((b) => b.members.length).map((b) => b.members.sort((a, c2) => a.i - c2.i)).sort((a, b) => a[0].i - b[0].i).map((m) => m.map((x) => x.g));
+}
 function readIds(path, id) {
-  if (!existsSync33(path)) return null;
+  if (!existsSync35(path)) return null;
   try {
-    const items = JSON.parse(readFileSync35(path, "utf8"));
+    const items = JSON.parse(readFileSync36(path, "utf8"));
     if (!Array.isArray(items)) return null;
     return items.map((i2) => String(id(i2)));
   } catch {
     return null;
   }
 }
-var SURFACE_FILTERS = [...SURFACES, "all"];
-function listPhases(runDir, engineAbs, surface = "all") {
-  const run2 = resolve22(runDir);
-  const findingsPath = join64(run2, "findings.json");
+function readRegionIds(path) {
+  if (!existsSync35(path)) return null;
+  try {
+    const raw = JSON.parse(readFileSync36(path, "utf8"));
+    if (!Array.isArray(raw) && !(raw !== null && typeof raw === "object" && Array.isArray(raw.regions))) return null;
+    return readInvestigateTodo(raw).map((r) => String(r.region));
+  } catch {
+    return null;
+  }
+}
+function listPhases(runDir, engineAbs, surface = ADJUDICATION_SURFACE) {
+  const run2 = resolve23(runDir);
+  const findingsPath = join67(run2, "findings.json");
   const allIds = readIds(findingsPath, (f) => f.id);
   let adjIds = [];
+  const byId = /* @__PURE__ */ new Map();
   if (allIds !== null) {
     try {
-      const findings = JSON.parse(readFileSync35(findingsPath, "utf8"));
-      adjIds = findings.filter((f) => f.status === "open" && (surface === "all" || surfaceOf(f) === surface)).map((f) => f.id);
+      const findings = JSON.parse(readFileSync36(findingsPath, "utf8"));
+      for (const f of findings) byId.set(f.id, f);
+      adjIds = findings.filter((f) => f.status === "open" && inSurface(f, surface)).map((f) => f.id);
     } catch {
     }
   }
-  const verPath = join64(run2, "VERIFY.todo.json");
-  const verIds = readIds(verPath, (i2) => i2.id);
-  const revPath = join64(run2, "REVALIDATE.todo.json");
-  const revIds = readIds(revPath, (i2) => i2.id);
-  const invPath = join64(run2, "INVESTIGATE.todo.json");
-  const invIds = readIds(invPath, (r) => r.region);
+  const scoped = (ids) => ids === null || surface === "all" ? ids : ids.filter((id) => !byId.has(id) || inSurface(byId.get(id), surface));
+  const verPath = join67(run2, "VERIFY.todo.json");
+  const verIds = scoped(readIds(verPath, (i2) => i2.id));
+  const revPath = join67(run2, "REVALIDATE.todo.json");
+  const revIds = scoped(readIds(revPath, (i2) => i2.id));
+  const invPath = join67(run2, "INVESTIGATE.todo.json");
+  const invIds = readRegionIds(invPath);
   return [
     {
       name: "adjudicate",
@@ -43084,20 +44095,57 @@ function listPhases(runDir, engineAbs, surface = "all") {
     }
   ];
 }
+function compactLine(item) {
+  return JSON.stringify(withoutEmptyAnswers(item));
+}
+function readArray(path) {
+  try {
+    const v = JSON.parse(readFileSync36(path, "utf8"));
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+function planPhase(ph, findingsById) {
+  const lines5 = {};
+  let groups;
+  let header3;
+  if (ph.name === "investigate") {
+    let raw = [];
+    try {
+      raw = JSON.parse(readFileSync36(ph.worklist, "utf8"));
+    } catch {
+    }
+    const todo = investigateTodo(readInvestigateTodo(raw));
+    header3 = todo.prompt || void 0;
+    const regions = new Map(todo.regions.map((r) => [String(r.region), r]));
+    for (const id of ph.ids) lines5[id] = compactLine(regions.get(id) ?? { region: id });
+    groups = ph.ids.map((id) => [id]);
+  } else {
+    const rows = ph.name === "adjudicate" ? /* @__PURE__ */ new Map() : new Map(readArray(ph.worklist).map((r) => [String(r.id), r]));
+    for (const id of ph.ids) {
+      const f = findingsById.get(id);
+      const row = ph.name === "adjudicate" ? f ? verifyItemOf(f) : void 0 : rows.get(id);
+      lines5[id] = compactLine(row ?? { id });
+    }
+    groups = adjudicationFamilies(ph.ids, (id) => findingsById.get(id));
+  }
+  return { batches: packFamilies(groups), lines: lines5, ...header3 ? { header: header3 } : {} };
+}
 function repoOf(run2) {
   try {
-    const m = JSON.parse(readFileSync35(join64(run2, "manifest.json"), "utf8"));
+    const m = JSON.parse(readFileSync36(join67(run2, "manifest.json"), "utf8"));
     if (typeof m.repo === "string" && m.repo) return m.repo;
   } catch {
   }
   return "<repo>";
 }
 function orchestrateRun(runDir, engineAbs, opts = {}) {
-  const run2 = resolve22(runDir);
-  if (!existsSync33(run2)) {
+  const run2 = resolve23(runDir);
+  if (!existsSync35(run2)) {
     return { exitCode: 2, written: [], notices: [], errors: [`run dir not found: ${run2}`], phases: [] };
   }
-  const phases = listPhases(run2, engineAbs, opts.surface ?? "all");
+  const phases = listPhases(run2, engineAbs, opts.surface ?? ADJUDICATION_SURFACE);
   let selected = phases.filter((p) => p.ready);
   if (opts.phase !== void 0) {
     const ph = phases.find((p) => p.name === opts.phase);
@@ -43123,16 +44171,19 @@ function orchestrateRun(runDir, engineAbs, opts = {}) {
   }
   const repoAbs = repoOf(run2);
   const orchDir = workPath(run2, "orchestration");
-  const agentsDir = join64(orchDir, "agents");
-  for (const p of PHASES) mkdirSync17(join64(orchDir, "out", p), { recursive: true });
-  mkdirSync17(agentsDir, { recursive: true });
+  const agentsDir = join67(orchDir, "agents");
+  for (const p of PHASES) mkdirSync18(join67(orchDir, "out", p), { recursive: true });
+  mkdirSync18(agentsDir, { recursive: true });
   const written = [];
   const notices = [];
   for (const [name2, content] of Object.entries(agentContracts(run2, engineAbs, repoAbs))) {
-    const p = join64(agentsDir, `${name2}.md`);
-    writeFileSync18(p, content);
+    const p = join67(agentsDir, `${name2}.md`);
+    writeFileSync19(p, content);
     written.push(p);
   }
+  const doc = loadContextDoc(run2);
+  const context = doc ? compactContextDoc(doc) ?? doc : void 0;
+  const findingsById = new Map(readArray(join67(run2, "findings.json")).map((f) => [f.id, f]));
   if (!opts.eco) {
     for (const ph of selected) {
       if (ph.items === 0) {
@@ -43142,20 +44193,20 @@ function orchestrateRun(runDir, engineAbs, opts = {}) {
       if (ph.items <= SMALL_WORKLIST) {
         notices.push(`phase "${ph.name}": only ${ph.items} item(s) \u2014 the sequential --eco path is equivalent and cheaper.`);
       }
-      const p = join64(orchDir, `${ph.name}.workflow.mjs`);
-      writeFileSync18(p, phaseWorkflowScript(ph, run2, engineAbs, BATCH_SIZE));
+      const p = join67(orchDir, `${ph.name}.workflow.mjs`);
+      writeFileSync19(p, phaseWorkflowScript(ph, run2, engineAbs, BATCH_SIZE, { plan: planPhase(ph, findingsById), context }));
       written.push(p);
     }
   }
-  const rb = join64(orchDir, "RUNBOOK.md");
-  writeFileSync18(rb, runbookMd(phases, run2, engineAbs, repoAbs));
+  const rb = join67(orchDir, "RUNBOOK.md");
+  writeFileSync19(rb, runbookMd(phases, run2, engineAbs, repoAbs));
   written.push(rb);
   return { exitCode: 0, written, notices, errors: [], phases };
 }
 
 // src/commands/triage.ts
 function runTriage(args2) {
-  const run2 = resolve23(flagStr(args2, "run") ?? ".ultrasec");
+  const run2 = resolve24(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
   try {
     dossier = loadDossier(run2);
@@ -43193,7 +44244,7 @@ function runTriage(args2) {
     return 2;
   }
   const surface = surfaceFlag ?? "all";
-  const scoped = surface === "all" ? dossier : { ...dossier, findings: dossier.findings.filter((f) => surfaceOf(f) === surface) };
+  const scoped = surface === "all" ? dossier : { ...dossier, findings: dossier.findings.filter((f) => inSurface(f, surface)) };
   const items = buildTriageWorklist(scoped);
   const files = stageFiles("TRIAGE");
   const wroteMd = wantsMdTwin(args2);
@@ -43204,6 +44255,8 @@ function runTriage(args2) {
   }
   println(`ultrasec triage \u2192 ${todoPath} (${items.length} open candidate${items.length === 1 ? "" : "s"}${surface === "all" ? "" : `, surface ${surface}`})`);
   println(worklistNote(files, wroteMd));
+  const high = scoped.findings.filter((f) => f.status === "open" && isHigh(f.severity)).length;
+  if (high) println(`  ${high} high/critical open candidate(s) not listed \u2014 a noise verdict cannot dismiss them; they go to verify.`);
   if (!items.length) {
     println(`  no open candidates to triage.`);
   } else {
@@ -43216,685 +44269,6 @@ function runTriage(args2) {
 // src/commands/investigate.ts
 import { readFileSync as readFileSync37 } from "fs";
 import { join as join68, resolve as resolve25 } from "path";
-
-// src/check.ts
-import { existsSync as existsSync34, openSync as openSync2, readSync as readSync2, closeSync as closeSync2 } from "fs";
-import { join as join65, resolve as resolve24, sep as sep11 } from "path";
-function insideRepo(repo, file) {
-  const base = resolve24(repo);
-  const abs = resolve24(base, file);
-  return abs === base || abs.startsWith(base + sep11);
-}
-var LINE_COUNT_CHUNK_BYTES = 1 << 20;
-function countNewlines(fd, chunkBytes = LINE_COUNT_CHUNK_BYTES) {
-  const buf = Buffer.alloc(chunkBytes);
-  let newlines = 0;
-  for (; ; ) {
-    const n = readSync2(fd, buf, 0, chunkBytes, null);
-    if (n === 0) break;
-    for (let i2 = 0; i2 < n; i2++) if (buf[i2] === 10) newlines++;
-  }
-  return newlines;
-}
-function lineCountDetailed(repo, file) {
-  if (!insideRepo(repo, file)) return { status: "missing" };
-  const abs = join65(repo, file);
-  if (!existsSync34(abs)) return { status: "missing" };
-  let fd;
-  try {
-    fd = openSync2(abs, "r");
-  } catch (e) {
-    return { status: "unreadable", error: e.message };
-  }
-  try {
-    return { status: "ok", lines: countNewlines(fd) + 1 };
-  } catch (e) {
-    return { status: "unreadable", error: e.message };
-  } finally {
-    closeSync2(fd);
-  }
-}
-function lineCount(repo, file) {
-  const outcome3 = lineCountDetailed(repo, file);
-  return outcome3.status === "ok" ? outcome3.lines : null;
-}
-function locsOf(f) {
-  const locs = [];
-  if (f.source) locs.push(f.source);
-  if (f.sink) locs.push(f.sink);
-  for (const p of f.path ?? []) locs.push(p);
-  for (const e of f.locations ?? []) locs.push({ file: e.file, line: e.line ?? 0 });
-  return locs;
-}
-function atLeast(sev, floor) {
-  return SEVERITIES2.indexOf(sev) <= SEVERITIES2.indexOf(floor);
-}
-function check(dossier, opts = {}) {
-  const repo = opts.repo ?? dossier.manifest.repo;
-  const floor = opts.minSeverity;
-  const findings = floor ? dossier.findings.filter((f) => atLeast(f.severity, floor)) : dossier.findings;
-  const dangling = [];
-  const lineCache = /* @__PURE__ */ new Map();
-  const linesOf = (file) => {
-    if (!lineCache.has(file)) lineCache.set(file, lineCountDetailed(repo, file));
-    return lineCache.get(file);
-  };
-  let historical = 0;
-  for (const f of findings) {
-    if (f.status === "dismissed") continue;
-    for (const loc of locsOf(f)) {
-      if (!insideRepo(repo, loc.file)) continue;
-      if (f.atCommit) {
-        const at2 = lineCountAtCommit(repo, f.atCommit, loc.file);
-        if (at2 === null)
-          dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `file not found at ${f.atCommit.slice(0, 8)} (the commit the scanner cited)` });
-        else if (loc.line !== 0 && (loc.line < 1 || loc.line > at2))
-          dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range at ${f.atCommit.slice(0, 8)} (file had ${at2} lines)` });
-        else historical++;
-        continue;
-      }
-      const lc = linesOf(loc.file);
-      if (lc.status === "missing") dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: "file not found" });
-      else if (lc.status === "unreadable") dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `file unreadable (${lc.error})` });
-      else if (loc.line === 0) continue;
-      else if (loc.line < 1 || loc.line > lc.lines)
-        dangling.push({ id: f.id, file: loc.file, line: loc.line, reason: `line out of range (file has ${lc.lines} lines)` });
-    }
-  }
-  const open = findings.filter((f) => f.status === "open").length;
-  const confirmed = findings.filter((f) => f.status === "confirmed").length;
-  const dismissed = findings.filter((f) => f.status === "dismissed").length;
-  const needsHuman = findings.filter((f) => f.status === "needs-human").length;
-  const ADJUDICATED = /* @__PURE__ */ new Set(["confirmed", "dismissed", "needs-human"]);
-  const unadjudicated = findings.filter((f) => !ADJUDICATED.has(f.status)).length;
-  const unargued = findings.filter((f) => f.status === "dismissed" && (f.severity === "critical" || f.severity === "high") && !f.brocard).map((f) => f.id).sort(byStr);
-  const messages = [];
-  let ok = true;
-  if (dossier.manifest.scannerPolicy && !dossier.manifest.scannerPolicy.complete) {
-    ok = false;
-    messages.push(`Required scanners incomplete: ${dossier.manifest.scannerPolicy.incomplete.join(", ")} \u2014 re-run scan with the required tools available.`);
-  }
-  if (dangling.length) {
-    ok = false;
-    messages.push(`${dangling.length} dangling citation(s) \u2014 a cited [file:line] does not resolve (hallucinated or stale).`);
-  }
-  if (historical > 0)
-    messages.push(
-      `${historical} citation(s) resolved against the commit that introduced them, not HEAD \u2014 history-scanned secrets in files since deleted. Still graded, just against the right tree.`
-    );
-  if (opts.semantic) {
-    if (unadjudicated > 0) {
-      ok = false;
-      messages.push(`${unadjudicated} candidate(s) still unadjudicated \u2014 run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
-    }
-    if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human \u2014 review required (not auto-failing).`);
-    if (unargued.length > 0)
-      messages.push(
-        `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", \u2026" : ""}) \u2014 set the verdict's \`brocard\` field so the refutation can be reviewed. A prose \`note\` is not read as a ground, however carefully argued: references/dismissal-brocards.md.`
-      );
-  }
-  const claims = opts.run ? contradicted(repo, opts.run) : [];
-  if (claims.length && opts.semantic) {
-    ok = false;
-    messages.push(
-      `${claims.length} negation(s) in CONTEXT.md contradicted by the code \u2014 reconcile the sentence or the finding before trusting it as background.`
-    );
-  }
-  if (ok)
-    messages.push(`grounding OK${opts.semantic ? " \xB7 audit adjudicated" : ""} \u2014 ${confirmed} confirmed, ${dismissed} dismissed, ${needsHuman} needs-human.`);
-  return {
-    ok,
-    dangling,
-    open,
-    confirmed,
-    dismissed,
-    needsHuman,
-    gated: findings.length,
-    unarguedDismissals: unargued,
-    historical,
-    contradictions: claims,
-    messages
-  };
-}
-function contradicted(repo, run2) {
-  const doc = loadContextDoc(run2);
-  if (!doc) return [];
-  try {
-    return contradictedClaims(repo, extractNegativeClaims(doc));
-  } catch {
-    return [];
-  }
-}
-
-// src/assumptions.ts
-import { join as join66 } from "path";
-var MAX_UNITS = 120;
-function buildAssumptionWorklist(scan2) {
-  const items = [];
-  for (const f of scan2.files) {
-    const lang = langForFile(f.rel);
-    if (!lang) continue;
-    const text = readText2(join66(scan2.repo, f.rel));
-    const sources = findSources(lang, text).length;
-    const sinks = findSinks(lang, f.calls, void 0, f.imports, localDefNames(f.symbols), text.split(/\r?\n/)).length;
-    if (!sources && !sinks) continue;
-    const why = sources && sinks ? "reads untrusted input AND performs a dangerous operation" : sources ? "reads untrusted input" : "performs a dangerous operation";
-    const named = f.symbols.filter((s) => s.name).slice(0, 12);
-    if (named.length) {
-      for (const s of named) {
-        items.push({
-          at: `${f.rel}:${s.line}`,
-          file: f.rel,
-          symbol: s.name,
-          signals: { sources, sinks },
-          why,
-          guarantees: [],
-          assumptions: [],
-          calls: [],
-          openQuestions: []
-        });
-      }
-    } else {
-      items.push({ at: f.rel, file: f.rel, signals: { sources, sinks }, why, guarantees: [], assumptions: [], calls: [], openQuestions: [] });
-    }
-  }
-  const testLast = (i2) => isTestPath(i2.file) ? 1 : 0;
-  return items.sort((a, b) => testLast(a) - testLast(b) || b.signals.sources + b.signals.sinks - (a.signals.sources + a.signals.sinks) || byStr(a.at, b.at)).slice(0, MAX_UNITS);
-}
-function renderAssumptionsMd(items, context) {
-  const L = [];
-  L.push(`# ultrasec assumption map (${items.length} unit${items.length === 1 ? "" : "s"})`);
-  L.push("");
-  L.push(`Read each unit and record what it **guarantees** and what it **assumes**. Build`);
-  L.push(`understanding, not verdicts: no severity here, and no finding \u2014 forcing a rating out`);
-  L.push(`of an observation this early is how an uncomfortable one gets talked away.`);
-  L.push("");
-  L.push(`For each unit:`);
-  L.push("");
-  L.push(`- **guarantees** \u2014 what holds when it returns, each with the line that establishes it.`);
-  L.push(`  If nothing establishes it, it is not a guarantee; it is an assumption.`);
-  L.push(`- **assumptions** \u2014 what it depends on and does not verify. Set \`enforcedAt\` to the`);
-  L.push(`  \`file:line\` that enforces it, or to the literal **\`nothing-found\`** when you looked`);
-  L.push(`  and there is none.`);
-  L.push(`- **calls** \u2014 what it calls and what it expects each callee to have already done.`);
-  L.push(`- **openQuestions** \u2014 what you could not resolve. List it; do not guess it.`);
-  L.push("");
-  L.push(`> **\`nothing-found\` is the output.** A function that trusts its caller to have checked`);
-  L.push(`> ownership, called by a caller that trusts the function to check it, is a vulnerability`);
-  L.push(`> present in NEITHER function's code. That is why taint enumeration cannot see it and`);
-  L.push(`> why reading file by file keeps missing it. \`--apply\` turns every \`nothing-found\` into`);
-  L.push(`> a prioritized \`investigate\` lead.`);
-  L.push("");
-  if (context) {
-    L.push(`## Project context`);
-    L.push(`_From \`CONTEXT.md\` \u2014 the trust model these assumptions are measured against._`);
-    L.push("");
-    L.push(context);
-    L.push("");
-  }
-  for (const it of items) {
-    L.push(`## \`${it.at}\`${it.symbol ? ` \u2014 ${it.symbol}()` : ""}`);
-    L.push(`- ${it.why} (${it.signals.sources} source(s), ${it.signals.sinks} sink(s) in this file)`);
-    L.push("");
-  }
-  return L.join("\n") + "\n";
-}
-var NOTHING_FOUND = "nothing-found";
-function parseAssumptionResults(raw) {
-  const arr = coerceRows(JSON.parse(raw), ["assumptions", "units"], "assumption results");
-  const rows = [];
-  const dropped = [];
-  for (const [index, entry2] of arr.entries()) {
-    const v = entry2;
-    if (!v || typeof v !== "object") {
-      dropped.push({ index, reason: "not an object" });
-      continue;
-    }
-    if (typeof v.at !== "string" || !v.at) {
-      dropped.push({ index, reason: "missing `at` (which unit is this a record of?)" });
-      continue;
-    }
-    rows.push({
-      at: v.at,
-      guarantees: Array.isArray(v.guarantees) ? v.guarantees : void 0,
-      assumptions: Array.isArray(v.assumptions) ? v.assumptions : void 0,
-      calls: Array.isArray(v.calls) ? v.calls : void 0,
-      openQuestions: Array.isArray(v.openQuestions) ? v.openQuestions : void 0
-    });
-  }
-  if (rows.length === 0 && arr.length > 0) {
-    throw new Error(`assumption results: all ${arr.length} row(s) were unusable \u2014 nothing folded (fail-closed)`);
-  }
-  return { rows, dropped };
-}
-function unenforced(results) {
-  const out2 = [];
-  for (const r of results) {
-    for (const a of r.assumptions ?? []) {
-      if (a.enforcedAt?.trim().toLowerCase() === NOTHING_FOUND) out2.push({ at: r.at, claim: a.claim });
-    }
-  }
-  return out2;
-}
-function renderAssumptionMap(results) {
-  const leads = unenforced(results);
-  const L = [`# Assumption map`, ""];
-  L.push(`${results.length} unit(s) recorded \xB7 **${leads.length} unenforced assumption(s)**.`);
-  L.push("");
-  L.push(`> An unenforced assumption is not a vulnerability. It is the place to look for one:`);
-  L.push(`> the code is relying on something nobody wrote down.`);
-  L.push("");
-  if (leads.length) {
-    L.push(`## Trusted but never enforced (${leads.length})`);
-    L.push("");
-    for (const l of leads) L.push(`- \`${l.at}\` \u2014 ${l.claim}`);
-    L.push("");
-  }
-  const questions = results.flatMap((r) => (r.openQuestions ?? []).map((q) => ({ at: r.at, q })));
-  if (questions.length) {
-    L.push(`## Open questions (${questions.length})`);
-    L.push("");
-    for (const q of questions) L.push(`- \`${q.at}\` \u2014 ${q.q}`);
-    L.push("");
-  }
-  L.push(`## Per-unit records`);
-  L.push("");
-  for (const r of results) {
-    L.push(`### \`${r.at}\``);
-    if (r.guarantees?.length) {
-      L.push(`**Guarantees**`);
-      for (const g of r.guarantees) L.push(`- ${g.claim} \u2014 \`${g.file}:${g.line}\``);
-    }
-    if (r.assumptions?.length) {
-      L.push(`**Assumes**`);
-      for (const a of r.assumptions) L.push(`- ${a.claim} \u2014 ${a.enforcedAt === NOTHING_FOUND ? "**nothing found**" : `enforced at \`${a.enforcedAt}\``}`);
-    }
-    if (r.calls?.length) {
-      L.push(`**Calls**`);
-      for (const c2 of r.calls) L.push(`- \`${c2.callee}\` \u2014 expects: ${c2.expectedBehavior}`);
-    }
-    L.push("");
-  }
-  return L.join("\n") + "\n";
-}
-var LEADS_FILE = "ASSUMPTIONS.leads.json";
-function leadsForRegion(leads, region, files) {
-  const inRegion = (at2) => at2.startsWith(`${region}/`) || files.some((f) => at2.startsWith(f));
-  return leads.filter((l) => inRegion(l.at)).map((l) => `${l.at}: ${l.claim}`);
-}
-
-// src/classes/hunt.ts
-import { existsSync as existsSync35, mkdirSync as mkdirSync18, readFileSync as readFileSync36, writeFileSync as writeFileSync19 } from "fs";
-import { dirname as dirname14, join as join67 } from "path";
-var MAX_HUNT_FILES = 8;
-var MAX_EXAMPLES = 3;
-function huntPrompt(h) {
-  const subject = HUNT_SUBJECTS[h.class];
-  const what = h.class === CATALOG_ROW ? "Taint-catalog coverage" : `Weakness class \`${h.class}\` (${h.cwe})`;
-  return `${what} on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""} \u2014 ${h.reason}. INVARIANT: ${subject.invariant} A VALID GUARD: ${subject.guard} Find how THIS repository writes the class with ${h.framework} \u2014 its own helpers, middlewares, config and wrappers \u2014 and check every place the invariant can break. Each break is a Discovery (cite a resolvable [file:line], set "hunt": "${h.id}"). Each idiom you recognize \u2014 the unsafe call AND the guard the code relies on \u2014 goes to \`idioms[]\` ({hunt, class, framework, kind: unsafe|guard, pattern, regex?, file, line, note}) so a maintainer can turn it into pack data. Looked and found nothing? Put "${h.id}" in \`hunted[]\` \u2014 an empty result is a result.`;
-}
-function buildClassHunts(manifest, surface) {
-  const cells = (manifest.weaknessClasses ?? []).filter(needsHunt);
-  const out2 = [];
-  for (const cell2 of cells) {
-    const cls = HUNT_SUBJECTS[cell2.class];
-    const fw = manifest.frameworks?.find((f) => f.id === cell2.framework && f.dir === cell2.dir);
-    const lang = ECOSYSTEM_LANGUAGES[cell2.ecosystem]?.[0];
-    const examples = [...cls.examples].sort((a, b) => Number(b.language === lang) - Number(a.language === lang)).slice(0, MAX_EXAMPLES);
-    const prefix = cell2.dir ? `${cell2.dir}/` : "";
-    const files = [...fw ? [fw.evidence.replace(/:\d+$/, "")] : [], ...(surface?.byFile ?? []).map((f) => f.file).filter((f) => f.startsWith(prefix))];
-    const hunt = {
-      id: huntId(cell2),
-      class: cell2.class,
-      title: cls.title,
-      cwe: cls.cwe,
-      framework: cell2.framework,
-      ecosystem: cell2.ecosystem,
-      ...cell2.version ? { version: cell2.version } : {},
-      dir: cell2.dir,
-      reason: cell2.degraded ?? "no pack covers this class here",
-      packsApplied: cell2.packs,
-      invariant: cls.invariant,
-      guard: cls.guard,
-      rubric: cls.rubric,
-      examples
-    };
-    out2.push({
-      region: hunt.id,
-      score: 0,
-      sinks: 0,
-      sources: 0,
-      files: [...new Set(files)].slice(0, MAX_HUNT_FILES),
-      neighbors: [],
-      prompt: huntPrompt(hunt),
-      hunt
-    });
-  }
-  return out2;
-}
-var HUNT_ID = /^hunt:[a-z-]+:[\w.-]+(?:@.+)?$/;
-var IDIOM_KINDS = ["unsafe", "guard"];
-function parseIdiom(raw) {
-  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { reason: badField("idiom", raw, "an object") };
-  const d = raw;
-  const bad = [];
-  if (!MATRIX_ROW_IDS.includes(d.class)) bad.push(notInVocabulary("class", d.class, MATRIX_ROW_IDS));
-  if (!IDIOM_KINDS.includes(d.kind)) bad.push(notInVocabulary("kind", d.kind, IDIOM_KINDS));
-  for (const field2 of ["framework", "pattern", "file"]) {
-    if (typeof d[field2] !== "string" || !d[field2].trim()) bad.push(badField(field2, d[field2], "a non-empty string"));
-  }
-  if (!Number.isInteger(d.line) || d.line < 1) bad.push(badField("line", d.line, "an integer \u2265 1"));
-  if (d.hunt !== void 0 && (typeof d.hunt !== "string" || !HUNT_ID.test(d.hunt)))
-    bad.push(badField("hunt", d.hunt, "a worklist hunt id (hunt:<class>:<framework>[@dir])"));
-  if (d.regex !== void 0) {
-    if (typeof d.regex !== "string") bad.push(badField("regex", d.regex, "a string"));
-    else
-      try {
-        new RegExp(d.regex);
-      } catch {
-        bad.push(`regex ${describeValue(d.regex)} does not compile`);
-      }
-  }
-  if (bad.length) return { reason: bad.join(", ") };
-  return {
-    row: {
-      ...typeof d.hunt === "string" ? { hunt: d.hunt } : {},
-      class: d.class,
-      framework: d.framework.trim(),
-      kind: d.kind,
-      ...typeof d.language === "string" ? { language: d.language } : {},
-      pattern: d.pattern.trim(),
-      ...typeof d.regex === "string" ? { regex: d.regex } : {},
-      file: d.file,
-      line: d.line,
-      ...typeof d.note === "string" ? { note: d.note } : {}
-    }
-  };
-}
-function parseHuntResults(raw) {
-  const data = JSON.parse(raw);
-  const out2 = { idioms: [], hunted: [], dropped: [] };
-  if (!data || typeof data !== "object") return out2;
-  const obj = data;
-  const discoveries = Array.isArray(data) ? data : Array.isArray(obj.discoveries) ? obj.discoveries : [];
-  for (const d of discoveries) {
-    const h = d?.hunt;
-    if (typeof h === "string" && HUNT_ID.test(h)) out2.hunted.push(h);
-  }
-  if (Array.isArray(data)) return out2;
-  for (const h of Array.isArray(obj.hunted) ? obj.hunted : []) if (typeof h === "string" && HUNT_ID.test(h)) out2.hunted.push(h);
-  for (const [index, row] of (Array.isArray(obj.idioms) ? obj.idioms : []).entries()) {
-    const p = parseIdiom(row);
-    if (p.row) {
-      out2.idioms.push(p.row);
-      if (p.row.hunt) out2.hunted.push(p.row.hunt);
-    } else out2.dropped.push({ index, reason: `idioms[${index}]: ${p.reason}` });
-  }
-  return out2;
-}
-function isHuntOnlyPayload(data) {
-  if (!data || typeof data !== "object" || Array.isArray(data)) return false;
-  const o = data;
-  return !Array.isArray(o.discoveries) && (Array.isArray(o.idioms) || Array.isArray(o.hunted));
-}
-var SUGGESTIONS_NOTE = "Proposals recognized by the AI hunt. The engine NEVER applies them: a maintainer promotes one by adding it to a pack in src/classes/packs with a vulnerable and a fixed fixture and a recall-matrix cell \u2014 see docs/weakness-classes.md.";
-function recordHuntResults(run2, repo, manifest, results, packIds) {
-  const path = workPath(run2, PACK_SUGGESTIONS_FILE);
-  const priorAt = readPath(run2, PACK_SUGGESTIONS_FILE);
-  const rejected = [];
-  const fresh3 = [];
-  const hunted = /* @__PURE__ */ new Set();
-  for (const r of results) {
-    for (const h of r.hunted) hunted.add(h);
-    for (const idiom of r.idioms) {
-      const problem = citationProblem(repo, { file: idiom.file, line: idiom.line });
-      if (problem) {
-        rejected.push({ idiom, reason: problem });
-        continue;
-      }
-      const text = readFileSync36(join67(repo, idiom.file), "utf8").split(/\r?\n/)[idiom.line - 1] ?? "";
-      const fw = manifest.frameworks?.find((f) => f.id === idiom.framework);
-      fresh3.push({
-        ...idiom,
-        evidence: text.trim().slice(0, 200),
-        ...fw?.version ? { seenOn: `${fw.id} ${fw.version}` } : {},
-        pack: packIds.includes(idiom.framework) ? idiom.framework : `new pack: ${idiom.framework}`
-      });
-    }
-  }
-  if (!fresh3.length && !hunted.size) return { accepted: 0, rejected, hunted: [] };
-  let prior = { schema: 1, note: SUGGESTIONS_NOTE, hunted: [], suggestions: [] };
-  if (existsSync35(priorAt)) {
-    try {
-      const p = JSON.parse(readFileSync36(priorAt, "utf8"));
-      prior = { ...prior, hunted: p.hunted ?? [], suggestions: p.suggestions ?? [] };
-    } catch {
-    }
-  }
-  const key = (s) => [s.class, s.framework, s.kind, s.pattern, s.file, s.line].join("\0");
-  const merged = new Map(prior.suggestions.map((s) => [key(s), s]));
-  let accepted = 0;
-  for (const s of fresh3)
-    if (!merged.has(key(s))) {
-      merged.set(key(s), s);
-      accepted++;
-    }
-  const file = {
-    schema: 1,
-    note: SUGGESTIONS_NOTE,
-    hunted: [.../* @__PURE__ */ new Set([...prior.hunted, ...hunted])].sort(byStr),
-    suggestions: [...merged.values()].sort((a, b) => byStr(a.class, b.class) || byStr(a.framework, b.framework) || byStr(a.file, b.file) || a.line - b.line)
-  };
-  mkdirSync18(dirname14(path), { recursive: true });
-  writeFileSync19(path, JSON.stringify(file, null, 2) + "\n");
-  return { accepted, rejected, hunted: [...hunted].sort(byStr), path };
-}
-
-// src/investigate.ts
-var MAX_FILES_PER_REGION = 8;
-var MAX_NEIGHBORS_PER_REGION = 12;
-var AI_TOOL = "ultrasec-ai";
-var ACCESS_CONTROL_LENS = "Access control \u2014 the highest-yield class, never enumerable by taint. For every route/handler in these files ask two questions. (1) Is there ANY authorization check before the object is read or written? A missing one is BFLA (broken function-level authz) \u2014 the classic shape is an admin/privileged action reachable by a normal role, or a method/version downgrade (GET\u2192PUT, /v2\u2192/v1) that skips the guard. (2) Does the check bind the CALLER to the SPECIFIC object in the request? Compare the guard to the object returned: an owner_id/tenant_id taken from the SESSION/token vs. an id taken from the URL/body/query. When they are not compared, an attacker swaps the id and reads another principal's data \u2014 IDOR/BOLA. Hunt horizontal escalation (user A reaching user B via a predictable/sequential/enumerable id), vertical escalation (a normal user reaching an admin object), and tenant-boundary crossing in multi-tenant code. Mass-assignment onto role/isAdmin/tenant/permissions is access control too \u2014 a body field that overwrites who you are. Cite resolvable [file:line] for the guard that is missing or the comparison that is absent. See references/access-control.md.";
-var LENSES = {
-  "sharp-edges": "Ask a DIFFERENT question here: not 'is this code vulnerable' but 'does this API make the insecure use easier than the secure one'. Six shapes: an algorithm/mode the caller picks; an insecure default or an ambiguous zero; raw bytes where a semantic type belongs; a config cliff that fails open; a verification that returns instead of throwing; permissions as strings. Model three users \u2014 the attacker, the copy-paster, the confused reader. Rate by how EASY the mistake is. See references/sharp-edges.md.",
-  "access-control": ACCESS_CONTROL_LENS,
-  idor: ACCESS_CONTROL_LENS,
-  crypto: "Crypto-specific: secrets compared with == or equals() rather than a constant-time helper; key material in a plain buffer never zeroed; a nonce or IV reused or derived from a counter the attacker sees; an algorithm read from attacker-supplied data. See references/attack-classes.md \xA7Cryptography.",
-  privacy: "Personal data: where it goes (a third-party processor, a log, an analytics beacon), how long it stays, and whether a control named 'anonymisation' actually prevents re-identification. See references/privacy-and-data-protection.md.",
-  cloud: "Cloud / container reachability, the half the IaC scan can't decide: can any user-controlled URL reach the instance-metadata endpoint (169.254.169.254 / metadata.google.internal) \u2014 SSRF to short-lived credentials? Is a wildcard/over-broad IAM role actually assumed on this path? Are instance/CI secrets read from env or a mounted file that a compromised container can exfiltrate? Does a container escape (privileged/hostPath/hostNetwork) turn a bug into node takeover? See references/frameworks.md \xA7Cloud."
-};
-function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens, classHunts = []) {
-  const filesByRegion = /* @__PURE__ */ new Map();
-  for (const fs2 of surface.byFile) {
-    const arr = filesByRegion.get(fs2.region) ?? filesByRegion.set(fs2.region, []).get(fs2.region);
-    if (arr.length < MAX_FILES_PER_REGION) arr.push(fs2.file);
-  }
-  const regions = [];
-  for (const t of surface.suggestedTargets) {
-    const files = [...filesByRegion.get(t.scope) ?? []];
-    const nb = /* @__PURE__ */ new Set();
-    for (const f of files) {
-      if (!graph.files.includes(f)) continue;
-      for (const l of neighbors(graph, f, 1).links) nb.add(l.node);
-    }
-    for (const f of files) nb.delete(f);
-    const leads = leadsForRegion(assumptionLeads, t.scope, files);
-    regions.push({
-      region: t.scope,
-      score: t.score,
-      sinks: t.sinks,
-      sources: t.sources,
-      files,
-      neighbors: [...nb].sort(byStr).slice(0, MAX_NEIGHBORS_PER_REGION),
-      prompt: "What the deterministic pass can't see: missing/incorrect authorization & IDOR, business-logic flaws, multi-hop taint that crosses these files, and personal-data handling (data leaving to a third-party processor, a control narrower than its name, reversible pseudonymisation, absent retention). Cite resolvable [file:line]." + (lens && LENSES[lens] ? `
-
-LENS \u2014 ${lens}: ${LENSES[lens]}` : ""),
-      ...leads.length ? { leads } : {}
-    });
-  }
-  return [...regions, ...classHunts];
-}
-function renderInvestigateMd(items, context) {
-  const regions = items.filter((r) => !r.hunt);
-  const hunts = items.filter((r) => r.hunt);
-  const L = [];
-  L.push(
-    `# ultrasec investigation worklist (${regions.length} region${regions.length === 1 ? "" : "s"}${hunts.length ? ` \xB7 ${hunts.length} weakness-class hunt${hunts.length === 1 ? "" : "s"}` : ""})`
-  );
-  L.push("");
-  L.push(`Investigate each region for issues the deterministic engine can't enumerate, and emit`);
-  L.push(`grounded **Discovery[]** as INVESTIGATE.json (array of`);
-  L.push(`{title, category, severity, cwe?, message, file, line, path?}). Then:`);
-  L.push(`\`ultrasec investigate --apply INVESTIGATE.json --run <run>\`.`);
-  L.push("");
-  L.push(`> Every discovery is ingested as an \`${AI_TOOL}\` **open** candidate and must be verified`);
-  L.push(`> like any other. Citations are checked: a [file:line] that doesn't resolve is **rejected**.`);
-  L.push(`> A discovery at an existing finding's location folds into its \`sources\` (no duplicate).`);
-  L.push("");
-  if (context) {
-    L.push(`## Project context`);
-    L.push(`_From \`CONTEXT.md\`._`);
-    L.push("");
-    L.push(context);
-    L.push("");
-  }
-  for (const r of regions) {
-    L.push(`## \`${r.region}\` \u2014 ${r.sinks} sink(s), ${r.sources} entry point(s)`);
-    if (r.files.length) L.push(`- files: ${r.files.map((f) => `\`${f}\``).join(", ")}`);
-    if (r.neighbors.length) L.push(`- neighbours: ${r.neighbors.map((f) => `\`${f}\``).join(", ")}`);
-    L.push(`- hunt: ${r.prompt}`);
-    if (r.leads?.length) {
-      L.push(`- **trusted but never enforced here** (from \`assumptions\`) \u2014 start with these:`);
-      for (const l of r.leads) L.push(`  - ${l}`);
-    }
-    L.push("");
-  }
-  if (hunts.length) L.push(...renderHuntsMd(hunts));
-  return L.join("\n") + "\n";
-}
-function renderHuntsMd(hunts) {
-  const L = [];
-  L.push(`## Weakness-class hunts`);
-  L.push("");
-  L.push(`Each hunt is a weakness class on a framework no pack settles (no pack for it, or a version`);
-  L.push(`outside the range the pack was validated on). Find how THIS repository writes the class and`);
-  L.push(`return, in the same INVESTIGATE.json \u2014 \`{ "discoveries": [...], "idioms": [...], "hunted": [...] }\`:`);
-  L.push(`- **discoveries** \u2014 every place the invariant breaks, with \`"hunt": "<hunt id>"\` (ingested like any discovery);`);
-  L.push(`- **idioms** \u2014 each unsafe call and each guard you recognized: \`{hunt, class, framework, kind: "unsafe"|"guard", pattern,`);
-  L.push(`  regex?, file, line, note}\`, citation checked, written to \`PACK-SUGGESTIONS.json\` (proposals \u2014 never applied);`);
-  L.push(`- **hunted** \u2014 the hunt ids you worked, including those where you found nothing.`);
-  L.push("");
-  for (const r of hunts) {
-    const h = r.hunt;
-    L.push(`### \`${h.id}\` \u2014 ${h.title} (${h.cwe}) on ${h.framework}${h.version ? ` ${h.version}` : ""}${h.dir ? ` in \`${h.dir}\`` : ""}`);
-    L.push(`- why: ${h.reason}${h.packsApplied.length ? ` (rules already run as a floor: ${h.packsApplied.join(", ")})` : ""}`);
-    L.push(`- invariant: ${h.invariant}`);
-    L.push(`- a valid guard: ${h.guard}`);
-    L.push(`- severity: ${h.rubric}`);
-    if (r.files.length) L.push(`- start in: ${r.files.map((f) => `\`${f}\``).join(", ")}`);
-    for (const e of h.examples) {
-      L.push(`- example (${e.language}) \u2014 vulnerable: \`${e.vulnerable.replace(/\n/g, " \u23CE ")}\``);
-      L.push(`  fixed: \`${e.fixed.replace(/\n/g, " \u23CE ")}\``);
-    }
-    L.push("");
-  }
-  return L;
-}
-function locOf(f) {
-  if (f.sink) return `${f.sink.file}:${f.sink.line}`;
-  const last = f.path?.[f.path.length - 1];
-  if (last) return `${last.file}:${last.line}`;
-  if (f.source) return `${f.source.file}:${f.source.line}`;
-  return "";
-}
-function dedupKey(category, ident, where) {
-  return `${category}::${(ident ?? "").trim().toLowerCase()}::${where}`;
-}
-function citationProblem(repo, d) {
-  const locs = [{ file: d.file, line: d.line }, ...(d.path ?? []).map((p) => ({ file: p.file, line: p.line }))];
-  for (const loc of locs) {
-    if (!insideRepo(repo, loc.file)) return `citation outside repo: ${loc.file}`;
-    const lc = lineCount(repo, loc.file);
-    if (lc === null) return `file not found: ${loc.file}`;
-    if (loc.line < 1 || loc.line > lc) return `line out of range: ${loc.file}:${loc.line} (file has ${lc} lines)`;
-  }
-  return null;
-}
-function ingestDiscoveries(dossier, discoveries, repo, opts = {}) {
-  const deployment = deploymentFacts(opts.context);
-  const result = /* @__PURE__ */ new Map();
-  const idByKey = /* @__PURE__ */ new Map();
-  for (const f of dossier.findings) {
-    result.set(f.id, f);
-    idByKey.set(dedupKey(f.category, f.cwe ?? f.title, locOf(f)), f.id);
-  }
-  let ingested = 0, folded = 0;
-  const rejected = [];
-  for (const d of discoveries) {
-    const problem = citationProblem(repo, d);
-    if (problem) {
-      rejected.push({ discovery: d, reason: problem });
-      continue;
-    }
-    const key = dedupKey(d.category, d.cwe ?? d.title, `${d.file}:${d.line}`);
-    const existingId = idByKey.get(key);
-    if (existingId) {
-      const prev = result.get(existingId);
-      const sources = [.../* @__PURE__ */ new Set([...prev.sources ?? [prev.tool], AI_TOOL])].sort(byStr);
-      result.set(existingId, { ...prev, sources });
-      folded++;
-      continue;
-    }
-    const f = makeToolFinding({
-      tool: AI_TOOL,
-      category: d.category,
-      ident: `${d.category}:${d.title}:${d.file}:${d.line}`,
-      title: d.title,
-      severity: d.severity,
-      // The hunter's own write-up, quoting what it found; a hard-coded key is
-      // reported by quoting it. Same mask as every other authored note.
-      message: redactSecrets(d.message),
-      file: d.file,
-      line: d.line,
-      cwe: d.cwe,
-      confidence: "low"
-      // AI-discovered + unverified — recall-oriented, adjudicate it
-    });
-    if (d.path?.length) f.path = d.path.map((p) => ({ file: p.file, line: p.line, why: redactSecrets(p.why) }));
-    if (d.vulnClass) f.vulnClass = d.vulnClass;
-    f.risk = scoreFinding(f, deployment);
-    result.set(f.id, f);
-    idByKey.set(key, f.id);
-    ingested++;
-  }
-  const findings = [...result.values()].sort((a, b) => byStr(a.id, b.id));
-  return { findings, ingested, folded, rejected };
-}
-function parseDiscoveries(raw) {
-  const data = JSON.parse(raw);
-  const arr = isHuntOnlyPayload(data) ? [] : coerceRows(data, ["discoveries"], "discoveries");
-  const rows = [];
-  const dropped = [];
-  const normalized = [];
-  const drop = (index, reason) => dropped.push({ index, reason });
-  for (const [index, raw2] of arr.entries()) {
-    const parsed2 = parseDiscoveryRow(raw2);
-    if (!parsed2.row) {
-      drop(index, parsed2.reason);
-      continue;
-    }
-    if (parsed2.note) normalized.push({ index, note: parsed2.note });
-    rows.push(parsed2.row);
-  }
-  return requireUsable(
-    // Presence-gated: no fold ⇒ the result is shape-identical to before.
-    { rows, dropped, ...normalized.length ? { normalized } : {} },
-    arr.length,
-    DISCOVERY_REQUIREMENT
-  );
-}
-
-// src/commands/investigate.ts
 function runInvestigate(args2) {
   const run2 = resolve25(flagStr(args2, "run") ?? ".ultrasec");
   let dossier;
@@ -43957,14 +44331,14 @@ function runInvestigate(args2) {
     println(
       `  ingested ${res.ingested} new ${"ultrasec-ai"} finding(s) \xB7 folded ${res.folded} into existing \xB7 rejected ${res.rejected.length} \xB7 dropped ${parsed2.dropped.length}`
     );
-    for (const line2 of formatNormalized(parsed2.normalized ?? [])) println(line2);
-    for (const r of res.rejected) println(`  \u2717 rejected "${r.discovery.title}": ${r.reason}`);
+    for (const line2 of linesCapped(formatNormalized(parsed2.normalized ?? []))) println(line2);
+    for (const line2 of linesCapped(res.rejected.map((r) => `  \u2717 rejected "${r.discovery.title}": ${r.reason}`))) println(line2);
     if (rec.path)
       println(
         `  pack suggestions: ${rec.accepted} new idiom(s) \xB7 ${rec.hunted.length} hunt(s) recorded \u2192 ${rec.path} (proposals \u2014 the engine never applies them)`
       );
-    for (const d of idiomDrops) println(`  \u2717 dropped ${d.reason}`);
-    for (const r of rec.rejected) println(`  \u2717 rejected idiom "${r.idiom.pattern.slice(0, 60)}": ${r.reason}`);
+    for (const line2 of linesCapped(idiomDrops.map((d) => `  \u2717 dropped ${d.reason}`))) println(line2);
+    for (const line2 of linesCapped(rec.rejected.map((r) => `  \u2717 rejected idiom "${r.idiom.pattern.slice(0, 60)}": ${r.reason}`))) println(line2);
     if (strict && res.rejected.length > 0)
       println(`  --strict: ${res.rejected.length} discovery(ies) refused by the citation gate \u2014 failing so the loss isn't absorbed silently.`);
     if (strict && idiomRefusals > 0) println(`  --strict: ${idiomRefusals} idiom(s) refused \u2014 failing so the loss isn't absorbed silently.`);
@@ -44006,13 +44380,13 @@ function runInvestigate(args2) {
   }
   const files = stageFiles("INVESTIGATE");
   const wroteMd = wantsMdTwin(args2);
-  const todoPath = emitWorklist(run2, files, regions, () => renderInvestigateMd(regions, loadContextDoc(run2)), { md: wroteMd });
-  if (flagBool(args2, "json")) {
-    println(JSON.stringify(regions, null, 2));
-    return 0;
-  }
+  const todoPath = emitWorklist(run2, files, investigateTodo(regions), () => renderInvestigateMd(regions, loadContextDoc(run2)), { md: wroteMd });
   const hunts = regions.filter((r) => r.hunt).length;
   const areas = regions.length - hunts;
+  if (flagBool(args2, "json")) {
+    println(JSON.stringify({ todo: todoPath, items: regions.length, counts: { regions: areas, hunts } }));
+    return 0;
+  }
   println(
     `ultrasec investigate \u2192 ${todoPath} (${areas} region${areas === 1 ? "" : "s"}${hunts ? ` \xB7 ${hunts} weakness-class hunt${hunts === 1 ? "" : "s"}` : ""})`
   );
@@ -44059,7 +44433,7 @@ function runPaths(args2) {
   }
   const chained = d.findings.filter((f) => f.path && f.path.length);
   let findings = chained;
-  if (surface !== "all") findings = findings.filter((f) => surfaceOf(f) === surface);
+  if (surface !== "all") findings = findings.filter((f) => inSurface(f, surface));
   if (kind) findings = findings.filter((f) => f.sink?.kind === kind);
   const hiddenAbove = sev && !floor ? findings.filter((f) => rank(f.severity) < rank(sev)) : [];
   if (floor) findings = findings.filter((f) => rank(f.severity) <= rank(floor));
@@ -44114,24 +44488,39 @@ function runVerify(args2) {
   }
   const applyPath = flagStr(args2, "apply");
   if (applyPath) return applyMode(run2, dossier, applyPath, args2);
+  const surfaceFlag = flagStr(args2, "surface");
+  const surface = parseSurfaceFlag(surfaceFlag, ADJUDICATION_SURFACE);
+  if (surface === null) {
+    eprintln(`ultrasec verify: unknown --surface "${surfaceFlag}" \u2014 expected one of: ${SURFACE_FILTERS.join(", ")}.`);
+    return 2;
+  }
   const all2 = flagBool(args2, "all");
-  const counts = worklistCounts(dossier, { all: all2 });
-  let items = buildWorklist(dossier, { all: all2 });
+  const counts = worklistCounts(dossier, { all: all2, surface });
+  let items = buildWorklist(dossier, { all: all2, surface });
   const shards = Number(flagStr(args2, "shards") ?? "0") || 0;
   const shardIdx = Number(flagStr(args2, "shard") ?? "0") || 0;
   if (shards > 1) items = shard(items, shards, shardIdx);
   const files = shards > 1 ? { todo: `VERIFY.todo.${shardIdx}.json`, md: "VERIFY.md" } : stageFiles("VERIFY");
   const wroteMd = wantsMdTwin(args2);
-  const todoPath = emitWorklist(run2, files, items, () => renderWorklistMd(buildWorklist(dossier, { all: all2 }), loadContextDoc(run2), counts), { md: wroteMd });
+  const todoPath = emitWorklist(run2, files, items, () => renderWorklistMd(buildWorklist(dossier, { all: all2, surface }), loadContextDoc(run2), counts), {
+    md: wroteMd
+  });
+  const outside2 = dossier.findings.filter((f) => (f.status === "open" || f.status === "needs-human") && !inSurface(f, surface)).length;
   if (flagBool(args2, "json")) {
-    println(JSON.stringify(items, null, 2));
+    println(JSON.stringify({ todo: todoPath, items: items.length, counts: { ...counts, outsideSurface: outside2, surface } }));
     return 0;
   }
   println(`ultrasec verify \u2192 ${todoPath} (${items.length} item${items.length === 1 ? "" : "s"}${shards > 1 ? `, shard ${shardIdx}/${shards}` : ""})`);
   println(worklistNote(files, wroteMd));
   if (counts.withheld) println(`  ${counts.fresh} new \xB7 ${counts.withheld} already adjudicated as needs-human, not shown \u2014 pass --all to re-open them`);
   else if (counts.reOpened) println(`  ${counts.fresh} new \xB7 ${counts.reOpened} re-opened (--all)`);
-  println(`  adjudicate each (\`ultrasec dossier <id> --run ${run2}\`), save verdicts.json, then:`);
+  if (outside2)
+    println(
+      `  ${outside2} pending finding(s) outside --surface ${surface}${surface === ADJUDICATION_SURFACE ? " (dependency advisories: the report ranks them per package)" : ""} \u2014 --surface all to include them`
+    );
+  println(
+    `  adjudicate each (\`ultrasec dossier <id> --run ${run2}\`) and write rows {id, verdict, note} \u2014 exploitPath on supported, brocard on refuted \u2014 to verdicts.json, then:`
+  );
   println(`  ultrasec verify --apply verdicts.json --run ${run2}`);
   return 0;
 }
@@ -44148,7 +44537,7 @@ function applyMode(run2, dossier, applyPath, args2) {
   const res = applyVerdicts(dossier, parsed2.rows);
   if (res.applied === 0 && res.ignored.length > 0) {
     eprintln(
-      `ultrasec verify --apply: all ${res.ignored.length} verdict(s) target unknown ids (${res.ignored.join(", ")}) \u2014 stale fragment? Re-emit the worklist and re-adjudicate; nothing was folded.`
+      `ultrasec verify --apply: all ${res.ignored.length} verdict(s) target unknown ids (${listCapped("", res.ignored)}) \u2014 stale fragment? Re-emit the worklist and re-adjudicate; nothing was folded.`
     );
     return 2;
   }
@@ -44174,15 +44563,17 @@ function applyMode(run2, dossier, applyPath, args2) {
   }
   println(`ultrasec verify --apply \u2192 updated ${join69(run2, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
-  if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
-  if (res.keptForHuman.length) {
-    println(`  kept for human (high-severity, only 'unsupported' \u2014 not auto-dismissed):`);
-    for (const k of res.keptForHuman) println(`    - ${k.id} [${k.severity}]`);
-  }
+  if (res.ignored.length) println(`  ${listCapped(`${res.ignored.length} verdict(s) ignored (unknown id)`, res.ignored)}`);
+  if (res.keptForHuman.length)
+    println(
+      `  ${listCapped(
+        `${res.keptForHuman.length} kept for human (high-severity, only 'unsupported' \u2014 not auto-dismissed)`,
+        res.keptForHuman.map((k) => `${k.id} [${k.severity}]`)
+      )}`
+    );
   if (res.reVerdicted.length) {
     println(`  \u26A0 ${res.reVerdicted.length} verdict(s) CHANGED an already-adjudicated finding:`);
-    for (const r of res.reVerdicted.slice(0, 10)) println(`    - ${r.id} [${r.wasStatus}] ${r.from ?? "(none)"} \u2192 ${r.to}`);
-    if (res.reVerdicted.length > 10) println(`    \u2026 and ${res.reVerdicted.length - 10} more`);
+    for (const line2 of linesCapped(res.reVerdicted.map((r) => `    - ${r.id} [${r.wasStatus}] ${r.from ?? "(none)"} \u2192 ${r.to}`))) println(line2);
     println(`    Re-verifying an escalation is legitimate; doing it by accident is not. Pass --re-verdict to accept under --strict.`);
   }
   if (strict && res.reVerdicted.length > 0 && !reVerdictOk) {
@@ -44216,11 +44607,11 @@ function runRevalidate(args2) {
       return 2;
     }
     const strict = flagBool(args2, "strict");
-    const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo));
+    const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo, { surface: "all", ids: new Set(parsed2.rows.map((r) => r.id)) }));
     const res = applyRevalidations(dossier, parsed2.rows, facts);
     if (res.applied === 0 && res.ignored.length > 0) {
       eprintln(
-        `ultrasec revalidate --apply: all ${res.ignored.length} verdict(s) target unknown ids (${res.ignored.join(", ")}) \u2014 stale fragment? Re-emit the worklist (\`revalidate --run ${run2}\`) and re-adjudicate; nothing was folded.`
+        `ultrasec revalidate --apply: all ${res.ignored.length} verdict(s) target unknown ids (${listCapped("", res.ignored)}) \u2014 stale fragment? Re-emit the worklist (\`revalidate --run ${run2}\`) and re-adjudicate; nothing was folded.`
       );
       return 2;
     }
@@ -44248,16 +44639,24 @@ function runRevalidate(args2) {
     println(
       `  applied ${res.applied} verdict(s): ${res.stillValid} still-valid \xB7 ${res.fixed} fixed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`
     );
-    if (res.ignored.length) println(`  ${res.ignored.length} verdict(s) ignored (unknown id): ${res.ignored.join(", ")}`);
-    for (const fl of res.flagged) println(`  \u26A0\uFE0F  ${fl.id}: ${fl.reason}`);
+    if (res.ignored.length) println(`  ${listCapped(`${res.ignored.length} verdict(s) ignored (unknown id)`, res.ignored)}`);
+    const byReason = /* @__PURE__ */ new Map();
+    for (const fl of res.flagged) byReason.set(fl.reason, [...byReason.get(fl.reason) ?? [], fl.id]);
+    for (const [reason, ids] of byReason) println(`  \u26A0\uFE0F  ${listCapped(reason, ids)}`);
     return surfaceDropped(parsed2.dropped, strict, println);
   }
-  const items = buildRevalidateWorklist(dossier, repo);
+  const surfaceFlag = flagStr(args2, "surface");
+  const surface = parseSurfaceFlag(surfaceFlag, ADJUDICATION_SURFACE);
+  if (surface === null) {
+    eprintln(`ultrasec revalidate: unknown --surface "${surfaceFlag}" \u2014 expected one of: ${SURFACE_FILTERS.join(", ")}.`);
+    return 2;
+  }
+  const items = buildRevalidateWorklist(dossier, repo, { surface });
   const files = stageFiles("REVALIDATE");
   const wroteMd = wantsMdTwin(args2);
   const todoPath = emitWorklist(run2, files, items, () => renderRevalidateMd(items, loadContextDoc(run2)), { md: wroteMd });
   if (flagBool(args2, "json")) {
-    println(JSON.stringify(items, null, 2));
+    println(JSON.stringify({ todo: todoPath, items: items.length, counts: { surface } }));
     return 0;
   }
   println(`ultrasec revalidate \u2192 ${todoPath} (${items.length} item${items.length === 1 ? "" : "s"})`);
@@ -44289,7 +44688,7 @@ function seeds(findings) {
   return findings.filter((f) => f.status === "confirmed");
 }
 function buildVariantWorklist(dossier) {
-  const all2 = dossier.findings;
+  const all2 = dossier.findings.filter((f) => surfaceOf(f) !== "deps");
   return seeds(all2).slice().sort((a, b) => byStr(a.id, b.id)).map((f) => {
     const sink = sinkOf(f);
     const op = operationOf(f);
@@ -44925,14 +45324,29 @@ function runGuards(args2) {
     }
     const res = ingestDiscoveries(dossier, discoveries, repo, { context: loadContextDoc(run2) });
     persistFindings(run2, dossier, res.findings);
+    if (flagBool(args2, "json")) {
+      println(
+        JSON.stringify({
+          filed: res.ingested,
+          folded: res.folded,
+          [present]: confirmedPresent,
+          [waived]: waivedRows,
+          [NOT_A_HANDLER]: notHandlers,
+          rejected: res.rejected.map((r) => ({ file: r.discovery.file, line: r.discovery.line, reason: r.reason })),
+          unknown,
+          dropped: parsed2.dropped
+        })
+      );
+      return strict && (unknown.length || res.rejected.length || parsed2.dropped.length) ? 1 : 0;
+    }
     println(`ultrasec guards --apply \u2192 ${run2}`);
     println(
       `  ${res.ingested} ${absent} handler(s) filed as findings \xB7 ${res.folded} folded into existing \xB7 ${confirmedPresent} confirmed ${present} \xB7 ${waivedRows} ${waived}${notHandlers ? ` \xB7 ${notHandlers} ${NOT_A_HANDLER} (dropped)` : ""}`
     );
-    for (const r of res.rejected) eprintln(`  \u2717 rejected ${r.discovery.file}:${r.discovery.line} \u2014 ${r.reason}`);
-    for (const id of unknown)
+    for (const line2 of linesCapped(res.rejected.map((r) => `  \u2717 rejected ${r.discovery.file}:${r.discovery.line} \u2014 ${r.reason}`))) eprintln(line2);
+    if (unknown.length)
       eprintln(
-        `  \u2717 dropped ${id}: no handler with that id in the current matrix (re-run \`ultrasec guards${lens === "auth" ? "" : " --lens " + lens}\` and refill)`
+        `  \u2717 ${listCapped(`dropped ${unknown.length} row(s) naming no handler in the current matrix (re-run \`ultrasec guards${lens === "auth" ? "" : " --lens " + lens}\` and refill)`, unknown)}`
       );
     const code = surfaceDropped(parsed2.dropped, strict, eprintln);
     if (strict && (unknown.length || res.rejected.length)) return 1;
@@ -44944,6 +45358,10 @@ function runGuards(args2) {
   const todoPath = emitWorklist(run2, files, rows, () => renderGuardsMd(rows, loadContextDoc(run2), lens), { md: wroteMd });
   const t = guardTotals(rows);
   writeDossier(run2, { ...dossier, manifest: { ...dossier.manifest, passes: { ...dossier.manifest.passes, [spec.pass]: true } } });
+  if (flagBool(args2, "json")) {
+    println(JSON.stringify({ todo: todoPath, items: rows.length, counts: t }));
+    return 0;
+  }
   println(`ultrasec guards${lens === "auth" ? "" : ` --lens ${lens}`} \u2192 ${run2}`);
   println(
     `  ${t.handlers} handler(s) reading request data \xB7 ${t.unguarded} with no visible ${label2}${t.fileScoped ? ` \xB7 ${t.fileScoped} file-scoped (weaker evidence)` : ""}`
@@ -45548,7 +45966,19 @@ function runCoverage(args2) {
     writeFileSync22(p, md);
     println(`ultrasec coverage \u2192 ${p}`);
   }
-  println(md);
+  if (flagBool(args2, "full")) println(md);
+  else {
+    const by = (state) => rows.filter((r) => r.state === state).length;
+    const cells = (state) => classCells.filter((c2) => c2.state === state).length;
+    println(
+      `ultrasec coverage \u2014 ${STANDARDS[standardId].title}: ${by("examined")} examined \xB7 ${by("engine")} engine-enumerated \xB7 ${by("unexamined")} not examined`
+    );
+    if (classCells.length)
+      println(
+        `  weakness classes: ${cells("deterministic")} by a pack \xB7 ${cells("not-applicable")} n/a \xB7 ${cells("not-covered")} not covered \xB7 ${cells("ai-hunt")} hunting \xB7 ${cells("ai-hunted")} hunted`
+      );
+    if (!flagBool(args2, "write")) println(`  --full prints the matrix, --write saves it to COVERAGE.md`);
+  }
   const gaps = rows.filter((r) => r.state === "unexamined").length;
   const judgment = rows.filter((r) => r.judgment && r.state !== "examined").length;
   println(`${gaps} categor${gaps === 1 ? "y" : "ies"} not examined \xB7 ${judgment} needing an explicit answer.`);
@@ -45567,7 +45997,9 @@ function citedAt2(f) {
   return "\u2014";
 }
 function buildNarrativeWorklist(dossier) {
-  const reportable = dossier.findings.filter((f) => f.status === "confirmed" || f.status === "needs-human").slice().sort((a, b) => byStr(a.id, b.id));
+  const reportableAll = dossier.findings.filter((f) => f.status === "confirmed" || f.status === "needs-human");
+  const reportable = reportableAll.filter((f) => surfaceOf(f) !== "deps").slice().sort((a, b) => byStr(a.id, b.id));
+  const packages = packageLines(reportableAll.filter((f) => surfaceOf(f) === "deps"));
   const findings = reportable.map((f) => ({
     id: f.id,
     severity: f.severity,
@@ -45586,7 +46018,7 @@ function buildNarrativeWorklist(dossier) {
     rootCauses: [],
     hardeningNotes: []
   };
-  return { findings, scaffold };
+  return packages.length ? { findings, packages, scaffold } : { findings, scaffold };
 }
 function renderNarrativeWorklistMd(wl, context) {
   const L = [];
@@ -45623,6 +46055,12 @@ function renderNarrativeWorklistMd(wl, context) {
     L.push(`- \`${f.id}\` \u2014 [${f.severity}] ${f.title} (${f.cwe ?? f.category}) \xB7 status ${f.status} \xB7 at ${f.at}${f.owner ? ` \xB7 owner ${f.owner}` : ""}`);
   }
   L.push("");
+  if (wl.packages?.length) {
+    L.push(`## Dependency advisories (one line per package \u2014 the report ranks them)`);
+    L.push("");
+    for (const p of wl.packages) L.push(`- ${p}`);
+    L.push("");
+  }
   L.push(`## Scaffold (starting point for NARRATIVE.json)`);
   L.push("```json");
   L.push(JSON.stringify(wl.scaffold, null, 2));
@@ -45794,8 +46232,10 @@ function deriveRootCauses(confirmed) {
 }
 function buildImplementWorklist(dossier, narrative) {
   const rem = remediationMap(narrative);
-  const confirmed = dossier.findings.filter((f) => f.status === "confirmed").slice().sort((a, b) => byStr(a.id, b.id));
-  const needsHuman = dossier.findings.filter((f) => f.status === "needs-human").slice().sort((a, b) => byStr(a.id, b.id));
+  const code = dossier.findings.filter((f) => surfaceOf(f) !== "deps");
+  const confirmed = code.filter((f) => f.status === "confirmed").slice().sort((a, b) => byStr(a.id, b.id));
+  const needsHuman = code.filter((f) => f.status === "needs-human").slice().sort((a, b) => byStr(a.id, b.id));
+  const upgrades = packageLines(dossier.findings.filter((f) => surfaceOf(f) === "deps" && (f.status === "confirmed" || f.status === "needs-human")));
   const dismissed = dossier.findings.filter((f) => f.status === "dismissed").length;
   const fixes = confirmed.map((f) => {
     const r = rem.get(f.id);
@@ -45825,7 +46265,7 @@ function buildImplementWorklist(dossier, narrative) {
     ...f.provenance?.owner ? { owner: f.provenance.owner } : {}
   }));
   const rootCauses = narrative?.rootCauses?.length ? narrative.rootCauses : deriveRootCauses(confirmed);
-  return { fixes, investigations, rootCauses, dismissed };
+  return upgrades.length ? { fixes, investigations, rootCauses, dismissed, upgrades } : { fixes, investigations, rootCauses, dismissed };
 }
 var TODO_DIRECTIVE = "<!-- ultrasec IMPLEMENT draft \u2014 feed this file to the `to-prd` skill to author the remediation PRD, or hand it to an implementer/AI. Every item is grounded in a confirmed [file:line]. -->";
 function severityBreakdown(items) {
@@ -45915,6 +46355,12 @@ function renderImplementMd(wl, context) {
     }
     L.push("");
   }
+  if (wl.upgrades?.length) {
+    L.push(`## Dependency upgrades (one per package)`);
+    L.push("");
+    for (const u of wl.upgrades) L.push(`- [ ] ${u}`);
+    L.push("");
+  }
   L.push(`## Out of scope`);
   L.push(wl.dismissed ? `- ${wl.dismissed} finding(s) were dismissed during the audit \u2014 not in scope for this work.` : `- Nothing dismissed.`);
   L.push("");
@@ -45934,7 +46380,8 @@ function runImplement(args2) {
   const narrFile = flagStr(args2, "narrative");
   const narrative = loadNarrative(run2, dossier, narrFile ? resolve34(narrFile) : void 0);
   const wl = buildImplementWorklist(dossier, narrative);
-  const todoPath = emitWorklist(run2, stageFiles("IMPLEMENT"), wl, () => renderImplementMd(wl, loadContextDoc(run2)), { md: true });
+  const wroteMd = wantsMdTwin(args2);
+  const todoPath = emitWorklist(run2, stageFiles("IMPLEMENT"), wl, () => renderImplementMd(wl, loadContextDoc(run2)), { md: wroteMd });
   if (flagBool(args2, "json")) {
     println(JSON.stringify(wl, null, 2));
     return 0;
@@ -45945,7 +46392,9 @@ function runImplement(args2) {
   if (!wl.fixes.length && !wl.investigations.length) {
     println(`  nothing confirmed/needs-human yet \u2014 run \`verify --apply\` first.`);
   } else {
-    println(`  next: feed ${run2}/IMPLEMENT.md to the \`to-prd\` skill to author the remediation PRD, or hand it to an implementer.`);
+    println(
+      wroteMd ? `  next: feed ${run2}/IMPLEMENT.md to the \`to-prd\` skill to author the remediation PRD, or hand it to an implementer.` : `  next: author the remediation PRD from ${todoPath} (\`--md\` also writes the IMPLEMENT.md draft for the \`to-prd\` skill).`
+    );
   }
   return 0;
 }
@@ -47847,10 +48296,10 @@ function classTable(fs2, ctx, withPriority) {
     const st = countBy(members, (f) => f.status).map(([s, n]) => `${n} ${s}`).join(" \xB7 ");
     const verified = members.some((f) => f.verified) ? " \xB7 \u2705 verified live" : "";
     const where = members.map((f) => `${locationOf2(f)}`);
-    const cap = ctx.full ? where.length : 3;
+    const cap2 = ctx.full ? where.length : 3;
     const lead = members[0];
     L.push(
-      `| ${withPriority ? `${priorityOf(lead)} | ` : ""}${badgeOf(lead.severity)} | ${cell(oneLine2(title, 100))} | ${st}${verified} | ${cell(capList(where, cap))} |`
+      `| ${withPriority ? `${priorityOf(lead)} | ` : ""}${badgeOf(lead.severity)} | ${cell(oneLine2(title, 100))} | ${st}${verified} | ${cell(capList(where, cap2))} |`
     );
   }
   if (shown.length < rows.length) L.push(`| ${withPriority ? " | " : ""} | _${rows.length - shown.length} more class(es) \u2014 \`render --full\`_ | | |`);
@@ -48732,23 +49181,23 @@ function runRender(args2) {
   if (out2.removed.length) println(`  removed stale: ${out2.removed.join(", ")}`);
   const unread = unadjudicatedCode(dossier.findings);
   const scannerPolicy = dossier.manifest.scannerPolicy;
-  const scannerIncomplete = scannerPolicy && !scannerPolicy.complete;
+  const scannerIncomplete = !!scannerPolicy && !scannerPolicy.complete;
   if (scannerPolicy && scannerIncomplete) {
     println(`  Required scanners incomplete: ${scannerPolicy.incomplete.join(", ")} \u2014 report marked incomplete.`);
   }
-  if (!unread.length) return scannerIncomplete && !flagBool(args2, "draft") ? 1 : 0;
-  const draft = flagBool(args2, "draft");
-  const crit = unread.filter((f) => f.severity === "critical").length;
-  println(`  \u26A0\uFE0F  ${unread.length} source-code candidate(s) at HIGH+ were never read (${crit} critical) \u2014 the report says so in a banner.`);
-  println(
-    `      next: ultrasec paths --run ${run2} --surface code  \u2192  ultrasec dossier <id> --run ${run2}  \u2192  ultrasec verify --apply verdicts.json --run ${run2}`
-  );
-  if (draft) {
-    println(`      --draft: exiting 0 on an acknowledged incomplete audit.`);
-    return 0;
+  if (unread.length) {
+    const crit = unread.filter((f) => f.severity === "critical").length;
+    println(`  \u26A0\uFE0F  ${unread.length} source-code candidate(s) at HIGH+ were never read (${crit} critical) \u2014 the report says so in a banner.`);
+    println(
+      `      next: ultrasec paths --run ${run2} --surface code  \u2192  ultrasec dossier <id> --run ${run2}  \u2192  ultrasec verify --apply verdicts.json --run ${run2}`
+    );
   }
-  println(`      exit 1 \u2014 rendered anyway; pass --draft when an incomplete audit is what you meant.`);
-  return 1;
+  const draft = legacy ? unread.length > 0 || scannerIncomplete : out2.status.draft;
+  if (draft && flagBool(args2, "strict")) {
+    println(`      --strict: exit 1 on a DRAFT report.`);
+    return 1;
+  }
+  return 0;
 }
 
 // src/commands/clean.ts
@@ -48963,7 +49412,7 @@ var STAGES = {
   triage: {
     crossCheckable: false,
     emit(repo, run2, dossier, md) {
-      const items = buildTriageWorklist(dossier);
+      const items = buildTriageWorklist({ ...dossier, findings: dossier.findings.filter((f2) => inSurface(f2, ADJUDICATION_SURFACE)) });
       const f = stageFiles("TRIAGE");
       const worklist = emitWorklist(run2, f, items, () => renderTriageMd(items, loadContextDoc(run2)), { md });
       return { worklist, outName: "TRIAGE.json" };
@@ -49020,7 +49469,7 @@ var STAGES = {
       const surface = buildAttackSurface(scanRepo2(repo));
       const regions = buildInvestigateWorklist(surface, dossier.graph, [], void 0, buildClassHunts(dossier.manifest, surface));
       const f = stageFiles("INVESTIGATE");
-      const worklist = emitWorklist(run2, f, regions, () => renderInvestigateMd(regions, loadContextDoc(run2)), { md });
+      const worklist = emitWorklist(run2, f, investigateTodo(regions), () => renderInvestigateMd(regions, loadContextDoc(run2)), { md });
       return { worklist, outName: "INVESTIGATE.json" };
     },
     applyPure: (repo, run2, dossier, raw) => ingestDiscoveries(dossier, rowsOf("investigate", parseDiscoveries(raw)), repo, { context: loadContextDoc(run2) }).findings,
@@ -49046,7 +49495,9 @@ var STAGES = {
       return { worklist, outName: "verdicts.json" };
     },
     applyPure: (_repo, _run, dossier, raw) => applyVerdicts(dossier, rowsOf("verify", parseVerdicts(raw))).findings,
-    instruction: (repo, run2, worklist, outPath) => `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node <ultrasec> dossier <id> --run ${run2}\`) and write a verdicts.json array of {id, verdict, note, exploitPath} to ${outPath}. Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`
+    // The engine by its absolute path: the agent CLI shares no cwd with it, and
+    // a `<ultrasec>` placeholder here was a command it could not run.
+    instruction: (repo, run2, worklist, outPath) => `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node ${enginePath()} dossier <id>[,<id>\u2026] --run ${run2} --brief --no-context\` \u2014 a comma list prints one packet for a family) and write a verdicts.json array of {id, verdict, note, exploitPath, brocard} to ${outPath} \u2014 exploitPath on supported, brocard (the named ground) on refuted. Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`
   },
   revalidate: {
     crossCheckable: true,
@@ -49056,7 +49507,11 @@ var STAGES = {
       const worklist = emitWorklist(run2, f, items, () => renderRevalidateMd(items, loadContextDoc(run2)), { md });
       return { worklist, outName: "REVALIDATE.json" };
     },
-    applyPure: (repo, _run, dossier, raw) => applyRevalidations(dossier, rowsOf("revalidate", parseRevalidations(raw)), revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo))).findings,
+    applyPure: (repo, _run, dossier, raw) => {
+      const rows = rowsOf("revalidate", parseRevalidations(raw));
+      const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo, { surface: "all", ids: new Set(rows.map((r) => r.id)) }));
+      return applyRevalidations(dossier, rows, facts).findings;
+    },
     instruction: (repo, run2, worklist, outPath) => `Read the revalidation worklist at ${worklist}. Using the git facts, decide still-valid|fixed|false-positive|uncertain per finding and write a JSON array of {id, verdict, fixedIn?, note?} to ${outPath}. ${UNTRUSTED}`
   },
   variants: {
@@ -49266,7 +49721,19 @@ function runRun(args2) {
     return 2;
   }
   if (flagBool(args2, "json")) {
-    println(JSON.stringify(res, null, 2));
+    println(
+      JSON.stringify({
+        powered,
+        stages,
+        externalCalls: res.externalCalls,
+        emitted: res.emitted.map((e) => ({ stage: e.stage, worklist: e.worklist })),
+        escalated: res.escalated.length,
+        errors: res.errors,
+        notices: res.notices,
+        report: res.report,
+        grounded: res.grounded
+      })
+    );
     return powered && res.errors.length ? 1 : 0;
   }
   const printNotices = () => {
@@ -49288,7 +49755,7 @@ function runRun(args2) {
   }
   println(`ultrasec run --powered \u2192 ${run2} (agent: ${agent}${crossCheck ? `, cross-check: ${crossCheck}` : ""})`);
   println(`  stages: ${stages.join(" \u2192 ")}  \xB7  external agent calls: ${res.externalCalls}`);
-  if (res.escalated.length) println(`  \u26A0\uFE0F  cross-check escalated ${res.escalated.length} finding(s) to needs-human: ${res.escalated.join(", ")}`);
+  if (res.escalated.length) println(`  \u26A0\uFE0F  ${listCapped(`cross-check escalated ${res.escalated.length} finding(s) to needs-human`, res.escalated)}`);
   printNotices();
   for (const err2 of res.errors) println(`  \u2717 ${err2}`);
   println(`  report: ${res.report.written.join(" \xB7 ")}`);
@@ -49296,21 +49763,21 @@ function runRun(args2) {
 }
 
 // src/commands/orchestrate.ts
-import { existsSync as existsSync44, realpathSync as realpathSync8 } from "fs";
-import { fileURLToPath as fileURLToPath3 } from "url";
+import { existsSync as existsSync44, realpathSync as realpathSync9 } from "fs";
+import { fileURLToPath as fileURLToPath4 } from "url";
 function runOrchestrate(args2) {
   const runFlag = flagStr(args2, "run");
   if (!runFlag) {
     eprintln("ultrasec orchestrate: --run <dir> is required (the run dir holding the audit dossier + worklists).");
     return 2;
   }
-  const engineAbs = realpathSync8(fileURLToPath3(import.meta.url));
+  const engineAbs = realpathSync9(fileURLToPath4(import.meta.url));
   const surfaceFlag = flagStr(args2, "surface");
-  if (surfaceFlag !== void 0 && !SURFACE_FILTERS.includes(surfaceFlag)) {
+  const surface = parseSurfaceFlag(surfaceFlag, ADJUDICATION_SURFACE);
+  if (surface === null) {
     eprintln(`ultrasec orchestrate: unknown --surface "${surfaceFlag}" \u2014 expected one of: ${SURFACE_FILTERS.join(", ")}.`);
     return 2;
   }
-  const surface = surfaceFlag ?? "all";
   if (flagBool(args2, "list")) {
     if (!existsSync44(runFlag)) {
       eprintln(`ultrasec orchestrate: run dir not found: ${runFlag}.`);
@@ -50651,7 +51118,7 @@ function parseReport(md, who, idx, opts = {}) {
     const cwe = raw.match(/\bCWE[-‐–\s]?(\d{1,4})\b/i)?.[1];
     const scenario = raw.match(SCENARIO_FIELD)?.[1]?.trim();
     const fix = raw.match(FIX_FIELD)?.[1]?.trim();
-    const excerpt = redactReviewerText(raw, ph);
+    const excerpt2 = redactReviewerText(raw, ph);
     claims.push({
       reviewer: who.reviewer,
       phase: who.phase,
@@ -50663,7 +51130,7 @@ function parseReport(md, who, idx, opts = {}) {
       citations: extractCitations(raw).map((c2) => resolveCitation(idx, c2, lines5)),
       ...scenario ? { scenario: redactReviewerText(scenario, ph).slice(0, 400) } : {},
       ...fix ? { fix: redactReviewerText(fix, ph).slice(0, 400) } : {},
-      excerpt: excerpt.length > MAX_EXCERPT ? `${excerpt.slice(0, MAX_EXCERPT)}\u2026` : excerpt,
+      excerpt: excerpt2.length > MAX_EXCERPT ? `${excerpt2.slice(0, MAX_EXCERPT)}\u2026` : excerpt2,
       // On the RAW block: a placeholder is an artefact whether or not our own
       // redaction would have masked what surrounds it.
       artefacts: placeholderArtefacts(raw, ph),
@@ -51216,10 +51683,14 @@ function applyMode2(run2, repo, dossier, ledger, applyPath, json, strict) {
   println(
     `  accepted ${res.accepted.length} (ingested ${res.ingested} new ultrasec-ai candidate(s), folded ${res.folded}) \xB7 rejected ${res.rejected.length} \xB7 refused ${res.refused.length} \xB7 dropped ${parsed2.dropped.length}`
   );
-  for (const a of res.accepted) println(`  \u2713 ${a.candidate} \u2192 ${a.findingId ?? "folded into an existing finding"} \u2014 ${a.title}`);
-  for (const r of res.rejected) println(`  \u2717 ${r.candidate} ${r.by === "citation-gate" ? "refused by the citation gate" : "rejected"}: ${r.reason}`);
-  for (const r of res.refused) println(`  \u2717 ${r.id}: ${r.reason}`);
-  for (const line2 of formatDropped(parsed2.dropped)) println(line2);
+  for (const line2 of linesCapped(res.accepted.map((a) => `  \u2713 ${a.candidate} \u2192 ${a.findingId ?? "folded into an existing finding"} \u2014 ${a.title}`)))
+    println(line2);
+  for (const line2 of linesCapped(
+    res.rejected.map((r) => `  \u2717 ${r.candidate} ${r.by === "citation-gate" ? "refused by the citation gate" : "rejected"}: ${r.reason}`)
+  ))
+    println(line2);
+  for (const line2 of linesCapped(res.refused.map((r) => `  \u2717 ${r.id}: ${r.reason}`))) println(line2);
+  for (const line2 of linesCapped(formatDropped(parsed2.dropped))) println(line2);
   if (todo.contested.length)
     println(`  ${todo.contested.length} contested finding(s) stay a worklist (COUNCIL.md) \u2014 re-verify those findings; nothing was changed for them.`);
   if (res.ingested) println(`  next: \`ultrasec verify --run ${run2}\` \u2014 accepted candidates are open, and are adjudicated like any other.`);
@@ -51312,7 +51783,8 @@ async function runAudit(args2) {
   for (const n of res.notices) eprintln(`ultrasec audit: \u26A0\uFE0F  ${n}`);
   for (const e of res.errors) eprintln(`ultrasec audit: \u2717 ${e}`);
   for (const n of notes) eprintln(`ultrasec audit: \u26A0\uFE0F  ${n}`);
-  const code = !res.grounded || powered && res.errors.length || flagBool(args2, "strict") && res.report.status.draft ? 1 : 0;
+  const code = powered && res.errors.length || flagBool(args2, "strict") && res.report.status.draft ? 1 : 0;
+  const next = res.report.status.draft ? nextStep(repo, run2, keepWork, dossier.manifest.scannerPolicy?.complete === false) : void 0;
   if (json) {
     println(
       JSON.stringify(
@@ -51324,7 +51796,8 @@ async function runAudit(args2) {
           grounded: res.grounded,
           externalCalls: res.externalCalls,
           worklists: keepWork ? res.emitted.map((e) => e.worklist) : [],
-          removed: removed.length
+          removed: removed.length,
+          ...next ? { next } : {}
         },
         null,
         2
@@ -51334,9 +51807,16 @@ async function runAudit(args2) {
   }
   println(res.report.written.join(" \xB7 "));
   println(`  ${status}`);
+  if (next) println(`  next: ${next}`);
   if (keepWork && res.emitted.length)
     println(`  worklists kept: fill the *.todo.json in ${run2}, \`--apply\` each, then \`ultrasec render --run ${run2}\` and \`ultrasec clean --run ${run2}\``);
   return code;
+}
+function nextStep(repo, run2, keepWork, scannersIncomplete) {
+  const engine = `node ${enginePath()}`;
+  if (scannersIncomplete) return `install or fix the required scanner(s), then ${engine} audit --repo ${repo} --out ${run2}`;
+  const keep = keepWork ? "" : `${engine} audit --repo ${repo} --out ${run2} --keep-work  \u2192  `;
+  return `${keep}fill ${join86(run2, "VERIFY.todo.json")}  \u2192  ${engine} verify --apply ${join86(run2, "VERIFY.todo.json")} --run ${run2}  \u2192  ${engine} render --run ${run2}`;
 }
 
 // src/commands/registry.ts
@@ -51375,7 +51855,7 @@ var COMMAND_HANDLERS = {
 import { createInterface as createInterface3 } from "readline";
 
 // src/mcp/handlers.ts
-import { existsSync as existsSync49, readFileSync as readFileSync45, realpathSync as realpathSync9, statSync as statSync20 } from "fs";
+import { existsSync as existsSync49, readFileSync as readFileSync45, realpathSync as realpathSync10, statSync as statSync20 } from "fs";
 import { isAbsolute as isAbsolute12, join as join87, resolve as resolve44, sep as sep13 } from "path";
 
 // src/run-lock.ts
@@ -51611,13 +52091,13 @@ function handleRead(args2, repo, run2) {
   const target = isAbsolute12(raw) ? raw : join87(repo, raw);
   let real;
   try {
-    real = realpathSync9(target);
+    real = realpathSync10(target);
   } catch {
     throw new ToolError(`no such file: ${raw}`);
   }
   const allowed = [repo, run2].map((d) => {
     try {
-      return realpathSync9(d);
+      return realpathSync10(d);
     } catch {
       return resolve44(d);
     }
@@ -52122,13 +52602,13 @@ function str4(v) {
 var DECLARED = new Set([...TOOLS3, ...WRITE_TOOLS].map((t) => t.name));
 
 // src/mcp/resources.ts
-import { existsSync as existsSync50, readdirSync as readdirSync9, readFileSync as readFileSync46, realpathSync as realpathSync10, statSync as statSync21 } from "fs";
+import { existsSync as existsSync50, readdirSync as readdirSync9, readFileSync as readFileSync46, realpathSync as realpathSync11, statSync as statSync21 } from "fs";
 import { basename as basename6, dirname as dirname15, join as join88, resolve as resolve45, sep as sep14 } from "path";
-import { fileURLToPath as fileURLToPath4 } from "url";
+import { fileURLToPath as fileURLToPath5 } from "url";
 var SKILL_NAME = "ultrasec";
 var URI_SCHEME = "skill://";
 function resolveSkillRoot(moduleDir) {
-  const here = moduleDir ?? dirname15(fileURLToPath4(import.meta.url));
+  const here = moduleDir ?? dirname15(fileURLToPath5(import.meta.url));
   const candidates = [resolve45(here, ".."), resolve45(here, "..", "skills", SKILL_NAME), resolve45(here, "..", "..", "skills", SKILL_NAME)];
   return candidates.find((dir) => existsSync50(join88(dir, "SKILL.md")));
 }
@@ -52153,10 +52633,10 @@ function readResource(uri, moduleDir) {
   const rel2 = uri.slice(URI_SCHEME.length);
   if (!rel2) throw new ResourceError("empty resource path");
   const target = resolve45(root, rel2);
-  const rootReal = realpathSync10(root);
+  const rootReal = realpathSync11(root);
   let targetReal;
   try {
-    targetReal = realpathSync10(target);
+    targetReal = realpathSync11(target);
   } catch {
     throw new ResourceError(`no such resource: ${uri}`);
   }
@@ -52608,7 +53088,8 @@ COMMANDS
              the stage pipeline \u2192 check \u2192 <run>/REPORT.md (REPORT.html with
              --html; both with --html --md) \u2192 remove the intermediates. Prints
              the report path and a one-line status: adjudicated & grounded, or
-             DRAFT with why. ZERO agent calls unless --powered <cli> (drives
+             DRAFT with why and a 'next:' line. Exit 0 once the report is
+             written. ZERO agent calls unless --powered <cli> (drives
              that CLI per worklist; --cross-check <cli>) or --council
              "<reviewer:model,\u2026>". --keep-work keeps .work/ and the JSON
              worklists for an agent to adjudicate (then render + clean).
@@ -52682,13 +53163,15 @@ COMMANDS
              enclosing function at the source and the sink, plus 'Who can reach
              this' \u2014 the route file, the callers of the entry symbol, the auth
              and rate-limit markers in scope, the sanitizers near the path.
-             --brief restores the compact windows for batch fan-out.
-             Flags: <finding-id> \xB7 --run \xB7 --repo \xB7 --compact \xB7 --no-context \xB7
-             --brief.
+             --brief restores the compact windows for batch fan-out. A comma
+             list (a,b,c) is a FAMILY: context and checklist once, the first
+             member in full, then a line and a \xB13-line window per member.
+             Flags: <finding-id>[,<id>\u2026] \xB7 --run \xB7 --repo \xB7 --compact \xB7
+             --no-context \xB7 --brief.
   triage     Fast, code-free first pass over OPEN candidates: emit / apply
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
              it is ignored (kept open for verify). --surface narrows the emitted
-             worklist (code | supply | deps | all); --apply never takes it, since
+             worklist (code | supply | deps | code+supply | all); --apply never takes it, since
              a verdict file names its own ids.
              Flags: --run \xB7 --apply \xB7 --surface <s> \xB7 --json.
   verify     Emit / apply the adversarial finding\u2194evidence worklist. --shards n
@@ -52699,8 +53182,11 @@ COMMANDS
              The worklist is a DELTA: findings an earlier pass already adjudicated
              as needs-human are withheld until --all. --apply reports any verdict
              that changes an already-adjudicated finding; under --strict that
-             fails unless --re-verdict is passed.
-             Flags: --run \xB7 --shards \xB7 --shard \xB7 --apply \xB7 --json.
+             fails unless --re-verdict is passed. --surface (default code+supply)
+             narrows the emitted worklist: dependency advisories are ranked per
+             package in the report, not ruled one by one; --surface all restores
+             them. --apply never takes it.
+             Flags: --run \xB7 --shards \xB7 --shard \xB7 --apply \xB7 --surface <s> \xB7 --json.
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]
              as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
@@ -52717,7 +53203,9 @@ COMMANDS
              needs-human findings; --apply folds in still-valid/fixed/
              false-positive/uncertain (fixed \u2192 dismissed + fixed-in commit;
              high-sev false-positive \u2192 needs-human), and fails closed if every
-             fragment is stale. Flags: --run \xB7 --repo \xB7 --apply \xB7 --json.
+             fragment is stale. --surface (default code+supply) narrows the
+             emitted worklist; --surface all restores the advisories.
+             Flags: --run \xB7 --repo \xB7 --apply \xB7 --surface <s> \xB7 --json.
   assumptions
              Build the assumption map BEFORE hunting: per unit, what it
              guarantees (cited) and what it depends on that nothing enforces.
@@ -52743,7 +53231,7 @@ COMMANDS
              are declared once in CONTEXT.md \u2014 'Auth markers: a, b.c' /
              'Throttle markers: \u2026' \u2014 or ad hoc with --marker.
              Flags: --run \xB7 --repo \xB7 --lens auth|throttle \xB7 --marker <name>[,\u2026] \xB7
-             --apply \xB7 --strict.
+             --apply \xB7 --strict \xB7 --json.
   variants   Hunt other instances of a CONFIRMED bug's root cause: emit one seed
              per confirmed finding with its mechanical neighbours (same sink
              callee / file / CWE), you state the root cause and generalize a
@@ -52766,12 +53254,12 @@ COMMANDS
              package, hardening, coverage, remediation plan, annexes.
              Dismissals are SUMMARISED and repeated findings are one card;
              --full restores every exhaustive table. Folds <run>/NARRATIVE.json
-             (or --narrative <file>), grounding-checked. EXITS 1 when a
-             HIGH/CRITICAL source-code candidate was never read \u2014 the file is
-             still written, with a DRAFT banner; --draft exits 0. --legacy
-             writes the previous SUMMARY.md + tiered REPORT.md + index.html.
-             Flags: --run \xB7 --html \xB7 --md \xB7 --full \xB7 --narrative <file> \xB7
-             --draft \xB7 --legacy.
+             (or --narrative <file>), grounding-checked. A HIGH/CRITICAL
+             source-code candidate never read makes it a DRAFT (a banner says
+             why); a written report exits 0 \u2014 --strict exits 1 on a DRAFT.
+             --legacy writes the previous SUMMARY.md + tiered REPORT.md +
+             index.html. Flags: --run \xB7 --html \xB7 --md \xB7 --full \xB7 --narrative
+             <file> \xB7 --strict \xB7 --legacy.
   coverage   The honest complement to 'only report what you can exploit': a
              standards matrix of what this audit looked at and what it did NOT.
              A short report reads as "nothing there" when it means "nothing
@@ -52781,18 +53269,21 @@ COMMANDS
              Top 10, the OWASP API Top 10, MASVS or the CWE Top 25. Also the
              weakness-class \xD7 framework matrix: matched by a pack, degraded
              (no pack, version outside testedWith), AI-hunted, or not covered.
-             Read-only. Flags: --run \xB7
+             Read-only; prints the counts \u2014 --full prints the matrix.
+             Flags: --run \xB7
              --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25 \xB7
-             --write (COVERAGE.md) \xB7 --json (--classes: the class matrix).
+             --full \xB7 --write (COVERAGE.md) \xB7 --json (--classes: the class matrix).
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
              READ-ONLY \u2014 it writes nothing and changes no status; --semantic ALSO
-             fails when a candidate is still unadjudicated. Exit 0 ok \xB7 1 gate
+             fails when a HIGH/CRITICAL candidate outside the dependency surface
+             is still unadjudicated (the predicate render's DRAFT banner uses);
+             open advisories are reported, never failing. Exit 0 ok \xB7 1 gate
              failed \xB7 2 unreadable run. Flags: --run \xB7 --repo \xB7 --semantic \xB7
              --min-severity critical|high|medium|low|info \xB7 --json.
   clean      Remove the intermediates \u2014 .work/, worklists, DOSSIER.md,
              orchestration and council scratch \u2014 KEEPING REPORT.md/REPORT.html,
              findings.json, manifest.json, CONTEXT.md and NARRATIVE.json (and an
-             older run's SUMMARY.md / index.html / JOURNAL.md); --all wipes the
+             older run's top-level JOURNAL.md); --all wipes the
              whole run dir, --keep-output keeps everything. With --docker also
              removes the scanner images + toolbox image + trivy cache volume
              (--dry-run to preview). A run that was never scanned is removed whole.
@@ -52831,13 +53322,14 @@ COMMANDS
              <reviewer> \xB7 --apply <file> \xB7 --strict \xB7 --json.
   orchestrate Emit the run's multi-agent orchestration from its CURRENT worklists
              into <run>/.work/orchestration/: one <phase>.workflow.mjs per ready phase
-             (adjudicate | verify | revalidate | investigate, real ids batched
-             8/agent), the dispatch contracts (agents/<role>.md) and a sequential
+             (adjudicate | verify | revalidate | investigate; families kept
+             whole, at most 12 agents, the items baked into each prompt as
+             compact JSON lines), the dispatch contracts (agents/<role>.md) and a sequential
              RUNBOOK.md fallback. Subagents RETURN verdict/discovery fragments;
              every conservative --apply fold stays with you (one writer).
-             --surface narrows the 'adjudicate' fan-out to code | supply | deps
-             (default all) \u2014 a fan-out over every open dependency advisory pays
-             for a dossier read that a ranked list already answers.
+             --surface narrows the fan-out to code | supply | deps | code+supply
+             | all (default code+supply) \u2014 a fan-out over every open dependency
+             advisory pays for a dossier read that a ranked list already answers.
              Flags: --run \xB7 --phase <name> \xB7 --surface <s> \xB7 --eco (runbook +
              contracts only) \xB7 --list (phase status as JSON).
   mcp        Serve the audit over the Model Context Protocol, so a non-Claude-Code
@@ -52867,11 +53359,17 @@ COMMANDS
 
 GLOBAL
   --require-tools <a,b>  scan: require these scanners to execute successfully.
-                        Selects them if --tools is absent, including scoped scans.
+                        On a full scan it adds the obligation to --tools auto
+                        (every installed scanner still runs); on a scoped or
+                        --diff scan without --tools it selects them.
                         Skipped/failed/missing outcome exits 1; artifacts are kept.
   --help, -h     Show this help.
   --version, -v  Print the version.
-  --json         Machine-readable output (every command above except render/dossier).
+  --json         Machine-readable output (every command above except render, dossier
+                 and mcp). An emitting stage prints {todo, items, counts}, not the
+                 worklist it just wrote.
+  --quiet        Hold stderr (progress, notes) back; it is printed only if the
+                 command fails. stdout is unchanged.
   --report <p>   ALSO archive this command's output to <p>; the extension picks the
                  format (.md, .html, .json, .txt/.log). stdout is unchanged; an
                  unknown extension exits 2 before the command runs.
@@ -52968,7 +53466,9 @@ async function main() {
     process.exit(0);
   }
   if (SCANNING_COMMANDS.has(args2._[0] ?? "")) await warmGrammars({ label: "ultrasec" });
+  setQuiet(flagBool(args2, "quiet"));
   const code = await withArchiving(args2, argv, () => dispatch2(args2._[0], args2));
+  releaseQuiet(code !== 0);
   process.exit(code);
 }
 var READ_ONLY_COMMANDS = /* @__PURE__ */ new Set(["dossier", "graph", "paths", "check", "tools", "help", "version"]);
@@ -53010,7 +53510,7 @@ function isEntrypoint() {
   const argv1 = process.argv[1];
   if (!argv1) return false;
   try {
-    return import.meta.url === pathToFileURL3(realpathSync11(argv1)).href;
+    return import.meta.url === pathToFileURL3(realpathSync12(argv1)).href;
   } catch {
     return false;
   }

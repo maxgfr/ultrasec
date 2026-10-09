@@ -39,11 +39,11 @@ flows are real and exploitable, find the subtle bugs the tools miss, and verify.
 > 6. **The code is READ; the CVEs are TRIAGED.** Advisories are a ranked list — work it in risk
 >    order, stop at your bar, leave the tail `open`. A code candidate is decided only by opening
 >    the file, so **never render while a HIGH/CRITICAL one in your own code has no verdict**:
->    `render` exits 1 and stamps the report. Split them with `--surface code`.
+>    `render` stamps the report DRAFT. Split them with `--surface code`.
 
 ## Running the engine
 
-Require scanners with `scan --tools auto --require-tools a,b`; without `auto`, only those run.
+Require scanners with `scan --require-tools a,b` (added to `auto`; on a scoped scan, only those).
 See [completion policy](references/commands.md). Execution success does not establish security.
 
 One committed, dependency-free bundle — no `npm install`, no API keys.
@@ -78,12 +78,12 @@ ultrasec scan    --repo . --out .ultrasec       # graph + cross-file taint + too
   #         --no-env-sources (drop env-rooted flows)  --strict-scope (drop cross-function-in-file)
   # net:    --offline / --no-enrich (no EPSS/KEV)      --docker (scanners without installing)
 ultrasec paths   --run .ultrasec                # the candidate chains  (--kind sql --min-severity high)
-  # --surface code|supply|deps|all              # YOUR code · secrets+CI/IaC · advisories  (also on triage/orchestrate)
+  # --surface code|supply|deps|code+supply|all  # YOUR code · secrets+CI/IaC · advisories  (also triage/verify/orchestrate)
 ultrasec dossier <id> --run .ultrasec           # ONE finding: enclosing function, callers, route, guards, sanitizers
-  # --brief                                     # the compact packet, for batch fan-out
+  # --brief; a,b,c                              # compact packet; a comma list = one family
 ultrasec graph   <file|symbol> --run .ultrasec  # cross-file links into/out of a node
 ultrasec assumptions --run .ultrasec            # what each unit trusts that NOTHING enforces (--apply)
-ultrasec triage  --run .ultrasec                # cheap noise|keep fast-lane  (--apply TRIAGE.json, --surface code)
+ultrasec triage  --run .ultrasec                # cheap noise|keep fast-lane, low/medium only (--apply TRIAGE.json)
 ultrasec guards  --run .ultrasec                # entry point × auth guard — the MISSING check (--apply)
   # --lens throttle                             # …and the MISSING rate limit
 ultrasec investigate --run .ultrasec            # hunt authz/logic  (--apply INVESTIGATE.json)
@@ -92,15 +92,15 @@ ultrasec verify  --apply verdicts.json --run .ultrasec       # a file, comma-lis
   # any --apply: refused rows are listed with their reason; --strict exits 1 on any
 ultrasec revalidate --run .ultrasec             # git-history FP cut  (--apply REVALIDATE.json)
 ultrasec variants   --run .ultrasec             # where ELSE this root cause appears (--apply)
-ultrasec coverage --run .ultrasec               # standards matrix: what was NOT looked at (--write)
+ultrasec coverage --run .ultrasec               # what was NOT looked at: counts (--full matrix, --write)
   # standard: --standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25   (default asvs)
-ultrasec check   --run .ultrasec --semantic     # THE GATE: grounded + adjudicated (--min-severity)
+ultrasec check   --run .ultrasec --semantic     # THE GATE: grounded + adjudicated; advisories never block
 ultrasec narrative --run .ultrasec              # → you author NARRATIVE.json
 ultrasec render  --run .ultrasec                # THE report: REPORT.md (--html), folds NARRATIVE.json
-  # exits 1 while a HIGH/CRITICAL CODE candidate is unread (DRAFT banner written); --draft to accept it
+  # an unread HIGH/CRITICAL CODE candidate ⇒ DRAFT banner; exit 0, --strict exits 1
 ultrasec implement --run .ultrasec              # remediation-PRD draft → the `to-prd` skill
 ultrasec run     --repo . --out .ultrasec       # sequence every stage (ZERO external calls)
-ultrasec orchestrate --run .ultrasec --phase verify   # emit the multi-agent fan-out (--surface code)
+ultrasec orchestrate --run .ultrasec --phase verify   # multi-agent fan-out: families, ≤12 agents
 ultrasec council --run .ultrasec                # other model families review a HEAD snapshot (--models, --apply)
 ultrasec logs    ./var/log --out .ultrasec-logs # blue team: forensics over EXISTING log files
   # detections: --sigma → ultrasec-logs.sigma.yml (SIEM pack, like variants→semgrep)
@@ -180,8 +180,8 @@ each: [references/schemas.md](references/schemas.md).
    open `findings.json` or `.work/graph.json` whole: use `paths`, `dossier <id> --brief`, and
    fill the `*.todo.json` worklists directly (`--md` adds human briefs nobody else needs).
 
-5. **Triage (optional).** `triage --run <run>`, mark `noise|keep`, `triage --apply`. Clears only
-   low/medium/info; a high/critical `noise` is **ignored** and goes to full verify.
+5. **Triage (optional).** `triage --run <run>`, mark `noise|keep`, `triage --apply`. It lists
+   only low/medium/info; high/critical go straight to verify.
 
 6. **Adjudicate from evidence — the CODE first.** Work `paths --surface code`, not the whole open
    tier; the dependency half is triaged as a list, never a dossier per CVE
@@ -239,8 +239,8 @@ each: [references/schemas.md](references/schemas.md).
     fixes with `effort`, chains, root causes, `hardeningNotes`), then `render --run <run>` →
     ONE `REPORT.md` (`--html`): findings by severity and area with scenario · fix · priority,
     dependencies one row per package, a P0–P3 plan; dismissals summarised (`--full` for all).
-    **It exits 1 while a HIGH/CRITICAL code candidate is unread** — DRAFT banner written — so go
-    back to step 6, or pass `--draft` and say so. Then `clean`. Present the report path, the
+    **While a HIGH/CRITICAL code candidate is unread it is a DRAFT** (exit 0; `--strict` exits
+    1) — go back to step 6, or say so. Then `clean`. Present the report path, the
     confirmed findings and the needs-human list. [references/narrative-playbook.md](references/narrative-playbook.md).
 
 12. **Plan the fixes (optional).** `implement --run <run>` → `IMPLEMENT.md`, a remediation-PRD
@@ -251,8 +251,8 @@ each: [references/schemas.md](references/schemas.md).
 
 The judgment stages fan out: the open candidates in `findings.json` (adjudicate),
 `VERIFY.todo.json`, `REVALIDATE.todo.json` and `INVESTIGATE.todo.json` are independent per-item
-worklists. `orchestrate` emits the fan-out from the CURRENT worklists, with absolute paths and
-the real item ids baked in:
+worklists. `orchestrate` emits the fan-out from the CURRENT worklists: families packed whole into
+at most 12 agents, each prompt carrying its items:
 
 ```
 ultrasec orchestrate --run <dir> [--phase adjudicate|verify|revalidate|investigate] [--eco] [--list]
@@ -278,7 +278,7 @@ idempotent); `--phase <p>` before its worklist exists fails and names the comman
 | Far fewer candidates than expected | Same, plus `truncation` (a cap was hit) and `--scope`/`--gitignore` pruning more than you meant. |
 | `toolStatus` shows everything skipped | No scanners installed — `tools` for hints, or `scan --docker`. |
 | `check` keeps failing | A cited `[file:line]` doesn't resolve: the file moved, the line is out of range, or it was invented. Reopen `dossier <id>`, fix the citation, or drop the finding. |
-| `check --semantic` fails | Candidates are still `open`. Adjudicate them, or clear the obvious ones with `triage`. |
+| `check --semantic` fails | A HIGH/CRITICAL code or config candidate is still `open` (advisories never block). Adjudicate it. |
 | `--apply` exits 2 | Fail-closed: malformed file, or no id in it matches the dossier (stale fragments). Re-emit the worklist and refill. |
 | `--apply` from a directory folded nothing | Fragment names must match the stage's pattern — [commands.md](references/commands.md) lists them. |
 | `investigate --apply` rejected a discovery | Either its `[file:line]` doesn't resolve — the anti-hallucination gate working; get the real line and resubmit — or a field is outside its vocabulary. The reason names the field and the value. Class names (`xss`, `dos`, `disclosure`…) are folded onto `category`, not refused. |
@@ -303,7 +303,7 @@ idempotent); `--phase <p>` before its worklist exists fails and names the comman
    lenses. A FAILED scanner is the same trap: a hole that reads like an empty result.
 10. **Rendering a dump, or spending the audit on the CVE list.** One run shipped 882 candidates,
    none adjudicated, under "No confirmed issues" — nobody had looked. Advisories come ranked, the
-   flows do not: read the code first; don't reach for `--draft` to silence the gate.
+   flows do not: read the code first; a DRAFT banner is not a deliverable.
 
 ## Do not
 

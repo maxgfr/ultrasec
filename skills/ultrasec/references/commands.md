@@ -14,7 +14,8 @@ Run the engine by its absolute path — see the `<skill-dir>` note in
 
 | flag | effect |
 |---|---|
-| `--json` | machine-readable output (all but `render`/`dossier`) |
+| `--json` | machine-readable output (all but `render`/`dossier`/`mcp`). An emitting stage (`verify`, `revalidate`, `investigate`, `guards`) prints `{todo, items, counts}` — where the worklist is and how much is in it — not the worklist it just wrote; `run --json` prints the summary. `--apply --json` lists every row. |
+| `--quiet` | hold stderr (progress, notes, warnings) back and print it only if the command fails. stdout is unchanged. |
 | `--report <path>` | ALSO write this command's output to `<path>`. The extension picks the format — `.md`, `.html` (self-contained, no external assets), `.json` (the structured transcript), `.txt`/`.log`. **stdout is unchanged**; the archive is additive. An unsupported extension exits **2 before the command runs**, so a ten-minute scan never ends in an unwritable report. |
 | `--no-journal` | skip the `.work/JOURNAL.md` entry (see below). |
 | `--md` | also write each worklist's human `.md` brief (`VERIFY.md`, `TRIAGE.md`, …); env `ULTRASEC_MD=1` does the same for a session. Default: worklists are JSON only. |
@@ -31,13 +32,21 @@ The read-only commands — `dossier`, `graph`, `paths`, `check`, `tools` — nev
 `audit` without `--keep-work`, are not journaled either: their last act is removing `.work/`, and
 a journal entry would recreate it.
 
-**Worklists are JSON only.** Each emitting command writes `<STAGE>.todo.json` and prints the
+**Console lists are capped.** An `--apply` prints the first ten ids of any list (ignored, kept
+for a human, refused rows…) followed by `… and N more (--json for all)`; a payload with no usable
+row is refused with one entry per distinct reason. `--json` carries every row.
+
+**Worklists are JSON only, and compact.** One row per line, no indentation, and an EMPTY answer
+slot (`verdict`, `note`, `brocard`, `fixedIn`, the assumption and variant arrays) is not written —
+add the field when you fill the row; every `--apply` accepts rows without them, and an older
+indented worklist still parses. Each emitting command writes `<STAGE>.todo.json` and prints the
 instructions plus "fill X.todo.json directly — field-by-field format in
 [schemas.md](schemas.md)". The `.md` twin (`VERIFY.md`, `TRIAGE.md`, `GUARDS.md`, `THROTTLE.md`,
 `INVESTIGATE.md`, `REVALIDATE.md`, `NARRATIVE.md`, `VARIANTS.md`, the emit-time `ASSUMPTIONS.md`,
 `CONTEXT.todo.md`) repeated the same rows for a human reader and doubled what an agent opened; it
-is written only with `--md`. Not twins, always written: `IMPLEMENT.md` (the PRD draft), the
-`ASSUMPTIONS.md` map written by `assumptions --apply`, and the `--apply` outputs of `guards`.
+is written only with `--md` — `IMPLEMENT.md`, the PRD draft, too (except in a powered run, whose
+agent reads it). Not twins, always written: the `ASSUMPTIONS.md` map written by
+`assumptions --apply`, and the `--apply` outputs of `guards`.
 
 ### Run directory layout
 
@@ -87,9 +96,11 @@ and every worklist twice. The reader wanted one file; the agent burned tokens op
   then `render` and `clean`.
 
 Stdout is two lines: the report path, then the status — `adjudicated & grounded — N confirmed ·
-…` or `DRAFT — <reasons> (…)`. **Exit 0** even on a DRAFT (the banner travels with the file) ·
-**1** when a citation does not resolve, a powered stage errored, or `--strict` and DRAFT · **2**
-usage.
+…` or `DRAFT — <reasons> (…)`. A DRAFT adds a third line, `next:`, with the command to run next
+in this run's real paths (the engine by its absolute path; `audit … --keep-work` first when the
+worklists were removed); `--json` carries it as `next`. **Exit 0** once the report is written,
+DRAFT included — the banner travels with the file, and an unresolved citation is one of its
+reasons · **1** when a powered stage errored, or `--strict` and DRAFT · **2** usage.
 
 ## Recon
 
@@ -121,14 +132,14 @@ Writes `CONTEXT.scaffold.json` and prints the `CONTEXT.md` outline (`CONTEXT.tod
 ### `scan --repo <dir>`
 
 `--require-tools <a,b>` requires each named scanner to execute successfully.
-Absent `--tools`, selects ONLY these names, even for a scoped/diff pass — every
-other installed scanner is skipped. Pass `--tools auto --require-tools <a,b>` to
-require some and keep the rest of the belt. With explicit
-`--tools`, every required scanner must be included. Unknown names, empty values
+On a full scan it is ADDITIVE: an execution obligation on top of `--tools auto`,
+so every other installed scanner still runs. On a scoped or `--diff` pass, where
+tools are skipped by default, absent `--tools` it selects only these names. With
+explicit `--tools`, every required scanner must be included. Unknown names, empty values
 and contradictory `--no-tools`/`--tools none` exit 2 before scanning. A skipped,
 failed or missing outcome exits 1 with artifacts retained and `scannerPolicy`
-in the manifest/JSON. `check` and `render` also fail on that incomplete policy;
-rendered reports keep a banner, including under the explicit `--draft` override.
+in the manifest/JSON. `check` also fails on that incomplete policy; the rendered
+report is a DRAFT with a banner (`render --strict` exits 1 on it).
 Zero findings from a successful scanner satisfies execution only, not security.
 The policy describes the current pass, not historical results carried by merge.
 Workspace-aware scanners must complete every selected workspace; partial results
@@ -298,15 +309,18 @@ target, an ambiguous symbol, or an unknown node.
 ### `paths`
 List the candidate source→sink **chains**. `--run` (default `.ultrasec`) · `--kind <k>` ·
 `--min-severity <s>` (that severity **and above**, as on `check`) · `--severity <s>` (exactly that
-severity — it prints how many chains above it were left out) · `--surface code|supply|deps|all` ·
+severity — it prints how many chains above it were left out) · `--surface code|supply|deps|code+supply|all` ·
 `--json`.
 
 `--surface` splits the candidates the way the report does — `code` is what you wrote (`taint`,
 `sast`, `authz`, `crypto`, `logs`, `privacy`), `supply` is your repo's credentials and CI/IaC
-(`secret`, `config`), `deps` is advisories on packages you installed. Default `all`; an unknown
-value exits 2 rather than silently widening back to everything. The same flag narrows `triage`'s
-emitted worklist and `orchestrate --phase adjudicate`'s fan-out. It never appears on an `--apply`:
-a verdict file names its own ids and folds exactly those.
+(`secret`, `config`), `deps` is advisories on packages you installed, `code+supply` both of the
+first two. Default `all` here; an unknown value exits 2 rather than silently widening back to
+everything. The same flag narrows the emitted worklist of `triage` (default `all`), `verify` and
+`revalidate` and the `orchestrate` fan-out — those three default to `code+supply`: a `dossier`
+read cannot decide an advisory, the report ranks them per package, and they never block
+`check --semantic`. `--surface all` restores them. It never appears on an `--apply`: a verdict
+file names its own ids and folds exactly those.
 
 It lists chains and only chains, so an **orphan sink** — a dangerous callee the walk could not
 connect to a source — never appears here. `--kind X` printing nothing therefore does not mean
@@ -316,7 +330,11 @@ findings it could not list, `paths` now says how many rather than leaving the si
 as absence — then go to the `DOSSIER.md` index and `dossier <id>`.
 
 ### `dossier <finding-id>`
-The grounding packet for one finding. **The id may be a unique prefix** (`dossier 7e51071c`).
+The grounding packet for one finding. **The id may be a unique prefix** (`dossier 7e51071c`). A
+comma list — `dossier a,b,c` — is a **family** packet: the context and "How to verify" once, the
+first member in full, then one line and a ±3-line window per other member, which is what it takes
+to check a member has the shape the first was judged on. Every id must resolve (exit 2
+otherwise); still one verdict per id.
 `--run` · `--repo` (defaults to the manifest's repo) · `--compact` / `--no-context` (how much of
 CONTEXT.md to reprint) · `--brief`. No `--json`. Read this before adjudicating anything.
 
@@ -336,8 +354,9 @@ verdict — which was checked, and what was found:
 
 `--brief` drops the enclosing bodies and this block, narrows the windows and prints CONTEXT.md
 compacted as `--compact` would (trust model, exposure, criticality, hunt list) — the packet for a
-batch fan-out, where one subagent reads eight findings at once and must not get eight copies of
-the whole document. `--no-context` still drops it entirely.
+batch fan-out, where one subagent reads a whole family at once and must not get a copy of the
+whole document per member. `--no-context` still drops it entirely — the fan-out prompts carry the
+compacted context once per agent and call `dossier <ids> --brief --no-context`.
 
 ## Adjudicate
 
@@ -347,13 +366,13 @@ back under a conservative rule. The verdict→status table and every JSON shape 
 
 | command | emits | you write | apply rule |
 |---|---|---|---|
-| `triage --run <d>` | `TRIAGE.todo.json` | `noise\|keep` | `noise` clears only low/med/info; on high/critical it is **ignored** |
+| `triage --run <d>` | `TRIAGE.todo.json` | `noise\|keep` | lists only low/med/info (a high/critical row goes to verify; a `noise` on one is **ignored**) |
 | `guards --run <d>` | `GUARDS.todo.json` | `guarded\|unguarded\|intentionally-public\|not-a-handler` | `unguarded` becomes a cited `authz` finding (CWE-306); the matrix is re-derived from the code, so a stale row is refused |
 | `guards --marker <name>[,…]` | same | same | adds the project's own guard helpers to the lens vocabulary (whole, possibly dotted names); `Auth markers:` / `Throttle markers:` lines in `CONTEXT.md` do the same for every run |
 | `guards --lens throttle --run <d>` | `THROTTLE.todo.json` | `throttled\|unthrottled\|not-abusable\|not-a-handler` | `unthrottled` becomes a cited `other` finding — **CWE-307 + CWE-204** on an auth-shaped handler, CWE-770 otherwise |
-| `verify --run <d>` | `VERIFY.todo.json` | `supported\|partial\|unsupported\|refuted` | `partial` → needs-human at any severity; `unsupported` → needs-human on high/critical |
+| `verify --run <d>` | `VERIFY.todo.json` (`--surface`, default `code+supply`) | `supported\|partial\|unsupported\|refuted` | `partial` → needs-human at any severity; `unsupported` → needs-human on high/critical |
 | `investigate --run <d>` | `INVESTIGATE.todo.json` | `Discovery[]`, or `{discoveries, idioms, hunted}` | citations checked **before** ingest; a bad one is rejected, not folded. Weakness-class hunts (`region: hunt:…`) take `idioms[]` too, citation-checked into `.work/PACK-SUGGESTIONS.json` — proposals, never applied; `--strict` counts refused idioms |
-| `revalidate --run <d>` | `REVALIDATE.todo.json` | `still-valid\|fixed\|false-positive\|uncertain` | `fixed` → dismissed + `fixedIn`; high/critical `false-positive` → needs-human |
+| `revalidate --run <d>` | `REVALIDATE.todo.json` (`--surface`, default `code+supply`) | `still-valid\|fixed\|false-positive\|uncertain` | `fixed` → dismissed + `fixedIn`; high/critical `false-positive` → needs-human |
 
 Shared `--apply` behaviour: the argument may be **a file, a comma-separated list, or a
 directory**. From a directory each stage picks up its own pattern, sorted for determinism —
@@ -382,8 +401,8 @@ non-terminal finding, so a batch meant to cover 11 new discoveries arrived holdi
 filling it in flipped 160 already-argued advisories to `supported` in a single apply. Re-visiting
 an escalation is legitimate — it is why the re-emission exists — but it has to be asked for.
 
-`--apply` lists every verdict that **changes** a finding already ruled on (`⚠ N verdict(s)
-CHANGED an already-adjudicated finding`). Re-applying the same verdict is a silent no-op. Under
+`--apply` reports every verdict that **changes** a finding already ruled on (`⚠ N verdict(s)
+CHANGED an already-adjudicated finding`, the first ten listed, all of them in `--json`). Re-applying the same verdict is a silent no-op. Under
 `--strict` a change fails the fold unless `--re-verdict` says it was intended. `investigate` accepts the focus flags (`--scope`/`--include`/
 `--exclude`/`--max-files`/`--gitignore`); `investigate` and `revalidate` accept `--repo`.
 
@@ -391,13 +410,16 @@ CHANGED an already-adjudicated finding`). Re-applying the same verdict is a sile
 
 ### `narrative --run <dir>`
 Emits `NARRATIVE.todo.json` (+ `NARRATIVE.md` with `--md`); you author `<run>/NARRATIVE.json`,
-which `render` folds automatically. Emit-only.
+which `render` folds automatically. Emit-only. Reportable dependency advisories appear as one
+line per package (`packages`), not a row each.
 See [narrative-playbook.md](narrative-playbook.md).
 
 ### `implement --run <dir>`
-Emits `IMPLEMENT.md` (a remediation-PRD draft) + `IMPLEMENT.todo.json`. Confirmed → fix items,
-needs-human → investigation items, grouped by root cause; folds `<run>/NARRATIVE.json` when
-present, or an explicit `--narrative <file>`. **Emit-only — never changes a status, persists
+Emits `IMPLEMENT.todo.json`, and with `--md` (or `ULTRASEC_MD=1`) `IMPLEMENT.md`, the
+remediation-PRD draft (the powered pipeline always writes it: its agent reads it). Confirmed →
+fix items, needs-human → investigation items, grouped by root cause; dependency advisories are
+one upgrade line per package; folds `<run>/NARRATIVE.json` when present, or an explicit
+`--narrative <file>`. **Emit-only — never changes a status, persists
 nothing.** See [implement-playbook.md](implement-playbook.md).
 
 ### `render --run <dir>`
@@ -405,7 +427,7 @@ Writes **one report**: `<run>/REPORT.md`, or a self-contained `REPORT.html` with
 and dark, no script, no external asset), both with `--html --md`. A stale report of the other
 format, and an older run's `SUMMARY.md` / `index.html`, are removed so one report remains.
 
-`--run` · `--html` · `--md` · `--full` · `--narrative <file>` · `--draft` · `--legacy`. No `--json`.
+`--run` · `--html` · `--md` · `--full` · `--narrative <file>` · `--strict` · `--draft` (kept, a no-op) · `--legacy`. No `--json`.
 
 - **Narrative** — `<run>/NARRATIVE.json` is folded automatically when `--narrative` is not given,
   grounding-checked: a section citing an unknown or non-confirmed id is dropped.
@@ -443,12 +465,12 @@ medium → P2; low/info → P3; needs-human high+ → P1, else P2. Packages: KEV
 high/critical runtime → P1, else P2/P3. **Effort** comes from the narrative's remediations
 (`effort: "S"|"M"|"L"`), else "—": a guessed effort would reorder the plan.
 
-**Exit codes: 0** ok · **1** a HIGH/CRITICAL candidate in code you wrote was never read · **2**
-unreadable run. On exit 1 the file is still written, with a DRAFT banner — refusing to produce it
-would trade a misleading report for no report, and the exit code is gone the moment the terminal
-scrolls while the file is what gets shared. Open dependency advisories never trigger it: triaging
-the ranked list and stopping at the bar is the prescribed outcome
-([supply-chain.md](supply-chain.md)). `--draft` acknowledges the state and exits 0.
+**Exit codes: 0** the report was written — a DRAFT included · **1** `--strict` and the report is
+a DRAFT · **2** unreadable run. A HIGH/CRITICAL candidate in code you wrote that was never read
+makes the report a DRAFT, with a banner — refusing to produce it would trade a misleading report
+for no report, and an exit code is gone the moment the terminal scrolls while the file is what
+gets shared. Open dependency advisories never make it one: triaging the ranked list and stopping
+at the bar is the prescribed outcome ([supply-chain.md](supply-chain.md)).
 
 ### `coverage --run <dir>`
 Read-only. Scores the run against a standard (`--standard asvs|owasp-top10|owasp-api-top10|masvs|cwe-top25`,
@@ -456,14 +478,17 @@ default ASVS) and appends the **weakness-class × framework matrix** from `manif
 each detected framework against each class, `✅ pack` / `➖ n/a` / `⬜ not covered`, overlaid with
 this run's AI hunt (`🔎` emitted by `investigate`, `🧭` recorded by an apply). A `⚠` cell is
 degraded — no framework pack, or a version outside the pack's `testedWith` — and is hunted rather
-than trusted. `--write` saves COVERAGE.md; `--json` prints the standard rows, `--classes --json`
-the class matrix.
+than trusted. By default it prints the COUNTS (examined / engine-enumerated / not examined, and
+the class cells by state); `--full` prints the matrix, `--write` saves it to COVERAGE.md; `--json`
+prints the standard rows, `--classes --json` the class matrix.
 
 ### `check --run <dir>`
 The exit gate. **Read-only — it writes nothing and changes no status.** Fails on any finding
 whose cited `[file:line]` doesn't resolve (the anti-hallucination gate); `--semantic` *also*
-fails when a candidate is still unadjudicated, or when **CONTEXT.md contradicts itself against the
-code** (below).
+fails when a HIGH/CRITICAL candidate outside the dependency surface is still `open` — the
+predicate `render`'s DRAFT banner uses — or a finding carries no recognised status, or when
+**CONTEXT.md contradicts itself against the code** (below). Open dependency advisories and open
+medium/low candidates are reported as information, never failing.
 
 `--run` (default `.ultrasec`) · `--repo` · `--semantic` ·
 `--min-severity critical|high|medium|low|info` · `--json`. Exit **0** ok · **1** gate failed ·
@@ -493,7 +518,8 @@ token are not evidence that the token is there.
 ### `clean --run <dir>`
 By default removes the intermediates and **keeps the deliverables** — `REPORT.md`,
 `REPORT.html`, `findings.json`, `manifest.json`, `CONTEXT.md`, `NARRATIVE.json` (and an older
-run's `SUMMARY.md`, `index.html` and top-level `JOURNAL.md`). Everything else goes: `.work/`, the
+run's top-level `JOURNAL.md`). An older run's `SUMMARY.md` and `index.html` go, as `render`
+removes them: re-rendering writes the one report. Everything else goes: `.work/`, the
 worklists, `DOSSIER.md`, `council/`, `sbom.cdx.json`, `IMPLEMENT.md`, `MAP.md`,
 `ultrasec-variants.yaml`, … — copy out what you want first. `findings.json` + `manifest.json` are
 what `render` re-renders from, and the two authored documents cannot be regenerated by a re-scan.
@@ -512,7 +538,7 @@ same pipeline plus the cleanup; `run` keeps every intermediate.
 
 `--repo` (default `.`) · `--out` (default `.ultrasec`) · `--powered` · `--agent <name|tpl>`
 (default `claude`) · `--cross-check <name|tpl>` · `--stages <a,b,c>` · `--no-scan` · `--html` ·
-`--md` · `--full` · the focus flags · `--json`
+`--md` · `--full` · the focus flags · `--json` (the summary: stages, worklists, report, errors)
 
 The **default (no `--powered`)** scans, emits every worklist (JSON; `--md` adds the briefs) and
 prints the agent TODO, making **zero external calls**. `--powered` drives your own agent CLI per
@@ -622,16 +648,25 @@ under `--strict` when any row was refused, dropped or stopped by the citation ga
 Emits the run's multi-agent fan-out from its **current** worklists.
 
 `--run` (**required**) · `--phase adjudicate|verify|revalidate|investigate` ·
-`--surface code|supply|deps|all` · `--eco` (RUNBOOK + contracts only) · `--list` (phase readiness
-as JSON)
+`--surface code|supply|deps|code+supply|all` · `--eco` (RUNBOOK + contracts only) · `--list` (phase
+readiness as JSON)
 
-`--surface` narrows the **adjudicate** phase, which fans out over the dossier's open candidates.
-Default `all`, and the narrowing is the difference between a usable fan-out and an absurd one: on
-one monorepo the open tier was 882 candidates — 111 subagents at 8 per batch — of which 190 were
-dependency advisories a `dossier` read cannot help with. An unknown value exits 2.
+`--surface` narrows the fan-out — the **adjudicate** phase's open candidates, and the verify and
+revalidate worklists. Default `code+supply`, and the narrowing is the difference between a usable
+fan-out and an absurd one: on one monorepo the open tier was 882 candidates — 111 subagents at 8
+per batch — of which 190 were dependency advisories a `dossier` read cannot help with. `all`
+restores them; an unknown value exits 2.
 
-Writes into `<run>/.work/orchestration/`: one `<phase>.workflow.mjs` per ready phase (real ids batched
-**8 per agent**, absolute paths baked in), the dispatch contracts
+**Families, under a ceiling.** Candidates are grouped by family — category, CWE, sink kind and
+title under one path root, or a noise class under one path root — and a family travels whole to
+one agent, which reads its first member in depth (`dossier <id>,<id>,… --brief --no-context`) and
+the others for their location; still one verdict row per id. Batches start at 8 items and grow so
+there are never more than **12 agents** a phase (494 code candidates went to 62 agents before).
+Each agent's prompt carries CONTEXT.md once, compacted, and its items as compact JSON lines —
+no agent opens a shared worklist.
+
+Writes into `<run>/.work/orchestration/`: one `<phase>.workflow.mjs` per ready phase (`BATCHES` of
+ids and `ITEMS` prompt text baked in, absolute paths too), the dispatch contracts
 `agents/{analyzer,skeptic,revalidator,hunter}.md`, a sequential `RUNBOOK.md` fallback, and empty
 `out/{adjudicate,verify,revalidate,investigate}/` directories for subagent fragments. Emission is
 deterministic and idempotent — re-run it whenever a worklist changes. `--phase <p>` before its
