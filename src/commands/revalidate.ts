@@ -4,6 +4,7 @@ import { loadDossier } from "../store.js";
 import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, worklistNote } from "../stage.js";
 import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
+import { ADJUDICATION_SURFACE, parseSurfaceFlag, SURFACE_FILTERS } from "../surface.js";
 import { buildRevalidateWorklist, renderRevalidateMd, applyRevalidations, parseRevalidations, revalFactsFromWorklist } from "../revalidate.js";
 
 // `ultrasec revalidate --run <dir> [--repo <dir>]`              → emit git-fact worklist
@@ -33,7 +34,7 @@ export function runRevalidate(args: ParsedArgs): number {
     const strict = flagBool(args, "strict");
     // Recompute git facts from CURRENT repo state so the drift guard + inferred
     // fixing commits reflect HEAD, not whatever was emitted earlier.
-    const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo));
+    const facts = revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo, { surface: "all" }));
     const res = applyRevalidations(dossier, parsed.rows, facts);
     // Fail closed on an entirely stale fragment: every verdict targeting an id
     // outside the revalidation scope means the false-positive cut never engaged.
@@ -73,8 +74,14 @@ export function runRevalidate(args: ParsedArgs): number {
     return surfaceDropped(parsed.dropped, strict, println);
   }
 
-  // Emit mode
-  const items = buildRevalidateWorklist(dossier, repo);
+  // Emit mode. `--surface` narrows the worklist only (default `code+supply`).
+  const surfaceFlag = flagStr(args, "surface");
+  const surface = parseSurfaceFlag(surfaceFlag, ADJUDICATION_SURFACE);
+  if (surface === null) {
+    eprintln(`ultrasec revalidate: unknown --surface "${surfaceFlag}" — expected one of: ${SURFACE_FILTERS.join(", ")}.`);
+    return 2;
+  }
+  const items = buildRevalidateWorklist(dossier, repo, { surface });
   const files = stageFiles("REVALIDATE");
   const wroteMd = wantsMdTwin(args);
   const todoPath = emitWorklist(run, files, items, () => renderRevalidateMd(items, loadContextDoc(run)), { md: wroteMd });

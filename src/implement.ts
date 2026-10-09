@@ -3,6 +3,8 @@ import { join } from "node:path";
 import type { Dossier } from "./store.js";
 import type { Finding, Narrative, RootCauseGroup } from "./types.js";
 import { byStr } from "./util.js";
+import { surfaceOf } from "./surface.js";
+import { packageLines } from "./deps.js";
 import { AI_DISCLAIMER, citedAt, hasNarrativeContent, mergeNarrative, parseNarrative, remediationMap } from "./narrative.js";
 
 // Remediation-planning stage (Phase 4). Emit-only, mirroring `narrative`: the engine
@@ -32,6 +34,9 @@ export interface ImplementWorklist {
   investigations: ImplementItem[];
   rootCauses: RootCauseGroup[];
   dismissed: number;
+  /** Confirmed / needs-human dependency advisories, ONE LINE PER PACKAGE (the
+   *  upgrade is the work item). Absent when there are none. */
+  upgrades?: string[];
 }
 
 /**
@@ -84,14 +89,18 @@ function deriveRootCauses(confirmed: Finding[]): RootCauseGroup[] {
 export function buildImplementWorklist(dossier: Dossier, narrative?: Narrative): ImplementWorklist {
   const rem = remediationMap(narrative);
 
-  const confirmed = dossier.findings
+  // Advisories become one upgrade line per package, not a fix item each: on a
+  // monorepo that was 190 numbered "Fix `lodash` at pnpm-lock.yaml:1" stories.
+  const code = dossier.findings.filter((f) => surfaceOf(f) !== "deps");
+  const confirmed = code
     .filter((f) => f.status === "confirmed")
     .slice()
     .sort((a, b) => byStr(a.id, b.id));
-  const needsHuman = dossier.findings
+  const needsHuman = code
     .filter((f) => f.status === "needs-human")
     .slice()
     .sort((a, b) => byStr(a.id, b.id));
+  const upgrades = packageLines(dossier.findings.filter((f) => surfaceOf(f) === "deps" && (f.status === "confirmed" || f.status === "needs-human")));
   const dismissed = dossier.findings.filter((f) => f.status === "dismissed").length;
 
   const fixes: ImplementItem[] = confirmed.map((f) => {
@@ -125,7 +134,7 @@ export function buildImplementWorklist(dossier: Dossier, narrative?: Narrative):
 
   const rootCauses = narrative?.rootCauses?.length ? narrative.rootCauses : deriveRootCauses(confirmed);
 
-  return { fixes, investigations, rootCauses, dismissed };
+  return upgrades.length ? { fixes, investigations, rootCauses, dismissed, upgrades } : { fixes, investigations, rootCauses, dismissed };
 }
 
 const TODO_DIRECTIVE =
@@ -235,6 +244,14 @@ export function renderImplementMd(wl: ImplementWorklist, context?: string): stri
         `${m}. Investigate \`${f.title}\` at \`${f.at}\` _([${f.severity}] ${f.cwe ?? f.category} · \`${f.id}\`${f.owner ? ` · owner ${f.owner}` : ""})_ — confirm whether it is exploitable, then route to fix or dismiss.`,
       );
     }
+    L.push("");
+  }
+
+  // ── Dependency upgrades (one line per package) ─────────────────────────────
+  if (wl.upgrades?.length) {
+    L.push(`## Dependency upgrades (one per package)`);
+    L.push("");
+    for (const u of wl.upgrades) L.push(`- [ ] ${u}`);
     L.push("");
   }
 

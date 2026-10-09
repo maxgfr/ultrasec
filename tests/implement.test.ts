@@ -52,6 +52,22 @@ describe("buildImplementWorklist — classification", () => {
     expect(wl.dismissed).toBe(1); // counted, not listed
   });
 
+  it("advisories become one upgrade line per package, never a fix item each", () => {
+    const adv = (id: string, status: Finding["status"]): Finding => ({
+      ...f(id, status, { category: "dep", cwe: "CWE-1321" }),
+      pkg: "minimist",
+      version: "1.2.5",
+      fixedVersion: "1.2.6",
+      sink: { file: "pnpm-lock.yaml", line: 1 },
+    });
+    const wl = buildImplementWorklist(dossier([f("c1", "confirmed"), adv("d1", "confirmed"), adv("d2", "needs-human"), adv("d3", "open")]));
+    expect(wl.fixes.map((i) => i.id)).toEqual(["c1"]);
+    expect(wl.investigations).toEqual([]);
+    expect(wl.rootCauses.flatMap((g) => g.findingIds)).toEqual(["c1"]);
+    expect(wl.upgrades).toEqual(["minimist@1.2.5 — high · 2 advisories · upgrade to 1.2.6"]);
+    expect(renderImplementMd(wl)).toMatch(/## Dependency upgrades \(one per package\)\n\n- \[ \] minimist@1\.2\.5/);
+  });
+
   it("is deterministic: items are id-sorted regardless of input order", () => {
     const wl = buildImplementWorklist(dossier([f("c3", "confirmed"), f("c1", "confirmed"), f("c2", "confirmed")]));
     expect(wl.fixes.map((i) => i.id)).toEqual(["c1", "c2", "c3"]);

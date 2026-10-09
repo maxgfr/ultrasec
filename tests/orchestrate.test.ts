@@ -151,6 +151,21 @@ describe("orchestrate — listPhases", () => {
     expect(adj.ids.sort()).toEqual(open.sort());
     for (const id of settled) expect(adj.ids).not.toContain(id);
   });
+
+  it("leaves open dependency advisories out of every fan-out by default; --surface all restores them", async () => {
+    const run = await makeRun({ scan: true });
+    const all = findings(run);
+    const dep: Finding = { ...all[0]!, id: "dep000000001", category: "dep", status: "open", sink: { file: "package.json", line: 1 } };
+    writeFileSync(join(run, "findings.json"), JSON.stringify([...all, dep]));
+    // An older VERIFY worklist that still carries the advisory is narrowed too.
+    writeFileSync(join(run, "VERIFY.todo.json"), JSON.stringify([{ id: all[0]!.id }, { id: dep.id }]));
+    const byDefault = listPhases(run, ENGINE);
+    expect(byDefault[0]!.ids).not.toContain(dep.id);
+    expect(byDefault[1]!.ids).toEqual([all[0]!.id]);
+    const everything = listPhases(run, ENGINE, "all");
+    expect(everything[0]!.ids).toContain(dep.id);
+    expect(everything[1]!.ids).toContain(dep.id);
+  });
 });
 
 describe("orchestrate — emitted workflow", () => {

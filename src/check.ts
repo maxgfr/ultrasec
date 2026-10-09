@@ -5,12 +5,17 @@ import { SEVERITIES, type CodeLoc, type Finding, type Severity } from "./types.j
 import { byStr } from "./util.js";
 import { lineCountAtCommit } from "./git.js";
 import { contradictedClaims, extractNegativeClaims, loadContextDoc, type ContradictedClaim } from "./context.js";
+import { surfaceOf, unadjudicatedCode } from "./surface.js";
 
 // The exit gate. Grounding (default): every cited [file:line] must resolve in the
 // repo — a hallucinated or stale location fails the audit (the same
 // anti-hallucination contract as ultraindex/ultrasearch `check`). Semantic
-// (--semantic): also require the audit to be fully adjudicated (no `open`
-// candidate left) and every `confirmed` finding to still resolve.
+// (--semantic): also require the audit to be adjudicated by the SAME predicate
+// `render` uses for its DRAFT banner (`unadjudicatedCode`: no HIGH/CRITICAL
+// candidate outside the dependency surface left open) and every `confirmed`
+// finding to still resolve. Open dependency advisories are reported, never
+// blocking: the report ranks them per package, and ruling ~280 of them one by
+// one to get a green gate is the cost this alignment removes.
 
 export interface Dangling {
   id: string;
@@ -27,6 +32,8 @@ export interface CheckResult {
   dismissed: number;
   needsHuman: number;
   gated: number; // findings considered after --min-severity
+  /** Dependency advisories still `open` — information, never a failure. */
+  openAdvisories: number;
   /** High/critical dismissals that name no ground for the refutation (see BROCARDS). */
   unarguedDismissals: string[];
   /** Citations resolved against a HISTORICAL commit rather than HEAD — a secret
@@ -203,13 +210,16 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
   const confirmed = findings.filter((f) => f.status === "confirmed").length;
   const dismissed = findings.filter((f) => f.status === "dismissed").length;
   const needsHuman = findings.filter((f) => f.status === "needs-human").length;
-  // Fail-closed: a finding is "adjudicated" only in a recognized terminal status.
-  // Anything else — the literal `open`, a MISSING status, or a foreign/unknown
-  // value (version skew, a tampered/corrupted dossier) — carries no real verdict
-  // and must trip the semantic gate. Keying only off `=== "open"` would wave a
-  // status-less or unknown-status finding through as "adjudicated" (fail-open).
-  const ADJUDICATED = new Set<string>(["confirmed", "dismissed", "needs-human"]);
-  const unadjudicated = findings.filter((f) => !ADJUDICATED.has(f.status as string)).length;
+  // What blocks the semantic gate is what makes `render` print a DRAFT banner:
+  // a HIGH/CRITICAL candidate in code you wrote or committed that nobody read.
+  // Plus, fail-closed: a finding is "adjudicated" only in a recognized status.
+  // A MISSING status or a foreign/unknown value (version skew, a tampered/
+  // corrupted dossier) carries no real verdict and must trip the gate whatever
+  // its surface — keying only off `=== "open"` would wave it through (fail-open).
+  const KNOWN = new Set<string>(["open", "confirmed", "dismissed", "needs-human"]);
+  const unadjudicated = unadjudicatedCode(findings).length + findings.filter((f) => !KNOWN.has(f.status as string)).length;
+  const openAdvisories = findings.filter((f) => f.status === "open" && surfaceOf(f) === "deps").length;
+  const openBelow = findings.filter((f) => f.status === "open" && surfaceOf(f) !== "deps").length - unadjudicatedCode(findings).length;
   // High/critical findings dropped without naming the ground for the refutation.
   const unargued = findings
     .filter((f) => f.status === "dismissed" && (f.severity === "critical" || f.severity === "high") && !f.brocard)
@@ -238,6 +248,9 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
       ok = false;
       messages.push(`${unadjudicated} candidate(s) still unadjudicated — run \`ultrasec verify\` and \`--apply\` verdicts before the gate can pass.`);
     }
+    // Reported, not failing — the same reading `render` gives them.
+    if (openAdvisories > 0) messages.push(`${openAdvisories} dependency advisory(ies) open — ranked per package in the report (info, not failing).`);
+    if (openBelow > 0) messages.push(`${openBelow} medium/low/info candidate(s) open in code or config (info, not failing).`);
     if (needsHuman > 0) messages.push(`${needsHuman} finding(s) flagged needs-human — review required (not auto-failing).`);
     // "Only dismiss what you can positively refute" never said what a refutation
     // may consist of. A brocard names the ground, which makes the dismissal
@@ -282,6 +295,7 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     dismissed,
     needsHuman,
     gated: findings.length,
+    openAdvisories,
     unarguedDismissals: unargued,
     historical,
     contradictions: claims,

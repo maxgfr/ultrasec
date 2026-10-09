@@ -66,6 +66,37 @@ export function bySurface(findings: readonly Finding[]): Record<Surface, Finding
   return out;
 }
 
+/** `--surface` values: the three surfaces, `code+supply` (everything a read can
+ *  decide — the default of the adjudicating stages) and `all`. */
+export const SURFACE_FILTERS = [...SURFACES, "code+supply", "all"] as const;
+export type SurfaceFilter = (typeof SURFACE_FILTERS)[number];
+
+/**
+ * The surface the adjudicating stages (verify, revalidate, the fan-out) work by
+ * default: what you wrote and what you committed, never the advisories.
+ *
+ * On the audit that prompted this, ~280 dependency advisories were ruled one by
+ * one because the semantic gate would not pass while any stayed open — and
+ * `render` never counted them. A `dossier` read cannot decide an advisory; the
+ * report's per-package table is where they are worked. `--surface all` restores
+ * the old scope.
+ */
+export const ADJUDICATION_SURFACE: SurfaceFilter = "code+supply";
+
+/** Whether a finding falls inside a `--surface` filter. */
+export function inSurface(f: Finding, filter: SurfaceFilter): boolean {
+  if (filter === "all") return true;
+  const s = surfaceOf(f);
+  return filter === "code+supply" ? s !== "deps" : s === filter;
+}
+
+/** Parse a `--surface` flag: `undefined` keeps the default, an unknown value is
+ *  `null` so the caller exits 2 rather than silently widening to everything. */
+export function parseSurfaceFlag(value: string | undefined, fallback: SurfaceFilter): SurfaceFilter | null {
+  if (value === undefined) return fallback;
+  return (SURFACE_FILTERS as readonly string[]).includes(value) ? (value as SurfaceFilter) : null;
+}
+
 /** Severities that must be READ rather than triaged from a list. */
 const MUST_READ: readonly Severity[] = ["critical", "high"];
 

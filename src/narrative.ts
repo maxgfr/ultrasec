@@ -1,6 +1,8 @@
 import type { Dossier } from "./store.js";
 import type { Finding, Narrative, Remediation } from "./types.js";
 import { byStr } from "./util.js";
+import { surfaceOf } from "./surface.js";
+import { packageLines } from "./deps.js";
 
 // AI-authored report narrative (Phase 3). The engine emits a worklist of the
 // confirmed/needs-human findings + a Narrative scaffold; the agent authors
@@ -29,12 +31,24 @@ export function citedAt(f: Finding): string {
   return "—";
 }
 
+export interface NarrativeWorklist {
+  findings: NarrativeFindingRef[];
+  /** Reportable dependency advisories, ONE LINE PER PACKAGE — enough to mention
+   *  them in the summary; absent when there are none. Never a row per advisory. */
+  packages?: string[];
+  scaffold: Narrative;
+}
+
 /** Build the narrative worklist: the reportable findings + a fill-in scaffold. */
-export function buildNarrativeWorklist(dossier: Dossier): { findings: NarrativeFindingRef[]; scaffold: Narrative } {
-  const reportable = dossier.findings
-    .filter((f) => f.status === "confirmed" || f.status === "needs-human")
+export function buildNarrativeWorklist(dossier: Dossier): NarrativeWorklist {
+  const reportableAll = dossier.findings.filter((f) => f.status === "confirmed" || f.status === "needs-human");
+  // Advisories are summarised per package below; a row each, with an empty
+  // remediation to fill each, is what made this worklist 100+ KB on a monorepo.
+  const reportable = reportableAll
+    .filter((f) => surfaceOf(f) !== "deps")
     .slice()
     .sort((a, b) => byStr(a.id, b.id));
+  const packages = packageLines(reportableAll.filter((f) => surfaceOf(f) === "deps"));
   const findings: NarrativeFindingRef[] = reportable.map((f) => ({
     id: f.id,
     severity: f.severity,
@@ -56,10 +70,10 @@ export function buildNarrativeWorklist(dossier: Dossier): { findings: NarrativeF
     rootCauses: [],
     hardeningNotes: [],
   };
-  return { findings, scaffold };
+  return packages.length ? { findings, packages, scaffold } : { findings, scaffold };
 }
 
-export function renderNarrativeWorklistMd(wl: { findings: NarrativeFindingRef[]; scaffold: Narrative }, context?: string): string {
+export function renderNarrativeWorklistMd(wl: NarrativeWorklist, context?: string): string {
   const L: string[] = [];
   L.push(`# ultrasec report-narrative worklist (${wl.findings.length})`);
   L.push("");
@@ -94,6 +108,12 @@ export function renderNarrativeWorklistMd(wl: { findings: NarrativeFindingRef[];
     L.push(`- \`${f.id}\` — [${f.severity}] ${f.title} (${f.cwe ?? f.category}) · status ${f.status} · at ${f.at}${f.owner ? ` · owner ${f.owner}` : ""}`);
   }
   L.push("");
+  if (wl.packages?.length) {
+    L.push(`## Dependency advisories (one line per package — the report ranks them)`);
+    L.push("");
+    for (const p of wl.packages) L.push(`- ${p}`);
+    L.push("");
+  }
   L.push(`## Scaffold (starting point for NARRATIVE.json)`);
   L.push("```json");
   L.push(JSON.stringify(wl.scaffold, null, 2));

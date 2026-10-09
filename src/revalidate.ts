@@ -4,6 +4,7 @@ import { isHigh } from "./verify.js";
 import { byStr, withStageNote } from "./util.js";
 import { isCredentialFinding, redactCredentialLine } from "./redact.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
+import { ADJUDICATION_SURFACE, inSurface, type SurfaceFilter } from "./surface.js";
 import { fileExistsAtHead, lineContentAtHead, lineLastChanged, fileRenamedTo, logSince, type LineChange } from "./git.js";
 
 // The git-history revalidation stage (Phase 2 — the biggest accuracy win, mirrors
@@ -62,10 +63,17 @@ export interface RevalidationInput {
   note?: string;
 }
 
+export interface RevalidateWorklistOptions {
+  /** Which surface to emit. Default `code+supply`: an advisory's lockfile line
+   *  says nothing git history can settle. `all` restores the old scope. */
+  surface?: SurfaceFilter;
+}
+
 /** Build the revalidation worklist from a run's confirmed/needs-human findings. */
-export function buildRevalidateWorklist(dossier: Dossier, repo: string): RevalidateItem[] {
+export function buildRevalidateWorklist(dossier: Dossier, repo: string, opts: RevalidateWorklistOptions = {}): RevalidateItem[] {
+  const surface = opts.surface ?? ADJUDICATION_SURFACE;
   return dossier.findings
-    .filter(inScope)
+    .filter((f) => inScope(f) && inSurface(f, surface))
     .slice()
     .sort((a, b) => byStr(a.id, b.id))
     .map((f) => {

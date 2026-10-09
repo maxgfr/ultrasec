@@ -1,6 +1,7 @@
 import { existsSync, realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { listPhases, orchestrateRun, PHASES, SURFACE_FILTERS, type SurfaceFilter } from "../orchestrate.js";
+import { listPhases, orchestrateRun, PHASES, SURFACE_FILTERS } from "../orchestrate.js";
+import { ADJUDICATION_SURFACE, parseSurfaceFlag } from "../surface.js";
 import { eprintln, flagBool, flagStr, println, type ParsedArgs } from "../util.js";
 import { workPath } from "../runlayout.js";
 
@@ -25,11 +26,11 @@ export function runOrchestrate(args: ParsedArgs): number {
   // fan out over 882 candidates when the caller asked for 620, and the only
   // symptom would be a bigger bill.
   const surfaceFlag = flagStr(args, "surface");
-  if (surfaceFlag !== undefined && !(SURFACE_FILTERS as readonly string[]).includes(surfaceFlag)) {
+  const surface = parseSurfaceFlag(surfaceFlag, ADJUDICATION_SURFACE);
+  if (surface === null) {
     eprintln(`ultrasec orchestrate: unknown --surface "${surfaceFlag}" — expected one of: ${SURFACE_FILTERS.join(", ")}.`);
     return 2;
   }
-  const surface = (surfaceFlag ?? "all") as SurfaceFilter;
 
   if (flagBool(args, "list")) {
     if (!existsSync(runFlag)) {

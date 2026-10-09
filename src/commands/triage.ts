@@ -6,7 +6,7 @@ import { surfaceDropped } from "../apply-parse.js";
 import { loadContextDoc } from "../context.js";
 import { buildTriageWorklist, renderTriageMd, applyTriage, parseTriage } from "../triage.js";
 import { SURFACE_FILTERS, type SurfaceFilter } from "../orchestrate.js";
-import { surfaceOf } from "../surface.js";
+import { inSurface } from "../surface.js";
 
 // `ultrasec triage --run <dir> [--surface code]`          → emit the open-candidate worklist
 // `ultrasec triage --apply <file|dir|a,b,c> --run <dir>`  → fold noise/keep back in
@@ -57,7 +57,7 @@ export function runTriage(args: ParsedArgs): number {
   const surface = (surfaceFlag ?? "all") as SurfaceFilter;
   // Narrowing the WORKLIST is safe; narrowing the fold is not, so `--apply`
   // takes no surface. A verdict file names its ids and folds exactly those.
-  const scoped = surface === "all" ? dossier : { ...dossier, findings: dossier.findings.filter((f) => surfaceOf(f) === surface) };
+  const scoped = surface === "all" ? dossier : { ...dossier, findings: dossier.findings.filter((f) => inSurface(f, surface)) };
   const items = buildTriageWorklist(scoped);
   const files = stageFiles("TRIAGE");
   const wroteMd = wantsMdTwin(args);

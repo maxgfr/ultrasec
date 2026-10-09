@@ -45,6 +45,29 @@ describe("buildWorklist", () => {
   });
 });
 
+describe("buildWorklist — surface (dependencies out by default)", () => {
+  const dep = (id: string): Finding => ({ ...finding(id, "high"), category: "dep", sink: { file: "pnpm-lock.yaml", line: 1 }, path: undefined });
+  const secret = (id: string): Finding => ({ ...finding(id, "high"), category: "secret" });
+
+  it("emits code + supply and leaves advisories to the report's per-package table", () => {
+    const d = dossier([finding("a", "high"), dep("d1"), secret("s1"), dep("d2")]);
+    expect(buildWorklist(d).map((i) => i.id)).toEqual(["a", "s1"]);
+    expect(worklistCounts(d).fresh).toBe(2);
+  });
+
+  it("--surface all restores the old scope; deps narrows to the advisories", () => {
+    const d = dossier([finding("a", "high"), dep("d1"), secret("s1")]);
+    expect(buildWorklist(d, { surface: "all" }).map((i) => i.id)).toEqual(["a", "d1", "s1"]);
+    expect(buildWorklist(d, { surface: "deps" }).map((i) => i.id)).toEqual(["d1"]);
+    expect(buildWorklist(d, { surface: "code" }).map((i) => i.id)).toEqual(["a"]);
+  });
+
+  it("the fold is not scoped: a verdict on an advisory still applies", () => {
+    const r = applyVerdicts(dossier([dep("d1")]), [{ id: "d1", verdict: "refuted", brocard: "outside-usage" }]);
+    expect(r.applied).toBe(1);
+  });
+});
+
 describe("shard", () => {
   it("round-robins into disjoint balanced slices covering everything", () => {
     const items = [1, 2, 3, 4, 5];

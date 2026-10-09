@@ -43,6 +43,25 @@ describe("buildNarrativeWorklist", () => {
     expect(wl.scaffold.positivePatterns).toBe(""); // advisory prose stubs are scaffolded too
     expect(wl.scaffold.hardeningNotes).toEqual([]);
   });
+
+  it("summarises reportable advisories ONE LINE PER PACKAGE — no row, no remediation stub each", () => {
+    const adv = (id: string, sev: Finding["severity"], fixedVersion: string): Finding => ({
+      ...f(id, "confirmed", sev),
+      category: "dep",
+      pkg: "lodash",
+      version: "4.17.20",
+      fixedVersion,
+      sink: { file: "pnpm-lock.yaml", line: 1 },
+    });
+    const wl = buildNarrativeWorklist(dossier([f("c1", "confirmed"), adv("d1", "high", "4.17.21"), adv("d2", "critical", "4.17.22")]));
+    expect(wl.findings.map((x) => x.id)).toEqual(["c1"]);
+    expect(wl.scaffold.remediations!.map((r) => r.id)).toEqual(["c1"]);
+    expect(wl.packages).toEqual(["lodash@4.17.20 — critical · 2 advisories · upgrade to 4.17.22"]);
+  });
+
+  it("carries no packages key when there is no reportable advisory", () => {
+    expect("packages" in buildNarrativeWorklist(dossier([f("c1", "confirmed")]))).toBe(false);
+  });
 });
 
 describe("parseNarrative", () => {

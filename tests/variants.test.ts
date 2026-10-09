@@ -44,6 +44,14 @@ describe("buildVariantWorklist", () => {
     expect(buildVariantWorklist(d).map((i) => i.seedId)).toEqual(["a"]);
   });
 
+  it("never seeds from, nor lists as a neighbour, a dependency advisory", () => {
+    const dep = (id: string): Finding => f(id, "confirmed", { category: "dep", cwe: "CWE-89", sink: { file: "pnpm-lock.yaml", line: 1 } });
+    const d = dossier([f("a", "confirmed"), dep("d1"), dep("d2")]);
+    const items = buildVariantWorklist(d);
+    expect(items.map((i) => i.seedId)).toEqual(["a"]);
+    expect(items[0]!.neighbours.some((n) => n.id === "d1" || n.id === "d2")).toBe(false);
+  });
+
   it("lists a same-operation neighbour as the strongest axis", () => {
     const d = dossier([f("a", "confirmed"), f("b", "open", { sink: { file: "src/other.js", line: 12, kind: "sql" } })]);
     const n = buildVariantWorklist(d)[0]!.neighbours;

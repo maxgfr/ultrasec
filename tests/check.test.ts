@@ -107,6 +107,26 @@ describe("check — semantic", () => {
     expect(r.messages.join(" ")).toMatch(/unadjudicated/);
   });
 
+  it("passes with open dependency advisories, and says how many (same predicate as render)", () => {
+    const dep: Finding = { ...f("d", "src/db.js", 6, "open"), category: "dep", severity: "critical" };
+    const r = check(dossier([f("a", "src/db.js", 6, "confirmed"), dep]), { semantic: true });
+    expect(r.ok).toBe(true);
+    expect(r.openAdvisories).toBe(1);
+    expect(r.messages.join(" ")).toMatch(/1 dependency advisory\(ies\) open — .*not failing/);
+  });
+
+  it("an open medium candidate in code is reported, not failing — render prints no DRAFT for it either", () => {
+    const medium: Finding = { ...f("m", "src/db.js", 6, "open"), severity: "medium" };
+    const r = check(dossier([medium]), { semantic: true });
+    expect(r.ok).toBe(true);
+    expect(r.messages.join(" ")).toMatch(/1 medium\/low\/info candidate\(s\) open/);
+  });
+
+  it("an advisory with a foreign status still fails closed", () => {
+    const dep: Finding = { ...f("d", "src/db.js", 6, "reviewed" as Finding["status"]), category: "dep" };
+    expect(check(dossier([dep]), { semantic: true }).ok).toBe(false);
+  });
+
   it("passes once everything is adjudicated and grounded", () => {
     const r = check(dossier([f("a", "src/db.js", 6, "confirmed"), f("b", "src/report.js", 5, "dismissed")]), { semantic: true });
     expect(r.ok).toBe(true);

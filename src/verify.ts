@@ -4,6 +4,7 @@ import { byStr, withStageNote } from "./util.js";
 import { redactSecrets } from "./redact.js";
 import { proposedFor, renderProposalSummary, type ProposedAdjudication } from "./noise.js";
 import { parseIdVerdictRows, type ParseResult } from "./apply-parse.js";
+import { ADJUDICATION_SURFACE, inSurface, type SurfaceFilter } from "./surface.js";
 
 // The adversarial verification gate. The engine emits a claim↔evidence worklist;
 // the AI (skeptic subagents) adjudicates each finding by reading the dossier's
@@ -75,9 +76,10 @@ function reOpened(f: Finding): boolean {
   return f.status === "needs-human" && f.verdict !== undefined;
 }
 
-/** Findings still needing adjudication (open or previously needs-human). */
-function pending(findings: Finding[]): Finding[] {
-  return findings.filter((f) => f.status === "open" || f.status === "needs-human");
+/** Findings still needing adjudication (open or previously needs-human), within
+ *  the surface the worklist covers. */
+function pending(findings: Finding[], surface: SurfaceFilter): Finding[] {
+  return findings.filter((f) => (f.status === "open" || f.status === "needs-human") && inSurface(f, surface));
 }
 
 export interface WorklistOptions {
@@ -92,6 +94,12 @@ export interface WorklistOptions {
    * but it has to be asked for.
    */
   all?: boolean;
+  /**
+   * Which surface to emit. Default `code+supply`: a dependency advisory is
+   * decided from the report's per-package table, not by reading a dossier, and
+   * it no longer blocks `check --semantic`. `all` restores the old scope.
+   */
+  surface?: SurfaceFilter;
 }
 
 /** How the worklist was composed, for the header and the CLI summary. */
@@ -103,7 +111,7 @@ export interface WorklistCounts {
 }
 
 export function worklistCounts(dossier: Dossier, opts: WorklistOptions = {}): WorklistCounts {
-  const p = pending(dossier.findings);
+  const p = pending(dossier.findings, opts.surface ?? ADJUDICATION_SURFACE);
   const re = p.filter(reOpened).length;
   return { fresh: p.length - re, reOpened: opts.all ? re : 0, withheld: opts.all ? 0 : re };
 }
@@ -131,7 +139,7 @@ function reachabilityLine(f: Finding): string | undefined {
 }
 
 export function buildWorklist(dossier: Dossier, opts: WorklistOptions = {}): VerifyItem[] {
-  return pending(dossier.findings)
+  return pending(dossier.findings, opts.surface ?? ADJUDICATION_SURFACE)
     .filter((f) => opts.all || !reOpened(f))
     .slice()
     .sort((a, b) => byStr(a.id, b.id))

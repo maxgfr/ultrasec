@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import type { InvestigateRegion } from "./investigate.js";
 import { agentContracts, phaseWorkflowScript, runbookMd } from "./orchestrate-templates.js";
 import type { RevalidateItem } from "./revalidate.js";
-import { surfaceOf, SURFACES } from "./surface.js";
+import { ADJUDICATION_SURFACE, inSurface, type SurfaceFilter } from "./surface.js";
 import type { Finding } from "./types.js";
 import type { VerifyItem } from "./verify.js";
 import { workPath } from "./runlayout.js";
@@ -58,11 +58,10 @@ function readIds<T>(path: string, id: (item: T) => string): string[] | null {
   }
 }
 
-/** `--surface` values: the three surfaces plus `all`, the default. */
-export const SURFACE_FILTERS = [...SURFACES, "all"] as const;
-export type SurfaceFilter = (typeof SURFACE_FILTERS)[number];
+// Re-exported: the commands that take `--surface` imported it from here first.
+export { SURFACE_FILTERS, type SurfaceFilter } from "./surface.js";
 
-export function listPhases(runDir: string, engineAbs: string, surface: SurfaceFilter = "all"): PhaseInfo[] {
+export function listPhases(runDir: string, engineAbs: string, surface: SurfaceFilter = ADJUDICATION_SURFACE): PhaseInfo[] {
   const run = resolve(runDir);
 
   // adjudicate fans out over the dossier's OPEN candidates — the scan's
@@ -72,25 +71,33 @@ export function listPhases(runDir: string, engineAbs: string, surface: SurfaceFi
   // usable fan-out and an absurd one: on a real monorepo the open tier was 882
   // candidates — 111 subagents at 8 per batch — of which 190 were dependency
   // advisories that a `dossier` read cannot help with. Those are triaged from a
-  // ranked list, not read one by one. Default stays `all` so nothing changes
-  // for a caller that does not ask.
+  // ranked list, not read one by one — so the default is `code+supply`, and
+  // `--surface all` restores the old scope.
   const findingsPath = join(run, "findings.json");
   const allIds = readIds<Finding>(findingsPath, (f) => f.id);
   let adjIds: string[] = [];
+  const byId = new Map<string, Finding>();
   if (allIds !== null) {
     try {
       const findings = JSON.parse(readFileSync(findingsPath, "utf8")) as Finding[];
-      adjIds = findings.filter((f) => f.status === "open" && (surface === "all" || surfaceOf(f) === surface)).map((f) => f.id);
+      for (const f of findings) byId.set(f.id, f);
+      adjIds = findings.filter((f) => f.status === "open" && inSurface(f, surface)).map((f) => f.id);
     } catch {
       /* readIds already vetted the file; keep [] on a racing rewrite */
     }
   }
+  // The verify and revalidate phases fan out over their worklists, which their
+  // own `--surface` already scoped. An older worklist emitted with every
+  // advisory in it is narrowed here the same way; an id the dossier does not
+  // know is kept, so the contract's "skip it and say so" still applies.
+  const scoped = (ids: string[] | null): string[] | null =>
+    ids === null || surface === "all" ? ids : ids.filter((id) => !byId.has(id) || inSurface(byId.get(id)!, surface));
 
   const verPath = join(run, "VERIFY.todo.json");
-  const verIds = readIds<VerifyItem>(verPath, (i) => i.id);
+  const verIds = scoped(readIds<VerifyItem>(verPath, (i) => i.id));
 
   const revPath = join(run, "REVALIDATE.todo.json");
-  const revIds = readIds<RevalidateItem>(revPath, (i) => i.id);
+  const revIds = scoped(readIds<RevalidateItem>(revPath, (i) => i.id));
 
   const invPath = join(run, "INVESTIGATE.todo.json");
   const invIds = readIds<InvestigateRegion>(invPath, (r) => r.region);
@@ -137,7 +144,7 @@ export interface OrchestrateOptions {
   phase?: string;
   /** Emit only the RUNBOOK + contracts (the explicit low-token sequential path). */
   eco?: boolean;
-  /** Narrow the `adjudicate` fan-out to one surface. Default `all`. */
+  /** Narrow the fan-out to a surface. Default `code+supply`. */
   surface?: SurfaceFilter;
 }
 
@@ -165,7 +172,7 @@ export function orchestrateRun(runDir: string, engineAbs: string, opts: Orchestr
   if (!existsSync(run)) {
     return { exitCode: 2, written: [], notices: [], errors: [`run dir not found: ${run}`], phases: [] };
   }
-  const phases = listPhases(run, engineAbs, opts.surface ?? "all");
+  const phases = listPhases(run, engineAbs, opts.surface ?? ADJUDICATION_SURFACE);
 
   let selected = phases.filter((p) => p.ready);
   if (opts.phase !== undefined) {

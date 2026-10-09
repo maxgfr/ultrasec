@@ -177,3 +177,18 @@ export function groupAdvisoriesByPackage(findings: readonly Finding[]): PackageR
     (a, b) => b.worstRisk - a.worstRisk || SEVERITIES.indexOf(a.worst) - SEVERITIES.indexOf(b.worst) || b.count - a.count || byStr(a.pkg, b.pkg),
   );
 }
+
+/**
+ * One line per package, for a worklist that must MENTION the advisories without
+ * ruling them: the narrative's summary and the remediation draft. Grouping is
+ * for reading — no verdict travels from a line to its members.
+ */
+export function packageLines(findings: readonly Finding[]): string[] {
+  return groupAdvisoriesByPackage(findings).map((r) => {
+    const bits = [`${r.worst}`, `${r.count} advisor${r.count === 1 ? "y" : "ies"}`];
+    if (r.kev) bits.push(`${r.kev} KEV`);
+    if (r.reachability) bits.push(r.reachability);
+    bits.push(r.fixedVersion ? `upgrade to ${r.fixedVersion}` : "no fix published");
+    return `${r.pkg}${r.versions.length ? `@${r.versions.join(",")}` : ""} — ${bits.join(" · ")}`;
+  });
+}

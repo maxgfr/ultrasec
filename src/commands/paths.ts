@@ -2,7 +2,7 @@ import { resolve } from "node:path";
 import { flagStr, flagBool, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
 import { SURFACE_FILTERS, type SurfaceFilter } from "../orchestrate.js";
-import { surfaceOf } from "../surface.js";
+import { inSurface } from "../surface.js";
 import { SEVERITIES, type Severity } from "../types.js";
 
 const isSeverity = (s: string): s is Severity => (SEVERITIES as readonly string[]).includes(s);
@@ -47,7 +47,7 @@ export function runPaths(args: ParsedArgs): number {
 
   const chained = d.findings.filter((f) => f.path && f.path.length);
   let findings = chained;
-  if (surface !== "all") findings = findings.filter((f) => surfaceOf(f) === surface);
+  if (surface !== "all") findings = findings.filter((f) => inSurface(f, surface));
   if (kind) findings = findings.filter((f) => f.sink?.kind === kind);
   // Chains an exact `--severity` leaves out ABOVE itself — the ones a reader
   // most needs to know were not listed.

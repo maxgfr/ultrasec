@@ -3,6 +3,7 @@ import type { Finding } from "./types.js";
 import { byStr } from "./util.js";
 import { coerceRows, parseDiscoveryRow, type DroppedRow, type NormalizedRow, type ParseResult } from "./apply-parse.js";
 import type { Discovery } from "./investigate.js";
+import { surfaceOf } from "./surface.js";
 
 // The variant-analysis stage. Every stage before it asks "is THIS candidate
 // real?"; this one asks the question that actually closes an audit: **where else
@@ -83,7 +84,10 @@ function seeds(findings: Finding[]): Finding[] {
 }
 
 export function buildVariantWorklist(dossier: Dossier): VariantItem[] {
-  const all = dossier.findings;
+  // Dependency advisories are neither seeds nor neighbours: a vulnerable package
+  // is one upgrade, not a root cause to hunt elsewhere in the code, and every
+  // one of them cites the same lockfile line — 25 identical neighbours apiece.
+  const all = dossier.findings.filter((f) => surfaceOf(f) !== "deps");
   return seeds(all)
     .slice()
     .sort((a, b) => byStr(a.id, b.id))

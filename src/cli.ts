@@ -105,7 +105,7 @@ COMMANDS
   triage     Fast, code-free first pass over OPEN candidates: emit / apply
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
              it is ignored (kept open for verify). --surface narrows the emitted
-             worklist (code | supply | deps | all); --apply never takes it, since
+             worklist (code | supply | deps | code+supply | all); --apply never takes it, since
              a verdict file names its own ids.
              Flags: --run · --apply · --surface <s> · --json.
   verify     Emit / apply the adversarial finding↔evidence worklist. --shards n
@@ -116,8 +116,11 @@ COMMANDS
              The worklist is a DELTA: findings an earlier pass already adjudicated
              as needs-human are withheld until --all. --apply reports any verdict
              that changes an already-adjudicated finding; under --strict that
-             fails unless --re-verdict is passed.
-             Flags: --run · --shards · --shard · --apply · --json.
+             fails unless --re-verdict is passed. --surface (default code+supply)
+             narrows the emitted worklist: dependency advisories are ranked per
+             package in the report, not ruled one by one; --surface all restores
+             them. --apply never takes it.
+             Flags: --run · --shards · --shard · --apply · --surface <s> · --json.
   investigate Agentic discovery: emit an attack-surface-region worklist (entry/
              sink files + graph neighbours); --apply ingests grounded Discovery[]
              as 'ultrasec-ai' open candidates (citation-checked, dedup-folded into
@@ -134,7 +137,9 @@ COMMANDS
              needs-human findings; --apply folds in still-valid/fixed/
              false-positive/uncertain (fixed → dismissed + fixed-in commit;
              high-sev false-positive → needs-human), and fails closed if every
-             fragment is stale. Flags: --run · --repo · --apply · --json.
+             fragment is stale. --surface (default code+supply) narrows the
+             emitted worklist; --surface all restores the advisories.
+             Flags: --run · --repo · --apply · --surface <s> · --json.
   assumptions
              Build the assumption map BEFORE hunting: per unit, what it
              guarantees (cited) and what it depends on that nothing enforces.
@@ -203,7 +208,9 @@ COMMANDS
              --write (COVERAGE.md) · --json (--classes: the class matrix).
   check      Gate: every finding must cite resolvable [file:line] (anti-hallucination).
              READ-ONLY — it writes nothing and changes no status; --semantic ALSO
-             fails when a candidate is still unadjudicated. Exit 0 ok · 1 gate
+             fails when a HIGH/CRITICAL candidate outside the dependency surface
+             is still unadjudicated (the predicate render's DRAFT banner uses);
+             open advisories are reported, never failing. Exit 0 ok · 1 gate
              failed · 2 unreadable run. Flags: --run · --repo · --semantic ·
              --min-severity critical|high|medium|low|info · --json.
   clean      Remove the intermediates — .work/, worklists, DOSSIER.md,
@@ -252,9 +259,9 @@ COMMANDS
              8/agent), the dispatch contracts (agents/<role>.md) and a sequential
              RUNBOOK.md fallback. Subagents RETURN verdict/discovery fragments;
              every conservative --apply fold stays with you (one writer).
-             --surface narrows the 'adjudicate' fan-out to code | supply | deps
-             (default all) — a fan-out over every open dependency advisory pays
-             for a dossier read that a ranked list already answers.
+             --surface narrows the fan-out to code | supply | deps | code+supply
+             | all (default code+supply) — a fan-out over every open dependency
+             advisory pays for a dossier read that a ranked list already answers.
              Flags: --run · --phase <name> · --surface <s> · --eco (runbook +
              contracts only) · --list (phase status as JSON).
   mcp        Serve the audit over the Model Context Protocol, so a non-Claude-Code

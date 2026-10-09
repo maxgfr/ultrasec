@@ -28,6 +28,7 @@ import { buildImplementWorklist, renderImplementMd, loadNarrative } from "../imp
 import type { AgentRunner } from "./agent.js";
 import { formatDropped, type ParseResult } from "../apply-parse.js";
 import { eprintln } from "../util.js";
+import { ADJUDICATION_SURFACE, inSurface } from "../surface.js";
 
 /** The stack the run's scan detected — the guard names only it uses come from its packs. */
 function runStack(run: string): string[] {
@@ -141,7 +142,8 @@ const STAGES: Record<StageName, StageDef> = {
   triage: {
     crossCheckable: false,
     emit(repo, run, dossier, md) {
-      const items = buildTriageWorklist(dossier);
+      // Advisories are ranked per package in the report, not ruled one by one.
+      const items = buildTriageWorklist({ ...dossier, findings: dossier.findings.filter((f) => inSurface(f, ADJUDICATION_SURFACE)) });
       const f = stageFiles("TRIAGE");
       const worklist = emitWorklist(run, f, items, () => renderTriageMd(items, loadContextDoc(run)), { md });
       return { worklist, outName: "TRIAGE.json" };
@@ -247,7 +249,11 @@ const STAGES: Record<StageName, StageDef> = {
       return { worklist, outName: "REVALIDATE.json" };
     },
     applyPure: (repo, _run, dossier, raw) =>
-      applyRevalidations(dossier, rowsOf("revalidate", parseRevalidations(raw)), revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo))).findings,
+      applyRevalidations(
+        dossier,
+        rowsOf("revalidate", parseRevalidations(raw)),
+        revalFactsFromWorklist(buildRevalidateWorklist(dossier, repo, { surface: "all" })),
+      ).findings,
     instruction: (repo, run, worklist, outPath) =>
       `Read the revalidation worklist at ${worklist}. Using the git facts, decide still-valid|fixed|false-positive|uncertain per finding and write a JSON array of {id, verdict, fixedIn?, note?} to ${outPath}. ${UNTRUSTED}`,
   },

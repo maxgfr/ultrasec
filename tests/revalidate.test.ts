@@ -52,6 +52,16 @@ describe("buildRevalidateWorklist — scope", () => {
   });
 });
 
+describe("buildRevalidateWorklist — surface (dependencies out by default)", () => {
+  it("leaves confirmed advisories out unless --surface all", () => {
+    const dep: Finding = { ...finding("dep", "high", "confirmed"), category: "dep", sink: { file: "pnpm-lock.yaml", line: 1 } };
+    const d = dossier([finding("conf", "high", "confirmed"), dep]);
+    const repo = mkdtempSync(join(tmpdir(), "ultrasec-reval-"));
+    expect(buildRevalidateWorklist(d, repo).map((i) => i.id)).toEqual(["conf"]);
+    expect(buildRevalidateWorklist(d, repo, { surface: "all" }).map((i) => i.id)).toEqual(["conf", "dep"]);
+  });
+});
+
 describe("applyRevalidations — conservative policy", () => {
   it("still-valid keeps the finding unchanged", () => {
     const r = applyRevalidations(dossier([finding("a", "high", "confirmed")]), [{ id: "a", verdict: "still-valid" }]);
