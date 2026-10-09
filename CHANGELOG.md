@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.64.0](https://github.com/maxgfr/ultrasec/compare/v1.63.0...v1.64.0) (2026-10-09)
+
+
+### Bug Fixes
+
+* --quiet prints a crash; merged investigate regions keep a file each ([7352b5b](https://github.com/maxgfr/ultrasec/commit/7352b5b51485473ad13dc8cd2c42b2ca208ec854))
+* **powered:** real engine path in the verify prompt; settle open defaults ([722776f](https://github.com/maxgfr/ultrasec/commit/722776f5c7735fc2be1374bbbfbe788c5403cf39))
+
+
+### Features
+
+* **check:** dependency advisories no longer gate adjudication ([1eeff28](https://github.com/maxgfr/ultrasec/commit/1eeff2807d7cea485916a4c3a705dec5dc573a10))
+* **cli:** capped console lists, compact --json, global --quiet ([c51a306](https://github.com/maxgfr/ultrasec/commit/c51a306fd599ebe8b2ce7a11d141235f08eb06c5))
+* **orchestrate:** fan out by family under a 12-agent ceiling ([0d0b663](https://github.com/maxgfr/ultrasec/commit/0d0b663e7648a7bc20aa8eb7b230f656bebf397a))
+* **stage:** compact worklists ([c8f25eb](https://github.com/maxgfr/ultrasec/commit/c8f25eba85ceb27af4635582cacdb025d93d4e36))
+
 # [1.63.0](https://github.com/maxgfr/ultrasec/compare/v1.62.0...v1.63.0) (2026-10-08)
 
 
