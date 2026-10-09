@@ -7,7 +7,7 @@ import { dispatch } from "../src/cli.js";
 import { BATCH_SIZE, MAX_AGENTS, PHASES, SMALL_WORKLIST, listPhases, orchestrateRun, packFamilies, planPhase, type PhaseInfo } from "../src/orchestrate.js";
 import { adjudicationKey } from "../src/family.js";
 import { phaseWorkflowScript } from "../src/orchestrate-templates.js";
-import type { Finding } from "../src/types.js";
+import { BROCARDS, type Finding } from "../src/types.js";
 import type { VerifyItem } from "../src/verify.js";
 import { parseArgs } from "../src/util.js";
 import { needsHunt, type ClassCoverageCell } from "../src/classes/coverage.js";
@@ -407,6 +407,12 @@ describe("orchestrate — families under an agent ceiling", () => {
     const skeptic = readFileSync(join(run, ".work", "orchestration", "agents", "skeptic.md"), "utf8");
     expect(skeptic).not.toMatch(/Open every cited/);
     expect(skeptic).toContain("brocard");
+    // The schema's enum is invisible to an agent reading the contract: without
+    // the names, every refutation came back with a prose ground the fold drops.
+    for (const b of BROCARDS) {
+      expect(analyzer).toContain(b);
+      expect(skeptic).toContain(b);
+    }
   });
 
   it("`dossier a,b` prints one family packet; an unknown member is refused", async () => {

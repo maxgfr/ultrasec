@@ -288,7 +288,7 @@ For EACH family:
    - \`supported\` — the flow is real and exploitable. REQUIRES \`exploitPath\` (who · what they send · what they get).
    - \`partial\` — a real issue, but weaker or narrower than claimed.
    - \`unsupported\` — the evidence does not establish the claim.
-   - \`refuted\` — the source positively contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\`).
+   - \`refuted\` — the source positively contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\` — exactly one of ${BROCARDS.map((b) => `\`${b}\``).join(" · ")}; the reasoning goes in \`note\`).
    Default to the harsher verdict ONLY when you can disprove it; otherwise mark \`partial\`/leave it for a human.
 4. Be conservative. The fold never auto-dismisses a high/critical finding on anything short of an explicit \`refuted\` — an uncertain high-severity finding stays **needs-human**, never dropped. Every claim in your \`note\` must cite resolvable \`[file:line]\` hops you actually read.
 
@@ -307,7 +307,7 @@ For EACH family:
    - \`supported\` — real and exploitable exactly as claimed (include \`exploitPath\`).
    - \`partial\` — a real issue, but the claim overstates it (wrong hop, narrower reach, weaker impact).
    - \`unsupported\` — the source does not establish the claim.
-   - \`refuted\` — the source contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\`).
+   - \`refuted\` — the source contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\` — exactly one of ${BROCARDS.map((b) => `\`${b}\``).join(" · ")}; the reasoning goes in \`note\`).
 3. Be skeptical, but do NOT dismiss a high/critical finding unless you can positively **refute** it — the fold sends an \`unsupported\`/\`partial\` high-severity finding to **needs-human**, never auto-dropped. Uncertain ⇒ leave it for a human.
 4. \`note\` is REQUIRED — one line grounded in what you read, citing resolvable \`[file:line]\`. If the entry carries a \`priorSignal\`, it is a HINT, never a verdict — adjudicate yourself.
 

@@ -87,7 +87,7 @@ For EACH family:
    - \`supported\` — real and exploitable exactly as claimed (include \`exploitPath\`).
    - \`partial\` — a real issue, but the claim overstates it (wrong hop, narrower reach, weaker impact).
    - \`unsupported\` — the source does not establish the claim.
-   - \`refuted\` — the source contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\`).
+   - \`refuted\` — the source contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\` — exactly one of \`no-threat-model\` · \`exploit-from-the-heavens\` · \`outside-usage\` · \`standard-behavior\` · \`documented-behavior\` · \`cure-worse-than-disease\` · \`report-not-dispositive\`; the reasoning goes in \`note\`).
 3. Be skeptical, but do NOT dismiss a high/critical finding unless you can positively **refute** it — the fold sends an \`unsupported\`/\`partial\` high-severity finding to **needs-human**, never auto-dropped. Uncertain ⇒ leave it for a human.
 4. \`note\` is REQUIRED — one line grounded in what you read, citing resolvable \`[file:line]\`. If the entry carries a \`priorSignal\`, it is a HINT, never a verdict — adjudicate yourself.
 

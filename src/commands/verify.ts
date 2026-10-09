@@ -5,6 +5,7 @@ import { emitWorklist, readApply, persistFindings, stageFiles, wantsMdTwin, work
 import { surfaceDropped } from "../apply-parse.js";
 import { buildWorklist, renderWorklistMd, shard, applyVerdicts, parseVerdicts, worklistCounts } from "../verify.js";
 import { loadContextDoc } from "../context.js";
+import { BROCARDS } from "../types.js";
 import { ADJUDICATION_SURFACE, inSurface, parseSurfaceFlag, SURFACE_FILTERS } from "../surface.js";
 
 // `ultrasec verify --run <dir> [--shards n --shard i]`  → emit the worklist
@@ -64,7 +65,7 @@ export function runVerify(args: ParsedArgs): number {
       `  ${outside} pending finding(s) outside --surface ${surface}${surface === ADJUDICATION_SURFACE ? " (dependency advisories: the report ranks them per package)" : ""} — --surface all to include them`,
     );
   println(
-    `  adjudicate each (\`ultrasec dossier <id> --run ${run}\`) and write rows {id, verdict, note} — exploitPath on supported, brocard on refuted — to verdicts.json, then:`,
+    `  adjudicate each (\`ultrasec dossier <id> --run ${run}\`) and write rows {id, verdict, note} — exploitPath on supported, brocard (${BROCARDS.join(" | ")}) on refuted — to verdicts.json, then:`,
   );
   println(`  ultrasec verify --apply verdicts.json --run ${run}`);
   return 0;

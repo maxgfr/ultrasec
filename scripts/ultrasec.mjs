@@ -42929,7 +42929,8 @@ function reachability(repo, graph, f) {
       said = true;
     }
     const sym = f.path?.[0]?.symbol ?? void 0;
-    const callers = sym ? graph.callersBySymbol?.[sym] ?? [] : [];
+    const indexed = sym ? graph.callersBySymbol?.[sym] : void 0;
+    const callers = Array.isArray(indexed) ? indexed : [];
     if (sym) {
       const outside2 = callers.filter((c2) => c2.file !== entry2.file);
       if (callers.length) {
@@ -43901,7 +43902,7 @@ For EACH family:
    - \`supported\` \u2014 the flow is real and exploitable. REQUIRES \`exploitPath\` (who \xB7 what they send \xB7 what they get).
    - \`partial\` \u2014 a real issue, but weaker or narrower than claimed.
    - \`unsupported\` \u2014 the evidence does not establish the claim.
-   - \`refuted\` \u2014 the source positively contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\`).
+   - \`refuted\` \u2014 the source positively contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\` \u2014 exactly one of ${BROCARDS.map((b) => `\`${b}\``).join(" \xB7 ")}; the reasoning goes in \`note\`).
    Default to the harsher verdict ONLY when you can disprove it; otherwise mark \`partial\`/leave it for a human.
 4. Be conservative. The fold never auto-dismisses a high/critical finding on anything short of an explicit \`refuted\` \u2014 an uncertain high-severity finding stays **needs-human**, never dropped. Every claim in your \`note\` must cite resolvable \`[file:line]\` hops you actually read.
 
@@ -43920,7 +43921,7 @@ For EACH family:
    - \`supported\` \u2014 real and exploitable exactly as claimed (include \`exploitPath\`).
    - \`partial\` \u2014 a real issue, but the claim overstates it (wrong hop, narrower reach, weaker impact).
    - \`unsupported\` \u2014 the source does not establish the claim.
-   - \`refuted\` \u2014 the source contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\`).
+   - \`refuted\` \u2014 the source contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\` \u2014 exactly one of ${BROCARDS.map((b) => `\`${b}\``).join(" \xB7 ")}; the reasoning goes in \`note\`).
 3. Be skeptical, but do NOT dismiss a high/critical finding unless you can positively **refute** it \u2014 the fold sends an \`unsupported\`/\`partial\` high-severity finding to **needs-human**, never auto-dropped. Uncertain \u21D2 leave it for a human.
 4. \`note\` is REQUIRED \u2014 one line grounded in what you read, citing resolvable \`[file:line]\`. If the entry carries a \`priorSignal\`, it is a HINT, never a verdict \u2014 adjudicate yourself.
 
@@ -44520,7 +44521,7 @@ function runVerify(args2) {
       `  ${outside2} pending finding(s) outside --surface ${surface}${surface === ADJUDICATION_SURFACE ? " (dependency advisories: the report ranks them per package)" : ""} \u2014 --surface all to include them`
     );
   println(
-    `  adjudicate each (\`ultrasec dossier <id> --run ${run2}\`) and write rows {id, verdict, note} \u2014 exploitPath on supported, brocard on refuted \u2014 to verdicts.json, then:`
+    `  adjudicate each (\`ultrasec dossier <id> --run ${run2}\`) and write rows {id, verdict, note} \u2014 exploitPath on supported, brocard (${BROCARDS.join(" | ")}) on refuted \u2014 to verdicts.json, then:`
   );
   println(`  ultrasec verify --apply verdicts.json --run ${run2}`);
   return 0;
@@ -49498,7 +49499,7 @@ var STAGES = {
     applyPure: (_repo, _run, dossier, raw) => applyVerdicts(dossier, rowsOf("verify", parseVerdicts(raw))).findings,
     // The engine by its absolute path: the agent CLI shares no cwd with it, and
     // a `<ultrasec>` placeholder here was a command it could not run.
-    instruction: (repo, run2, worklist, outPath) => `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node ${enginePath()} dossier <id>[,<id>\u2026] --run ${run2} --brief --no-context\` \u2014 a comma list prints one packet for a family) and write a verdicts.json array of {id, verdict, note, exploitPath, brocard} to ${outPath} \u2014 exploitPath on supported, brocard (the named ground) on refuted. Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`
+    instruction: (repo, run2, worklist, outPath) => `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node ${enginePath()} dossier <id>[,<id>\u2026] --run ${run2} --brief --no-context\` \u2014 a comma list prints one packet for a family) and write a verdicts.json array of {id, verdict, note, exploitPath, brocard} to ${outPath} \u2014 exploitPath on supported, brocard on refuted \u2014 exactly one of ${BROCARDS.join(" | ")} (the reasoning goes in note). Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`
   },
   revalidate: {
     crossCheckable: true,

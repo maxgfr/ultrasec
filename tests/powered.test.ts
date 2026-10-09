@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { buildAgentArgv, resolveTemplate, CliAgentRunner, type AgentRunner, type AgentTask, type SpawnFn } from "../src/powered/agent.js";
 import { runPipeline, reconcileCrossCheck, ALL_STAGES, type StageName } from "../src/powered/pipeline.js";
 import { loadDossier, writeDossier } from "../src/store.js";
-import type { Finding } from "../src/types.js";
+import { BROCARDS, type Finding } from "../src/types.js";
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
 const tmpRun = () => mkdtempSync(join(tmpdir(), "ultrasec-powered-"));
@@ -169,6 +169,7 @@ describe("runPipeline — the verify prompt names a command the agent can run", 
     expect(prompt).toMatch(/node \/\S+ dossier <id>/);
     expect(prompt).toContain("--brief --no-context");
     expect(prompt).toContain("brocard");
+    for (const b of BROCARDS) expect(prompt).toContain(b);
   });
 
   it("leaves dependency advisories out of the powered triage and verify worklists", () => {

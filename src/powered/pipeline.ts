@@ -6,7 +6,7 @@ import { scanRepo, extractionTier, type ScanOptions } from "../scan.js";
 import { buildGraph } from "../graph.js";
 import { enumerateTaint } from "../taint.js";
 import { buildAttackSurface } from "../map.js";
-import { VERSION, SCHEMA_VERSION, type Finding, type Manifest, type Status } from "../types.js";
+import { BROCARDS, VERSION, SCHEMA_VERSION, type Finding, type Manifest, type Status } from "../types.js";
 import { isHigh } from "../verify.js";
 import { check } from "../check.js";
 import { deliverReport, runNarrative, type DeliverOptions } from "../render/deliver.js";
@@ -240,7 +240,7 @@ const STAGES: Record<StageName, StageDef> = {
     // The engine by its absolute path: the agent CLI shares no cwd with it, and
     // a `<ultrasec>` placeholder here was a command it could not run.
     instruction: (repo, run, worklist, outPath) =>
-      `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node ${enginePath()} dossier <id>[,<id>…] --run ${run} --brief --no-context\` — a comma list prints one packet for a family) and write a verdicts.json array of {id, verdict, note, exploitPath, brocard} to ${outPath} — exploitPath on supported, brocard (the named ground) on refuted. Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`,
+      `Read the verification worklist at ${worklist}. Adjudicate each finding from the cited code (run \`node ${enginePath()} dossier <id>[,<id>…] --run ${run} --brief --no-context\` — a comma list prints one packet for a family) and write a verdicts.json array of {id, verdict, note, exploitPath, brocard} to ${outPath} — exploitPath on supported, brocard on refuted — exactly one of ${BROCARDS.join(" | ")} (the reasoning goes in note). Be conservative: only refute a high/critical finding you can positively disprove. ${UNTRUSTED}`,
   },
   revalidate: {
     crossCheckable: true,
