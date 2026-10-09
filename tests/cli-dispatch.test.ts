@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { COMMAND_HANDLERS, dispatch, HELP } from "../src/cli.js";
@@ -126,5 +127,17 @@ describe("CLI bundle entrypoint", () => {
   it.runIf(existsSync(bundle))("an unknown command exits 2", () => {
     const { code } = run(["definitely-not-a-command"]);
     expect(code).toBe(2);
+  });
+
+  // `--quiet` holds stderr until the command fails; a THROW skips main's own
+  // release, so the top-level catch must release it or the crash is silent.
+  it.runIf(existsSync(bundle))("--quiet still prints a crash", () => {
+    const runDir = mkdtempSync(join(tmpdir(), "ultrasec-quiet-"));
+    writeFileSync(join(runDir, "findings.json"), "[]");
+    writeFileSync(join(runDir, "manifest.json"), "{}");
+    mkdirSync(join(runDir, "VERIFY.todo.json")); // the worklist write throws EISDIR
+    const { code, out } = run(["verify", "--run", runDir, "--quiet"]);
+    expect(code).toBe(1);
+    expect(out).toContain("EISDIR");
   });
 });

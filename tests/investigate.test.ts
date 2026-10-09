@@ -73,9 +73,11 @@ describe("INVESTIGATE worklist — the shared prompt once, small regions merged 
     expect(regions).toHaveLength(MAX_REGIONS);
     const merged = regions.at(-1)!;
     expect(merged.merged).toEqual(Array.from({ length: 20 - (MAX_REGIONS - 1) }, (_, i) => `pkg/r${String(i + MAX_REGIONS - 1).padStart(2, "0")}`));
-    // one representative file per merged region, round-robin, under the per-region cap
-    expect(merged.files.length).toBe(8);
+    // one representative file per merged region, round-robin — the cap grows to
+    // the number of merged regions so none is reduced to a name
+    expect(merged.files.length).toBe(20 - (MAX_REGIONS - 1));
     expect(merged.files[0]).toBe("pkg/r11/f0.ts");
+    for (const r of merged.merged!) expect(merged.files.some((f) => f.startsWith(`${r}/`))).toBe(true);
   });
 
   it("writes the hunt prompt once and reads either shape back", () => {

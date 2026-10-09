@@ -156,12 +156,15 @@ function capRegions(regions: InvestigateRegion[]): InvestigateRegion[] {
   if (regions.length <= MAX_REGIONS) return regions;
   const head = regions.slice(0, MAX_REGIONS - 1);
   const tail = regions.slice(MAX_REGIONS - 1);
+  // At least one file per merged region: the round-robin's first pass takes
+  // each one's best file, so no region is reduced to a name in `merged`.
+  const cap = Math.max(MAX_FILES_PER_REGION, tail.length);
   const files: string[] = [];
-  for (let i = 0; files.length < MAX_FILES_PER_REGION; i++) {
+  for (let i = 0; files.length < cap; i++) {
     let added = false;
     for (const r of tail) {
       const f = r.files[i];
-      if (f !== undefined && files.length < MAX_FILES_PER_REGION && !files.includes(f)) {
+      if (f !== undefined && files.length < cap && !files.includes(f)) {
         files.push(f);
         added = true;
       }

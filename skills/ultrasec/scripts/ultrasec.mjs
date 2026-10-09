@@ -38720,12 +38720,13 @@ function capRegions(regions) {
   if (regions.length <= MAX_REGIONS) return regions;
   const head = regions.slice(0, MAX_REGIONS - 1);
   const tail = regions.slice(MAX_REGIONS - 1);
+  const cap2 = Math.max(MAX_FILES_PER_REGION, tail.length);
   const files = [];
-  for (let i2 = 0; files.length < MAX_FILES_PER_REGION; i2++) {
+  for (let i2 = 0; files.length < cap2; i2++) {
     let added = false;
     for (const r of tail) {
       const f = r.files[i2];
-      if (f !== void 0 && files.length < MAX_FILES_PER_REGION && !files.includes(f)) {
+      if (f !== void 0 && files.length < cap2 && !files.includes(f)) {
         files.push(f);
         added = true;
       }
@@ -53518,6 +53519,7 @@ function isEntrypoint() {
 if (isEntrypoint()) {
   main().catch((err2) => {
     eprintln(`ultrasec: ${err2 instanceof Error ? err2.stack || err2.message : String(err2)}`);
+    releaseQuiet(true);
     process.exit(1);
   });
 }

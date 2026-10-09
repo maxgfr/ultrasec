@@ -545,6 +545,9 @@ function isEntrypoint(): boolean {
 if (isEntrypoint()) {
   main().catch((err) => {
     eprintln(`ultrasec: ${err instanceof Error ? err.stack || err.message : String(err)}`);
+    // A throw skips main's own release: under `--quiet` the error and what was
+    // held before it would otherwise never reach stderr.
+    releaseQuiet(true);
     process.exit(1);
   });
 }
