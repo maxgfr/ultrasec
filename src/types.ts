@@ -5,7 +5,7 @@ import type { ClassCoverageCell } from "./classes/coverage.js";
 // Single source of truth for the version the bundle reports. `sync-version.mjs`
 // rewrites this string at release time (kept in lockstep with package.json and
 // SKILL.md). SCHEMA_VERSION bumps when the on-disk audit-dossier format changes.
-export const VERSION = "1.65.0";
+export const VERSION = "1.65.1";
 // 2: graph.json gained `callersBySymbol` (reverse call-index); manifest gained
 // optional `truncation`/`scopes` (large-repo scaling). Older dossiers omit them.
 // 3: findings gained optional `provenance` (git-blame author/commit/date +
