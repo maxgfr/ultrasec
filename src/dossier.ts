@@ -236,7 +236,11 @@ function reachability(repo: string, graph: Graph, f: Finding): string[] {
 
     // ── Who calls the entry symbol ─────────────────────────────────────────
     const sym = f.path?.[0]?.symbol ?? undefined;
-    const callers = sym ? (graph.callersBySymbol?.[sym] ?? []) : [];
+    // Array.isArray guard: a symbol named like an Object.prototype member
+    // ("constructor", "toString", …) makes this plain-object lookup return an
+    // inherited function — `dossier` crashed on every class constructor.
+    const indexed = sym ? graph.callersBySymbol?.[sym] : undefined;
+    const callers = Array.isArray(indexed) ? indexed : [];
     if (sym) {
       const outside = callers.filter((c) => c.file !== entry.file);
       if (callers.length) {

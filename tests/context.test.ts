@@ -119,6 +119,21 @@ describe("renderFindingDossier — CONTEXT.md injection (back-compat)", () => {
     expect(renderFindingDossier(FIXTURE, graph, f, undefined)).toBe(without);
   });
 
+  // A class constructor is the entry symbol of many a controller path; looked up
+  // in the plain-object call index it returned Object.prototype.constructor and
+  // `dossier` crashed on `.filter` (two of 48 findings on a real audit).
+  it("renders the callers block when the entry symbol is named like an Object.prototype member", () => {
+    const ctor: Finding = {
+      ...f,
+      source: { file: "src/db.js", line: 2 },
+      path: [{ file: "src/db.js", line: 2, symbol: "constructor", why: "entry" }],
+    };
+    for (const sym of ["constructor", "toString", "hasOwnProperty"]) {
+      const g = { ...ctor, path: [{ ...ctor.path![0]!, symbol: sym }] };
+      expect(() => renderFindingDossier(FIXTURE, { ...graph, callersBySymbol: {} }, g)).not.toThrow();
+    }
+  });
+
   it("includes the Project context section verbatim when context is given", () => {
     const ctx = "Auth via JWT on /admin/*; ORM parameterizes all queries.";
     const out = renderFindingDossier(FIXTURE, graph, f, ctx);
