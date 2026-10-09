@@ -7,7 +7,7 @@ import { scanRepo } from "../src/scan.js";
 import { buildAttackSurface } from "../src/map.js";
 import { buildContextScaffold, loadContextDoc, compactContextDoc } from "../src/context.js";
 import { dossierContext } from "../src/commands/dossier.js";
-import { renderFindingDossier } from "../src/dossier.js";
+import { renderFamilyDossier, renderFindingDossier } from "../src/dossier.js";
 import type { Finding } from "../src/types.js";
 import type { Graph } from "../src/graph.js";
 
@@ -126,6 +126,44 @@ describe("renderFindingDossier — CONTEXT.md injection (back-compat)", () => {
     expect(out).toContain(ctx);
     // the section sits before the decision prompt
     expect(out.indexOf("## Project context")).toBeLessThan(out.indexOf("## What to decide"));
+  });
+});
+
+describe("renderFamilyDossier — `dossier a,b,c --brief`", () => {
+  const graph: Graph = { files: [], edges: [], symbolDefs: {} };
+  const m = (id: string, line: number): Finding => ({
+    id,
+    category: "taint",
+    cwe: "CWE-89",
+    title: "SQLi",
+    severity: "high",
+    confidence: "low",
+    message: `candidate ${id}`,
+    tool: "ultrasec",
+    status: "open",
+    sink: { file: "src/db.js", line },
+  });
+
+  it("prints the context and the checklist once, the first member in full, a line + ±3 window per other member", () => {
+    const ctx = "Auth via JWT on /admin/*.";
+    const out = renderFamilyDossier(FIXTURE, graph, [m("a", 6), m("b", 7), m("c", 8)], { context: ctx, brief: true });
+    expect(out.split("## Project context").length - 1).toBe(1);
+    expect(out.split("## How to verify").length - 1).toBe(1);
+    expect(out).toContain("# a — SQLi");
+    expect(out).toContain("## What to decide\ncandidate a");
+    expect(out).toContain("## Other members (2)");
+    expect(out).toContain("### b — [high] SQLi · src/db.js:7");
+    expect(out).not.toContain("candidate b"); // a member is its location, not a second packet
+    // the window is ±3 lines around the member's line, marked
+    const win = out.slice(out.indexOf("### b —"), out.indexOf("### c —"));
+    expect(win).toMatch(/>> {4}7 \|/);
+    expect(win).toMatch(/ {3}4 \|/);
+    expect(win).not.toMatch(/ {3}3 \|/);
+    expect(out.indexOf("## How to verify")).toBeGreaterThan(out.indexOf("### c —"));
+  });
+
+  it("a single id renders exactly the one-finding packet", () => {
+    expect(renderFamilyDossier(FIXTURE, graph, [m("a", 6)], { brief: true })).toBe(renderFindingDossier(FIXTURE, graph, m("a", 6), { brief: true }));
   });
 });
 

@@ -1,10 +1,11 @@
 import { resolve } from "node:path";
 import { flagBool, flagStr, println, eprintln, type ParsedArgs } from "../util.js";
 import { loadDossier } from "../store.js";
-import { renderFindingDossier } from "../dossier.js";
+import { renderFamilyDossier, renderFindingDossier } from "../dossier.js";
 import { compactContextDoc, loadContextDoc } from "../context.js";
+import type { Finding } from "../types.js";
 
-// `ultrasec dossier <finding-id> [--run .ultrasec] [--repo <dir>] [--compact|--no-context] [--brief]`
+// `ultrasec dossier <finding-id>[,<id>…] [--run .ultrasec] [--repo <dir>] [--compact|--no-context] [--brief]`
 // Print the grounding packet (real code + cross-file path + neighbours) for one
 // finding — the evidence an adjudicating subagent reads.
 export function runDossier(args: ParsedArgs): number {
@@ -23,7 +24,23 @@ export function runDossier(args: ParsedArgs): number {
     return 2;
   }
 
-  const f = d.findings.find((x) => x.id === id || x.id.startsWith(id));
+  // `a,b,c` is a family: one packet, the first member in full and a window per
+  // other member. Every id must resolve — a family with a hole is refused, not
+  // shown short.
+  const wanted = id
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const found: Finding[] = [];
+  for (const w of wanted) {
+    const hit = d.findings.find((x) => x.id === w || x.id.startsWith(w));
+    if (!hit) {
+      eprintln(`ultrasec dossier: no finding "${w}" in ${run}.`);
+      return 2;
+    }
+    found.push(hit);
+  }
+  const f = found[0];
   if (!f) {
     eprintln(`ultrasec dossier: no finding "${id}" in ${run}.`);
     return 2;
@@ -47,7 +64,9 @@ export function runDossier(args: ParsedArgs): number {
   // `--brief` is the batch packet: narrow windows, no enclosing bodies, no
   // reachability block. One subagent reading eight findings pays for the full
   // depth eight times; one auditor deciding a single flow wants all of it.
-  println(renderFindingDossier(repo, d.graph, f, { context: shown, brief }));
+  println(
+    found.length > 1 ? renderFamilyDossier(repo, d.graph, found, { context: shown, brief }) : renderFindingDossier(repo, d.graph, f, { context: shown, brief }),
+  );
   return 0;
 }
 

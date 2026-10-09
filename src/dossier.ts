@@ -306,6 +306,21 @@ export interface DossierOptions {
    * section. For batch fan-out, where one subagent reads eight of these.
    */
   brief?: boolean;
+  /** Close with the "How to verify" checklist (default). A family packet prints
+   *  it once, after every member. */
+  howToVerify?: boolean;
+}
+
+function howToVerify(): string[] {
+  return [
+    `## How to verify`,
+    `1. Confirm the SOURCE is genuinely attacker-controlled.`,
+    `2. Follow each HOP — does the tainted value actually pass through unchanged?`,
+    `3. Check for a sanitizer/validator/authz guard anywhere on the path.`,
+    `4. Confirm the SINK is exploitable with the value that arrives.`,
+    `5. Record \`supported\` / \`partial\` / \`unsupported\` / \`refuted\` via \`ultrasec verify\`.`,
+    `   If unsure and severity is high, leave it **needs-human** — do not dismiss.`,
+  ];
 }
 
 export function renderFindingDossier(repo: string, graph: Graph, f: Finding, options: DossierOptions | string = {}): string {
@@ -392,12 +407,56 @@ export function renderFindingDossier(repo: string, graph: Graph, f: Finding, opt
     }
   }
 
-  L.push(`## How to verify`);
-  L.push(`1. Confirm the SOURCE is genuinely attacker-controlled.`);
-  L.push(`2. Follow each HOP — does the tainted value actually pass through unchanged?`);
-  L.push(`3. Check for a sanitizer/validator/authz guard anywhere on the path.`);
-  L.push(`4. Confirm the SINK is exploitable with the value that arrives.`);
-  L.push(`5. Record \`supported\` / \`partial\` / \`unsupported\` / \`refuted\` via \`ultrasec verify\`.`);
-  L.push(`   If unsure and severity is high, leave it **needs-human** — do not dismiss.`);
+  if (opts.howToVerify !== false) L.push(...howToVerify());
+  return L.join("\n") + "\n";
+}
+
+/** Lines either side of a family member's location — enough to see it has the
+ *  first member's shape, not enough to re-read it. */
+const MEMBER_CTX = 3;
+
+/**
+ * The packet for a FAMILY: `dossier a,b,c`.
+ *
+ * A fan-out agent rules on families — the same category, CWE, sink and title
+ * under one path root — and used to call `dossier` once per member, paying for
+ * the same context block, the same checklist and a full packet each time. Here
+ * the context and "How to verify" print once, the first member in full, and
+ * every other member as one line plus a ±3-line window: what it takes to check
+ * a member has the shape the first one was judged on. Still one verdict per id.
+ */
+export function renderFamilyDossier(repo: string, graph: Graph, members: readonly Finding[], options: DossierOptions = {}): string {
+  const [first, ...rest] = members;
+  if (!first) return "";
+  const L: string[] = [];
+  if (rest.length) {
+    L.push(`# Family of ${members.length} — ${first.title}`);
+    L.push(`_The first member in full; the others are judged on their location. One verdict per id._`);
+    L.push("");
+  }
+  if (options.context) {
+    L.push(`## Project context`);
+    L.push(`_From \`CONTEXT.md\` — background to judge reachability/exploitability; not a verdict._`);
+    L.push("");
+    L.push(options.context);
+    L.push("");
+  }
+  L.push(renderFindingDossier(repo, graph, first, { brief: options.brief, howToVerify: false }).trimEnd());
+  L.push("");
+  if (rest.length) {
+    L.push(`## Other members (${rest.length})`);
+    L.push("");
+    for (const f of rest) {
+      const at = f.sink ?? f.path?.[f.path.length - 1] ?? f.source;
+      L.push(`### ${f.id} — [${f.severity}] ${f.title}${at ? ` · ${at.file}:${at.line}` : ""}`);
+      if (at) {
+        L.push("```");
+        L.push(excerpt(repo, { file: at.file, line: at.line, why: "" }, MEMBER_CTX));
+        L.push("```");
+      }
+      L.push("");
+    }
+  }
+  if (options.howToVerify !== false) L.push(...howToVerify());
   return L.join("\n") + "\n";
 }

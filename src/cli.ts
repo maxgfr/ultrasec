@@ -99,9 +99,11 @@ COMMANDS
              enclosing function at the source and the sink, plus 'Who can reach
              this' — the route file, the callers of the entry symbol, the auth
              and rate-limit markers in scope, the sanitizers near the path.
-             --brief restores the compact windows for batch fan-out.
-             Flags: <finding-id> · --run · --repo · --compact · --no-context ·
-             --brief.
+             --brief restores the compact windows for batch fan-out. A comma
+             list (a,b,c) is a FAMILY: context and checklist once, the first
+             member in full, then a line and a ±3-line window per member.
+             Flags: <finding-id>[,<id>…] · --run · --repo · --compact ·
+             --no-context · --brief.
   triage     Fast, code-free first pass over OPEN candidates: emit / apply
              noise|keep. 'noise' dismisses only low/med/info; on high/critical
              it is ignored (kept open for verify). --surface narrows the emitted
@@ -255,8 +257,9 @@ COMMANDS
              <reviewer> · --apply <file> · --strict · --json.
   orchestrate Emit the run's multi-agent orchestration from its CURRENT worklists
              into <run>/.work/orchestration/: one <phase>.workflow.mjs per ready phase
-             (adjudicate | verify | revalidate | investigate, real ids batched
-             8/agent), the dispatch contracts (agents/<role>.md) and a sequential
+             (adjudicate | verify | revalidate | investigate; families kept
+             whole, at most 12 agents, the items baked into each prompt as
+             compact JSON lines), the dispatch contracts (agents/<role>.md) and a sequential
              RUNBOOK.md fallback. Subagents RETURN verdict/discovery fragments;
              every conservative --apply fold stays with you (one writer).
              --surface narrows the fan-out to code | supply | deps | code+supply

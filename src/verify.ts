@@ -138,37 +138,41 @@ function reachabilityLine(f: Finding): string | undefined {
   return bits.length ? bits.join(" · ") : undefined;
 }
 
+/** One finding as a verify item — the row the worklist holds and the line a
+ *  fan-out prompt carries. */
+export function verifyItemOf(f: Finding): VerifyItem {
+  const files = new Set<string>();
+  for (const p of f.path ?? []) files.add(`${p.file}:${p.line}`);
+  if (f.sink) files.add(`${f.sink.file}:${f.sink.line}`);
+  if (f.source) files.add(`${f.source.file}:${f.source.line}`);
+  const item: VerifyItem = {
+    id: f.id,
+    severity: f.severity,
+    cwe: f.cwe,
+    title: f.title,
+    category: f.category,
+    claim: f.message,
+    files: [...files],
+    verdict: null,
+    note: "",
+    brocard: null,
+  };
+  const proposed = proposedFor(f);
+  if (proposed) item.proposed = proposed;
+  const reach = reachabilityLine(f);
+  if (reach) item.reachability = reach;
+  const pa = f.priorAnalysis;
+  if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
+  if (reOpened(f)) item.priorVerdict = f.verdict;
+  return item;
+}
+
 export function buildWorklist(dossier: Dossier, opts: WorklistOptions = {}): VerifyItem[] {
   return pending(dossier.findings, opts.surface ?? ADJUDICATION_SURFACE)
     .filter((f) => opts.all || !reOpened(f))
     .slice()
     .sort((a, b) => byStr(a.id, b.id))
-    .map((f) => {
-      const files = new Set<string>();
-      for (const p of f.path ?? []) files.add(`${p.file}:${p.line}`);
-      if (f.sink) files.add(`${f.sink.file}:${f.sink.line}`);
-      if (f.source) files.add(`${f.source.file}:${f.source.line}`);
-      const item: VerifyItem = {
-        id: f.id,
-        severity: f.severity,
-        cwe: f.cwe,
-        title: f.title,
-        category: f.category,
-        claim: f.message,
-        files: [...files],
-        verdict: null,
-        note: "",
-        brocard: null,
-      };
-      const proposed = proposedFor(f);
-      if (proposed) item.proposed = proposed;
-      const reach = reachabilityLine(f);
-      if (reach) item.reachability = reach;
-      const pa = f.priorAnalysis;
-      if (pa?.revalidationVerdict) item.priorSignal = `${pa.tool} revalidation: ${pa.revalidationVerdict}`;
-      if (reOpened(f)) item.priorVerdict = f.verdict;
-      return item;
-    });
+    .map(verifyItemOf);
 }
 
 /** Round-robin slice `i` of `n` over the stable worklist order (balanced shards). */

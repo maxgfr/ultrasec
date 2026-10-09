@@ -22,7 +22,7 @@ conservative folds; only wall-clock differs. Fan-out is an optimization, not a r
 
 1. **Scan** (if not done): \`node <ENGINE> scan --repo <REPO> --out <RUN>\` → \`<RUN>/findings.json\` (+ optionally prime \`node <ENGINE> context\`).
 2. **Investigate the attack surface** (discovery) — \`node <ENGINE> investigate --run <RUN>\` writes \`<RUN>/INVESTIGATE.todo.json\`. For EVERY region, apply \`<RUN>/.work/orchestration/agents/hunter.md\` yourself; merge the grounded Discovery[] into \`<RUN>/.work/orchestration/out/investigate/INVESTIGATE.json\`. Then ingest (citation-checked): \`node <ENGINE> investigate --apply <RUN>/.work/orchestration/out/investigate/INVESTIGATE.json --run <RUN>\`.
-3. **Adjudicate the open candidates** — the worklist is \`<RUN>/findings.json\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`<RUN>/.work/orchestration/agents/analyzer.md\` yourself (\`node <ENGINE> dossier <id> --run <RUN>\`, read every hop, verdict supported/partial/unsupported/refuted + note, exploitPath when supported); merge the verdicts into \`<RUN>/.work/orchestration/out/adjudicate/verdicts.json\`. Then fold, conservatively: \`node <ENGINE> verify --apply <RUN>/.work/orchestration/out/adjudicate/verdicts.json --run <RUN>\`.
+3. **Adjudicate the open candidates** — the worklist is \`<RUN>/findings.json\` itself (every \`status: "open"\` candidate). For EVERY open id, apply \`<RUN>/.work/orchestration/agents/analyzer.md\` yourself, one family at a time — same category, CWE, sink and title under the same path root (\`node <ENGINE> dossier <id>,<id>,… --run <RUN> --brief --no-context\`, read every hop of the first member, the others for their location; one verdict per id, supported/partial/unsupported/refuted + note, exploitPath when supported, brocard when refuted); merge the verdicts into \`<RUN>/.work/orchestration/out/adjudicate/verdicts.json\`. Then fold, conservatively: \`node <ENGINE> verify --apply <RUN>/.work/orchestration/out/adjudicate/verdicts.json --run <RUN>\`.
 4. **Verify adversarially** — \`node <ENGINE> verify --run <RUN>\` writes \`<RUN>/VERIFY.todo.json\` (the still-pending findings). For EVERY entry, apply \`<RUN>/.work/orchestration/agents/skeptic.md\` yourself (try to REFUTE; uncertain high-severity stays needs-human); merge into \`<RUN>/.work/orchestration/out/verify/verdicts.json\`. Then: \`node <ENGINE> verify --apply <RUN>/.work/orchestration/out/verify/verdicts.json --run <RUN>\`.
 5. **Revalidate against git history** — \`node <ENGINE> revalidate --run <RUN>\` writes \`<RUN>/REVALIDATE.todo.json\`. For EVERY entry, apply \`<RUN>/.work/orchestration/agents/revalidator.md\` yourself (still-valid/fixed/false-positive/uncertain + note, fixedIn when fixed); merge into \`<RUN>/.work/orchestration/out/revalidate/REVALIDATE.json\`. Then: \`node <ENGINE> revalidate --apply <RUN>/.work/orchestration/out/revalidate/REVALIDATE.json --run <RUN>\`.
 6. **Gate**: \`node <ENGINE> check --run <RUN> --semantic\` must exit 0 before presenting anything.
@@ -42,15 +42,21 @@ exports[`orchestrate — contracts & runbook > golden shape (paths normalized) >
 // Constants for THIS run (injected at emit time; no Date.now/Math.random in this harness).
 const RUN = "<RUN>"
 const ENGINE = "<ENGINE>"
+// The worklist the items came from — for the orchestrator's merge, never handed to an agent.
 const WORKLIST = "<RUN>/findings.json"
 const AGENTS = RUN + '/.work/orchestration/agents'
+// The ids each agent rules on (families kept whole, the agent count capped), and the
+// items themselves as compact JSON lines — the agent opens no worklist.
 const BATCHES = [["9b0bcc91ea6a"]]
-const SCHEMA = {"type":"object","required":["verdicts"],"properties":{"verdicts":{"type":"array","items":{"type":"object","required":["id","verdict","note"],"properties":{"id":{"type":"string"},"verdict":{"enum":["supported","partial","unsupported","refuted"]},"note":{"type":"string","description":"one line grounded in the source you read, citing [file:line]"},"exploitPath":{"type":"string","description":"REQUIRED for supported: who · what they send · what they get"}}}}}}
+const ITEMS = ["Your 1 item(s), one compact JSON line each, in 1 family. A family is ONE judgment: read its first member in depth, the others for their location only (\`dossier <id>,<id>,… --brief --no-context\` prints exactly that). Still ONE verdict row per id.\\n# family 1 (1)\\n{\\"id\\":\\"9b0bcc91ea6a\\",\\"severity\\":\\"medium\\",\\"cwe\\":\\"CWE-79\\",\\"title\\":\\"Cross-site scripting (reflected): untrusted input reaches send()\\",\\"category\\":\\"taint\\",\\"claim\\":\\"Intra-file candidate: http input at src/server.js:18 may reach the xss sink send() at src/server.js:20 through 1 hop(s). Tainted data written to an HTML response. Verify it is contextually escaped before reaching the browser. Heuristic — verify the data actually reaches the sink unsanitized before trusting it.\\",\\"files\\":[\\"src/server.js:18\\",\\"src/server.js:20\\"],\\"reachability\\":\\"scope symbol · def-use linked\\"}"]
+const CONTEXT = ""
+const SCHEMA = {"type":"object","required":["verdicts"],"properties":{"verdicts":{"type":"array","items":{"type":"object","required":["id","verdict","note"],"properties":{"id":{"type":"string"},"verdict":{"enum":["supported","partial","unsupported","refuted"]},"note":{"type":"string","description":"one line grounded in the source you read, citing [file:line]"},"exploitPath":{"type":"string","description":"REQUIRED for supported: who · what they send · what they get"},"brocard":{"enum":["no-threat-model","exploit-from-the-heavens","outside-usage","standard-behavior","documented-behavior","cure-worse-than-disease","report-not-dispositive"],"description":"REQUIRED for refuted: the named ground of the dismissal (references/dismissal-brocards.md)"}}}}}}
 
 function contract(name, extra) {
   return 'Read and follow the dispatch contract at ' + AGENTS + '/' + name + '.md VERBATIM.\\n'
-    + 'Constants: RUN=' + RUN + '  ENGINE=' + ENGINE + '  WORKLIST=' + WORKLIST + '.\\n'
-    + 'Invoke the engine only by its ABSOLUTE path: node ' + ENGINE + ' <cmd> — read-only commands only.'
+    + 'Constants: RUN=' + RUN + '  ENGINE=' + ENGINE + '.\\n'
+    + 'Invoke the engine only by its ABSOLUTE path: node ' + ENGINE + ' <cmd> — read-only commands only; dossier always with --brief --no-context.'
+    + (CONTEXT ? '\\nProject context (CONTEXT.md, compacted — background for judging reachability, never a verdict):\\n' + CONTEXT : '')
     + (extra ? '\\n' + extra : '')
 }
 
@@ -58,7 +64,7 @@ log('ultrasec adjudicate: ' + "1" + ' item(s) across ' + BATCHES.length + ' agen
 
 phase("Adjudicate")
 const results = await pipeline(BATCHES, (batch, _item, i) =>
-  agent(contract('analyzer', 'ITEMS=' + batch.join(',')), { label: 'adjudicate:' + (i + 1), phase: "Adjudicate", agentType: 'general-purpose', schema: SCHEMA }))
+  agent(contract('analyzer', ITEMS[i]), { label: 'adjudicate:' + (i + 1), phase: "Adjudicate", agentType: 'general-purpose', schema: SCHEMA }))
 
 // One-writer rule: this workflow only COLLECTS verdicts fragments. The main agent merges
 // the returned \`verdicts\` arrays into <RUN>/.work/orchestration/out/adjudicate/verdicts.json, then runs the conservative fold:
@@ -72,20 +78,20 @@ exports[`orchestrate — contracts & runbook > golden shape (paths normalized) >
 
 You are an adversarial skeptic verifying the pending findings of an ultrasec audit. Assume each claim is wrong until the source proves it — try to REFUTE it.
 
-Worklist: \`<RUN>/VERIFY.todo.json\` (a JSON array; each entry has \`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`; repo root: \`<REPO>\`). Handle ONLY the entries whose \`id\` is named in your prompt (\`ITEMS=<id,…>\`). If an \`ITEMS\` id is no longer in the worklist, skip it and say so in your note.
+Your items are in your prompt: one compact JSON line per finding (\`id\`, \`severity\`, \`cwe\`, \`title\`, \`category\`, \`claim\`, \`files[]\`), grouped by family. Repo root: \`<REPO>\`. If an id is no longer in the worklist — \`dossier\` cannot find it — skip it and say so in your note.
 
-For EACH of your entries:
+For EACH family:
 
-1. Open every cited \`file:line\` in \`files[]\` and read it in context; run \`node <ENGINE> dossier <id> --run <RUN>\` (read-only) for the full cross-file packet.
-2. Judge the claim against the source — is the flow **real and exploitable**?
+1. Run \`node <ENGINE> dossier <id>,<id>,… --run <RUN> --brief --no-context\` (read-only) — the first member's cross-file packet in full, a ±3-line window per other member. Open a cited \`file:line\` only when the packet cannot decide.
+2. Judge the first member's claim against the source — is the flow **real and exploitable**? Then check each other member's window has the same shape (a member that differs gets its own reading):
    - \`supported\` — real and exploitable exactly as claimed (include \`exploitPath\`).
    - \`partial\` — a real issue, but the claim overstates it (wrong hop, narrower reach, weaker impact).
    - \`unsupported\` — the source does not establish the claim.
-   - \`refuted\` — the source contradicts the claim (name the guard/sanitizer \`[file:line]\`).
+   - \`refuted\` — the source contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\`).
 3. Be skeptical, but do NOT dismiss a high/critical finding unless you can positively **refute** it — the fold sends an \`unsupported\`/\`partial\` high-severity finding to **needs-human**, never auto-dropped. Uncertain ⇒ leave it for a human.
 4. \`note\` is REQUIRED — one line grounded in what you read, citing resolvable \`[file:line]\`. If the entry carries a \`priorSignal\`, it is a HINT, never a verdict — adjudicate yourself.
 
-Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath" }] }\` — your ITEMS only.
+Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath", "brocard" }] }\` — one row per id in your prompt.
 
 ## Return, don't write
 

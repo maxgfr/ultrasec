@@ -4,7 +4,8 @@ import { dirname, isAbsolute, join } from "node:path";
 import { Script } from "node:vm";
 import { describe, expect, it, vi } from "vitest";
 import { dispatch } from "../src/cli.js";
-import { BATCH_SIZE, PHASES, SMALL_WORKLIST, listPhases, orchestrateRun, type PhaseInfo } from "../src/orchestrate.js";
+import { BATCH_SIZE, MAX_AGENTS, PHASES, SMALL_WORKLIST, listPhases, orchestrateRun, packFamilies, planPhase, type PhaseInfo } from "../src/orchestrate.js";
+import { adjudicationKey } from "../src/family.js";
 import { phaseWorkflowScript } from "../src/orchestrate-templates.js";
 import type { Finding } from "../src/types.js";
 import type { VerifyItem } from "../src/verify.js";
@@ -315,6 +316,110 @@ describe("orchestrate — emitted workflow", () => {
   });
 });
 
+describe("orchestrate — families under an agent ceiling", () => {
+  // 494 synthetic code candidates — the cdtn-admin count that used to fan out to
+  // 62 agents at 8 per batch: 40 families of 3–21 members plus 0–n singletons.
+  function synthetic(): Finding[] {
+    const out: Finding[] = [];
+    let n = 0;
+    for (let fam = 0; out.length < 494; fam++) {
+      const size = fam < 40 ? 3 + ((fam * 7) % 19) : 1;
+      for (let k = 0; k < size && out.length < 494; k++) {
+        out.push({
+          id: `c${String(n++).padStart(4, "0")}`,
+          category: fam % 3 ? "taint" : "sast",
+          cwe: `CWE-${79 + (fam % 5)}`,
+          title: `shape ${fam}`,
+          severity: "high",
+          confidence: "low",
+          message: "m",
+          tool: "ultrasec",
+          status: "open",
+          sink: { file: `targets/app${fam % 4}/src/f${k}.ts`, line: 1 + k, kind: fam % 2 ? "sql" : "html" },
+        });
+      }
+    }
+    return out;
+  }
+
+  it("494 candidates → at most MAX_AGENTS agents, no family split, every id exactly once", () => {
+    const all = synthetic();
+    const byId = new Map(all.map((f) => [f.id, f]));
+    const ph: PhaseInfo = { name: "adjudicate", ready: true, worklist: "/run/findings.json", items: all.length, ids: all.map((f) => f.id), prerequisite: "" };
+    const plan = planPhase(ph, byId);
+    expect(MAX_AGENTS).toBe(12);
+    expect(plan.batches.length).toBeLessThanOrEqual(MAX_AGENTS);
+    expect(plan.batches.length).toBe(MAX_AGENTS); // 494 / 8 would be 62
+    const flat = plan.batches.flat(2);
+    expect(flat.length).toBe(all.length);
+    expect(new Set(flat).size).toBe(all.length);
+    // A family's members all land in ONE batch.
+    const batchOf = new Map<string, number>();
+    plan.batches.forEach((b, i) => {
+      for (const id of b.flat()) batchOf.set(id, i);
+    });
+    const byKey = new Map<string, Set<number>>();
+    for (const f of all) {
+      const k = adjudicationKey(f);
+      byKey.set(k, (byKey.get(k) ?? new Set()).add(batchOf.get(f.id)!));
+    }
+    for (const batches of byKey.values()) expect(batches.size).toBe(1);
+  });
+
+  it("a small worklist keeps the old floor: one agent per BATCH_SIZE items", () => {
+    const groups = Array.from({ length: 20 }, (_, i) => [`x${i}`]);
+    expect(packFamilies(groups).length).toBe(Math.ceil(20 / BATCH_SIZE));
+    expect(packFamilies([])).toEqual([]);
+    // a family bigger than a batch is never split
+    expect(packFamilies([Array.from({ length: 30 }, (_, i) => `f${i}`), ["a"], ["b"]]).some((b) => b.flat().length >= 30)).toBe(true);
+  });
+
+  it("each agent's prompt carries its items as compact JSON lines — no bare ITEMS=, no worklist path, --brief", async () => {
+    const run = await makeRun({ scan: true, extraOpen: 4, verify: true });
+    writeFileSync(join(run, "CONTEXT.md"), "# Ctx\n\n## Trust model\nAdmins only behind SSO.\n\n## Purpose\nLong prose nobody needs per agent.\n");
+    orchestrateRun(run, ENGINE);
+    for (const phase of ["adjudicate", "verify"]) {
+      const src = readWf(run, phase);
+      const items = JSON.parse(src.match(/^const ITEMS = (.+)$/m)![1]!) as string[];
+      const batches = JSON.parse(src.match(/const BATCHES = (\[.*?\])\n/s)![1]!) as string[][];
+      expect(items.length).toBe(batches.length);
+      for (const [i, text] of items.entries()) {
+        expect(text).not.toContain("ITEMS=");
+        expect(text).not.toContain(join(run, "VERIFY.todo.json"));
+        expect(text).not.toContain(join(run, "findings.json"));
+        for (const id of batches[i]!) expect(text).toContain(`{"id":"${id}"`);
+        // the answer slots are not evidence
+        expect(text).not.toContain('"verdict":null');
+      }
+      const code = src.split("\n").filter((l) => !l.trim().startsWith("//"));
+      const from = code.findIndex((l) => l.startsWith("function contract"));
+      const contract = code.slice(from, code.indexOf("}", from) + 1).join("\n");
+      expect(contract).not.toContain("WORKLIST");
+      expect(contract).toContain("--brief --no-context");
+      // CONTEXT.md once per agent, compacted to the verdict-bearing sections
+      const ctx = JSON.parse(src.match(/^const CONTEXT = (.+)$/m)![1]!) as string;
+      expect(ctx).toContain("Admins only behind SSO.");
+      expect(ctx).not.toContain("Long prose");
+    }
+    const analyzer = readFileSync(join(run, ".work", "orchestration", "agents", "analyzer.md"), "utf8");
+    expect(analyzer).toContain("--brief --no-context");
+    expect(analyzer).not.toMatch(/Worklist: /);
+    const skeptic = readFileSync(join(run, ".work", "orchestration", "agents", "skeptic.md"), "utf8");
+    expect(skeptic).not.toMatch(/Open every cited/);
+    expect(skeptic).toContain("brocard");
+  });
+
+  it("`dossier a,b` prints one family packet; an unknown member is refused", async () => {
+    const run = await makeRun({ scan: true });
+    const ids = findings(run).map((f) => f.id);
+    const r = await engineCaptured("dossier", `${ids[0]},${ids[1]}`, "--run", run, "--brief", "--no-context");
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("## Other members (1)");
+    expect(r.out.split("## How to verify").length - 1).toBe(1);
+    expect(await engine("dossier", `${ids[0]},nope0000`, "--run", run)).toBe(2);
+  });
+});
+
 describe("orchestrate — contracts & runbook", () => {
   it("every emitted contract carries the one-writer footer and returns structured output", async () => {
     const run = await fullRun();
@@ -490,6 +595,23 @@ describe("orchestrate — emitted fragments fold back through the real --apply (
     writeFileSync(fragment, JSON.stringify({ [key]: [{ id, verdict: "refuted", note: "guard at [src/server.js:1]" }] }));
     expect(await engine(...argv)).toBe(0);
     expect(findings(run).find((f) => f.id === id)!.status).toBe("dismissed");
+  });
+
+  it("the verdict schema carries `brocard`, and a refutation's brocard survives the fold", async () => {
+    const run = await makeRun({ scan: true });
+    expect(orchestrateRun(run, ENGINE, { phase: "adjudicate" }).exitCode).toBe(0);
+    const src = readWf(run, "adjudicate");
+    const schema = JSON.parse(src.match(/^const SCHEMA = (.+)$/m)![1]!) as {
+      properties: { verdicts: { items: { properties: Record<string, { enum?: string[] }> } } };
+    };
+    expect(schema.properties.verdicts.items.properties.brocard!.enum).toContain("outside-usage");
+    const { argv, fragment, key, batches } = emittedFold(run, "adjudicate");
+    const id = batches[0]![0]!;
+    writeFileSync(fragment, JSON.stringify({ [key]: [{ id, verdict: "refuted", note: "admin-only [src/server.js:1]", brocard: "outside-usage" }] }));
+    expect(await engine(...argv)).toBe(0);
+    const f = findings(run).find((x) => x.id === id)!;
+    expect(f.status).toBe("dismissed");
+    expect(f.brocard).toBe("outside-usage");
   });
 
   it("revalidate: a schema-shaped {verdicts:[...]} fragment dismisses a fixed finding (the loop can close)", async () => {

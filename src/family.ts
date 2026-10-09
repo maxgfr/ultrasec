@@ -133,3 +133,39 @@ export function familyCount(f: Family): string {
 export function collapsedCount(grouped: Grouped): number {
   return grouped.families.reduce((n, f) => n + f.members.length - 1, 0);
 }
+
+// ── Families for a FAN-OUT ──────────────────────────────────────────────────
+//
+// The same grouping, cut for a different reader: an adjudicating subagent, not
+// a report reader. The key drops the stage notes (an open candidate has none,
+// and a fan-out is about candidates nobody has argued yet) and adds what makes
+// two candidates ONE judgment before anyone has read them — the same class of
+// bug (category, CWE), the same operation (sink kind) under the same title, in
+// the same component. A noise-by-construction class is a judgment of its own:
+// "every one of these is a test-only path" is decided once per component.
+//
+// Packing a family whole into one agent is what lets that agent read the first
+// member in depth and the rest for their location only. Still one verdict per
+// id: nothing here travels from one member to another.
+
+/** The key a fan-out packs on. */
+export function adjudicationKey(f: Finding): string {
+  const at = locationOf(f);
+  const root = at ? pathRoot(at) : UNPLACED + f.id;
+  if (f.noise) return ["noise", f.noise, root].join(KEY_SEP);
+  return [f.category, f.cwe ?? "", f.sink?.kind ?? "", f.title, root].join(KEY_SEP);
+}
+
+/** Group ids by `adjudicationKey`, preserving first-seen order (families and
+ *  members alike). An id the lookup does not know is its own family. */
+export function adjudicationFamilies(ids: readonly string[], lookup: (id: string) => Finding | undefined): string[][] {
+  const byKey = new Map<string, string[]>();
+  for (const id of ids) {
+    const f = lookup(id);
+    const key = f ? adjudicationKey(f) : UNPLACED + id;
+    const list = byKey.get(key);
+    if (list) list.push(id);
+    else byKey.set(key, [id]);
+  }
+  return [...byKey.values()];
+}

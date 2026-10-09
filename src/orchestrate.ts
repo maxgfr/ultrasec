@@ -5,8 +5,10 @@ import { agentContracts, phaseWorkflowScript, runbookMd } from "./orchestrate-te
 import type { RevalidateItem } from "./revalidate.js";
 import { ADJUDICATION_SURFACE, inSurface, type SurfaceFilter } from "./surface.js";
 import type { Finding } from "./types.js";
-import type { VerifyItem } from "./verify.js";
+import { verifyItemOf, type VerifyItem } from "./verify.js";
 import { workPath } from "./runlayout.js";
+import { adjudicationFamilies } from "./family.js";
+import { compactContextDoc, loadContextDoc } from "./context.js";
 
 // ---------------------------------------------------------------------------
 // `ultrasec orchestrate` — emit the run's multi-agent orchestration from its
@@ -22,8 +24,17 @@ import { workPath } from "./runlayout.js";
 // invocation WRITES a `VERIFY.todo.<i>.json` into the run dir and re-derives
 // its slice from findings.json at call time — a write, and a drift risk if the
 // dossier moves between emit and dispatch. So orchestrate batches the ids of
-// the ONE emitted `VERIFY.todo.json` instead (8 per agent, baked in at emit
-// time): subagents stay read-only and the worklist stays the source of truth.
+// the ONE emitted `VERIFY.todo.json` instead (baked in at emit time):
+// subagents stay read-only and the worklist stays the source of truth.
+//
+// Batching is by FAMILY, under a ceiling on agents. Fixed batches of 8 sent 62
+// agents at 494 code candidates on a real monorepo, each re-reading CONTEXT.md
+// and re-opening the worklist; most batches held members of the same few
+// families, decided eight times over. A family now travels whole to one agent,
+// which reads its first member in depth and the rest for their location, and
+// the batch size grows with the worklist so the agent count never passes
+// MAX_AGENTS. The items themselves are baked into the prompt as compact JSON
+// lines — no agent opens a shared worklist.
 // ---------------------------------------------------------------------------
 
 export const PHASES = ["adjudicate", "verify", "revalidate", "investigate"] as const;
@@ -31,8 +42,41 @@ export type PhaseName = (typeof PHASES)[number];
 
 /** Small worklists don't amortize a fan-out — orchestrate says so and nudges --eco. */
 export const SMALL_WORKLIST = 3;
-/** One subagent per batch of at most this many worklist items. */
+/** The floor of a batch: below MAX_AGENTS × BATCH_SIZE items, one agent per
+ *  BATCH_SIZE items, as before. */
 export const BATCH_SIZE = 8;
+/** The ceiling on agents per phase. Past it the batches grow instead. */
+export const MAX_AGENTS = 12;
+
+/**
+ * Pack whole groups (families) into at most `maxAgents` batches — each batch
+ * a list of its groups, so the prompt can still say where a family starts.
+ *
+ * The batch count is what fixed batches of `minBatch` would give, capped at
+ * `maxAgents`; groups are then placed largest first into the lightest batch
+ * (ties: the earlier group, the earlier batch), so the load stays balanced and
+ * no group is ever split. Within a batch, groups keep their input order, and
+ * batches are ordered by their first group — deterministic for a given input.
+ */
+export function packFamilies(groups: readonly string[][], maxAgents = MAX_AGENTS, minBatch = BATCH_SIZE): string[][][] {
+  const live = groups.map((g, i) => ({ g, i })).filter((x) => x.g.length > 0);
+  const total = live.reduce((n, x) => n + x.g.length, 0);
+  if (!total) return [];
+  const k = Math.max(1, Math.min(maxAgents, Math.ceil(total / minBatch), live.length));
+  const bins = Array.from({ length: k }, () => ({ load: 0, members: [] as { g: string[]; i: number }[] }));
+  const bySize = live.slice().sort((a, b) => b.g.length - a.g.length || a.i - b.i);
+  for (const x of bySize) {
+    let best = bins[0]!;
+    for (const b of bins) if (b.load < best.load) best = b;
+    best.load += x.g.length;
+    best.members.push(x);
+  }
+  return bins
+    .filter((b) => b.members.length)
+    .map((b) => b.members.sort((a, c) => a.i - c.i))
+    .sort((a, b) => a[0]!.i - b[0]!.i)
+    .map((m) => m.map((x) => x.g));
+}
 
 export interface PhaseInfo {
   name: PhaseName;
@@ -139,6 +183,56 @@ export function listPhases(runDir: string, engineAbs: string, surface: SurfaceFi
   ];
 }
 
+/** What one phase's workflow carries: its batches, families kept whole, and
+ *  the compact JSON line each item is handed to its agent as. */
+export interface BatchPlan {
+  batches: string[][][];
+  lines: Record<string, string>;
+}
+
+/** Fields a worklist row carries EMPTY for the adjudicator to fill. Not
+ *  evidence, so a prompt line leaves them out; a filled one is kept. */
+const ANSWER_FIELDS = new Set(["verdict", "note", "brocard", "fixedIn"]);
+
+/** One item as the single JSON line its agent reads. */
+export function compactLine(item: object): string {
+  return JSON.stringify(item, (k, v) => (ANSWER_FIELDS.has(k) && (v === null || v === "") ? undefined : v));
+}
+
+function readArray<T>(path: string): T[] {
+  try {
+    const v = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The batch plan of a ready phase: the items as compact lines, the finding
+ * phases grouped into families (`adjudicationKey`), packed under MAX_AGENTS.
+ * An item the source no longer holds still gets a line — its bare id — so the
+ * agent's "skip it and say so" applies rather than a silent drop.
+ */
+export function planPhase(ph: PhaseInfo, findingsById: ReadonlyMap<string, Finding>): BatchPlan {
+  const lines: Record<string, string> = {};
+  let groups: string[][];
+  if (ph.name === "investigate") {
+    const regions = new Map(readArray<InvestigateRegion>(ph.worklist).map((r) => [String(r.region), r]));
+    for (const id of ph.ids) lines[id] = compactLine(regions.get(id) ?? { region: id });
+    groups = ph.ids.map((id) => [id]);
+  } else {
+    const rows = ph.name === "adjudicate" ? new Map<string, object>() : new Map(readArray<{ id: string }>(ph.worklist).map((r) => [String(r.id), r as object]));
+    for (const id of ph.ids) {
+      const f = findingsById.get(id);
+      const row = ph.name === "adjudicate" ? (f ? verifyItemOf(f) : undefined) : rows.get(id);
+      lines[id] = compactLine(row ?? { id });
+    }
+    groups = adjudicationFamilies(ph.ids, (id) => findingsById.get(id));
+  }
+  return { batches: packFamilies(groups), lines };
+}
+
 export interface OrchestrateOptions {
   /** Emit only this phase (exit 2 if its worklist does not exist yet). */
   phase?: string;
@@ -218,6 +312,12 @@ export function orchestrateRun(runDir: string, engineAbs: string, opts: Orchestr
     written.push(p);
   }
 
+  // CONTEXT.md once per agent, compacted to what bears on a verdict — not once
+  // per `dossier` call, which is what eight reprints per agent used to cost.
+  const doc = loadContextDoc(run);
+  const context = doc ? (compactContextDoc(doc) ?? doc) : undefined;
+  const findingsById = new Map(readArray<Finding>(join(run, "findings.json")).map((f) => [f.id, f]));
+
   if (!opts.eco) {
     for (const ph of selected) {
       if (ph.items === 0) {
@@ -228,7 +328,7 @@ export function orchestrateRun(runDir: string, engineAbs: string, opts: Orchestr
         notices.push(`phase "${ph.name}": only ${ph.items} item(s) — the sequential --eco path is equivalent and cheaper.`);
       }
       const p = join(orchDir, `${ph.name}.workflow.mjs`);
-      writeFileSync(p, phaseWorkflowScript(ph, run, engineAbs, BATCH_SIZE));
+      writeFileSync(p, phaseWorkflowScript(ph, run, engineAbs, BATCH_SIZE, { plan: planPhase(ph, findingsById), context }));
       written.push(p);
     }
   }
