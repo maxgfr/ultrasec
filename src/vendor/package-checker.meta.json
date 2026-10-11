@@ -1,9 +1,9 @@
 {
-  "tag": "v1.11.78",
-  "scriptVersion": "1.11.78",
+  "tag": "v1.11.80",
+  "scriptVersion": "1.11.80",
   "sha256": {
-    "package-checker.sh": "fb69f4f738babd660dc933a950476154a506e35ed321a6c04f438c04ffc917e7",
-    "package-checker-script.ts": "0e9a14da09095b9a1171f47ab768a34666e42f663176d06f50ff265f5eadeb4c"
+    "package-checker.sh": "50b94acf51b8c40f19444a38dab95f4708162e490b5951e3d17eb3a70e9f85c7",
+    "package-checker-script.ts": "9ae43344bb6f49e637ee79ae65c76b9a2df9f67a15fac7ca9bb0c5084438a9c2"
   },
-  "syncedAt": "2026-10-10T11:12:18.435Z"
+  "syncedAt": "2026-10-11T11:25:47.864Z"
 }
