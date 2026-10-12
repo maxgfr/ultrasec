@@ -4,16 +4,29 @@
 # Package Vulnerability Checker
 # Analyzes package.json and lockfiles to detect vulnerable packages from custom data sources
 
-if [ "${BASH_VERSINFO[0]}" -lt 4 ]; then
-    printf '%s\n' 'Error: package-checker requires Bash 4 or newer (macOS: brew install bash).' >&2
-    exit 1
-fi
+# Plain POSIX syntax up to the version check, so `sh script.sh` gets this
+# message instead of a parse error.
+case "${BASH_VERSION:-}" in
+    ""|[0-3].*)
+        printf '%s\n' 'Error: package-checker requires Bash 4 or newer (macOS: brew install bash).' >&2
+        exit 2 ;;
+esac
 set -e
+
+# Exit codes: 0 = no vulnerable package, 1 = vulnerable packages found,
+# EXIT_ERROR = the scan could not run or complete (bad usage, unreadable or
+# empty data, unexpected failure). CI treats any non-zero code as a failure.
+EXIT_ERROR=2
+
+# Byte-wise string comparison and character classes: version ordering
+# ([[ a < b ]]), awk ranges and sort must not depend on the user's locale
+# (5.0.0-beta1 vs 5.0.0-RC1 orders differently under fr_FR and C).
+export LC_ALL=C
 
 # Version - automatically updated by release workflow
 # Last release: https://github.com/maxgfr/package-checker.sh/releases
 # NOTE: this exact 'VERSION="..."' format is sed-matched by .releaserc.json — do not reformat.
-VERSION="1.11.80"
+VERSION="1.13.0"
 
 # Default configuration
 CONFIG_FILE=".package-checker.config.json"
@@ -25,12 +38,10 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Global variables
-VULN_DATA=""
 DATA_SOURCES=()
 LOADED_SOURCE_COUNT=0
 FOUND_VULNERABLE=0
 VULNERABLE_PACKAGES=()
-CSV_COLUMNS=()
 
 # Pre-built vulnerability lookup tables (for O(1) lookup)
 declare -A VULN_EXACT_LOOKUP      # VULN_EXACT_LOOKUP[package]="ver1|ver2|..."
@@ -42,10 +53,9 @@ declare -A VULN_METADATA_SOURCE   # VULN_METADATA_SOURCE[package@version OR pack
 declare -A VULN_ADVISORIES        # VULN_ADVISORIES[package@version]="sev;ghsa;cve;src||sev;ghsa;cve;src" (all matching advisories)
 declare -A VULN_METADATA_FIX      # VULN_METADATA_FIX[package:range]="fix_version" (upper bound from range)
 declare -A VULN_RECORDS           # lookup key -> newline-separated advisory records
-VULN_LOOKUP_BUILT=false
 
 # Configuration defaults (can be overridden by config file)
-CONFIG_IGNORE_PATHS=("node_modules" ".yarn" ".git")
+CONFIG_IGNORE_PATHS=("node_modules" ".yarn" ".git" "vendor")
 CONFIG_DEPENDENCY_TYPES=("dependencies" "devDependencies" "optionalDependencies")
 CONFIG_ECOSYSTEMS=""  # optional feed-loading override from config (options.ecosystems)
 
@@ -58,11 +68,22 @@ KNOWN_LOCKFILE_ALIASES=""    # space-separated unique alias list (validation + h
 
 # Ecosystems detected in the scanned project (eco -> 1); drives default-feed loading
 declare -A DETECTED_ECOSYSTEMS
+
+# govulncheck call analysis of Go findings (--go-reachability)
+declare -A VULN_REACHABILITY      # VULN_REACHABILITY[dir|golang:module@version]="called|not called"
+
+# CycloneDX SBOMs given with --sbom (path -> 1), scanned as project inventories
+declare -A SBOM_FILES
 # Syntax validation for JSON inputs; scan-time code must not require jq.
 # Stream tokens through a small grammar stack. Repeated indexing into a growing
 # whole-document string becomes quadratic with some awk implementations.
 json_is_valid() {
-    printf '%s\n' "$1" | LC_ALL=C awk '
+    printf '%s\n' "$1" | json_is_valid_file /dev/stdin
+}
+
+# Same check on a file, read directly by awk (no copy into a shell variable).
+json_is_valid_file() {
+    LC_ALL=C awk '
     function take_value() {
         if (state[depth] != "value" && state[depth] != "value-or-end") return 0
         state[depth] = depth ? "comma-or-end" : "done"
@@ -120,6 +141,8 @@ json_is_valid() {
         return 1
     }
     BEGIN { depth = 0; state[0] = "value" }
+    # A UTF-8 byte order mark is an encoding marker, not JSON.
+    NR == 1 && substr($0, 1, 3) == "\357\273\277" { $0 = substr($0, 4) }
     {
         # Most pretty-printed lockfile records contain short, unescaped tokens.
         # Consume whole strings/numbers there, keeping the bounded byte path for
@@ -155,7 +178,7 @@ json_is_valid() {
         if (!character("\n")) { invalid = 1; exit }
     }
     END { exit (invalid || quoted || depth || !finish_token() || state[0] != "done") }
-    '
+    ' "$1"
 }
 # ============================================================================
 # Pure Bash JSON Parser Functions (no jq dependency)
@@ -266,68 +289,6 @@ json_array_get() {
     fi
 }
 
-# Get all keys from a JSON object
-# Usage: json_keys "$json"
-json_keys() {
-    local json="$1"
-    # Return only the top-level keys (children of the root object).
-    # Use an awk-based parser that respects strings, escapes and nesting depth.
-    echo "$json" | tr '\n' ' ' | awk '
-    {
-        s=$0
-        depth=0
-        in_str=0
-        prev=""
-        key=""
-        collecting=0
-        for(i=1;i<=length(s);i++){
-            c=substr(s,i,1)
-            if(in_str){
-                if(c=="\"" && prev!="\\"){
-                    in_str=0
-                    # look ahead for next non-space char
-                    j=i+1
-                    nextc=""
-                    while(j<=length(s)){
-                        nc=substr(s,j,1)
-                        if(nc ~ /[[:space:]]/){ j++; continue }
-                        nextc=nc
-                        break
-                    }
-                    if(nextc==":" && depth==1){ print key }
-                    collecting=0
-                    key=""
-                } else {
-                    if(collecting==1) key = key c
-                }
-            } else {
-                if(c=="\""){
-                    in_str=1
-                    collecting=1
-                    key=""
-                } else if(c=="{"){
-                    depth++
-                } else if(c=="}"){
-                    depth--
-                }
-            }
-            prev=c
-        }
-    }' | sort -u
-}
-
-# Check if JSON object has a key
-# Usage: json_has_key "$json" "key"
-json_has_key() {
-    local json="$1"
-    local key="$2"
-    local escaped_key=$(escape_regex "$key")
-    if echo "$json" | grep -qE "\"$escaped_key\"[[:space:]]*:"; then
-        return 0
-    fi
-    return 1
-}
-
 # Get nested object value from JSON
 # Usage: json_get_object "$json" "key"
 json_get_object() {
@@ -394,161 +355,12 @@ json_get_array() {
         echo "$result"
     fi
 }
-
-# Iterate over array elements (outputs one element per line)
-# Usage: json_array_iterate "$json_array"
-json_array_iterate() {
-    local json="$1"
-    local len=$(json_array_length "$json")
-    local i=0
-    while [ $i -lt $len ]; do
-        local elem=$(json_array_get "$json" $i)
-        # Remove quotes from string elements
-        echo "$elem" | sed 's/^"//;s/"$//'
-        i=$((i + 1))
-    done
-}
-
-# Count keys in JSON object (object length)
-# OPTIMIZED: Uses fast pattern matching instead of full JSON parsing
-# Works for both compact and formatted JSON
-# Usage: json_object_length "$json"
-json_object_length() {
-    local json="$1"
-    # Fast method: count occurrences of "key": { pattern (with optional whitespace)
-    # This works for both compact JSON ("key":{) and formatted JSON ("key": {)
-    local count
-    count=$(echo "$json" | tr -d '\n\r\t' | grep -oE '"[^"]+"\s*:\s*\{' | wc -l | tr -d ' ')
-    echo "${count:-0}"
-}
-
-# Merge two JSON objects (simple merge, second overwrites first)
-# Usage: json_merge "$json1" "$json2"
-json_merge() {
-    # Merge two top-level JSON objects (both expected as object strings)
-    # - keys are merged
-    # - when a key exists in both, try to merge their versions and versions_range arrays
-    local json1="$1"
-    local json2="$2"
-
-    # Build a set of all top-level keys
-    local keys1=$(json_keys "$json1")
-    local keys2=$(json_keys "$json2")
-    local all_keys="$(printf '%s\n%s' "$keys1" "$keys2" | sort -u)"
-
-    local out="{"
-    local first=true
-
-    for key in $all_keys; do
-        [ -z "$key" ] && continue
-
-        # Extract object for this key from both inputs
-        local obj1=$(json_get_object "$json1" "$key")
-        local obj2=$(json_get_object "$json2" "$key")
-
-        # Normalize empty objects
-        [ -z "$obj1" ] && obj1='{}'
-        [ -z "$obj2" ] && obj2='{}'
-
-        local merged_obj=""
-
-        # If one of objects is empty, take the other
-        if [ "$obj1" = "{}" ] && [ "$obj2" = "{}" ]; then
-            merged_obj="{}"
-        elif [ "$obj1" = "{}" ]; then
-            merged_obj="$obj2"
-        elif [ "$obj2" = "{}" ]; then
-            merged_obj="$obj1"
-        else
-            # Merge versions and ranges from both objects into unique arrays
-            declare -A seen_versions
-            declare -A seen_ranges
-            local versions_list=()
-            local ranges_list=()
-
-            # Helper to add array items into set/array
-            add_items() {
-                local arr_json="$1"
-                local kind="$2" # version|range
-                # iterate elements
-                local len=$(json_array_length "$arr_json")
-                local i=0
-                while [ $i -lt $len ]; do
-                    local v=$(json_array_get "$arr_json" $i)
-                    # Strip surrounding quotes if present
-                    v=$(echo "$v" | sed 's/^"//;s/"$//')
-                    if [ -n "$v" ]; then
-                        if [ "$kind" = "version" ]; then
-                            if [ -z "${seen_versions[$v]+x}" ]; then
-                                seen_versions[$v]=1
-                                versions_list+=("$v")
-                            fi
-                        else
-                            if [ -z "${seen_ranges[$v]+x}" ]; then
-                                seen_ranges[$v]=1
-                                ranges_list+=("$v")
-                            fi
-                        fi
-                    fi
-                    i=$((i+1))
-                done
-            }
-
-            # Extract arrays from objects if present
-            local v1=$(json_get_array "$obj1" "versions")
-            local v2=$(json_get_array "$obj2" "versions")
-            local r1=$(json_get_array "$obj1" "versions_range")
-            local r2=$(json_get_array "$obj2" "versions_range")
-
-            add_items "$v1" "version"
-            add_items "$v2" "version"
-            add_items "$r1" "range"
-            add_items "$r2" "range"
-
-            # Build merged object JSON
-            merged_obj="{"
-            local has=false
-            if [ ${#versions_list[@]} -gt 0 ]; then
-                merged_obj+="\"versions\":["
-                local firstv=true
-                for vv in "${versions_list[@]}"; do
-                    if [ "$firstv" = false ]; then merged_obj+=","; fi
-                    firstv=false
-                    merged_obj+="\"${vv}\""
-                done
-                merged_obj+="]"
-                has=true
-            fi
-            if [ ${#ranges_list[@]} -gt 0 ]; then
-                if [ "$has" = true ]; then merged_obj+=","; fi
-                merged_obj+="\"versions_range\":["
-                local firstr=true
-                for rr in "${ranges_list[@]}"; do
-                    if [ "$firstr" = false ]; then merged_obj+=","; fi
-                    firstr=false
-                    merged_obj+="\"${rr}\""
-                done
-                merged_obj+="]"
-            fi
-            merged_obj+="}"
-        fi
-
-        # Append to output
-        if [ "$first" = true ]; then
-            out+="\"${key}\":${merged_obj}"
-            first=false
-        else
-            out+=",\"${key}\":${merged_obj}"
-        fi
-    done
-
-    out+="}"
-    echo "$out"
-}
 # Put structural JSON delimiters on separate records without changing strings.
 # Line-oriented lockfile readers can then handle compact or pretty JSON alike.
 json_structural_lines() {
     awk '
+    # A UTF-8 byte order mark is an encoding marker, not JSON.
+    NR == 1 && substr($0, 1, 3) == "\357\273\277" { $0 = substr($0, 4) }
     function flush() {
         if (buffer ~ /[^[:space:]]/) print buffer
         buffer = ""
@@ -609,7 +421,8 @@ json_structural_lines() {
 show_version() {
     echo "package-checker.sh version $VERSION"
     echo ""
-    echo "A tool to check Node.js projects for vulnerable packages against custom data sources."
+    echo "Scan project dependencies (npm, PyPI, Go, Maven, Cargo, RubyGems, Composer, NuGet,"
+    echo "Pub, Hex, Swift, GitHub Actions) for known vulnerable versions."
     echo "Repository: https://github.com/maxgfr/package-checker.sh"
     exit 0
 }
@@ -619,7 +432,9 @@ show_help() {
     cat << EOF
 Usage: $0 [PATH] [OPTIONS]
 
-A tool to check Node.js projects for vulnerable packages against custom data sources.
+Scan project dependencies (npm, PyPI, Go, Maven, Cargo, RubyGems, Composer, NuGet,
+Pub, Hex, Swift, GitHub Actions) for known vulnerable versions, using the built-in
+GHSA/OSV feeds or your own data sources.
 
 ARGUMENTS:
     PATH                    Directory to scan (default: current directory)
@@ -631,19 +446,23 @@ OPTIONS:
     --help-ai doc           Output the full AI guide (docs/ai-guide.md)
     -v, --version           Show version information
     -s, --source SOURCE     Data source path or URL (can be used multiple times)
-    --default-source-ghsa   Use default GHSA source (auto-detect from brew, ./data/, /app/data/, or GitHub)
-    --default-source-osv    Use default OSV source (auto-detect from brew, ./data/, /app/data/, or GitHub)
+    --default-source-ghsa   Use default GHSA source (script dir, brew, /app/data/, ./data/, then GitHub)
+    --default-source-osv    Use default OSV source (script dir, brew, /app/data/, ./data/, then GitHub)
     --default-source-ghsa-osv        Use both default GHSA and OSV sources (recommended)
-    -f, --format FORMAT     Data format: json, csv, purl, sarif, sbom-cyclonedx, or trivy-json (default: json)
-    -c, --config FILE       Path to configuration file (default: .package-checker.config.json)
-    --no-config             Skip loading configuration file
-    --csv-columns COLS      CSV columns specification (e.g., "1,2" or "name,versions")
+    -f, --format FORMAT     Format of the preceding -s source: json, csv, purl, sarif,
+                            sbom-cyclonedx or trivy-json (default: auto-detected from
+                            the file extension, json when unknown)
+    -c, --config FILE       Path to configuration file (default: .package-checker.config.json);
+                            its options always apply, its sources only when no source
+                            is given on the command line
+    --no-config             Skip the default configuration file
+    --csv-columns COLS      CSV columns of the preceding -s source (e.g., "1,2" or "name,versions")
     --package-name NAME     Check vulnerability for a specific package name
     --package-version VER   Check specific version (requires --package-name)
     --ecosystem ECO         Ecosystem for --package-name (default: npm). One of:
                             npm, pypi, golang, maven, cargo, gem, composer, nuget, pub, hex, swift, githubactions
-    --export-json FILE      Export vulnerability results to JSON file (default: vulnerabilities.json)
-    --export-csv FILE       Export vulnerability results to CSV file (default: vulnerabilities.csv)
+    --export-json [FILE]    Export results to JSON (FILE optional, default: vulnerabilities.json)
+    --export-csv [FILE]     Export results to CSV (FILE optional, default: vulnerabilities.csv)
     --github-org ORG        GitHub organization to fetch package.json files from
     --github-repo REPO      GitHub repository to fetch package.json files from (format: owner/repo)
     --github-token TOKEN    GitHub personal access token (or use GITHUB_TOKEN env var)
@@ -667,10 +486,22 @@ OPTIONS:
                             maven, nuget, dart, hex, swift, actions) or purl types
                             (npm, pypi, golang, cargo, githubactions, ...).
                             Example: --ecosystems npm
+    --sbom FILE             Also scan the components of a CycloneDX JSON SBOM, like a
+                            lockfile (can be used multiple times). Use it for Maven
+                            transitive dependencies, which pom.xml does not list:
+                            mvn org.cyclonedx:cyclonedx-maven-plugin:makeAggregateBom
+    --go-reachability       Annotate each Go finding "called" or "not called" with
+                            govulncheck, when it is installed (one run per go.mod).
+                            The exit code does not change.
+
+EXIT CODES:
+    0   No vulnerable package found
+    1   Vulnerable packages found
+    2   Error: invalid usage, unreadable or empty data source, failed scan
 
 EXAMPLES:
     # Scan current directory with default sources (recommended)
-    $0 --default-source
+    $0 --default-source-ghsa-osv
 
     # Scan specific directory
     $0 ./my-project --default-source-osv
@@ -679,8 +510,9 @@ EXAMPLES:
     # Use configuration file
     $0 --config .package-checker.config.json
 
-    # Use custom source
+    # Use custom source (-f/--csv-columns qualify the -s right before them)
     $0 --source https://example.com/vulns.json
+    $0 --source ./vulns.csv -f csv --csv-columns "name,versions"
 
     # GitHub organization scan
     $0 --github-org myorg --github-token ghp_xxxx --default-source-ghsa-osv
@@ -694,6 +526,9 @@ EXAMPLES:
     # Fetch feeds for specific ecosystems only
     $0 --fetch-osv pypi,golang
     $0 --fetch-ghsa cargo
+
+    # Scan a Maven project with its transitive dependencies
+    $0 --sbom target/bom.json --default-source-ghsa-osv
 
     # Scan only lockfiles in specific directory
     $0 ./subfolder --only-lockfiles --lockfile-types yarn,npm
@@ -742,10 +577,12 @@ JSON format (object with package names as keys):
   }
 }
 
-CSV format (default: package,version):
+CSV format (default columns: package,version; the first line is a header
+unless its version field looks like a version or a range):
+name,versions
 package-name,1.0.0
 package-name,2.0.0
-another-package,3.0.0
+another-package,">=3.0.0 <3.2.1"
 
 CSV format with custom columns:
 name,versions,sources
@@ -805,8 +642,7 @@ resolve_ai_doc() {
     # 5. Fetch from GitHub
     local url="${GITHUB_RAW_BASE}/${file_path}"
     local content
-    content=$(curl -fsSL "$url" 2>/dev/null)
-    if [ $? -eq 0 ] && [ -n "$content" ]; then
+    if content=$(curl -fsSL "$url" 2>/dev/null) && [ -n "$content" ]; then
         echo "$content"
         return 0
     fi
@@ -826,8 +662,7 @@ show_ai_help() {
             echo -e "${YELLOW}Source: ${GITHUB_RAW_BASE}/prompt.md${NC}"
             echo ""
             local content
-            content=$(resolve_ai_doc "prompt.md")
-            if [ $? -eq 0 ]; then
+            if content=$(resolve_ai_doc "prompt.md"); then
                 echo "$content"
             else
                 echo -e "${RED}❌ Error: Could not load prompt.md${NC}"
@@ -835,6 +670,7 @@ show_ai_help() {
                 echo "Try one of:"
                 echo "  - Clone the repo and run locally"
                 echo "  - curl -fsSL ${GITHUB_RAW_BASE}/prompt.md"
+                exit "$EXIT_ERROR"
             fi
             ;;
         doc)
@@ -844,8 +680,7 @@ show_ai_help() {
             echo -e "${YELLOW}Source: ${GITHUB_RAW_BASE}/docs/ai-guide.md${NC}"
             echo ""
             local content
-            content=$(resolve_ai_doc "docs/ai-guide.md")
-            if [ $? -eq 0 ]; then
+            if content=$(resolve_ai_doc "docs/ai-guide.md"); then
                 echo "$content"
             else
                 echo -e "${RED}❌ Error: Could not load docs/ai-guide.md${NC}"
@@ -853,6 +688,7 @@ show_ai_help() {
                 echo "Try one of:"
                 echo "  - Clone the repo and run locally"
                 echo "  - curl -fsSL ${GITHUB_RAW_BASE}/docs/ai-guide.md"
+                exit "$EXIT_ERROR"
             fi
             ;;
         *)
@@ -885,11 +721,38 @@ EOF
     exit 0
 }
 
-# Check that curl is installed
+# Check that the required tools are installed (default: curl, used to
+# download remote sources). Feed generation also needs jq and friends.
 check_dependencies() {
-    if ! command -v curl &> /dev/null; then
-        echo "❌ Error: 'curl' must be installed to run this script"
-        exit 1
+    local tool
+    [ $# -gt 0 ] || set -- curl
+    for tool in "$@"; do
+        if ! command -v "$tool" &> /dev/null; then
+            echo "❌ Error: '$tool' must be installed to run this command"
+            exit "$EXIT_ERROR"
+        fi
+    done
+}
+
+# Temporary files removed when the script exits, whatever the exit path.
+PC_TEMP_FILES=()
+PC_CLEANUP_TRAP=false
+pc_cleanup_temp_files() {
+    [ ${#PC_TEMP_FILES[@]} -eq 0 ] || rm -f -- "${PC_TEMP_FILES[@]}"
+}
+# Register a temp file for cleanup. The EXIT trap is installed once and keeps
+# any EXIT trap already set (it runs after the cleanup).
+register_temp_file() {
+    PC_TEMP_FILES+=("$1")
+    [ "$PC_CLEANUP_TRAP" = true ] && return 0
+    PC_CLEANUP_TRAP=true
+    local previous
+    previous=$(trap -p EXIT)
+    if [ -n "$previous" ]; then
+        eval "set -- $previous"   # trap -- 'command' EXIT
+        trap "pc_cleanup_temp_files; $3" EXIT
+    else
+        trap pc_cleanup_temp_files EXIT
     fi
 }
 
@@ -903,53 +766,70 @@ GITHUB_RATE_LIMIT_DELAY=2
 CREATE_GITHUB_ISSUE=false
 CREATE_SINGLE_ISSUE=false
 
-# Make a GitHub API request with automatic retry on rate limit
+# Make a GitHub API request with automatic retry on rate limit. A 403/429
+# rate-limit answer waits until the time GitHub gives (Retry-After or
+# x-ratelimit-reset), capped by GITHUB_RATE_LIMIT_MAX_WAIT seconds.
+GITHUB_RATE_LIMIT_MAX_WAIT="${GITHUB_RATE_LIMIT_MAX_WAIT:-900}"
 github_request() {
     local url="$1"
     local max_retries=3
-    local retry_delay=60
     local attempt=1
-    
+    local response http_code headers wait_time value
+
     while [ $attempt -le $max_retries ]; do
-        local response
-        local http_code
-        
-        if ! response=$(curl -sS --connect-timeout 10 --max-time 60 -w "\n%{http_code}" \
+        headers=$(mktemp) || return 1
+        register_temp_file "$headers"
+        if ! response=$(curl -sS --connect-timeout 10 --max-time 60 -D "$headers" -w "\n%{http_code}" \
             ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
             -H "Accept: application/vnd.github.v3+json" \
             -H "User-Agent: package-checker-script" \
             "$url"); then
+            rm -f -- "$headers"
             echo "Error: Unable to reach GitHub API" >&2
             return 1
         fi
-        
+
         http_code="${response##*$'\n'}"
         response="${response%$'\n'*}"
-        
+
         if [ "$http_code" = "200" ]; then
+            rm -f -- "$headers"
             echo "$response"
             return 0
         fi
-        
+
         # Handle rate limiting (403 or 429)
-        if [ "$http_code" = "403" ] || [ "$http_code" = "429" ]; then
-            if [ $attempt -lt $max_retries ]; then
-                # Check for Retry-After header or rate limit reset time
-                local wait_time=$retry_delay
-                if [ "$http_code" = 429 ] || [[ "$response" == *"rate limit"* ]]; then
-                    echo -e "${YELLOW}⚠️  Rate limit hit, waiting ${wait_time}s before retry ($attempt/$max_retries)...${NC}" >&2
-                    sleep $wait_time
-                    attempt=$((attempt + 1))
-                    continue
+        if { [ "$http_code" = 429 ] || { [ "$http_code" = 403 ] &&
+            { [[ "$response" == *"rate limit"* ]] || grep -qi '^x-ratelimit-remaining:[[:space:]]*0' "$headers"; }; }; } &&
+            [ $attempt -lt $max_retries ]; then
+            wait_time=60
+            value=$(awk 'tolower($1) == "retry-after:" { gsub(/\r/, "", $2); print $2 }' "$headers")
+            if [[ "$value" =~ ^[0-9]+$ ]]; then
+                wait_time=$value
+            else
+                value=$(awk 'tolower($1) == "x-ratelimit-reset:" { gsub(/\r/, "", $2); print $2 }' "$headers")
+                if [[ "$value" =~ ^[0-9]+$ ]]; then
+                    wait_time=$(( value - $(date +%s) + 1 ))
+                    [ "$wait_time" -ge 1 ] || wait_time=1
                 fi
             fi
+            rm -f -- "$headers"
+            if [ "$wait_time" -gt "$GITHUB_RATE_LIMIT_MAX_WAIT" ]; then
+                echo -e "${RED}❌ GitHub rate limit resets in ${wait_time}s (more than ${GITHUB_RATE_LIMIT_MAX_WAIT}s); giving up${NC}" >&2
+                return 1
+            fi
+            echo -e "${YELLOW}⚠️  Rate limit hit, waiting ${wait_time}s before retry ($attempt/$max_retries)...${NC}" >&2
+            sleep "$wait_time"
+            attempt=$((attempt + 1))
+            continue
         fi
-        
+        rm -f -- "$headers"
+
         # Non-retryable error or max retries reached
         echo -e "${RED}❌ GitHub API error ($http_code): $response${NC}" >&2
         return 1
     done
-    
+
     return 1
 }
 
@@ -1010,13 +890,22 @@ search_package_json_in_repo_tree() {
     
     echo -e "   ${BLUE}Fetching repository tree...${NC}"
     
-    # Get the default branch first
+    # Get the default branch first, then pin its current commit: the tree
+    # and every file then come from the same snapshot, even if the branch
+    # moves while files are downloaded.
     local repo_info
     repo_info=$(github_request "https://api.github.com/repos/${repo_full_name}") || return 1
-    local default_branch=$(json_get_value "$repo_info" "default_branch")
-    
+    local default_branch ref branch_info
+    default_branch=$(json_get_value "$repo_info" "default_branch")
+    ref="$default_branch"
+    if branch_info=$(github_request "https://api.github.com/repos/${repo_full_name}/branches/${default_branch}"); then
+        local commit_sha
+        commit_sha=$(json_get_value "$branch_info" "sha")
+        [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] && ref="$commit_sha"
+    fi
+
     # Get the full tree recursively
-    local tree_url="https://api.github.com/repos/${repo_full_name}/git/trees/${default_branch}?recursive=1"
+    local tree_url="https://api.github.com/repos/${repo_full_name}/git/trees/${ref}?recursive=1"
     local tree_response
     tree_response=$(github_request "$tree_url") || return 1
     if [[ "$tree_response" =~ \"truncated\"[[:space:]]*:[[:space:]]*true ]]; then
@@ -1050,15 +939,23 @@ search_package_json_in_repo_tree() {
     local lock_count=$(echo "$target_files" | grep -v "package.json" | grep -c "." || true)
     echo "   Found $pkg_count package.json file(s) and $lock_count lockfile(s)"
     
-    # Create repo directory
+    # Start from an empty repo directory, so files deleted upstream since a
+    # previous fetch are not scanned again. Only a directory this tool
+    # created (it holds the marker file) is cleared: a pre-existing folder of
+    # the same name, such as a local workspace, is never deleted.
     local repo_dir="${GITHUB_OUTPUT_DIR}/${repo_name}"
+    local marker=".package-checker-fetch"
+    if [ -n "$repo_name" ] && [ "$repo_name" != . ] && [ "$repo_name" != .. ] && [ -f "$repo_dir/$marker" ]; then
+        rm -rf -- "$repo_dir"
+    fi
     mkdir -p "$repo_dir"
-    
+    printf '%s\n' "$repo_full_name" > "$repo_dir/$marker"
+
     # Fetch each file
     while IFS= read -r file_path; do
         [ -z "$file_path" ] && continue
-        
-        local raw_url="https://raw.githubusercontent.com/${repo_full_name}/${default_branch}/${file_path}"
+
+        local raw_url="https://raw.githubusercontent.com/${repo_full_name}/${ref}/${file_path}"
         local file_content
         file_content=$(curl -fsSL --connect-timeout 10 --max-time 60 \
             ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
@@ -1067,106 +964,18 @@ search_package_json_in_repo_tree() {
         
         # Save the file
         local full_path="${repo_dir}/${file_path}"
-        local dir=$(dirname "$full_path")
+        local dir="${full_path%/*}"
         mkdir -p "$dir"
         
         printf '%s\n' "$file_content" > "$full_path" || return 1
         
-        local file_name=$(basename "$file_path")
+        local file_name="${file_path##*/}"
         if [ "$file_name" = "package.json" ]; then
             echo -e "   ${GREEN}✓ Saved: ${repo_name}/${file_path}${NC}"
         else
             echo -e "   ${BLUE}✓ Saved: ${repo_name}/${file_path}${NC}"
         fi
     done <<< "$target_files"
-}
-
-# Search for package.json and lockfiles in a repository using Search API (requires token)
-search_package_json_in_repo() {
-    local repo_full_name="$1"
-    local repo_name="$2"
-    
-    echo -e "   ${BLUE}Searching for package.json and lockfiles...${NC}"
-    
-    # Search for multiple file types (derived from the ecosystem registry)
-    local all_files=""
-    local search_terms=() _term
-    for _term in $(ecosystem_scan_filenames); do
-        search_terms+=("$_term")
-    done
-    
-    for term in "${search_terms[@]}"; do
-        local search_url="https://api.github.com/search/code?q=filename:${term}+repo:${repo_full_name}"
-        local search_results
-        
-        search_results=$(github_request "$search_url") 2>/dev/null || continue
-        
-        # OPTIMIZED: Extract path and url pairs using grep/sed instead of slow JSON parsing
-        # Format: path|url (one per line)
-        local file_pairs
-        file_pairs=$(echo "$search_results" | tr '\n' ' ' | \
-            grep -oE '"path"[[:space:]]*:[[:space:]]*"[^"]*"[^}]*"url"[[:space:]]*:[[:space:]]*"[^"]*"' | \
-            sed 's/"path"[[:space:]]*:[[:space:]]*"//;s/"[^}]*"url"[[:space:]]*:[[:space:]]*"/|/;s/"$//')
-        
-        if [ -n "$file_pairs" ]; then
-            if [ -z "$all_files" ]; then
-                all_files="$file_pairs"
-            else
-                all_files="$all_files"$'\n'"$file_pairs"
-            fi
-        fi
-        
-        sleep 1  # Rate limiting between searches
-    done
-    
-    if [ -z "$all_files" ]; then
-        echo "   ✗ No package.json or lockfiles found"
-        return 0
-    fi
-    
-    # Remove duplicates and count
-    all_files=$(echo "$all_files" | sort -u)
-    local count=$(echo "$all_files" | wc -l | tr -d ' ')
-    echo "   Found $count file(s)"
-    
-    # Create repo directory
-    local repo_dir="${GITHUB_OUTPUT_DIR}/${repo_name}"
-    mkdir -p "$repo_dir"
-    
-    # Fetch each file
-    while IFS='|' read -r file_path file_url; do
-        [ -z "$file_path" ] && continue
-        
-        # Get file content
-        local content_response
-        content_response=$(github_request "$file_url") || continue
-        
-        local download_url=$(json_get_value "$content_response" "download_url")
-        
-        if [ -n "$download_url" ] && [ "$download_url" != "null" ]; then
-            local file_content
-            file_content=$(curl -fsSL --connect-timeout 10 --max-time 60 \
-                ${GITHUB_TOKEN:+-H "Authorization: Bearer $GITHUB_TOKEN"} \
-                -H "User-Agent: package-checker-script" \
-                "$download_url") || return 1
-            
-            # Save the file
-            local full_path="${repo_dir}/${file_path}"
-            local dir=$(dirname "$full_path")
-            mkdir -p "$dir"
-            
-            echo "$file_content" > "$full_path"
-            
-            local file_name=$(basename "$file_path")
-            if [ "$file_name" = "package.json" ]; then
-                echo -e "   ${GREEN}✓ Saved: ${repo_name}/${file_path}${NC}"
-            else
-                echo -e "   ${BLUE}✓ Saved: ${repo_name}/${file_path}${NC}"
-            fi
-        fi
-        
-        sleep 1  # Rate limiting
-    done <<< "$all_files"
 }
 
 # Create a GitHub issue with proper JSON escaping using jq
@@ -1242,7 +1051,7 @@ fetch_github_packages() {
         return 1
     fi
     
-    # Token is required for organization (uses Search API)
+    # Token is required for organization scanning (repository listing)
     if [ -n "$GITHUB_ORG" ] && [ -z "$GITHUB_TOKEN" ]; then
         echo -e "${RED}❌ Error: GitHub token is required for organization scanning${NC}"
         echo "   Set GITHUB_TOKEN environment variable or use --github-token option"
@@ -1289,8 +1098,11 @@ fetch_github_packages() {
             
             echo -e "${BLUE}Processing: $repo_name${NC}"
             
-            # Use Tree API instead of Search API (much higher rate limit)
-            search_package_json_in_repo_tree "$repo_full_name" "$repo_name" || return 1
+            # Use Tree API instead of Search API (much higher rate limit). An
+            # empty or unreadable repository must not stop the organization scan.
+            if ! search_package_json_in_repo_tree "$repo_full_name" "$repo_name"; then
+                echo -e "${YELLOW}⚠️  Skipping $repo_full_name: unable to fetch its files${NC}"
+            fi
             
             sleep "$GITHUB_RATE_LIMIT_DELAY"
         done <<< "$repos"
@@ -1303,226 +1115,331 @@ fetch_github_packages() {
     echo ""
 }
 
-# Check if a version string is a range (contains operators like >=, <=, >, <)
-is_version_range() {
-    local version="$1"
-    if [[ "$version" =~ (>=|<=|>|<) ]]; then
-        return 0  # true - it's a range
+# ============================================================================
+# GitHub issue reports (--create-multiple-issues / --create-single-issue)
+#
+# Findings (VULNERABLE_PACKAGES: "file|eco|name@version") are grouped by target
+# repository, then by "eco:name", then by version with the files using it.
+# Every advisory of a version comes from VULN_ADVISORIES (merged GHSA/OSV
+# records "severity;ghsa;cve;source;fix;id"). An issue whose exact title is
+# already open in the repository is not created again.
+# ============================================================================
+ISSUE_REPO_LIST=()
+declare -A ISSUE_REPO_PKGS=()       # repo -> newline list of eco:name
+declare -A ISSUE_PKG_VERSIONS=()    # repo|eco:name -> newline list of versions
+declare -A ISSUE_VERSION_FILES=()   # repo|eco:name|version -> newline list of files
+
+# Repository (owner/repo) an issue about FILE belongs to: --github-repo, or in
+# organization mode the repository whose fetched copy holds the file
+# ($GITHUB_OUTPUT_DIR/<repo>/...). Sets ISSUE_REPO ("" when unknown).
+issue_repository_for() {
+    ISSUE_REPO=""
+    if [ -n "$GITHUB_REPO" ]; then
+        ISSUE_REPO="${GITHUB_REPO%/}"
+        return
     fi
-    return 1  # false - it's an exact version
+    [ -n "$GITHUB_ORG" ] || return 0
+    local file="${1#./}" dir="${GITHUB_OUTPUT_DIR%/}/"
+    dir="${dir#./}"
+    [[ "$file" == "$dir"*/* ]] || return 0
+    file="${file#"$dir"}"
+    ISSUE_REPO="$GITHUB_ORG/${file%%/*}"
 }
 
-# FAST CSV Parser using awk - parses entire CSV in a single pass
-# Handles: quoted fields, multi-line values, Windows line endings, version ranges
-# Output: JSON object with versions and versions_range arrays
-parse_csv_to_json() {
-    local csv_data="$1"
-    local col1="${CSV_COLUMNS[0]:-}"
-    local col2="${CSV_COLUMNS[1]:-}"
-    
-    # Use awk for fast single-pass parsing
-    echo "$csv_data" | tr -d '\r' | awk -v col1="$col1" -v col2="$col2" '
-    BEGIN {
-        FS = ","
-        pkg_col = 1
-        ver_col = 2
-        header_done = 0
-        pkg_count = 0
-    }
-    
-    # Function to check if a string is a version range
-    function is_range(v) {
-        return (v ~ /[><~^*]/ || index(v, "||") > 0)
-    }
-    
-    # Function to trim whitespace and quotes
-    function trim(s) {
-        gsub(/^[[:space:]"]+/, "", s)
-        gsub(/[[:space:]"]+$/, "", s)
-        return s
-    }
-    
-    # Function to parse a CSV line handling quoted fields
-    # Returns fields in array f[], returns field count
-    function parse_csv_line(line, f,    i, j, n, in_quote, field, c) {
-        n = 1
-        field = ""
-        in_quote = 0
-        
-        for (i = 1; i <= length(line); i++) {
-            c = substr(line, i, 1)
-            
-            if (c == "\"") {
-                # Check for escaped quote (double quote)
-                if (in_quote && substr(line, i+1, 1) == "\"") {
-                    field = field "\""
-                    i++
-                } else {
-                    in_quote = !in_quote
-                }
-            } else if (c == "," && !in_quote) {
-                f[n] = trim(field)
-                n++
-                field = ""
-            } else {
-                field = field c
-            }
-        }
-        # Last field
-        f[n] = trim(field)
-        return n
-    }
-    
-    # Handle multi-line quoted values by accumulating lines
-    {
-        # Accumulate line if we are in the middle of a quoted field
-        if (pending_line != "") {
-            current_line = pending_line " " $0
-            pending_line = ""
-        } else {
-            current_line = $0
-        }
-        
-        # Count quotes to check if line is complete
-        quote_count = gsub(/"/, "\"", current_line)
-        if (quote_count % 2 == 1) {
-            # Odd number of quotes - line continues
-            pending_line = current_line
-            next
-        }
-        
-        # Skip empty lines
-        if (current_line == "") next
-        
-        # Parse the line
-        field_count = parse_csv_line(current_line, fields)
-        
-        # First non-empty line is header
-        if (!header_done) {
-            header_done = 1
-            
-            # Try to find column indices from header names if column names specified
-            if (col1 ~ /^[0-9]+$/ && col2 ~ /^[0-9]+$/) {
-                pkg_col = int(col1)
-                ver_col = int(col2)
-            } else if (col1 != "" && col2 != "") {
-                for (i = 1; i <= field_count; i++) {
-                    lower_field = tolower(fields[i])
-                    lower_col1 = tolower(col1)
-                    lower_col2 = tolower(col2)
-                    
-                    if (lower_field == lower_col1) pkg_col = i
-                    if (lower_field == lower_col2) ver_col = i
-                }
-            }
-            
-            # Skip header row
-            next
-        }
-        
-        # Extract package and version
-        pkg = fields[pkg_col]
-        ver = fields[ver_col]
-        
-        # Skip invalid entries
-        if (pkg == "" || ver == "") next
-        if (tolower(pkg) == "package" || tolower(pkg) == "name") next
-        
-        # Track package order (first occurrence)
-        if (!(pkg in pkg_seen)) {
-            pkg_seen[pkg] = 1
-            pkg_order[++pkg_count] = pkg
-        }
-        
-        # Categorize as version or range
-        if (is_range(ver)) {
-            if (pkg in pkg_ranges) {
-                pkg_ranges[pkg] = pkg_ranges[pkg] ",\"" ver "\""
-            } else {
-                pkg_ranges[pkg] = "\"" ver "\""
-            }
-        } else {
-            if (pkg in pkg_versions) {
-                pkg_versions[pkg] = pkg_versions[pkg] ",\"" ver "\""
-            } else {
-                pkg_versions[pkg] = "\"" ver "\""
-            }
-        }
-    }
-    
-    END {
-        # Build JSON output
-        printf "{"
-        first = 1
-        
-        for (i = 1; i <= pkg_count; i++) {
-            pkg = pkg_order[i]
-            
-            if (!first) printf ","
-            first = 0
-            
-            printf "\"%s\":{", pkg
-            has_content = 0
-            
-            if (pkg in pkg_versions) {
-                printf "\"versions\":[%s]", pkg_versions[pkg]
-                has_content = 1
-            }
-            
-            if (pkg in pkg_ranges) {
-                if (has_content) printf ","
-                printf "\"versions_range\":[%s]", pkg_ranges[pkg]
-            }
-            
-            printf "}"
-        }
-        
-        printf "}"
-    }
-    '
+group_findings_for_issues() {
+    ISSUE_REPO_LIST=()
+    ISSUE_REPO_PKGS=()
+    ISSUE_PKG_VERSIONS=()
+    ISSUE_VERSION_FILES=()
+    local vuln file eco pv pkg ver pk vk unknown=0
+    for vuln in "${VULNERABLE_PACKAGES[@]}"; do
+        IFS='|' read -r file eco pv <<< "$vuln"
+        issue_repository_for "$file"
+        if [ -z "$ISSUE_REPO" ]; then
+            unknown=$((unknown + 1))
+            continue
+        fi
+        pkg="$eco:${pv%@*}" ver="${pv##*@}"
+        pk="$ISSUE_REPO|$pkg" vk="$ISSUE_REPO|$pkg|$ver"
+        if [ -z "${ISSUE_REPO_PKGS[$ISSUE_REPO]+x}" ]; then
+            ISSUE_REPO_LIST+=("$ISSUE_REPO")
+            ISSUE_REPO_PKGS["$ISSUE_REPO"]=""
+        fi
+        if [ -z "${ISSUE_PKG_VERSIONS[$pk]+x}" ]; then
+            ISSUE_REPO_PKGS["$ISSUE_REPO"]+="$pkg"$'\n'
+            ISSUE_PKG_VERSIONS["$pk"]=""
+        fi
+        if [ -z "${ISSUE_VERSION_FILES[$vk]+x}" ]; then
+            ISSUE_PKG_VERSIONS["$pk"]+="$ver"$'\n'
+            ISSUE_VERSION_FILES["$vk"]="$file"
+        else
+            case $'\n'"${ISSUE_VERSION_FILES[$vk]}"$'\n' in
+                *$'\n'"$file"$'\n'*) ;;
+                *) ISSUE_VERSION_FILES["$vk"]+=$'\n'"$file" ;;
+            esac
+        fi
+    done
+    if [ "$unknown" -gt 0 ]; then
+        echo -e "${YELLOW}⚠️  ${unknown} finding(s) not attributable to a repository were left out (use --github-repo or --github-org)${NC}"
+    fi
 }
 
-# FAST CSV Parser that generates lookup table eval commands directly
-# This bypasses the slow JSON intermediate step for large CSV files
-# Returns: bash eval commands to populate VULN_EXACT_LOOKUP and VULN_RANGE_LOOKUP
+# Distinct advisories of one package across its versions. Sets ADV_TOTAL,
+# ADV_MAX_RANK and ADV_SEV_COUNTS (index = severity rank, 0 = unknown).
+package_advisory_stats() {
+    local pkg="$1" versions="$2" ver advisories advisory key
+    local severity ghsa cve source fix id
+    local -A seen=()
+    ADV_TOTAL=0 ADV_MAX_RANK=0
+    ADV_SEV_COUNTS=(0 0 0 0 0)
+    while IFS= read -r ver; do
+        [ -n "$ver" ] || continue
+        advisories="${VULN_ADVISORIES[$pkg@$ver]:-}"
+        while [ -n "$advisories" ]; do
+            advisory="${advisories%%||*}"
+            if [ "$advisory" = "$advisories" ]; then advisories=""; else advisories="${advisories#*||}"; fi
+            IFS=';' read -r severity ghsa cve source fix id <<< "$advisory"
+            key="${ghsa:-${cve:-${id:-$advisory}}}"
+            [ -z "${seen[$key]+x}" ] || continue
+            seen["$key"]=1
+            severity_rank "$severity"
+            ADV_SEV_COUNTS[SEV_RANK]=$(( ADV_SEV_COUNTS[SEV_RANK] + 1 ))
+            ADV_TOTAL=$((ADV_TOTAL + 1))
+            [ "$SEV_RANK" -le "$ADV_MAX_RANK" ] || ADV_MAX_RANK=$SEV_RANK
+        done
+    done <<< "$versions"
+}
+
+# Severity rank -> SEV_LABEL / SEV_EMOJI.
+severity_label() {
+    case "$1" in
+        4) SEV_LABEL="CRITICAL" SEV_EMOJI="🔴" ;;
+        3) SEV_LABEL="HIGH" SEV_EMOJI="🟠" ;;
+        2) SEV_LABEL="MEDIUM" SEV_EMOJI="🟡" ;;
+        1) SEV_LABEL="LOW" SEV_EMOJI="🟢" ;;
+        *) SEV_LABEL="UNKNOWN" SEV_EMOJI="⚪" ;;
+    esac
+}
+
+# Markdown rows of the severity summary table.
+severity_summary_rows() {
+    local rank rows=""
+    for rank in 4 3 2 1 0; do
+        [ "${ADV_SEV_COUNTS[$rank]}" -gt 0 ] || continue
+        severity_label "$rank"
+        rows+="| ${SEV_EMOJI} ${SEV_LABEL,,} | ${ADV_SEV_COUNTS[$rank]} |"$'\n'
+    done
+    printf '%s' "$rows"
+}
+
+# Markdown table of the advisories of one package version.
+advisory_table() {
+    local advisories="$1" advisory severity ghsa cve source fix id link
+    printf '| Severity | Advisory | CVE | Source | Fixed in |\n'
+    printf '|----------|----------|-----|--------|----------|\n'
+    while [ -n "$advisories" ]; do
+        advisory="${advisories%%||*}"
+        if [ "$advisory" = "$advisories" ]; then advisories=""; else advisories="${advisories#*||}"; fi
+        IFS=';' read -r severity ghsa cve source fix id <<< "$advisory"
+        severity_rank "$severity"
+        severity_label "$SEV_RANK"
+        link="-"
+        if [ -n "$ghsa" ]; then link="[${ghsa}](https://github.com/advisories/${ghsa})"
+        elif [ -n "$id" ]; then link="[${id}](https://osv.dev/vulnerability/${id})"
+        fi
+        printf '| %s %s | %s | %s | %s | %s |\n' "$SEV_EMOJI" "${severity:-unknown}" "$link" \
+            "${cve:+[${cve}](https://nvd.nist.gov/vuln/detail/${cve})}" "${source:--}" "${fix:--}"
+    done
+}
+
+# Titles of the open issues of a repository (one per line), so a run does not
+# file the same report twice. Empty when they cannot be listed.
+open_issue_titles() {
+    local repo="$1" page response titles=""
+    for page in 1 2 3 4 5 6 7 8 9 10; do
+        response=$(github_request "https://api.github.com/repos/${repo}/issues?state=open&per_page=100&page=${page}" 2>/dev/null) || {
+            echo -e "${YELLOW}⚠️  Unable to list open issues of $repo: duplicates are not checked${NC}" >&2
+            break
+        }
+        titles+=$(printf '%s' "$response" | jq -r '.[] | select(.pull_request == null) | .title' 2>/dev/null)$'\n'
+        [ "$(printf '%s' "$response" | jq 'length' 2>/dev/null)" = 100 ] || break
+    done
+    printf '%s' "$titles"
+}
+
+# Create an issue unless one with the same title is open (titles in $4).
+create_issue_once() {
+    local repo="$1" title="$2" body="$3" open_titles="$4"
+    if printf '%s\n' "$open_titles" | grep -qxF -- "$title"; then
+        echo -e "${BLUE}ℹ️  Already open on ${repo}: ${title}${NC}"
+        return 2
+    fi
+    create_github_issue "$repo" "$title" "$body" "security,vulnerability,dependencies"
+}
+
+# Body of the issue about one package (eco:name) in one repository.
+package_issue_body() {
+    local repo="$1" pkg="$2" versions="$3"
+    local eco="${pkg%%:*}" name="${pkg#*:}" ver file body
+    body="## 🔒 Security Vulnerabilities in \`${name}\` (${eco})"$'\n\n'
+    body+="### 📊 Summary"$'\n\n'"| Metric | Count |"$'\n'"|--------|-------|"$'\n'
+    body+="| **Total Vulnerabilities** | ${ADV_TOTAL} |"$'\n'"$(severity_summary_rows)"$'\n\n'
+    body+="---"$'\n\n'"### 🔍 Vulnerability Details"$'\n\n'
+    while IFS= read -r ver; do
+        [ -n "$ver" ] || continue
+        body+="#### Version \`${ver}\`"$'\n\n'
+        body+="$(advisory_table "${VULN_ADVISORIES[$pkg@$ver]:-}")"$'\n\n'
+        body+="<details>"$'\n'"<summary>📁 Affected files</summary>"$'\n\n'
+        while IFS= read -r file; do
+            [ -n "$file" ] && body+="- \`${file}\`"$'\n'
+        done <<< "${ISSUE_VERSION_FILES[$repo|$pkg|$ver]}"
+        body+=$'\n'"</details>"$'\n\n'
+    done <<< "$versions"
+    body+="### ✅ Recommendations"$'\n\n'
+    body+="1. **Update the package** to the latest patched version:"$'\n'"   \`\`\`bash"$'\n'
+    body+="$(fix_commands_for_eco "$eco" "$name" "   ")"$'\n'"   \`\`\`"$'\n\n'
+    body+="2. **Check for breaking changes** before updating major versions"$'\n\n'
+    body+="3. **Run a security audit** after updating:"$'\n'"   \`\`\`bash"$'\n'
+    body+="   $(verify_command_for_eco "$eco")"$'\n'"   \`\`\`"$'\n\n'
+    body+="4. **Review the advisories** linked above for specific remediation steps"$'\n\n'
+    body+="---"$'\n\n'"*🤖 Generated by [package-checker.sh](https://github.com/maxgfr/package-checker.sh)*"
+    printf '%s' "$body"
+}
+
+# One issue per vulnerable package, in the repository that uses it.
+create_package_issues() {
+    local repo pkg versions title open_titles created=0 total=0 status
+    group_findings_for_issues
+    for repo in "${ISSUE_REPO_LIST[@]}"; do
+        open_titles=$(open_issue_titles "$repo")
+        while IFS= read -r pkg; do
+            [ -n "$pkg" ] || continue
+            total=$((total + 1))
+            versions="${ISSUE_PKG_VERSIONS[$repo|$pkg]}"
+            package_advisory_stats "$pkg" "$versions"
+            severity_label "$ADV_MAX_RANK"
+            title="${SEV_EMOJI} Security: ${ADV_TOTAL} vulnerabilit$([ "$ADV_TOTAL" -eq 1 ] && echo y || echo ies) in \`${pkg#*:}\`"
+            [ "${pkg%%:*}" = npm ] || title+=" (${pkg%%:*})"
+            [ "$ADV_MAX_RANK" -eq 0 ] || title+=" [${SEV_LABEL}]"
+            echo -e "${BLUE}📦 ${pkg#*:}${NC} (${ADV_TOTAL} vulnerability/ies) → ${repo}"
+            status=0
+            create_issue_once "$repo" "$title" "$(package_issue_body "$repo" "$pkg" "$versions")" "$open_titles" || status=$?
+            [ "$status" -ne 0 ] || created=$((created + 1))
+            sleep 1  # Rate limiting
+            echo ""
+        done <<< "${ISSUE_REPO_PKGS[$repo]}"
+    done
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "${GREEN}✅ Created ${created} issue(s) for ${total} package(s)${NC}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+}
+
+# One consolidated report per repository.
+create_consolidated_issues() {
+    local repo pkg versions ver file title body details ecos rank status
+    local total pkg_count open_titles
+    local -a counts
+    group_findings_for_issues
+    for repo in "${ISSUE_REPO_LIST[@]}"; do
+        total=0 pkg_count=0 details="" ecos=""
+        counts=(0 0 0 0 0)
+        local max_rank=0
+        while IFS= read -r pkg; do
+            [ -n "$pkg" ] || continue
+            pkg_count=$((pkg_count + 1))
+            versions="${ISSUE_PKG_VERSIONS[$repo|$pkg]}"
+            package_advisory_stats "$pkg" "$versions"
+            total=$((total + ADV_TOTAL))
+            for rank in 0 1 2 3 4; do counts[rank]=$(( counts[rank] + ADV_SEV_COUNTS[rank] )); done
+            [ "$ADV_MAX_RANK" -le "$max_rank" ] || max_rank=$ADV_MAX_RANK
+            case " $ecos " in *" ${pkg%%:*} "*) ;; *) ecos+=" ${pkg%%:*}" ;; esac
+            severity_label "$ADV_MAX_RANK"
+            details+="<details>"$'\n'"<summary>${SEV_EMOJI} <strong>${pkg#*:}</strong> (${pkg%%:*}, ${ADV_TOTAL} vulnerabilities)</summary>"$'\n\n'
+            while IFS= read -r ver; do
+                [ -n "$ver" ] || continue
+                details+="**Version \`${ver}\`**"$'\n\n'"$(advisory_table "${VULN_ADVISORIES[$pkg@$ver]:-}")"$'\n\n'
+                while IFS= read -r file; do
+                    [ -n "$file" ] && details+="- \`${file}\`"$'\n'
+                done <<< "${ISSUE_VERSION_FILES[$repo|$pkg|$ver]}"
+                details+=$'\n'
+            done <<< "$versions"
+            details+="</details>"$'\n\n'
+        done <<< "${ISSUE_REPO_PKGS[$repo]}"
+
+        severity_label "$max_rank"
+        title="${SEV_EMOJI} Security Report: ${total} vulnerabilities in ${pkg_count} packages [${SEV_LABEL}]"
+        ADV_SEV_COUNTS=("${counts[@]}")
+        body="## 🔒 Security Vulnerability Report"$'\n\n'
+        body+="This issue contains a consolidated report of all security vulnerabilities detected in this repository."$'\n\n'
+        body+="### 📊 Global Summary"$'\n\n'"| Metric | Count |"$'\n'"|--------|-------|"$'\n'
+        body+="| **Total Vulnerabilities** | ${total} |"$'\n'"| **Affected Packages** | ${pkg_count} |"$'\n'
+        body+="$(severity_summary_rows)"$'\n\n'"---"$'\n\n'"### 📦 Vulnerable Packages"$'\n\n'"$details"
+        body+="---"$'\n\n'"### ✅ Recommended Actions"$'\n\n'
+        body+="1. **Review each vulnerability** using the advisory links above."$'\n'
+        body+="2. **Update the affected packages** to their latest patched versions. Commands per detected ecosystem:"$'\n\n'
+        local eco
+        for eco in $ecos; do
+            body+="#### $(eco_display_name "$eco")"$'\n\n'"\`\`\`bash"$'\n'
+            body+="$(fix_commands_for_eco "$eco" "<package-name>")"$'\n'"\`\`\`"$'\n\n'
+            body+="Verify: \`$(verify_command_for_eco "$eco")\`"$'\n\n'
+        done
+        body+="---"$'\n\n'"*🤖 Generated by [package-checker.sh](https://github.com/maxgfr/package-checker.sh)*"
+
+        echo -e "${BLUE}Creating consolidated security report on ${repo}...${NC}"
+        open_titles=$(open_issue_titles "$repo")
+        status=0
+        create_issue_once "$repo" "$title" "$body" "$open_titles" || status=$?
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        case "$status" in
+            0) echo -e "${GREEN}✅ Created 1 consolidated issue with ${total} vulnerabilities${NC}" ;;
+            2) ;;
+            *) echo -e "${RED}❌ Failed to create consolidated issue${NC}" ;;
+        esac
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    done
+}
+# CSV source parser: generates lookup-table eval statements in a single awk
+# pass. Handles quoted fields, multi-line quoted values, Windows line endings
+# and version ranges. Args: FILE [COLUMNS], COLUMNS being "pkg,version" as
+# 1-based indexes ("1,2") or header names ("name,versions").
+#
+# The first line is a header when columns are given by name, or when its
+# version field does not look like a version or a range; a headerless file
+# therefore keeps its first row.
 parse_csv_to_lookup_eval() {
-    local csv_data="$1"
-    local col1="${CSV_COLUMNS[0]:-}"
-    local col2="${CSV_COLUMNS[1]:-}"
-    
-    # Use awk to parse CSV and generate eval commands directly
-    echo "$csv_data" | tr -d '\r' | awk -v col1="$col1" -v col2="$col2" '
+    local file="$1" columns="${2:-}"
+    local col1="${columns%%,*}" col2=""
+    [[ "$columns" == *,* ]] && col2="${columns#*,}" && col2="${col2%%,*}"
+    col1="${col1#"${col1%%[![:space:]]*}"}"; col1="${col1%"${col1##*[![:space:]]}"}"
+    col2="${col2#"${col2%%[![:space:]]*}"}"; col2="${col2%"${col2##*[![:space:]]}"}"
+
+    tr -d '\r' < "$file" | awk -v col1="$col1" -v col2="$col2" "$AWK_FEED_LIB"'
     BEGIN {
-        FS = ","
         pkg_col = 1
         ver_col = 2
-        header_done = 0
-        pkg_count = 0
+        by_name = (col1 != "" && col2 != "" && !(col1 ~ /^[0-9]+$/ && col2 ~ /^[0-9]+$/))
+        if (col1 ~ /^[0-9]+$/ && col2 ~ /^[0-9]+$/) {
+            pkg_col = int(col1)
+            ver_col = int(col2)
+        }
     }
-    
+
     function is_range(v) {
-        return (v ~ /[><~^*]/ || index(v, "||") > 0)
+        return (v ~ /[><=,~^*]/ || index(v, "||") > 0)
     }
-    
+
     function trim(s) {
         gsub(/^[[:space:]"]+/, "", s)
         gsub(/[[:space:]"]+$/, "", s)
         return s
     }
-    
-    function escape_sq(s) {
-        gsub(/'\''/, "'\''\\'\'''\''", s)
-        return s
-    }
-    
+
     function parse_csv_line(line, f,    i, n, in_quote, field, c) {
         n = 1
         field = ""
         in_quote = 0
-        
         for (i = 1; i <= length(line); i++) {
             c = substr(line, i, 1)
-            
             if (c == "\"") {
                 if (in_quote && substr(line, i+1, 1) == "\"") {
                     field = field "\""
@@ -1541,7 +1458,7 @@ parse_csv_to_lookup_eval() {
         f[n] = trim(field)
         return n
     }
-    
+
     {
         if (pending_line != "") {
             current_line = pending_line " " $0
@@ -1549,625 +1466,485 @@ parse_csv_to_lookup_eval() {
         } else {
             current_line = $0
         }
-        
+
+        # An odd number of quotes means the quoted field continues.
         quote_count = gsub(/"/, "\"", current_line)
         if (quote_count % 2 == 1) {
             pending_line = current_line
             next
         }
-        
+
         if (current_line == "") next
-        
+
         field_count = parse_csv_line(current_line, fields)
-        
-        if (!header_done) {
-            header_done = 1
-            
-            if (col1 ~ /^[0-9]+$/ && col2 ~ /^[0-9]+$/) {
-                pkg_col = int(col1)
-                ver_col = int(col2)
-            } else if (col1 != "" && col2 != "") {
+
+        if (!header_checked) {
+            header_checked = 1
+            if (by_name) {
                 for (i = 1; i <= field_count; i++) {
                     lower_field = tolower(fields[i])
                     if (lower_field == tolower(col1)) pkg_col = i
                     if (lower_field == tolower(col2)) ver_col = i
                 }
+                next
             }
-            next
+            if (fields[ver_col] !~ /^([<>=~^*]|[vV]?[0-9])/) next
         }
-        
+
         pkg = fields[pkg_col]
         ver = fields[ver_col]
-        
         if (pkg == "" || ver == "") next
-        if (tolower(pkg) == "package" || tolower(pkg) == "name") next
-        
-        if (!(pkg in pkg_seen)) {
-            pkg_seen[pkg] = 1
-            pkg_order[++pkg_count] = pkg
-        }
-        
-        if (is_range(ver)) {
-            if (pkg in pkg_ranges) {
-                pkg_ranges[pkg] = pkg_ranges[pkg] "\n" ver
-            } else {
-                pkg_ranges[pkg] = ver
-            }
-        } else {
-            if (pkg in pkg_versions) {
-                pkg_versions[pkg] = pkg_versions[pkg] "|" ver
-            } else {
-                pkg_versions[pkg] = ver
-            }
-        }
-    }
-    
-    END {
-        # OPTIMIZED: Output package count FIRST (allows read without grep)
-        printf "CSV_PKG_COUNT=%d\n", pkg_count
 
         # CSV carries no ecosystem info -> wildcard namespace "*:"
-        # Output eval commands that MERGE with existing data instead of overwriting
-        for (pkg in pkg_versions) {
-            nk = "*:" pkg
-            printf "VULN_EXACT_LOOKUP['\''%s'\'']+='\''|%s'\''\n", escape_sq(nk), escape_sq(pkg_versions[pkg])
-        }
-        for (pkg in pkg_ranges) {
-            nk = "*:" pkg
-            printf "VULN_RANGE_LOOKUP['\''%s'\'']+='\''%s\n'\''\n", escape_sq(nk), escape_sq(pkg_ranges[pkg])
-        }
+        add_entry("*:" pkg, ver, "", is_range(ver))
     }
+
+    END { emit_lookup() }
     '
 }
-
-# Alias for backward compatibility
-parse_csv_default() {
-    parse_csv_to_json "$1"
+# Awk helpers shared by every feed parser (purl, SARIF, CycloneDX, Trivy).
+# Prepended to each awk program so canonicalization cannot drift between them.
+#   escape_sq(s)            quote s for a single-quoted bash eval string
+#   canon_purl_name(e, n)   canonical package name for purl type e; MUST match
+#                           the feed emission (src/60-feeds.sh) and the lockfile
+#                           parsers (src/50-ecosystems/)
+#   purl_split(p)           split "pkg:type/name@version?q" into PURL_TYPE,
+#                           PURL_NAME (percent-decoded), PURL_VERSION and
+#                           PURL_QUERY; returns 0 when p is not a versioned purl
+#   add_entry / emit_lookup collect rows, then print the bash eval statements
+AWK_FEED_LIB='
+function escape_sq(s) {
+    gsub(/'\''/, "'\''\\'\'''\''", s)
+    return s
 }
+function canon_purl_name(eco, name,   lo, cnt, parts) {
+    if (eco == "pypi") {
+        # PEP 503: lowercase, collapse runs of - _ . to a single -
+        lo = tolower(name)
+        gsub(/[-_.]+/, "-", lo)
+        return lo
+    } else if (eco == "maven") {
+        # groupId/artifactId -> groupId:artifactId (last two path components)
+        if (index(name, ":") > 0) return name
+        cnt = split(name, parts, "/")
+        if (cnt >= 2) return parts[cnt-1] ":" parts[cnt]
+        return name
+    } else if (eco == "composer" || eco == "githubactions" || eco == "nuget") {
+        return tolower(name)
+    } else if (eco == "swift") {
+        lo = name
+        sub(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "", lo)
+        sub(/\/+$/, "", lo)
+        sub(/\.git$/, "", lo)
+        return tolower(lo)
+    }
+    # npm, golang, cargo, gem, pub, hex and unknown types: name as-is
+    return name
+}
+function purl_split(p,   main_part, q, te, at) {
+    PURL_TYPE = PURL_NAME = PURL_VERSION = PURL_QUERY = ""
+    if (substr(p, 1, 4) != "pkg:") return 0
+    te = index(p, "/")
+    if (te <= 5) return 0
+    main_part = p
+    q = index(p, "?")
+    # The query string may itself contain "@": split it off first.
+    if (q > 0) { main_part = substr(p, 1, q - 1); PURL_QUERY = substr(p, q + 1) }
+    PURL_TYPE = substr(main_part, 5, te - 5)
+    # Name/version split at the LAST "@": scoped names start with "@".
+    if (!match(main_part, /@[^@]*$/)) return 0
+    at = RSTART
+    if (at <= te + 1) return 0
+    PURL_NAME = substr(main_part, te + 1, at - te - 1)
+    PURL_VERSION = substr(main_part, at + 1)
+    if (index(main_part, "\"")) {
+        gsub(/"/, "", PURL_NAME)
+        gsub(/"/, "", PURL_VERSION)
+    }
+    if (index(PURL_NAME, "%")) {
+        gsub(/%40/, "@", PURL_NAME)
+        gsub(/%2[fF]/, "/", PURL_NAME)
+    }
+    return PURL_NAME != "" && PURL_VERSION != ""
+}
+# Register one advisory row. key = "eco:name", version = exact version or
+# range, record = "severity;ghsa;cve;source;fix;id" (id: the advisory id when
+# it is neither a GHSA nor a CVE, e.g. PYSEC-, GO-, RUSTSEC-, MAL-). Ranges are newline-separated
+# (they may contain "||"), exact versions "|"-separated. Every distinct record
+# is kept, even when two advisories share the same range.
+function add_entry(key, version, record, is_range,   meta_key, rk, vk) {
+    meta_key = key (is_range ? ":" : "@") version
+    rk = meta_key SUBSEP record
+    # A record without any metadata adds nothing to the default one.
+    if (record !~ /^;*$/ && !(rk in seen_records)) {
+        seen_records[rk] = 1
+        records[meta_key] = records[meta_key] record "\n"
+    }
+    vk = key SUBSEP version
+    if (vk in seen_versions) return
+    seen_versions[vk] = 1
+    if (!(key in seen_keys)) { seen_keys[key] = 1; key_count++ }
+    if (is_range) {
+        pkg_ranges[key] = (key in pkg_ranges) ? pkg_ranges[key] "\n" version : version
+    } else {
+        pkg_versions[key] = (key in pkg_versions) ? pkg_versions[key] "|" version : version
+    }
+}
+# Known fixed version of a single range: its exclusive upper bound. An
+# inclusive upper bound (<=) is still affected, and an OR-range is ambiguous.
+function range_fix(version) {
+    if (version !~ /\|\|/ && match(version, /<[0-9][^[:space:],]*/))
+        return substr(version, RSTART + 1, RLENGTH - 1)
+    return ""
+}
+# Print the counts first (FEED_PKG_COUNT: packages kept, FEED_RAW_COUNT:
+# entries read before pre-filtering), then the eval statements. Appends ("+=")
+# merge with tables filled by earlier sources; single quotes keep the data
+# literal through eval.
+function emit_lookup(   pkg, key) {
+    printf "FEED_PKG_COUNT=%d\nFEED_RAW_COUNT=%d\n", key_count, (raw_count != "" ? raw_count : key_count)
+    for (pkg in pkg_versions)
+        printf "VULN_EXACT_LOOKUP['\''%s'\'']+='\''|%s'\''\n", escape_sq(pkg), escape_sq(pkg_versions[pkg])
+    for (pkg in pkg_ranges)
+        printf "VULN_RANGE_LOOKUP['\''%s'\'']+='\''%s\n'\''\n", escape_sq(pkg), escape_sq(pkg_ranges[pkg])
+    for (key in records)
+        printf "VULN_RECORDS['\''%s'\'']+='\''%s'\''\n", escape_sq(key), escape_sq(records[key])
+}
+'
 
-# Parse PURL format to lookup tables
-# PURL format: pkg:type/namespace/name@version
+# Parse a PURL feed file into lookup-table eval statements.
+# Line format: pkg:type/namespace/name@version-or-range?severity=..&ghsa=..
 # Example: pkg:npm/lodash@4.17.21
 # Example with version range: pkg:npm/express@>=4.0.0 <4.17.0
+#
+# Pre-filtering: with PREFILTER_TOKENS_FILE set (see build_project_tokens), an
+# entry is kept only when the last segment of its name (after the last "/" or
+# ":"), lowercased with runs of - _ . collapsed to "-", is one of the project
+# tokens. That segment is part of every way a package is written in a
+# lockfile (npm scope/name, PEP 503 names, Maven group:artifact, Go module
+# paths, Swift repository URLs, NuGet ids...), so no relevant entry is lost
+# while a 300k-line feed shrinks to the few entries the project can match.
 parse_purl_to_lookup_eval() {
-    local raw_data="$1"
-
-    # OPTIMIZED: Use awk to parse PURL lines and generate eval commands
-    # Key optimizations:
-    # 1. Batch all versions/ranges per package before output (reduces eval overhead)
-    # 2. Output count first to avoid grep post-processing
-    # 3. Use printf for efficient output
-    printf '%s\n' "$raw_data" | awk '
-    function escape_sq(s) {
-        gsub(/'\''/, "'\''\\'\'''\''", s)
-        return s
+    local file="$1"
+    awk -v tokens_file="${PREFILTER_TOKENS_FILE:-}" "$AWK_FEED_LIB"'
+    BEGIN {
+        raw_count = 0
+        filtering = (tokens_file != "")
+        if (filtering) while ((getline t < tokens_file) > 0) wanted[t] = 1
     }
-
-    function parse_query_params(query_string, params) {
+    function parse_query_params(query_string, params,   n, i, pairs, eq) {
         delete params
         if (query_string == "") return
-
-        # Split by & to get individual parameters
         n = split(query_string, pairs, "&")
         for (i = 1; i <= n; i++) {
-            if (index(pairs[i], "=") > 0) {
-                split(pairs[i], kv, "=")
-                params[kv[1]] = kv[2]
-            }
+            eq = index(pairs[i], "=")
+            if (eq > 0) params[substr(pairs[i], 1, eq - 1)] = substr(pairs[i], eq + 1)
         }
     }
-
-    # Canonicalize a package name for a given purl type (ecosystem).
-    # "name" is the full path (already percent-decoded) between the first "/" and "@".
-    function canon_purl_name(eco, name,   lo, cnt, parts) {
-        if (eco == "pypi") {
-            # PEP 503: lowercase, collapse runs of - _ . to a single -
-            lo = tolower(name)
-            gsub(/[-_.]+/, "-", lo)
-            return lo
-        } else if (eco == "maven") {
-            # groupId/artifactId -> groupId:artifactId (last two path components)
-            if (index(name, ":") > 0) return name
-            cnt = split(name, parts, "/")
-            if (cnt >= 2) return parts[cnt-1] ":" parts[cnt]
-            return name
-        } else if (eco == "composer" || eco == "githubactions" || eco == "nuget") {
-            return tolower(name)
-        } else if (eco == "swift") {
-            lo = name
-            sub(/^https?:\/\//, "", lo)
-            sub(/\.git$/, "", lo)
-            return tolower(lo)
-        }
-        # npm, golang, cargo, gem, pub, hex and unknown types: name as-is
-        return name
-    }
-
-    BEGIN {
-        pkg_count = 0
-    }
-
-    # Skip empty lines and comments
-    /^[[:space:]]*$/ { next }
-    /^[[:space:]]*#/ { next }
 
     {
+        # Fast path for generated feeds: one bare purl per line. Anything else
+        # (indentation, CRLF, comments, blank lines) goes through a trim.
         line = $0
-        # Remove leading/trailing whitespace
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
-
-        # Parse PURL: pkg:type/namespace/name@version?params or pkg:type/name@version?params
-        if (match(line, /^pkg:[^\/]+\/(.+)@(.+)$/)) {
-            # Extract the purl type: text between "pkg:" and the first "/"
-            type_end = index(line, "/")
-            purl_type = substr(line, 5, type_end - 5)
-            if (type_end > 0) {
-                # Split the query string off FIRST — it may itself contain "@"
-                main_part = line
-                query_string = ""
-                query_pos = index(line, "?")
-                if (query_pos > 0) {
-                    main_part = substr(line, 1, query_pos - 1)
-                    query_string = substr(line, query_pos + 1)
-                }
-
-                # Split name/version at the LAST "@" of the pre-query part.
-                # Versions/ranges never contain "@"; scoped names start with "@".
-                at_pos = 0
-                for (scan_i = length(main_part); scan_i > type_end; scan_i--) {
-                    if (substr(main_part, scan_i, 1) == "@") { at_pos = scan_i; break }
-                }
-                if (at_pos > type_end) {
-                    # Package name is the FULL path (all components between the
-                    # first "/" and the last "@"), e.g. "@babel/traverse".
-                    path = substr(main_part, type_end + 1, at_pos - type_end - 1)
-                    # Version/range is everything after the last "@"
-                    version = substr(main_part, at_pos + 1)
-
-                    # Remove quotes if present
-                    gsub(/"/, "", path)
-                    gsub(/"/, "", version)
-
-                    # Percent-decode common PURL encodings (%40 -> @, %2F -> /)
-                    gsub(/%40/, "@", path)
-                    gsub(/%2[fF]/, "/", path)
-
-                    pkg_name = path
-
-                    # Namespaced lookup key: "eco:name" (eco = purl type, name canonicalized)
-                    canon_key = purl_type ":" canon_purl_name(purl_type, pkg_name)
-
-                    # Parse query parameters
-                    parse_query_params(query_string, params)
-
-                    if (pkg_name != "" && version != "") {
-                        # Detect if version is a range (contains space or operators)
-                        # But exclude ? from the check as it is now used for params
-                        is_range = (version ~ /[[:space:]]|>|<|\^|~|\*|\|\|/)
-
-                        # Create unique key for metadata, namespaced by ecosystem
-                        # For ranges: use eco:name:range to avoid collision when multiple advisories affect the same package
-                        # For exact versions: use eco:name@version
-                        if (is_range) {
-                            meta_key = canon_key ":" version
-                        } else {
-                            meta_key = canon_key "@" version
-                        }
-
-                        # Keep every distinct advisory, even when ranges are identical.
-                        # An inclusive upper bound is affected, not a known fixed version.
-                        fix = ""
-                        if (is_range && version !~ /\|\|/ && match(version, /<[0-9][^[:space:]]*/)) {
-                            fix = substr(version, RSTART + 1, RLENGTH - 1)
-                        }
-                        if ("fixed" in params) fix = params["fixed"]
-                        record = params["severity"] ";" params["ghsa"] ";" params["cve"] ";" params["source"] ";" fix
-                        record_key = meta_key SUBSEP record
-                        if (!(record_key in seen_records)) {
-                            seen_records[record_key] = 1
-                            records[meta_key] = records[meta_key] record "\n"
-                        }
-
-                        if (is_range) {
-                            # Version range (keyed by namespaced eco:name)
-                            if (canon_key in pkg_ranges) {
-                                pkg_ranges[canon_key] = pkg_ranges[canon_key] "\n" version
-                            } else {
-                                pkg_ranges[canon_key] = version
-                                pkg_count++
-                            }
-                        } else {
-                            # Exact version (keyed by namespaced eco:name)
-                            if (canon_key in pkg_versions) {
-                                pkg_versions[canon_key] = pkg_versions[canon_key] "|" version
-                            } else {
-                                pkg_versions[canon_key] = version
-                                pkg_count++
-                            }
-                        }
-                    }
-                }
-            }
+        last = substr(line, length(line))
+        if (substr(line, 1, 4) != "pkg:" || last == "\r" || last == " " || last == "\t") {
+            gsub(/^[[:space:]]+|[[:space:]\r]+$/, "", line)
+            if (substr(line, 1, 4) != "pkg:") next
         }
+        raw_count++
+        if (filtering) {
+            # Last segment of the name, without decoding the whole purl.
+            q = index(line, "?")
+            segment = q ? substr(line, 1, q - 1) : line
+            sub(/@[^@]*$/, "", segment)
+            if (index(segment, "%")) gsub(/%2[fF]/, "/", segment)
+            sub(/\/+$/, "", segment)
+            sub(/^.*[\/:]/, "", segment)
+            segment = tolower(segment)
+            gsub(/[-_.]+/, "-", segment)
+            if (!(segment in wanted)) next
+        }
+        if (!purl_split(line)) next
+        canon_key = PURL_TYPE ":" canon_purl_name(PURL_TYPE, PURL_NAME)
+        version = PURL_VERSION
+        parse_query_params(PURL_QUERY, params)
+
+        # Ranges contain operators, spaces, wildcards or OR-alternatives.
+        is_range = (version ~ /[[:space:]]|>|<|=|,|\^|~|\*|\|\|/)
+
+        fix = is_range ? range_fix(version) : ""
+        if ("fixed" in params) fix = params["fixed"]
+        record = params["severity"] ";" params["ghsa"] ";" params["cve"] ";" params["source"] ";" fix ";" params["id"]
+        add_entry(canon_key, version, record, is_range)
     }
 
-    END {
-        # OPTIMIZED: Output unique package count FIRST (allows read without grep)
-        delete unique_pkgs
-        for (pkg in pkg_versions) unique_pkgs[pkg] = 1
-        for (pkg in pkg_ranges) unique_pkgs[pkg] = 1
-        unique_count = 0
-        for (pkg in unique_pkgs) unique_count++
-        printf "PURL_PKG_COUNT=%d\n", unique_count
-
-        # Output eval commands for exact versions
-        for (pkg in pkg_versions) {
-            printf "VULN_EXACT_LOOKUP['\''%s'\'']+='\''|%s'\''\n", escape_sq(pkg), escape_sq(pkg_versions[pkg])
-        }
-        # Output eval commands for version ranges
-        for (pkg in pkg_ranges) {
-            printf "VULN_RANGE_LOOKUP['\''%s'\'']+='\''%s\n'\''\n", escape_sq(pkg), escape_sq(pkg_ranges[pkg])
-        }
-
-        # Single-quoted appends preserve literal data through eval, also on merge.
-        for (key in records) {
-            printf "VULN_RECORDS['\''%s'\'']+='\''%s'\''\n", escape_sq(key), escape_sq(records[key])
-        }
-    }
-    '
+    END { emit_lookup() }
+    ' "$file"
 }
+# JSON-shaped source importers: SARIF, CycloneDX SBOM, Trivy JSON and the
+# native JSON source format.
+#
+# Every importer reads json_structural_lines output (one JSON token group per
+# record), so pretty-printed and minified reports parse identically, and walks
+# it with the path tracker below. Each finding becomes an exact-version entry
+# plus an advisory record, through the same add_entry/emit_lookup helpers as
+# the purl parser (AWK_FEED_LIB in src/31-parsers-purl.sh).
 
-# Parse SARIF format to lookup tables
-# SARIF format: Static Analysis Results Interchange Format
-# Example: Generated by Trivy, Semgrep, etc.
+# Awk JSON path tracker over json_structural_lines records. jp_step(line)
+# classifies the record (JP_EVENT = open | close | scalar), keeps a stack of
+# container names ("#" for an array element) and exposes JP_PATH, e.g.
+# "/#/runs/#/results/#" inside a SARIF result. For a scalar, JP_KEY/JP_VAL hold
+# the key and the unquoted value (escapes such as \n stay literal). On close,
+# JP_PATH is the path of the container that just closed.
+AWK_JSON_PATH='
+function jp_step(line,   k, rest) {
+    gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+    JP_KEY = JP_VAL = ""
+    if (line == "}" || line == "]") {
+        JP_EVENT = "close"
+        JP_PATH = jp_path()
+        if (jp_depth > 0) jp_depth--
+        return
+    }
+    k = "#"
+    rest = line
+    if (match(line, /^"([^"\\]|\\.)*"[[:space:]]*:[[:space:]]*/)) {
+        k = substr(line, 1, RLENGTH)
+        sub(/"[[:space:]]*:[[:space:]]*$/, "", k)
+        k = substr(k, 2)
+        rest = substr(line, RLENGTH + 1)
+    }
+    if (rest == "{" || rest == "[") {
+        JP_EVENT = "open"
+        jp_stack[++jp_depth] = k
+        JP_PATH = jp_path()
+        return
+    }
+    JP_EVENT = "scalar"
+    JP_PATH = jp_path()
+    JP_KEY = k
+    if (rest ~ /^".*"$/) rest = substr(rest, 2, length(rest) - 2)
+    JP_VAL = rest
+}
+function jp_path(   i, p) {
+    p = ""
+    for (i = 1; i <= jp_depth; i++) p = p "/" jp_stack[i]
+    return p
+}
+# Advisory identifier -> ghsa/cve fields of a record.
+function id_fields(id) {
+    ID_GHSA = ID_CVE = ID_OTHER = ""
+    if (id ~ /^GHSA-/) ID_GHSA = id
+    else if (id ~ /^CVE-/) ID_CVE = id
+    else ID_OTHER = id
+}
+# Register a finding: namespaced key from a purl when available, else the
+# wildcard namespace "*:" (the report carries no ecosystem).
+function add_finding(purl, name, version, severity, id, source,   key) {
+    key = ""
+    if (purl != "" && purl_split(purl)) {
+        key = PURL_TYPE ":" canon_purl_name(PURL_TYPE, PURL_NAME)
+        if (version == "") version = PURL_VERSION
+    } else if (name != "") {
+        key = "*:" name
+    }
+    if (key == "" || version == "") return
+    id_fields(id)
+    add_entry(key, version, tolower(severity) ";" ID_GHSA ";" ID_CVE ";" source ";;" ID_OTHER, 0)
+}
+'
+
+# Parse a SARIF report (Trivy, Grype, ...). Each runs[].results[] entry is one
+# finding. The package comes from the Trivy-style message
+# ("Package: next\nInstalled Version: 16.0.3\n...") or, failing that, from a
+# location message "path: name@version" (split at the LAST "@" so scoped names
+# survive). ruleId carries the advisory identifier.
 parse_sarif_to_lookup_eval() {
-    local raw_data="$1"
-
-    # Use awk to parse SARIF JSON and extract vulnerabilities
-    echo "$raw_data" | awk '
-    function escape_sq(s) {
-        gsub(/'\''/, "'\''\\'\'''\''", s)
-        return s
+    json_structural_lines "$1" | awk "$AWK_FEED_LIB$AWK_JSON_PATH"'
+    function reset() { rule = level = pkg = ver = loc_pkg = loc_ver = sev = "" }
+    function field(text, label,   s) {
+        s = index(text, label)
+        if (s == 0) return ""
+        text = substr(text, s + length(label))
+        sub(/\\n.*/, "", text)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", text)
+        return text
     }
-
-    BEGIN {
-        pkg_count = 0
-        in_results = 0
-        in_result = 0
-        depth = 0
-        current_pkg = ""
-        current_version = ""
-    }
-
+    BEGIN { reset() }
     {
-        # Look for "results": [ array
-        if ($0 ~ /"results"[[:space:]]*:[[:space:]]*\[/) {
-            in_results = 1
-            next
-        }
-
-        if (in_results) {
-            # Track depth to find result objects
-            if ($0 ~ /\{/) depth++
-            if ($0 ~ /\}/) depth--
-
-            # Extract package name from message text
-            # Format: "text": "package-lock.json: next@16.0.4"
-            if ($0 ~ /"text"[[:space:]]*:/) {
-                text_line = $0
-                sub(/.*"text"[[:space:]]*:[[:space:]]*"/, "", text_line)
-                sub(/".*/, "", text_line)
-
-                # Check if it contains package@version pattern
-                if (text_line ~ /:[[:space:]]*[^:]+@[^[:space:]]+/) {
-                    # Extract package@version after the colon
-                    pkg_ver = text_line
-                    sub(/.*:[[:space:]]*/, "", pkg_ver)
-
-                    if (pkg_ver ~ /@/) {
-                        split(pkg_ver, parts, "@")
-                        if (parts[1] != "" && parts[2] != "") {
-                            if (!(parts[1] in pkg_versions)) {
-                                pkg_versions[parts[1]] = parts[2]
-                                pkg_count++
-                            } else {
-                                if (pkg_versions[parts[1]] !~ parts[2]) {
-                                    pkg_versions[parts[1]] = pkg_versions[parts[1]] "|" parts[2]
-                                }
-                            }
-                        }
-                    }
-                }
+        jp_step($0)
+        if (JP_EVENT == "scalar") {
+            if (JP_PATH ~ /\/results\/#$/ && JP_KEY == "ruleId") rule = JP_VAL
+            else if (JP_PATH ~ /\/results\/#$/ && JP_KEY == "level") level = JP_VAL
+            else if (JP_PATH ~ /\/results\/#\/message$/ && JP_KEY == "text") {
+                pkg = field(JP_VAL, "Package: ")
+                ver = field(JP_VAL, "Installed Version: ")
+                sev = field(JP_VAL, "Severity: ")
+            } else if (JP_PATH ~ /\/locations\/#\/(physicalLocation\/)?message$/ && JP_KEY == "text" && loc_pkg == "") {
+                t = JP_VAL
+                sub(/^.*:[[:space:]]+/, "", t)
+                at = 0
+                for (i = length(t); i > 1; i--) if (substr(t, i, 1) == "@") { at = i; break }
+                if (at > 1) { loc_pkg = substr(t, 1, at - 1); loc_ver = substr(t, at + 1) }
             }
-
-            if (depth == 0) in_results = 0
+        } else if (JP_EVENT == "close" && JP_PATH ~ /\/results\/#$/) {
+            if (pkg == "" || ver == "") { pkg = loc_pkg; ver = loc_ver }
+            if (sev == "") sev = (level == "error" ? "high" : (level == "warning" ? "medium" : ""))
+            add_finding("", pkg, ver, sev, rule, "sarif")
+            reset()
         }
     }
-
-    END {
-        # OPTIMIZED: Output package count FIRST (allows read without grep)
-        printf "SARIF_PKG_COUNT=%d\n", pkg_count
-
-        # SARIF carries no ecosystem info -> wildcard namespace "*:"
-        # Output eval commands for exact versions
-        for (pkg in pkg_versions) {
-            nk = "*:" pkg
-            printf "VULN_EXACT_LOOKUP['\''%s'\'']+='\''|%s'\''\n", escape_sq(nk), escape_sq(pkg_versions[pkg])
-        }
-    }
+    END { emit_lookup() }
     '
 }
 
-# Parse SBOM CycloneDX format to lookup tables
-# SBOM format: Software Bill of Materials in CycloneDX JSON format
-# Example: Generated by Trivy, Syft, etc.
+# Parse a CycloneDX SBOM. Each vulnerabilities[] entry lists affects[].ref,
+# which is either a purl or a bom-ref resolved through components[] (at any
+# nesting depth). Explicit affects[].versions[] with status "affected" are
+# added too. References are resolved at the end, since components may follow
+# the vulnerabilities.
 parse_sbom_to_lookup_eval() {
-    local raw_data="$1"
-
-    # Use awk to parse SBOM JSON and extract vulnerabilities
-    echo "$raw_data" | awk '
-    function escape_sq(s) {
-        gsub(/'\''/, "'\''\\'\'''\''", s)
-        return s
-    }
-
-    # Canonicalize a package name for a given purl type (ecosystem).
-    function canon_purl_name(eco, name,   lo, cnt, parts) {
-        if (eco == "pypi") {
-            lo = tolower(name)
-            gsub(/[-_.]+/, "-", lo)
-            return lo
-        } else if (eco == "maven") {
-            if (index(name, ":") > 0) return name
-            cnt = split(name, parts, "/")
-            if (cnt >= 2) return parts[cnt-1] ":" parts[cnt]
-            return name
-        } else if (eco == "composer" || eco == "githubactions" || eco == "nuget") {
-            return tolower(name)
-        } else if (eco == "swift") {
-            lo = name
-            sub(/^https?:\/\//, "", lo)
-            sub(/\.git$/, "", lo)
-            return tolower(lo)
-        }
-        return name
-    }
-
-    BEGIN {
-        pkg_count = 0
-        in_vulnerabilities = 0
-        depth = 0
-        current_pkg = ""
-        current_version = ""
-    }
-
+    json_structural_lines "$1" | awk "$AWK_FEED_LIB$AWK_JSON_PATH"'
     {
-        # Look for "vulnerabilities": [ array
-        if ($0 ~ /"vulnerabilities"[[:space:]]*:[[:space:]]*\[/) {
-            in_vulnerabilities = 1
-            next
-        }
-
-        if (in_vulnerabilities) {
-            # Track depth
-            if ($0 ~ /\{/) depth++
-            if ($0 ~ /\}/) depth--
-
-            # Look for affects array within vulnerability
-            if ($0 ~ /"affects"[[:space:]]*:[[:space:]]*\[/) {
-                in_affects = 1
+        jp_step($0)
+        if (JP_EVENT == "scalar") {
+            if (JP_PATH ~ /\/components\/#$/) {
+                if (JP_KEY == "bom-ref") comp_ref = JP_VAL
+                else if (JP_KEY == "purl") comp_purl = JP_VAL
+            } else if (JP_PATH ~ /\/vulnerabilities\/#$/ && JP_KEY == "id") {
+                vid = JP_VAL
+            } else if (JP_PATH ~ /\/vulnerabilities\/#\/ratings\/#$/ && JP_KEY == "severity" && vsev == "") {
+                vsev = JP_VAL
+            } else if (JP_PATH ~ /\/vulnerabilities\/#\/affects\/#$/ && JP_KEY == "ref") {
+                refs[++nrefs] = JP_VAL
+            } else if (JP_PATH ~ /\/vulnerabilities\/#\/affects\/#\/versions\/#$/) {
+                if (JP_KEY == "version") aver = JP_VAL
+                else if (JP_KEY == "status") astatus = JP_VAL
             }
-
-            if ($0 ~ /"ref"[[:space:]]*:/) {
-                # Extract package ref: "pkg:npm/package@version"
-                ref = $0
-                sub(/.*"ref"[[:space:]]*:[[:space:]]*"/, "", ref)
-                sub(/".*/, "", ref)
-
-                # Only PURL refs carry package info (skip CycloneDX bom-ref UUIDs)
-                if (ref ~ /^pkg:[^\/]+\//) {
-                    # Split query string off first (it may contain "@")
-                    sbom_main = ref
-                    sbom_qp = index(ref, "?")
-                    if (sbom_qp > 0) sbom_main = substr(ref, 1, sbom_qp - 1)
-
-                    sbom_te = index(sbom_main, "/")
-                    sbom_eco = substr(sbom_main, 5, sbom_te - 5)
-
-                    # Split name/version at the LAST "@"
-                    sbom_ap = 0
-                    for (sbom_i = length(sbom_main); sbom_i > sbom_te; sbom_i--) {
-                        if (substr(sbom_main, sbom_i, 1) == "@") { sbom_ap = sbom_i; break }
-                    }
-                    if (sbom_ap > sbom_te) {
-                        sbom_path = substr(sbom_main, sbom_te + 1, sbom_ap - sbom_te - 1)
-                        current_version = substr(sbom_main, sbom_ap + 1)
-                        gsub(/%40/, "@", sbom_path)
-                        gsub(/%2[fF]/, "/", sbom_path)
-                        # Namespaced lookup key: "eco:name"
-                        current_pkg = sbom_eco ":" canon_purl_name(sbom_eco, sbom_path)
-                    }
+        } else if (JP_EVENT == "close") {
+            if (JP_PATH ~ /\/components\/#$/) {
+                if (comp_ref != "" && comp_purl != "") purl_of[comp_ref] = comp_purl
+                comp_ref = comp_purl = ""
+            } else if (JP_PATH ~ /\/vulnerabilities\/#\/affects\/#\/versions\/#$/) {
+                if (aver != "" && (astatus == "" || astatus == "affected")) extra[nrefs] = extra[nrefs] " " aver
+                aver = astatus = ""
+            } else if (JP_PATH ~ /\/vulnerabilities\/#$/) {
+                for (r = 1; r <= nrefs; r++) {
+                    n = ++nfind
+                    find_ref[n] = refs[r]; find_id[n] = vid; find_sev[n] = vsev
+                    find_extra[n] = extra[r]
                 }
-
-                if (current_pkg != "" && current_version != "") {
-                    if (!(current_pkg in pkg_versions)) {
-                        pkg_versions[current_pkg] = current_version
-                        pkg_count++
-                    } else {
-                        if (pkg_versions[current_pkg] !~ current_version) {
-                            pkg_versions[current_pkg] = pkg_versions[current_pkg] "|" current_version
-                        }
-                    }
-                    current_pkg = ""
-                    current_version = ""
-                }
+                delete refs; delete extra
+                nrefs = 0; vid = vsev = ""
             }
-
-            if (depth == 0) in_vulnerabilities = 0
         }
     }
-
     END {
-        # OPTIMIZED: Output package count FIRST (allows read without grep)
-        printf "SBOM_PKG_COUNT=%d\n", pkg_count
-
-        # Output eval commands for exact versions
-        for (pkg in pkg_versions) {
-            printf "VULN_EXACT_LOOKUP['\''%s'\'']+='\''|%s'\''\n", escape_sq(pkg), escape_sq(pkg_versions[pkg])
+        for (n = 1; n <= nfind; n++) {
+            p = find_ref[n]
+            if (p !~ /^pkg:/ && (p in purl_of)) p = purl_of[p]
+            if (p !~ /^pkg:/) continue
+            add_finding(p, "", "", find_sev[n], find_id[n], "cyclonedx")
+            cnt = split(find_extra[n], vers, " ")
+            for (v = 1; v <= cnt; v++) if (vers[v] != "") add_finding(p, "", vers[v], find_sev[n], find_id[n], "cyclonedx")
         }
+        emit_lookup()
     }
     '
 }
 
-# Parse Trivy JSON format to lookup tables
-# Trivy format: Trivy JSON output from filesystem or container scans
-# Example: trivy fs --format json --output trivy-report.json .
+# Print "eco|name|version" for every component of a CycloneDX SBOM (--sbom),
+# at any nesting depth, from its purl. metadata.component is the project
+# itself and metadata.tools lists the generators: neither is a dependency.
+# Go purls carry a "v" prefix that go.sum parsing strips too.
+cyclonedx_components() {
+    json_structural_lines "$1" | awk "$AWK_FEED_LIB$AWK_JSON_PATH"'
+    {
+        jp_step($0)
+        if (JP_EVENT != "scalar" || JP_KEY != "purl" || JP_PATH !~ /\/components\/#$/ || JP_PATH ~ /^\/#\/metadata\//) next
+        gsub(/\\\//, "/", JP_VAL)
+        if (!purl_split(JP_VAL)) next
+        if (PURL_TYPE == "golang") sub(/^v/, "", PURL_VERSION)
+        print PURL_TYPE "|" canon_purl_name(PURL_TYPE, PURL_NAME) "|" PURL_VERSION
+    }
+    ' | sort -u
+}
+
+# Check the components of a CycloneDX SBOM given with --sbom, like a lockfile.
+# A Maven build lists its transitive dependencies only there (pom.xml does not).
+analyze_cyclonedx_inventory() {
+    local lockfile="$1"
+    local vuln_count_before=${#VULNERABLE_PACKAGES[@]}
+    local packages eco pkg_name version
+    packages=$(cyclonedx_components "$lockfile")
+    while IFS='|' read -r eco pkg_name version; do
+        [ -z "$pkg_name" ] || [ -z "$version" ] && continue
+        check_vulnerability "$eco" "$pkg_name" "$version" "$lockfile" || true
+    done <<< "$packages"
+
+    local vuln_count_after=${#VULNERABLE_PACKAGES[@]}
+    if [ "$vuln_count_after" -eq "$vuln_count_before" ]; then
+        echo -e "${GREEN}✓ [$lockfile] No vulnerabilities found${NC}"
+    fi
+}
+
+# Parse a Trivy JSON report (trivy fs/image --format json). Each
+# Results[].Vulnerabilities[] entry is one finding; PkgIdentifier.PURL gives the
+# ecosystem when present, otherwise the wildcard namespace is used.
 parse_trivy_to_lookup_eval() {
-    local raw_data="$1"
-
-    # Use awk to parse Trivy JSON and extract vulnerabilities
-    echo "$raw_data" | awk '
-    function escape_sq(s) {
-        gsub(/'\''/, "'\''\\'\'''\''", s)
-        return s
-    }
-
-    # Canonicalize a package name for a given purl type (ecosystem).
-    function canon_purl_name(eco, name,   lo, cnt, parts) {
-        if (eco == "pypi") {
-            lo = tolower(name)
-            gsub(/[-_.]+/, "-", lo)
-            return lo
-        } else if (eco == "maven") {
-            if (index(name, ":") > 0) return name
-            cnt = split(name, parts, "/")
-            if (cnt >= 2) return parts[cnt-1] ":" parts[cnt]
-            return name
-        } else if (eco == "composer" || eco == "githubactions" || eco == "nuget") {
-            return tolower(name)
-        } else if (eco == "swift") {
-            lo = name
-            sub(/^https?:\/\//, "", lo)
-            sub(/\.git$/, "", lo)
-            return tolower(lo)
-        }
-        return name
-    }
-
-    # Build a namespaced key ("eco:name") from a purl string, or "" if not a purl
-    function purl_to_key(purl,   pmain, pqp, pte, peco, pap, pi, ppath) {
-        if (purl !~ /^pkg:[^\/]+\//) return ""
-        pmain = purl
-        pqp = index(purl, "?")
-        if (pqp > 0) pmain = substr(purl, 1, pqp - 1)
-        pte = index(pmain, "/")
-        peco = substr(pmain, 5, pte - 5)
-        pap = 0
-        for (pi = length(pmain); pi > pte; pi--) {
-            if (substr(pmain, pi, 1) == "@") { pap = pi; break }
-        }
-        if (pap <= pte) return ""
-        ppath = substr(pmain, pte + 1, pap - pte - 1)
-        gsub(/%40/, "@", ppath)
-        gsub(/%2[fF]/, "/", ppath)
-        return peco ":" canon_purl_name(peco, ppath)
-    }
-
-    BEGIN {
-        pkg_count = 0
-        in_results = 0
-        in_vulnerabilities = 0
-        depth = 0
-        current_pkg = ""
-        current_version = ""
-        current_purl_key = ""
-    }
-
+    json_structural_lines "$1" | awk "$AWK_FEED_LIB$AWK_JSON_PATH"'
     {
-        # Look for "Results": [ array
-        if ($0 ~ /"Results"[[:space:]]*:[[:space:]]*\[/) {
-            in_results = 1
-            next
-        }
-
-        if (in_results) {
-            # Track depth
-            if ($0 ~ /\{/) depth++
-            if ($0 ~ /\}/) depth--
-
-            # Look for "Vulnerabilities": [ array within Results
-            if ($0 ~ /"Vulnerabilities"[[:space:]]*:[[:space:]]*\[/) {
-                in_vulnerabilities = 1
+        jp_step($0)
+        if (JP_EVENT == "scalar") {
+            if (JP_PATH ~ /\/Results\/#\/Vulnerabilities\/#$/) {
+                if (JP_KEY == "PkgName") pkg = JP_VAL
+                else if (JP_KEY == "InstalledVersion") ver = JP_VAL
+                else if (JP_KEY == "VulnerabilityID") vid = JP_VAL
+                else if (JP_KEY == "Severity") sev = JP_VAL
+            } else if (JP_PATH ~ /\/Results\/#\/Vulnerabilities\/#\/PkgIdentifier$/ && JP_KEY == "PURL") {
+                purl = JP_VAL
             }
-
-            if (in_vulnerabilities) {
-                # Extract PkgName
-                if ($0 ~ /"PkgName"[[:space:]]*:/) {
-                    pkg = $0
-                    sub(/.*"PkgName"[[:space:]]*:[[:space:]]*"/, "", pkg)
-                    sub(/".*/, "", pkg)
-                    if (pkg != "") current_pkg = pkg
-                }
-
-                # Extract PkgIdentifier.PURL (preferred: carries ecosystem)
-                if ($0 ~ /"PURL"[[:space:]]*:/) {
-                    purl = $0
-                    sub(/.*"PURL"[[:space:]]*:[[:space:]]*"/, "", purl)
-                    sub(/".*/, "", purl)
-                    if (purl != "") current_purl_key = purl_to_key(purl)
-                }
-
-                # Extract InstalledVersion
-                if ($0 ~ /"InstalledVersion"[[:space:]]*:/) {
-                    ver = $0
-                    sub(/.*"InstalledVersion"[[:space:]]*:[[:space:]]*"/, "", ver)
-                    sub(/".*/, "", ver)
-                    if (ver != "") current_version = ver
-                }
-
-                # When we close a vulnerability object and have both pkg and version
-                if ($0 ~ /\}/ && current_pkg != "" && current_version != "") {
-                    # Use the PURL-derived namespaced key when available; otherwise
-                    # this result has no ecosystem info -> wildcard namespace "*:"
-                    if (current_purl_key != "") {
-                        store_key = current_purl_key
-                    } else {
-                        store_key = "*:" current_pkg
-                    }
-                    if (!(store_key in pkg_versions)) {
-                        pkg_versions[store_key] = current_version
-                        pkg_count++
-                    } else {
-                        if (pkg_versions[store_key] !~ current_version) {
-                            pkg_versions[store_key] = pkg_versions[store_key] "|" current_version
-                        }
-                    }
-                    current_pkg = ""
-                    current_version = ""
-                    current_purl_key = ""
-                }
-            }
-
-            if (depth == 0) {
-                in_results = 0
-                in_vulnerabilities = 0
-            }
+        } else if (JP_EVENT == "close" && JP_PATH ~ /\/Results\/#\/Vulnerabilities\/#$/) {
+            add_finding(purl, pkg, ver, sev, vid, "trivy")
+            pkg = ver = vid = sev = purl = ""
         }
     }
-
-    END {
-        # OPTIMIZED: Output package count FIRST (allows read without grep)
-        printf "TRIVY_PKG_COUNT=%d\n", pkg_count
-
-        # Output eval commands for exact versions
-        for (pkg in pkg_versions) {
-            printf "VULN_EXACT_LOOKUP['\''%s'\'']+='\''|%s'\''\n", escape_sq(pkg), escape_sq(pkg_versions[pkg])
-        }
-    }
+    END { emit_lookup() }
     '
 }
 
-# Detect format from URL
+# Parse the JSON source format: { "<package>": { "versions": [...],
+# "versions_range": [...], "severity", "ghsa", "cve", "source" } }. JSON
+# sources carry no ecosystem, so entries land in the wildcard namespace "*:".
+# Package objects sit at depth 2 (their names may contain "/", so depth is
+# used rather than JP_PATH patterns).
+parse_json_to_lookup_eval() {
+    json_structural_lines "$1" | awk "$AWK_FEED_LIB$AWK_JSON_PATH"'
+    {
+        jp_step($0)
+        if (JP_EVENT == "open" && jp_depth == 2) {
+            pkg = jp_stack[2]; nv = 0; sev = ghsa = cve = src = ""
+        } else if (JP_EVENT == "scalar" && jp_depth == 2 && pkg != "") {
+            if (JP_KEY == "severity") sev = JP_VAL
+            else if (JP_KEY == "ghsa") ghsa = JP_VAL
+            else if (JP_KEY == "cve") cve = JP_VAL
+            else if (JP_KEY == "source") src = JP_VAL
+        } else if (JP_EVENT == "scalar" && jp_depth == 3 && pkg != "" && JP_VAL != "" &&
+                   (jp_stack[3] == "versions" || jp_stack[3] == "versions_range")) {
+            vals[++nv] = JP_VAL
+            ranged[nv] = (jp_stack[3] == "versions_range")
+        } else if (JP_EVENT == "close" && jp_depth == 1 && pkg != "") {
+            # jp_depth is already popped: the package object just closed.
+            for (i = 1; i <= nv; i++) {
+                record = tolower(sev) ";" ghsa ";" cve ";" src ";" (ranged[i] ? range_fix(vals[i]) : "") ";"
+                add_entry("*:" pkg, vals[i], record, ranged[i])
+            }
+            pkg = ""
+        }
+    }
+    END { emit_lookup() }
+    '
+}
 detect_format_from_url() {
     local url="$1"
 
@@ -2226,7 +2003,7 @@ load_data_source() {
     local format="${2:-}"
     local name="${3:-$url}"
     local csv_columns="${4:-}"
-    
+
     # Auto-detect format if not provided
     if [ -z "$format" ]; then
         format=$(detect_format_from_url "$url")
@@ -2234,176 +2011,85 @@ load_data_source() {
     else
         echo -e "${BLUE}🔍 Loading: $name${NC}"
     fi
-    
+
     echo "   URL: $url"
     echo "   Format: $format"
-    
-    # Download or read local data
-    local raw_data
-    if [[ "$url" =~ ^https?:// ]] || [[ "$url" =~ ^ftp:// ]]; then
-        # Remote URL - use curl
-        if ! raw_data=$(curl -fsSL --connect-timeout 10 --max-time 60 "$url"); then
-            echo -e "${RED}❌ Error: Unable to download from $url${NC}"
-            return 1
-        fi
-    else
-        # Local file - read directly
-        if [ ! -f "$url" ]; then
-            echo -e "${RED}❌ Error: Local file not found: $url${NC}"
-            return 1
-        fi
-        raw_data=$(cat "$url")
-    fi
 
+    local parser
     case "$format" in
-        json|sarif|sbom|sbom-cyclonedx|trivy|trivy-json)
-            if ! json_is_valid "$raw_data"; then
-                echo "Error: Invalid JSON in $name"
-                return 1
-            fi
-            ;;
-    esac
-    
-    # Set CSV columns for this source
-    if [ -n "$csv_columns" ]; then
-        echo "   CSV Columns: $csv_columns"
-        # Parse column specification
-        IFS=',' read -ra CSV_COLUMNS <<< "$csv_columns"
-        # Trim whitespace from columns
-        for i in "${!CSV_COLUMNS[@]}"; do
-            CSV_COLUMNS[$i]=$(echo "${CSV_COLUMNS[$i]}" | xargs)
-        done
-    else
-        # Clear columns for default format
-        CSV_COLUMNS=()
-    fi
-    
-    # Parse based on format
-    local parsed_data
-    local pkg_count=0
-    
-    case "$format" in
-        json)
-            parsed_data="$raw_data"
-            # Merge into global vulnerability data
-            if [ -z "$VULN_DATA" ]; then
-                VULN_DATA="$parsed_data"
-            else
-                VULN_DATA=$(json_merge "$VULN_DATA" "$parsed_data")
-            fi
-            pkg_count=$(json_object_length "$parsed_data")
-            ;;
-        csv)
-            # FAST PATH: Parse CSV directly into lookup tables, bypass JSON
-            # OPTIMIZED: Read count from first line, eval the rest (avoids grep)
-            local eval_commands
-            eval_commands=$(parse_csv_to_lookup_eval "$raw_data")
-
-            # Extract package count from first line (format: CSV_PKG_COUNT=N)
-            local first_line="${eval_commands%%$'\n'*}"
-            pkg_count="${first_line#*=}"
-            pkg_count=${pkg_count:-0}
-
-            # Execute all assignments (including the count line, which is harmless)
-            eval "$eval_commands"
-
-            # NOTE: Do NOT set VULN_LOOKUP_BUILT=true here!
-            # This allows build_vulnerability_lookup() to still process JSON data
-            # that was loaded from other sources into VULN_DATA
-
-            # For compatibility, also generate minimal JSON (just for display/merge if needed)
-            # But we skip this since we already have the data in lookup tables
-            VULN_DATA="${VULN_DATA:-{}}"
-            ;;
-        purl)
-            # FAST PATH: Parse PURL directly into lookup tables, bypass JSON
-            # OPTIMIZED: Read count from first line, eval the rest (avoids grep)
-            local eval_commands
-            eval_commands=$(parse_purl_to_lookup_eval "$raw_data")
-
-            # Extract package count from first line (format: PURL_PKG_COUNT=N)
-            local first_line="${eval_commands%%$'\n'*}"
-            pkg_count="${first_line#*=}"
-            pkg_count=${pkg_count:-0}
-
-            # Execute all assignments (including the count line, which is harmless)
-            eval "$eval_commands"
-
-            # NOTE: Do NOT set VULN_LOOKUP_BUILT=true here!
-            # This allows build_vulnerability_lookup() to still process JSON data
-            # that was loaded from other sources into VULN_DATA
-
-            # For compatibility, maintain minimal JSON structure
-            VULN_DATA="${VULN_DATA:-{}}"
-            ;;
-        sarif)
-            # FAST PATH: Parse SARIF format directly into lookup tables
-            # OPTIMIZED: Read count from first line, eval the rest (avoids grep)
-            local eval_commands
-            eval_commands=$(parse_sarif_to_lookup_eval "$raw_data")
-
-            # Extract package count from first line (format: SARIF_PKG_COUNT=N)
-            local first_line="${eval_commands%%$'\n'*}"
-            pkg_count="${first_line#*=}"
-            pkg_count=${pkg_count:-0}
-
-            # Execute all assignments (including the count line, which is harmless)
-            eval "$eval_commands"
-
-            # For compatibility, maintain minimal JSON structure
-            VULN_DATA="${VULN_DATA:-{}}"
-            ;;
-        sbom|sbom-cyclonedx)
-            # FAST PATH: Parse SBOM CycloneDX format directly into lookup tables
-            # OPTIMIZED: Read count from first line, eval the rest (avoids grep)
-            local eval_commands
-            eval_commands=$(parse_sbom_to_lookup_eval "$raw_data")
-
-            # Extract package count from first line (format: SBOM_PKG_COUNT=N)
-            local first_line="${eval_commands%%$'\n'*}"
-            pkg_count="${first_line#*=}"
-            pkg_count=${pkg_count:-0}
-
-            # Execute all assignments (including the count line, which is harmless)
-            eval "$eval_commands"
-
-            # For compatibility, maintain minimal JSON structure
-            VULN_DATA="${VULN_DATA:-{}}"
-            ;;
-        trivy|trivy-json)
-            # FAST PATH: Parse Trivy JSON format directly into lookup tables
-            # OPTIMIZED: Read count from first line, eval the rest (avoids grep)
-            local eval_commands
-            eval_commands=$(parse_trivy_to_lookup_eval "$raw_data")
-
-            # Extract package count from first line (format: TRIVY_PKG_COUNT=N)
-            local first_line="${eval_commands%%$'\n'*}"
-            pkg_count="${first_line#*=}"
-            pkg_count=${pkg_count:-0}
-
-            # Execute all assignments (including the count line, which is harmless)
-            eval "$eval_commands"
-
-            # For compatibility, maintain minimal JSON structure
-            VULN_DATA="${VULN_DATA:-{}}"
-            ;;
+        json) parser=parse_json_to_lookup_eval ;;
+        csv) parser=parse_csv_to_lookup_eval ;;
+        purl) parser=parse_purl_to_lookup_eval ;;
+        sarif) parser=parse_sarif_to_lookup_eval ;;
+        sbom|sbom-cyclonedx) parser=parse_sbom_to_lookup_eval ;;
+        trivy|trivy-json) parser=parse_trivy_to_lookup_eval ;;
         *)
             echo -e "${RED}❌ Error: Unsupported format '$format'${NC}"
             return 1
             ;;
     esac
-    
-    echo -e "${GREEN}✅ Loaded $pkg_count packages from $name${NC}"
+
+    # Parsers read a local file: download remote sources to a temp file first.
+    local file="$url" downloaded=""
+    if [[ "$url" =~ ^(https?|ftp):// ]]; then
+        if ! downloaded=$(mktemp); then
+            echo -e "${RED}❌ Error: Unable to create a temporary file${NC}"
+            return 1
+        fi
+        register_temp_file "$downloaded"
+        if ! curl -fsSL --connect-timeout 10 --max-time 120 -o "$downloaded" "$url"; then
+            rm -f -- "$downloaded"
+            echo -e "${RED}❌ Error: Unable to download from $url${NC}"
+            return 1
+        fi
+        file="$downloaded"
+    elif [ ! -f "$url" ]; then
+        echo -e "${RED}❌ Error: Local file not found: $url${NC}"
+        return 1
+    fi
+
+    local status=0 eval_commands=""
+    case "$format" in
+        json|sarif|sbom|sbom-cyclonedx|trivy|trivy-json)
+            if ! json_is_valid_file "$file"; then
+                echo "Error: Invalid JSON in $name"
+                status=1
+            fi
+            ;;
+    esac
+    if [ "$status" = 0 ]; then
+        [ -z "$csv_columns" ] || echo "   CSV Columns: $csv_columns"
+        if ! eval_commands=$("$parser" "$file" "$csv_columns"); then
+            echo -e "${RED}❌ Error: Unable to parse $name${NC}"
+            status=1
+        fi
+    fi
+    [ -z "$downloaded" ] || rm -f -- "$downloaded"
+    [ "$status" = 0 ] || return 1
+
+    # Sets FEED_PKG_COUNT / FEED_RAW_COUNT, then fills the lookup tables,
+    # merging with every source loaded before.
+    FEED_PKG_COUNT=0 FEED_RAW_COUNT=0
+    eval "$eval_commands"
+
+    LAST_SOURCE_ENTRY_COUNT="$FEED_RAW_COUNT"
+    TOTAL_SOURCE_ENTRIES=$(( ${TOTAL_SOURCE_ENTRIES:-0} + FEED_RAW_COUNT ))
+    if [ "$format" = purl ] && [ -n "${PREFILTER_TOKENS_FILE:-}" ]; then
+        echo -e "${GREEN}✅ Loaded ${FEED_PKG_COUNT} packages from $name (${FEED_RAW_COUNT} entries before pre-filtering)${NC}"
+    else
+        echo -e "${GREEN}✅ Loaded ${FEED_PKG_COUNT} packages from $name${NC}"
+    fi
     echo ""
     LOADED_SOURCE_COUNT=$((LOADED_SOURCE_COUNT + 1))
-    
+
     return 0
 }
 
 # Load configuration file
 load_config_file() {
     local config_path="$1"
-    
+    local load_sources="${2:-true}"
+
     if [ ! -f "$config_path" ]; then
         return 1
     fi
@@ -2411,8 +2097,10 @@ load_config_file() {
     echo -e "${BLUE}📋 Loading configuration from: $config_path${NC}"
     echo ""
     
-    # Read config file content
-    local config_content=$(cat "$config_path")
+    # Read config file content (a UTF-8 BOM is not part of the JSON)
+    local config_content
+    config_content=$(cat "$config_path")
+    config_content="${config_content#$'\xef\xbb\xbf'}"
     if ! json_is_valid "$config_content"; then
         echo "Error: Invalid JSON in configuration: $config_path"
         return 1
@@ -2489,7 +2177,9 @@ load_config_file() {
     local sources_array=$(json_get_array "$config_content" "sources")
     local sources_count=$(json_array_length "$sources_array")
     
-    if [ "$sources_count" -eq 0 ]; then
+    if [ "$load_sources" != true ]; then
+        [ "$sources_count" -eq 0 ] || echo -e "${BLUE}ℹ️  Configuration sources ignored: sources given on the command line take precedence${NC}"
+    elif [ "$sources_count" -eq 0 ]; then
         echo -e "${YELLOW}⚠️  Warning: No sources found in configuration file${NC}"
         # Don't return 1 here - config may still have github settings
     else
@@ -2526,9 +2216,6 @@ load_config_file() {
     
     return 0
 }
-
-# Extract base version (without pre-release suffix like -rc, -alpha, -beta, etc.)
-# For example: "19.0.0-rc-6230622a1a-20240610" -> "19.0.0"
 get_base_version() {
     local version="$1"
     # Extract major.minor.patch, removing any pre-release or build metadata
@@ -2547,18 +2234,22 @@ compare_versions() {
     local v2="$2"
     v1="${v1%%+*}"
     v2="${v2%%+*}"
+    # Tags such as v1.2.3 (cargo git deps, actions, swift) carry a cosmetic 'v'.
+    [[ "$v1" == [vV][0-9]* ]] && v1="${v1:1}"
+    [[ "$v2" == [vV][0-9]* ]] && v2="${v2:1}"
 
-    # Split base (x.y.z) from the pre-release tail (first '-' onward).
+    # Split base (x.y.z[.w...]) from the pre-release tail (first '-' onward).
     local base1="${v1%%-*}"
     local base2="${v2%%-*}"
 
-    # --- Compare base x.y.z numerically ---
-    local IFS='.'
-    local parts1=($base1)
-    local parts2=($base2)
-    unset IFS
-    local i n1 n2
-    for i in 0 1 2; do
+    # --- Compare every numeric base part (missing parts count as 0) ---
+    local -a parts1 parts2
+    IFS='.' read -ra parts1 <<< "$base1"
+    IFS='.' read -ra parts2 <<< "$base2"
+    local i n1 n2 nparts=${#parts1[@]}
+    [ "${#parts2[@]}" -gt "$nparts" ] && nparts=${#parts2[@]}
+    [ "$nparts" -lt 3 ] && nparts=3
+    for (( i = 0; i < nparts; i++ )); do
         n1="${parts1[$i]:-0}"
         n2="${parts2[$i]:-0}"
         # Decimal identifiers have no size limit in SemVer. Comparing lengths
@@ -2625,51 +2316,81 @@ compare_versions() {
     COMPARE_RESULT="0"
 }
 
-# Convert semver ranges (~ and ^) to standard range format
-# ~1.2.3 -> >=1.2.3 <1.3.0
-# ^1.2.3 -> >=1.2.3 <2.0.0
+# Convert one semver shorthand token (~ and ^, full or partial) into its
+# comparator pair. Sets EXPANDED_RANGE (no subshell: called per distinct range).
+# ~1.2.3 -> >=1.2.3 <1.3.0     ~1.2 -> >=1.2.0 <1.3.0     ~1 -> >=1.0.0 <2.0.0
+# ^1.2.3 -> >=1.2.3 <2.0.0     ^0.2 -> >=0.2.0 <0.3.0     ^1 -> >=1.0.0 <2.0.0
+# Anything else is returned unchanged.
 expand_semver_range() {
     local range="$1"
+    EXPANDED_RANGE="$range"
+    [[ "$range" =~ ^([~^])([0-9]+)(\.([0-9]+))?(\.([0-9]+))?(.*)$ ]] || return 0
+    local op="${BASH_REMATCH[1]}" major="${BASH_REMATCH[2]}"
+    local minor="${BASH_REMATCH[4]}" patch="${BASH_REMATCH[6]}" tail="${BASH_REMATCH[7]}"
+    # A partial version cannot carry a pre-release tail (~1.2-beta is not semver).
+    if [ -n "$tail" ] && [ -z "$patch" ]; then return 0; fi
+    local lower="$major.${minor:-0}.${patch:-0}$tail"
 
-    # Handle tilde ranges: ~1.2.3 means >=1.2.3 <1.3.0
-    if [[ "$range" =~ ^~([0-9]+)\.([0-9]+)\.([0-9]+)(.*)$ ]]; then
-        local major="${BASH_REMATCH[1]}"
-        local minor="${BASH_REMATCH[2]}"
-        local patch="${BASH_REMATCH[3]}"
-        local prerelease="${BASH_REMATCH[4]}"
-        local next_minor=$((minor + 1))
-        echo ">=$major.$minor.$patch$prerelease <$major.$next_minor.0"
-        return 0
-    fi
-
-    # Handle caret ranges: ^1.2.3 means >=1.2.3 <2.0.0
-    if [[ "$range" =~ ^\^([0-9]+)\.([0-9]+)\.([0-9]+)(.*)$ ]]; then
-        local major="${BASH_REMATCH[1]}"
-        local minor="${BASH_REMATCH[2]}"
-        local patch="${BASH_REMATCH[3]}"
-        local prerelease="${BASH_REMATCH[4]}"
-
-        # For ^0.x.y, it's more restrictive
-        if [ "$major" = "0" ]; then
-            if [ "$minor" = "0" ]; then
-                # ^0.0.x -> >=0.0.x <0.0.(x+1)
-                local next_patch=$((patch + 1))
-                echo ">=$major.$minor.$patch$prerelease <$major.$minor.$next_patch"
-            else
-                # ^0.x.y -> >=0.x.y <0.(x+1).0
-                local next_minor=$((minor + 1))
-                echo ">=$major.$minor.$patch$prerelease <$major.$next_minor.0"
-            fi
+    if [ "$op" = "~" ]; then
+        if [ -z "$minor" ]; then
+            EXPANDED_RANGE=">=$lower <$((major + 1)).0.0"
         else
-            # ^x.y.z -> >=x.y.z <(x+1).0.0
-            local next_major=$((major + 1))
-            echo ">=$major.$minor.$patch$prerelease <$next_major.0.0"
+            EXPANDED_RANGE=">=$lower <$major.$((minor + 1)).0"
         fi
-        return 0
+    elif [ "$major" != 0 ] || [ -z "$minor" ]; then
+        EXPANDED_RANGE=">=$lower <$((major + 1)).0.0"
+    elif [ "$minor" != 0 ] || [ -z "$patch" ]; then
+        EXPANDED_RANGE=">=$lower <0.$((minor + 1)).0"
+    else
+        EXPANDED_RANGE=">=$lower <0.0.$((patch + 1))"
     fi
+}
 
-    # Return original if no semver range detected
-    echo "$range"
+# Parsed form of every distinct range string seen so far: "op ver op ver ..."
+# ("*" matches everything, "!" never matches). Ranges repeat across thousands of
+# lockfile entries, so normalization runs once per distinct string.
+declare -A RANGE_CACHE=()
+
+# Normalize one range (no "||") into RANGE_CACHE. Custom sources write ranges in
+# many dialects: ">=1.0,<2.0", ">= 1.0", "==1.0", "=1.0", "^1", "~1.2".
+_prepare_range() {
+    local raw="$1" r="$1" token op ver parsed="" bad=""
+    r="${r//,/ }"
+    # Glue a detached operator to its version: ">= 1.0" -> ">=1.0".
+    while [[ "$r" =~ ^(.*)(\>=|\<=|==|\>|\<|=|\^|~)[[:space:]]+(.*)$ ]]; do
+        r="${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
+    done
+    local -a tokens
+    read -ra tokens <<< "$r"
+    if [ "${#tokens[@]}" -eq 1 ] && [ "${tokens[0]}" = "*" ]; then
+        RANGE_CACHE["$raw"]="*"
+        return
+    fi
+    local expanded=""
+    for token in "${tokens[@]}"; do
+        case "$token" in
+            "~"*|"^"*) expand_semver_range "$token"; expanded+="$EXPANDED_RANGE " ;;
+            *) expanded+="$token " ;;
+        esac
+    done
+    read -ra tokens <<< "$expanded"
+    for token in "${tokens[@]}"; do
+        if [[ "$token" =~ ^(\>=|\<=|==|\>|\<|=)(.+)$ ]]; then
+            op="${BASH_REMATCH[1]}" ver="${BASH_REMATCH[2]}"
+            [ "$op" = "==" ] && op="="
+        elif [[ "$token" =~ ^[vV]?[0-9] ]]; then
+            op="=" ver="$token"     # a bare version is an exact constraint
+        else
+            bad="$token"; break
+        fi
+        parsed+="$op $ver "
+    done
+    if [ -n "$bad" ] || [ -z "$parsed" ]; then
+        RANGE_CACHE["$raw"]="!"
+        [ -n "$raw" ] && echo -e "${YELLOW}⚠️  Warning: unsupported version range '$raw' (token '$bad'); it never matches${NC}" >&2
+        return
+    fi
+    RANGE_CACHE["$raw"]="${parsed% }"
 }
 
 # Check if a version is within a range
@@ -2688,12 +2409,16 @@ version_in_range() {
     fi
     range="${range#"${range%%[![:space:]]*}"}"
     range="${range%"${range##*[![:space:]]}"}"
-    case "$range" in "~"*|"^"*) range=$(expand_semver_range "$range") ;; esac
 
     # Guard against empty range (should not match any version)
     if [ -z "$range" ]; then
         return 1
     fi
+    [ "$range" = "*" ] && return 0
+    [ -n "${RANGE_CACHE[$range]+x}" ] || _prepare_range "$range"
+    local parsed="${RANGE_CACHE[$range]}"
+    [ "$parsed" = "*" ] && return 0
+    [ "$parsed" = "!" ] && return 1
 
     # Get base version for pre-release handling
     local base_version="${version%%-*}"
@@ -2702,37 +2427,29 @@ version_in_range() {
     if [ "$version" != "$base_version" ]; then
         is_prerelease=true
     fi
-    
-    # Parse the range - split by space
-    [[ "$range" =~ ^[[:space:]]*\*[[:space:]]*$ ]] && return 0
+
     local -a conditions
-    read -ra conditions <<< "$range"
-    local valid=false
-    
-    for condition in "${conditions[@]}"; do
-        local operator=""
-        local range_version=""
-        
-        # Extract operator and version
-        if [[ "$condition" =~ ^(\>=|\<=|\>|\<)(.+)$ ]]; then
-            operator="${BASH_REMATCH[1]}"
-            range_version="${BASH_REMATCH[2]}"
-        else
-            # A bare version is an exact constraint; reject unsupported tokens.
-            if [[ "$condition" =~ ^[0-9] ]]; then
-                operator="="
-                range_version="$condition"
-            else
-                return 1
-            fi
+    read -ra conditions <<< "$parsed"
+    local idx operator range_version
+
+    for (( idx = 0; idx < ${#conditions[@]}; idx += 2 )); do
+        operator="${conditions[$idx]}"
+        range_version="${conditions[$((idx + 1))]}"
+
+        # ">=0" admits every version, including pre-releases of 0.0.0 such as
+        # Go pseudo-versions (0.0.0-2021...) and npm 0.0.0-experimental builds.
+        if [ "$operator" = ">=" ] && [[ "$range_version" =~ ^[vV]?0(\.0)*$ ]]; then
+            continue
         fi
-        
+        # Identical strings compare equal under every ecosystem comparator.
+        if [ "$version" = "$range_version" ]; then
+            COMPARE_RESULT=0
         # For pre-release versions, use base version for comparison
         # This allows 19.0.0-rc.1 to be considered as within >=19.0.0
         # OPTIMIZED: dispatch on CHECK_ECO and use COMPARE_RESULT (avoids subshell).
         # npm/everything-else routes to the shared semver comparator; only
         # ecosystems with their own comparator (e.g. golang) diverge.
-        if [ "$is_prerelease" = true ] && [ "${CHECK_ECO:-npm}" = npm ]; then
+        elif [ "$is_prerelease" = true ] && [ "${CHECK_ECO:-npm}" = npm ]; then
             # Special handling for >= operator with pre-release
             # 19.0.0-rc is considered >= 19.0.0 (it's a pre-release OF 19.0.0)
             if [ "$operator" = ">=" ] && [ "$base_version" = "$range_version" ]; then
@@ -2744,7 +2461,6 @@ version_in_range() {
             compare_versions_eco "${CHECK_ECO:-npm}" "$version" "$range_version"
         fi
 
-        valid=true
         case "$operator" in
             "=")
                 [ "$COMPARE_RESULT" = "0" ] || return 1
@@ -2771,8 +2487,7 @@ version_in_range() {
                 ;;
         esac
     done
-    
-    [ "$valid" = true ]  # Empty/invalid conditions must not match everything.
+    return 0
 }
 
 # Check if a version matches a vulnerable version (exact or pre-release of it)
@@ -2805,11 +2520,6 @@ version_matches_vulnerable() {
     
     return 1
 }
-
-# Build vulnerability lookup tables from VULN_DATA for O(1) lookups
-# This parses the JSON once and stores in associative arrays
-# OPTIMIZED: awk generates bash eval statements directly, avoiding slow bash loops
-# NOTE: This function MERGES JSON data with existing lookup tables (e.g., from CSV)
 # Comparator dispatch — routes a candidate/range version comparison to the
 # ecosystem-appropriate comparator. Matching code passes CHECK_ECO (set by
 # check_vulnerability); everything that is not a special-cased ecosystem falls
@@ -2824,6 +2534,7 @@ compare_versions_eco() {
         gem)    compare_versions_gem "$2" "$3" ;;
         maven)  compare_versions_maven "$2" "$3" ;;
         nuget)  compare_versions_nuget "$2" "$3" ;;
+        composer) compare_versions_composer "$2" "$3" ;;
         *)      compare_versions "$2" "$3" ;;
     esac
 }
@@ -3074,14 +2785,31 @@ _gem_tokenize() {
     done
 }
 
+# Gem::Version#canonical_segments: drop trailing zeros from the release part
+# (numeric segments before the first string) and from the prerelease part, so
+# 1.0.0.pre.1 == 1.0.pre.1 and 1.0.0 == 1.
+_gem_canonical() {
+    local -a release=() pre=()
+    local seg in_pre=0
+    for seg in "${_GEM_SEGS[@]}"; do
+        if [ "$in_pre" = 0 ] && [[ "$seg" == *[!0-9]* ]]; then in_pre=1; fi
+        if [ "$in_pre" = 1 ]; then pre+=("$seg"); else release+=("$seg"); fi
+    done
+    while [ "${#release[@]}" -gt 0 ] && [[ "${release[-1]}" =~ ^0+$ ]]; do unset "release[$(( ${#release[@]} - 1 ))]"; done
+    while [ "${#pre[@]}" -gt 0 ] && [[ "${pre[-1]}" =~ ^0+$ ]]; do unset "pre[$(( ${#pre[@]} - 1 ))]"; done
+    _GEM_SEGS=("${release[@]}" "${pre[@]}")
+}
+
 compare_versions_gem() {
     # Canonicalize: '-' introduces a prerelease, identically to '.pre.'.
     local v1="${1//-/.pre.}"
     local v2="${2//-/.pre.}"
 
     _gem_tokenize "$v1"
+    _gem_canonical
     local -a segs1=("${_GEM_SEGS[@]}")
     _gem_tokenize "$v2"
+    _gem_canonical
     local -a segs2=("${_GEM_SEGS[@]}")
 
     local len1=${#segs1[@]} len2=${#segs2[@]}
@@ -3498,144 +3226,208 @@ compare_versions_nuget() {
 
     COMPARE_RESULT="0"
 }
-build_vulnerability_lookup() {
-    if [ "$VULN_LOOKUP_BUILT" = true ]; then
-        return 0
+# Composer (Packagist) version comparator. Routed to from compare_versions_eco
+# when CHECK_ECO=composer.
+#
+# Composer's VersionParser normalizes before comparing, and its ordering is not
+# semver's:
+#   * a leading "v" is cosmetic (v2.4.0 == 2.4.0);
+#   * the numeric part has any number of components (1.2.3.4), missing ones
+#     count as 0;
+#   * the stability suffix may be glued to the number (9.4.0RC1 == 9.4.0-RC1)
+#     and orders dev < alpha (a) < beta (b) < RC < stable < patch (pl, p);
+#   * "-pN" is a post-release patch (Magento 2.4.7-p4 > 2.4.7), not a
+#     pre-release;
+#   * the stability number compares numerically (beta10 > beta9).
+#
+# Contract mirrors compare_versions: sets COMPARE_RESULT (-1/0/1), no stdout,
+# no subshell.
+
+# Split a composer version into the globals _CV_NUMS (array of numeric parts),
+# _CV_RANK (stability rank), _CV_NUM (stability number) and _CV_TAIL (anything
+# left, compared lexically).
+_composer_parse() {
+    local v="${1,,}"
+    v="${v%%+*}"
+    [[ "$v" == v[0-9]* ]] && v="${v:1}"
+    local nums="" rest=""
+    if [[ "$v" =~ ^([0-9]+(\.[0-9]+)*)(.*)$ ]]; then
+        nums="${BASH_REMATCH[1]}"
+        rest="${BASH_REMATCH[3]}"
+    else
+        rest="$v"
     fi
-
-    # NOTE: Do NOT clear existing data - we want to merge with CSV data if present
-    # VULN_EXACT_LOOKUP=()
-    # VULN_RANGE_LOOKUP=()
-    
-    # Use awk to parse JSON and generate bash eval statements directly
-    # This avoids the slow while-read loop in bash
-    local eval_commands
-    eval_commands=$(echo "$VULN_DATA" | awk '
-    BEGIN {
-        pkg = ""
-        in_ver = 0
-        in_range = 0
-    }
-    
-    # Function to escape single quotes for bash
-    function escape_sq(s) {
-        gsub(/'\''/, "'\''\\'\'''\''", s)
-        return s
-    }
-    
-    {
-        # Work character by character to handle JSON properly
-        line = $0
-        n = length(line)
-        
-        for (i = 1; i <= n; i++) {
-            c = substr(line, i, 1)
-            
-            # Simple state machine
-            if (c == "\"") {
-                # Start of quoted string - find the end
-                start = i + 1
-                i++
-                while (i <= n) {
-                    c2 = substr(line, i, 1)
-                    if (c2 == "\\") {
-                        i++  # Skip escaped char
-                    } else if (c2 == "\"") {
-                        break
-                    }
-                    i++
-                }
-                end = i - 1
-                str = substr(line, start, end - start + 1)
-                
-                # Check what comes after the string
-                rest = substr(line, i + 1)
-                if (match(rest, /^[[:space:]]*:[[:space:]]*\{/)) {
-                    # This is a package name
-                    pkg = str
-                    in_ver = 0
-                    in_range = 0
-                } else if (str == "versions" && match(rest, /^[[:space:]]*:[[:space:]]*\[/)) {
-                    in_ver = 1
-                    in_range = 0
-                } else if (str == "versions_range" && match(rest, /^[[:space:]]*:[[:space:]]*\[/)) {
-                    in_range = 1
-                    in_ver = 0
-                } else if (in_ver && pkg != "" && str != "") {
-                    # Aggregate exact versions by package
-                    if (pkg in exact_vers) {
-                        exact_vers[pkg] = exact_vers[pkg] "|" str
-                    } else {
-                        exact_vers[pkg] = str
-                    }
-                } else if (in_range && pkg != "" && str != "") {
-                    # Aggregate ranges by package
-                    if (pkg in range_vers) {
-                        range_vers[pkg] = range_vers[pkg] "\n" str
-                    } else {
-                        range_vers[pkg] = str
-                    }
-                }
-            } else if (c == "]") {
-                in_ver = 0
-                in_range = 0
-            }
-        }
-    }
-    END {
-        # JSON sources carry no ecosystem info -> wildcard namespace "*:"
-        # Output bash eval statements that MERGE with existing data
-        for (pkg in exact_vers) {
-            nk = "*:" pkg
-            printf "VULN_EXACT_LOOKUP['\''%s'\'']+='\''|%s'\''\n", escape_sq(nk), escape_sq(exact_vers[pkg])
-        }
-        for (pkg in range_vers) {
-            nk = "*:" pkg
-            printf "VULN_RANGE_LOOKUP['\''%s'\'']+='\''%s\n'\''\n", escape_sq(nk), escape_sq(range_vers[pkg])
-        }
-    }
-    ')
-
-    # Execute all assignments at once (much faster than while-read loop)
-    eval "$eval_commands"
-    
-    VULN_LOOKUP_BUILT=true
+    IFS='.' read -ra _CV_NUMS <<< "$nums"
+    _CV_RANK=4 _CV_NUM=0 _CV_TAIL=""
+    rest="${rest#[-._]}"
+    [ -z "$rest" ] && return
+    if [[ "$rest" =~ ^(dev|alpha|beta|rc|patch|pl|stable|a|b|c|p)[-._]?([0-9]*)(.*)$ ]]; then
+        case "${BASH_REMATCH[1]}" in
+            dev) _CV_RANK=0 ;;
+            alpha|a) _CV_RANK=1 ;;
+            beta|b) _CV_RANK=2 ;;
+            rc|c) _CV_RANK=3 ;;
+            stable) _CV_RANK=4 ;;
+            patch|pl|p) _CV_RANK=5 ;;
+        esac
+        _CV_NUM="${BASH_REMATCH[2]:-0}"
+        _CV_TAIL="${BASH_REMATCH[3]}"
+    else
+        # Unknown suffix: rank it like a pre-release so it stays inside "<x.y.z".
+        _CV_RANK=0
+        _CV_TAIL="$rest"
+    fi
 }
 
-# Collect all advisories attached to a matched version/range. The caller owns
-# the per-package seen set so duplicates across namespaces/sources collapse.
+compare_versions_composer() {
+    _composer_parse "$1"
+    local -a nums1=("${_CV_NUMS[@]}")
+    local rank1=$_CV_RANK num1=$_CV_NUM tail1=$_CV_TAIL
+    _composer_parse "$2"
+    local -a nums2=("${_CV_NUMS[@]}")
+    local rank2=$_CV_RANK num2=$_CV_NUM tail2=$_CV_TAIL
+
+    local i n1 n2 len=${#nums1[@]}
+    [ "${#nums2[@]}" -gt "$len" ] && len=${#nums2[@]}
+    for (( i = 0; i < len; i++ )); do
+        n1="${nums1[$i]:-0}" n2="${nums2[$i]:-0}"
+        while [[ "$n1" == 0* && ${#n1} -gt 1 ]]; do n1="${n1#0}"; done
+        while [[ "$n2" == 0* && ${#n2} -gt 1 ]]; do n2="${n2#0}"; done
+        if (( ${#n1} != ${#n2} )); then
+            (( ${#n1} < ${#n2} )) && COMPARE_RESULT=-1 || COMPARE_RESULT=1
+            return
+        fi
+        if [[ "$n1" < "$n2" ]]; then COMPARE_RESULT=-1; return; fi
+        if [[ "$n1" > "$n2" ]]; then COMPARE_RESULT=1; return; fi
+    done
+
+    if (( rank1 != rank2 )); then
+        (( rank1 < rank2 )) && COMPARE_RESULT=-1 || COMPARE_RESULT=1
+        return
+    fi
+    if (( 10#$num1 != 10#$num2 )); then
+        (( 10#$num1 < 10#$num2 )) && COMPARE_RESULT=-1 || COMPARE_RESULT=1
+        return
+    fi
+    if [[ "$tail1" < "$tail2" ]]; then COMPARE_RESULT=-1; return; fi
+    if [[ "$tail1" > "$tail2" ]]; then COMPARE_RESULT=1; return; fi
+    COMPARE_RESULT=0
+}
+# Severity rank used to compare and count advisories (sets SEV_RANK).
+# GHSA spells medium "moderate".
+severity_rank() {
+    case "${1,,}" in
+        critical) SEV_RANK=4 ;;
+        high) SEV_RANK=3 ;;
+        medium|moderate) SEV_RANK=2 ;;
+        low) SEV_RANK=1 ;;
+        *) SEV_RANK=0 ;;
+    esac
+}
+
+# Collect the advisories attached to a matched version/range into the
+# caller's adv_list (records "severity;ghsa;cve;source;fix;id") and adv_ids
+# (identity -> index). GHSA and OSV describe the same advisory in two records:
+# records sharing a GHSA id, a CVE or an OSV id merge into one entry whose
+# sources accumulate ("ghsa, osv") and whose missing fields are filled in.
+# Two different GHSA ids never merge.
 record_matching_advisories() {
-    local lookup_key="$1" result_key="$2"
+    local lookup_key="$1"
     local records="${VULN_RECORDS[$lookup_key]:-}"
-    local record severity ghsa cve source fix identity
-    [ -n "$records" ] || records=";;;;"
+    local record severity ghsa cve source fix id idx key
+    local s0 g0 c0 src0 f0 i0
+    [ -n "$records" ] || records=";;;;;"
     while IFS= read -r record; do
         [ -n "$record" ] || continue
-        IFS=';' read -r severity ghsa cve source fix <<< "$record"
-        if [ -n "$ghsa" ]; then identity="ghsa:$ghsa"
-        elif [ -n "$cve" ]; then identity="cve:$cve"
-        else identity="record:$record"
+        IFS=';' read -r severity ghsa cve source fix id <<< "$record"
+        idx=""
+        if [ -n "$ghsa$cve$id" ]; then
+            for key in ${ghsa:+"ghsa:$ghsa"} ${cve:+"cve:$cve"} ${id:+"id:$id"}; do
+                [ -n "${adv_ids[$key]+x}" ] || continue
+                idx="${adv_ids[$key]}"
+                IFS=';' read -r s0 g0 c0 src0 f0 i0 <<< "${adv_list[$idx]}"
+                if [ -n "$ghsa" ] && [ -n "$g0" ] && [ "$ghsa" != "$g0" ]; then
+                    idx=""
+                    continue
+                fi
+                break
+            done
+        elif [ -n "${adv_ids[record:$record]+x}" ]; then
+            continue
         fi
-        [ -n "${seen_advisories[$identity]+x}" ] && continue
-        seen_advisories["$identity"]=1
-        if [ -z "${VULN_ADVISORIES[$result_key]+x}" ]; then
-            VULN_ADVISORIES["$result_key"]="$record"
-            # Public exports keep the first advisory; console/issues retain all.
-            VULN_METADATA_SEVERITY["$result_key"]="$severity"
-            VULN_METADATA_GHSA["$result_key"]="$ghsa"
-            VULN_METADATA_CVE["$result_key"]="$cve"
-            VULN_METADATA_SOURCE["$result_key"]="$source"
-            VULN_METADATA_FIX["$result_key"]="$fix"
+        if [ -z "$idx" ]; then
+            idx=${#adv_list[@]}
+            adv_list+=("$record")
+            [ -n "$ghsa$cve$id" ] || adv_ids["record:$record"]="$idx"
         else
-            VULN_ADVISORIES["$result_key"]+="||$record"
+            IFS=';' read -r s0 g0 c0 src0 f0 i0 <<< "${adv_list[$idx]}"
+            severity_rank "$s0"; local rank0=$SEV_RANK
+            severity_rank "$severity"
+            [ "$SEV_RANK" -gt "$rank0" ] || severity="$s0"
+            case ", $src0, " in
+                *", $source, "*) source="$src0" ;;
+                *) source="${src0:+$src0${source:+, }}$source" ;;
+            esac
+            adv_list[$idx]="$severity;${g0:-$ghsa};${c0:-$cve};$source;${f0:-$fix};${i0:-$id}"
+            IFS=';' read -r severity ghsa cve source fix id <<< "${adv_list[$idx]}"
         fi
+        for key in ${ghsa:+"ghsa:$ghsa"} ${cve:+"cve:$cve"} ${id:+"id:$id"}; do
+            adv_ids["$key"]="$idx"
+        done
     done <<< "$records"
 }
 
+# Store the merged advisories of one finding. VULN_ADVISORIES keeps them all
+# ("rec||rec"); the VULN_METADATA_* summary uses the most severe advisory and
+# VULN_METADATA_FIX the highest fixed version (the one that fixes them all).
+finalize_advisories() {
+    local result_key="$1" rec joined="" best="" best_rank=-1 fixed=""
+    local severity ghsa cve source fix id
+    for rec in "${adv_list[@]}"; do
+        joined+="${joined:+||}$rec"
+        IFS=';' read -r severity ghsa cve source fix id <<< "$rec"
+        severity_rank "$severity"
+        if [ "$SEV_RANK" -gt "$best_rank" ]; then best_rank=$SEV_RANK; best="$rec"; fi
+        if [ -n "$fix" ]; then
+            if [ -z "$fixed" ]; then
+                fixed="$fix"
+            else
+                compare_versions_eco "$CHECK_ECO" "$fix" "$fixed"
+                [ "$COMPARE_RESULT" != 1 ] || fixed="$fix"
+            fi
+        fi
+    done
+    VULN_ADVISORIES["$result_key"]="$joined"
+    IFS=';' read -r severity ghsa cve source fix id <<< "$best"
+    VULN_METADATA_SEVERITY["$result_key"]="$severity"
+    VULN_METADATA_GHSA["$result_key"]="$ghsa"
+    VULN_METADATA_CVE["$result_key"]="$cve"
+    VULN_METADATA_SOURCE["$result_key"]="$source"
+    VULN_METADATA_FIX["$result_key"]="$fixed"
+}
+
+# Canonical form of a user-supplied package name for an ecosystem (the form
+# the lockfile parsers and feeds use). Sets CANON_NAME.
+canonical_package_name() {
+    case "$1" in
+        pypi) _pypi_normalize_name "$2"; CANON_NAME="$PEP503_NAME" ;;
+        nuget|composer|githubactions) CANON_NAME="${2,,}" ;;
+        swift)
+            local n="${2,,}"
+            n="${n#*://}"; n="${n%/}"; n="${n%.git}"
+            CANON_NAME="$n" ;;
+        *) CANON_NAME="$2" ;;
+    esac
+}
+
 # Probe ecosystem-specific and wildcard feeds without cross-ecosystem leakage.
-# Args: ecosystem package version source-file.
+# Args: ecosystem package version source-file. With --package-name, only that
+# package (PACKAGE_FILTER = "eco:name") is reported.
 check_vulnerability() {
     local eco="$1" name="$2" version="$3" source="$4"
+    if [ -n "${PACKAGE_FILTER:-}" ] && [ "$eco:$name" != "$PACKAGE_FILTER" ]; then
+        return 1
+    fi
     # Most installed packages have no advisory. Avoid allocating per-advisory
     # maps and parsing four empty lists for every such dependency in a lockfile.
     if [ -z "${VULN_EXACT_LOOKUP[$eco:$name]+x}" ] &&
@@ -3650,7 +3442,8 @@ check_vulnerability() {
     [ "$eco" = "*" ] || probe_keys+=("*:${name}")
     local pk candidate lookup_key message="" found=false
     local -a candidates
-    local -A seen_advisories=() seen_candidates=()
+    local -A seen_candidates=() adv_ids=()
+    local -a adv_list=()
     local collect=true
     [ -z "${VULN_ADVISORIES[$result_key]+x}" ] || collect=false
 
@@ -3671,7 +3464,7 @@ check_vulnerability() {
                 fi
                 found=true
                 if [ "$collect" = true ]; then
-                    record_matching_advisories "$lookup_key" "$result_key"
+                    record_matching_advisories "$lookup_key"
                 fi
             fi
         done
@@ -3688,13 +3481,14 @@ check_vulnerability() {
                 fi
                 found=true
                 if [ "$collect" = true ]; then
-                    record_matching_advisories "$lookup_key" "$result_key"
+                    record_matching_advisories "$lookup_key"
                 fi
             fi
         done <<< "${VULN_RANGE_LOOKUP[$pk]:-}"
     done
 
     if [ "$found" = true ]; then
+        [ "$collect" = false ] || finalize_advisories "$result_key"
         echo -e "${RED}⚠️  [$source] $name@$version $message${NC}"
         FOUND_VULNERABLE=1
         VULNERABLE_PACKAGES+=("$source|$eco|$name@$version")
@@ -3798,44 +3592,56 @@ analyze_yarn_lock() {
     # Use awk to extract all packages in one pass (POSIX-compatible)
     local packages
     packages=$(awk '
-    BEGIN { pkg="" }
-    /^[^[:space:]].*:$/ && !/^[[:space:]]/ {
-        line = $0
-        gsub(/:$/, "", line)
-        gsub(/"/, "", line)
-        # Handle scoped packages: @scope/name@version
-        # Extract package name (before first @version part)
-        if (substr(line, 1, 1) == "@") {
-            # Scoped package: @scope/name@version
-            # Find second @ which separates name from version
-            temp = substr(line, 2)  # Remove leading @
-            idx = index(temp, "@")
-            if (idx > 0) {
-                pkg = "@" substr(temp, 1, idx-1)
-            }
-        } else {
-            # Regular package: name@version or name@npm:version (Yarn Berry)
-            idx = index(line, "@")
-            if (idx > 0) {
-                pkg = substr(line, 1, idx-1)
-            }
+    # Package name of one yarn descriptor ("name@range", "@scope/name@range").
+    # An npm alias "alias@npm:real@^1" installs "real", so return that.
+    function spec_name(spec,   at, name, rest) {
+        at = index(substr(spec, 2), "@")
+        if (at == 0) return ""
+        name = substr(spec, 1, at)
+        rest = substr(spec, at + 2)
+        if (rest ~ /^npm:/) {
+            rest = substr(rest, 5)
+            at = index(substr(rest, 2), "@")
+            if (at > 0) name = substr(rest, 1, at)
         }
+        return name
     }
-    # Match both Yarn Classic (version "x.y.z") and Yarn Berry (version: x.y.z) formats
+    function flush() {
+        if (pkg != "" && ver != "" && ver !~ /^(workspace|file|link|npm|portal|patch|exec):/ && ver != "0.0.0-use.local")
+            print pkg "|" ver
+        pkg = ver = ""
+    }
+    { sub(/\r$/, "") }
+    # Block header: one or more comma-separated descriptors ending in ":".
+    /^[^[:space:]#].*:$/ {
+        flush()
+        line = $0
+        sub(/:$/, "", line)
+        gsub(/"/, "", line)
+        sub(/,.*/, "", line)
+        gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
+        if (line != "__metadata") pkg = spec_name(line)
+        next
+    }
+    # Classic: version "x.y.z"   Berry: version: x.y.z
     /^[[:space:]]+version[[:space:]:]/ && pkg != "" {
         line = $0
-        # Extract version value - handle both formats
-        sub(/.*version[[:space:]:]+/, "", line)
+        sub(/^[[:space:]]+version[[:space:]:]+/, "", line)
         gsub(/"/, "", line)
         gsub(/[[:space:]].*/, "", line)
-        # Skip non-semver versions (workspace, file, link references)
-        if (line ~ /^(workspace|file|link|npm):/ || line == "0.0.0-use.local" || line == "") {
-            pkg=""
-            next
-        }
-        print pkg "|" line
-        pkg=""
+        ver = line
+        next
     }
+    # Berry records the installed package itself: resolution: "real@npm:1.2.3"
+    /^[[:space:]]+resolution:[[:space:]]/ && pkg != "" {
+        line = $0
+        sub(/^[[:space:]]+resolution:[[:space:]]+/, "", line)
+        gsub(/"/, "", line)
+        at = index(substr(line, 2), "@")
+        if (at > 0 && substr(line, at + 2) ~ /^npm:/) pkg = substr(line, 1, at)
+        next
+    }
+    END { flush() }
     ' "$lockfile" 2>/dev/null | sort -u)
 
     # Process extracted packages
@@ -3868,8 +3674,19 @@ analyze_pnpm_lock() {
     /^[a-zA-Z]/ && !/^[[:space:]]/ && in_packages { in_packages=0 }
     in_packages {
         line = $0
+        # A package installed from a tarball URL or git ("xlsx@https://...")
+        # names no version in its key: pnpm records it in a version: field.
+        if (tarball_pkg != "" && line ~ /^    version:[[:space:]]*[^[:space:]]/) {
+            version = line
+            sub(/^    version:[[:space:]]*/, "", version)
+            gsub(/[\047"[:space:]]/, "", version)
+            if (version != "") print tarball_pkg "|" version
+            tarball_pkg = ""
+            next
+        }
         # Only package-map keys, never nested dependency metadata.
         if (line !~ /^  [^[:space:]].*:[[:space:]]*$/) next
+        tarball_pkg = ""
         # Remove leading whitespace
         gsub(/^[[:space:]]+/, "", line)
         # Remove trailing colon
@@ -3882,12 +3699,24 @@ analyze_pnpm_lock() {
 
         # Peer suffixes identify resolutions of this same installed version.
         sub(/\(.*/, "", line)
-        # pnpm <=7 uses /name/version, with optional _peer context.
+        # pnpm <=7 uses /name/version, with optional _peer context. The
+        # trailing segment must be a version: "@scope/3d-lib@1.0.0" is the
+        # modern format with a name that merely starts with a digit.
         if (match(line, /\/[0-9][^\/]*$/)) {
-            pkg_name = substr(line, 1, RSTART - 1)
-            version = substr(line, RSTART + 1)
-            sub(/_.*/, "", version)
-            print pkg_name "|" version
+            seg = substr(line, RSTART + 1)
+            if (seg ~ /^[0-9]+\.[0-9]+[^@]*(_|$)/) {
+                pkg_name = substr(line, 1, RSTART - 1)
+                version = seg
+                sub(/_.*/, "", version)
+                print pkg_name "|" version
+                next
+            }
+        }
+
+        # Remote tarball or git source: the version follows in the block.
+        at = index(substr(line, 2), "@")
+        if (at > 0 && substr(line, at + 2) ~ /^(https?:|git\+|git:|github:)/) {
+            tarball_pkg = substr(line, 1, at)
             next
         }
 
@@ -3942,6 +3771,33 @@ analyze_bun_lock() {
     # Use awk to extract all packages in one pass (POSIX-compatible)
     local packages
     packages=$(awk '
+    { sub(/\r$/, "") }
+    # Top-level keys sit at a two-space indent; only "packages" holds
+    # resolved versions ("workspaces" lists the requested specs, e.g. "2").
+    /^  "[^"]+"[[:space:]]*:/ {
+        section = $0
+        sub(/^  "/, "", section)
+        sub(/".*/, "", section)
+    }
+    section != "packages" { next }
+    # Remote tarball: ["pkg@https://.../<base>-<version>.tgz", ...]. bun
+    # records no version, so read it from the file name; skip it otherwise.
+    match($0, /\["[^"]+@https?:[^"]*"/) {
+        temp = substr($0, RSTART + 2, RLENGTH - 3)
+        idx = index(substr(temp, 2), "@")
+        pkg_name = substr(temp, 1, idx)
+        file = substr(temp, idx + 2)
+        sub(/[?#].*/, "", file)
+        sub(/.*\//, "", file)
+        sub(/\.(tgz|tar\.gz)$/, "", file)
+        base = pkg_name
+        sub(/.*\//, "", base)
+        if (substr(file, 1, length(base) + 1) == base "-") {
+            version = substr(file, length(base) + 2)
+            if (version ~ /^[0-9]/) print pkg_name "|" version
+        }
+        next
+    }
     # Match package entries: "pkg": ["pkg@version", ...]
     /\["[^"]+@[0-9]/ {
         line = $0
@@ -3960,11 +3816,11 @@ analyze_bun_lock() {
             }
         }
     }
-    # Match workspace deps: "pkg": "version"
+    # Exact dependency pins inside a package entry: "pkg": "1.2.3"
     /"[^"]+": "[0-9]/ {
         line = $0
         # Extract "key": "value" pattern
-        if (match(line, /"[^"]+": "[0-9][^"]*"/)) {
+        if (match(line, /"[^"]+": "[0-9]+\.[0-9]+\.[0-9][^"]*"/)) {
             temp = substr(line, RSTART+1, RLENGTH-2)  # Remove outer quotes
             idx = index(temp, "\": \"")
             if (idx > 0) {
@@ -4012,28 +3868,15 @@ analyze_deno_lock() {
             gsub(/^[[:space:]]*"/, "", temp)
             gsub(/"[[:space:]]*:.*/, "", temp)
 
-            # Remove anything after underscore (peer deps)
-            idx = index(temp, "_")
-            if (idx > 0) temp = substr(temp, 1, idx-1)
-
-            # Extract package name and version
-            # Handle scoped packages
-            if (substr(temp, 1, 1) == "@") {
-                # Find second @
-                rest = substr(temp, 2)
-                at_idx = index(rest, "@")
-                if (at_idx > 0) {
-                    pkg_name = "@" substr(rest, 1, at_idx-1)
-                    version = substr(rest, at_idx+1)
-                    print pkg_name "|" version
-                }
-            } else {
-                at_idx = index(temp, "@")
-                if (at_idx > 0) {
-                    pkg_name = substr(temp, 1, at_idx-1)
-                    version = substr(temp, at_idx+1)
-                    print pkg_name "|" version
-                }
+            # Name/version split at the first "@" after the scope marker.
+            # Package names may contain "_" (string_decoder): only the
+            # version carries the "_peer@x" suffix, so strip it there.
+            at_idx = index(substr(temp, 2), "@")
+            if (at_idx > 0) {
+                pkg_name = substr(temp, 1, at_idx)
+                version = substr(temp, at_idx + 2)
+                sub(/_.*/, "", version)
+                if (pkg_name != "" && version != "") print pkg_name "|" version
             }
         }
     }
@@ -4103,10 +3946,11 @@ ECOSYSTEM_REGISTRY=(
 
 # ============================================================================
 # Path-discovered ecosystems — the parallel to ECOSYSTEM_REGISTRY for
-# ecosystems selected by a directory PATH pattern instead of a fixed lockfile
-# basename. GitHub Actions is the only one: workflow YAML lives at a well-known
-# path (.github/workflows/*.yml|*.yaml) under ARBITRARY filenames, so `find
-# -name` cannot select it and `basename` cannot dispatch it. Both the find-args
+# ecosystems selected by a directory PATH pattern or a filename glob instead of
+# a fixed lockfile basename. GitHub Actions workflow YAML lives at a well-known
+# path (.github/workflows/*.yml|*.yaml) under ARBITRARY filenames, and pip
+# projects split pins into requirements-*.txt or requirements/*.txt, so `find
+# -name <basename>` cannot select them and `basename` cannot dispatch them. Both the find-args
 # builder and the dispatcher special-case these entries (see discover_project_files
 # and the analysis loop in src/90-main.sh); path_ecosystem_match() below is the
 # single resolver they share.
@@ -4124,6 +3968,8 @@ ECOSYSTEM_REGISTRY=(
 # does not fetch workflow files. This is a documented limitation.
 PATH_ECOSYSTEM_REGISTRY=(
     "*/.github/workflows/*|*.yml,*.yaml|githubactions|analyze_github_workflow|actions"
+    "*|requirements-*.txt|pypi|analyze_requirements_txt|python"
+    "*/requirements/*|*.txt|pypi|analyze_requirements_txt|python"
 )
 
 # Resolve a discovered file to its path-ecosystem. Echoes "parser|eco|alias"
@@ -4248,7 +4094,8 @@ default_feed_filename() {
 # Python / PyPI dependency parsers.
 #
 # Registered lockfiles (see 01-registry.sh):
-#   requirements.txt -> analyze_requirements_txt   (exact == pins only)
+#   requirements.txt, requirements-*.txt, requirements/*.txt
+#                    -> analyze_requirements_txt   (exact == pins only)
 #   poetry.lock / uv.lock / pdm.lock -> analyze_toml_pkg_lock (shared TOML)
 #   Pipfile.lock     -> analyze_pipfile_lock        (JSON default+develop)
 #
@@ -4279,7 +4126,8 @@ _pypi_normalize_name() {
 #     or containing a scheme://);
 #   * backslash continuations are joined before comments/options are stripped;
 #   * requirements using any operator other than '==' (>=, <=, ~=, !=, ===, >,
-#     <) are skipped — a range is not an installed version.
+#     <) are skipped — a range is not an installed version — and so are
+#     wildcard pins such as ==1.0.*.
 # Extracted names are PEP 503-normalized.
 analyze_requirements_txt() {
     local lockfile="$1"
@@ -4321,6 +4169,7 @@ analyze_requirements_txt() {
         br = index(name, "[")                       # strip extras
         if (br > 0) name = substr(name, 1, br - 1)
         sub(/[[:space:]].*$/, "", ver)              # drop any trailing tokens
+        if (ver ~ /\*/) next                        # ==1.0.* is a range, not a pin
         if (name != "" && ver != "") print name "|" ver
     }
     ' "$lockfile" 2>/dev/null | sort -u)
@@ -4516,6 +4365,86 @@ analyze_go_mod() {
         echo -e "${GREEN}✓ [$lockfile] No vulnerabilities found${NC}"
     fi
 }
+
+# Annotate the Go findings with govulncheck's call analysis (--go-reachability):
+# VULN_REACHABILITY["dir|golang:module@version"] is "called" when one of the
+# module's findings reaches a vulnerable function from the code of the Go
+# module in dir, else "not called". govulncheck runs once per go.mod directory whose go.sum or
+# go.mod has a finding; a module it says nothing about stays unannotated. In its JSON stream, the first frame
+# of a finding's trace is the vulnerable module, and names a function only when
+# the code calls it. A missing govulncheck or a failed run only warns: the
+# scan result never depends on it.
+go_reachability() {
+    local vuln file eco dir dirs=""
+    for vuln in "${VULNERABLE_PACKAGES[@]}"; do
+        IFS='|' read -r file eco _ <<< "$vuln"
+        [ "$eco" = golang ] || continue
+        finding_dir "$file"
+        dir="$FINDING_DIR"
+        [ -f "$dir/go.mod" ] || continue
+        case $'\n'"$dirs"$'\n' in *$'\n'"$dir"$'\n'*) ;; *) dirs+="${dirs:+$'\n'}$dir" ;; esac
+    done
+    [ -n "$dirs" ] || return 0
+    if ! command -v govulncheck > /dev/null 2>&1; then
+        echo -e "${YELLOW}⚠️  --go-reachability: govulncheck not found (go install golang.org/x/vuln/cmd/govulncheck@latest); Go findings are not annotated${NC}"
+        return 0
+    fi
+
+    local out err rc annotations module state
+    while IFS= read -r dir; do
+        out=$(mktemp) || return 0
+        register_temp_file "$out"
+        err=$(mktemp) || return 0
+        register_temp_file "$err"
+        echo "🔎 Checking Go reachability with govulncheck in $dir..."
+        rc=0
+        govulncheck -C "$dir" -format json ./... > "$out" 2> "$err" || rc=$?
+        # 3 means "vulnerabilities found" in text mode; JSON mode exits 0.
+        if [ "$rc" -ne 0 ] && [ "$rc" -ne 3 ]; then
+            echo -e "${YELLOW}⚠️  govulncheck failed in $dir (exit $rc): $(head -n 1 "$err"); its Go findings are not annotated${NC}"
+            continue
+        fi
+        annotations=$(json_structural_lines "$out" | awk "$AWK_FEED_LIB$AWK_JSON_PATH"'
+        {
+            jp_step($0)
+            if (JP_EVENT == "open" && JP_PATH == "/#/finding/trace") frame = 0
+            else if (JP_EVENT == "open" && JP_PATH == "/#/finding/trace/#") frame++
+            else if (JP_EVENT == "scalar" && JP_PATH == "/#/finding/trace/#" && frame == 1) {
+                if (JP_KEY == "module") module = JP_VAL
+                else if (JP_KEY == "version") version = JP_VAL
+                else if (JP_KEY == "function" && JP_VAL != "") called = 1
+            } else if (JP_EVENT == "close" && JP_PATH == "/#/finding") {
+                if (module != "" && version != "") {
+                    sub(/^v/, "", version)
+                    key = module "@" version
+                    if (called) state[key] = "called"
+                    else if (!(key in state)) state[key] = "not called"
+                }
+                module = version = ""
+                called = 0
+            }
+        }
+        END { for (key in state) print key "|" state[key] }
+        ')
+        while IFS='|' read -r module state; do
+            [ -n "$module" ] || continue
+            VULN_REACHABILITY["$dir|golang:$module"]="$state"
+        done <<< "$annotations"
+    done <<< "$dirs"
+}
+
+# Directory of a finding's file, in FINDING_DIR.
+finding_dir() {
+    FINDING_DIR="${1%/*}"
+    [ "$FINDING_DIR" != "$1" ] || FINDING_DIR="."
+}
+
+# Reachability of one occurrence (file, eco:name@version) in REACHABILITY,
+# empty when govulncheck said nothing about it.
+reachability_of() {
+    finding_dir "$1"
+    REACHABILITY="${VULN_REACHABILITY[$FINDING_DIR|$2]:-}"
+}
 # Shared TOML "[[package]]" lockfile parser.
 #
 # Handles Cargo.lock (v3/v4) today; the same block shape (name = "..." /
@@ -4529,6 +4458,9 @@ analyze_go_mod() {
 # [package.dependencies] / [package.extras] / [package.source] (or [metadata],
 # etc.) closes the capture window, so a dependency literally keyed `name` or
 # `version` inside a subtable can never leak a bogus pair.
+#
+# LOCAL PROJECTS: uv.lock lists the project being locked as a [[package]] with
+# source = { editable = "." } or { virtual = "." }; such entries are skipped.
 #
 # NORMALIZATION: when eco = pypi, package names are PEP 503-normalized
 # (lowercase; runs of - _ . collapsed to a single -) so they line up with the
@@ -4544,11 +4476,12 @@ analyze_toml_pkg_lock() {
     local packages
     packages=$(awk '
     function emit_pkg() {
-        if (pkg_name != "" && pkg_version != "") {
+        if (pkg_name != "" && pkg_version != "" && !local_pkg) {
             print pkg_name "|" pkg_version
         }
         pkg_name = ""
         pkg_version = ""
+        local_pkg = 0
     }
     # Start of a new [[package]] block: flush, then open the capture window.
     /^[[:space:]]*\[\[package\]\][[:space:]]*$/ {
@@ -4572,6 +4505,12 @@ analyze_toml_pkg_lock() {
         gsub(/^"/, "", line)
         gsub(/"$/, "", line)
         pkg_name = line
+        next
+    }
+    # uv.lock records the project itself (and workspace members) with an
+    # editable or virtual source: local code, not a published release.
+    in_pkg && /^[[:space:]]*source[[:space:]]*=[[:space:]]*\{.*(editable|virtual)[[:space:]]*=/ {
+        local_pkg = 1
         next
     }
     in_pkg && /^[[:space:]]*version[[:space:]]*=/ {
@@ -4897,19 +4836,21 @@ analyze_gradle_lockfile() {
     fi
 }
 
-# Parse a pom.xml. A line-oriented awk state machine walks each <dependency> block
-# and captures its <groupId>, <artifactId> and <version> child text (tolerating a
-# same-line "<groupId>x</groupId>" form). A dependency is REPORTED only when it has
-# a literal, resolvable version: entries whose version is absent or contains "${"
-# (an unresolved property such as ${spring.version}) are SKIPPED — this parser does
-# NOT resolve properties or parent/dependencyManagement inheritance, a documented
-# manifest-grade limitation (the same class of limitation every non-lockfile parser
-# in this codebase carries). <dependency> blocks anywhere are accepted (project
-# <dependencies> and <dependencyManagement> alike). Nested <exclusions> carry their
-# own <groupId>/<artifactId> children, so that region is skipped to avoid clobbering
-# the enclosing dependency's coordinates. The opening tag is matched as
-# "<dependency" followed by a space or '>' so that "<dependencies>" (the wrapper)
-# never triggers a block.
+# Parse a pom.xml. The whole file is read into one string so tags split over
+# several lines (<version>\n  1.2.3\n</version>) parse like single-line ones,
+# and XML comments are removed first (a commented-out <dependency> is not a
+# dependency). Each <dependency> block yields its <groupId>, <artifactId> and
+# <version>; nested <exclusions> are cut out so their coordinates cannot
+# clobber the dependency's. A version "${name}" is resolved from the same
+# file's <properties>; anything else that is not a literal version is SKIPPED:
+# unresolved properties (parent POMs, ${project.version}), dependencyManagement
+# inheritance (no version at all) and version ranges ("[1.0,2.0)"). This is a
+# manifest-grade parser — the same class of limitation every non-lockfile
+# parser in this codebase carries; the missing and unresolved versions are
+# counted and reported once, pointing to --sbom. <dependency> blocks anywhere are accepted
+# (project <dependencies> and <dependencyManagement> alike); the opening tag is
+# matched as "<dependency" followed by a space or '>' so that the
+# "<dependencies>" wrapper never opens a block.
 analyze_pom_xml() {
     local lockfile="$1"
     local eco="${2:-maven}"
@@ -4918,55 +4859,74 @@ analyze_pom_xml() {
 
     local packages
     packages=$(awk '
-    # Return the inner text of <tag>...</tag> on this line, or the sentinel
-    # "\001" (never a valid coordinate) when the tag is not present/closed here.
-    function inner(line, tag,   open, s, rest, e, val) {
+    function trim(v) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); return v }
+    # Inner text of the first <tag>...</tag> in s, or "\001" when absent.
+    function inner(s, tag,   open, b, rest, e) {
         open = "<" tag ">"
-        s = index(line, open)
-        if (s == 0) return "\001"
-        rest = substr(line, s + length(open))
+        b = index(s, open)
+        if (b == 0) return "\001"
+        rest = substr(s, b + length(open))
         e = index(rest, "</" tag ">")
         if (e == 0) return "\001"
-        val = substr(rest, 1, e - 1)
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", val)
-        return val
+        return trim(substr(rest, 1, e - 1))
     }
-    BEGIN { in_dep = 0; in_excl = 0 }
-    {
-        line = $0
-        gsub(/\r/, "", line)
-
-        # Open/capture/close are handled within the SAME line pass (not via
-        # "next"), so a whole "<dependency>...</dependency>" on one line, or an
-        # opening tag sharing a line with its first child, is still captured.
-        if (line ~ /<dependency[[:space:]>]/) {
-            in_dep = 1; in_excl = 0
-            g = ""; a = ""; v = ""; have_v = 0
+    { doc = doc $0 "\n" }
+    END {
+        gsub(/\r/, "", doc)
+        # Drop XML comments (an unterminated one runs to the end of file).
+        while ((b = index(doc, "<!--")) > 0) {
+            rest = substr(doc, b + 4)
+            e = index(rest, "-->")
+            doc = substr(doc, 1, b - 1) (e ? substr(rest, e + 3) : "")
         }
-        if (in_dep) {
-            if (line ~ /<exclusions>/) in_excl = 1
-            # Skip coordinate capture inside a nested <exclusions> block (its
-            # <groupId>/<artifactId> children would otherwise clobber the dep).
-            if (!in_excl) {
-                val = inner(line, "groupId");    if (val != "\001") g = val
-                val = inner(line, "artifactId"); if (val != "\001") a = val
-                val = inner(line, "version");    if (val != "\001") { v = val; have_v = 1 }
+        # <properties><name>value</name>...</properties>
+        props = inner(doc, "properties")
+        if (props != "\001") {
+            while (match(props, /<[A-Za-z0-9_.-]+>[^<]*<\//)) {
+                m = substr(props, RSTART + 1, RLENGTH - 3)
+                gt = index(m, ">")
+                prop[substr(m, 1, gt - 1)] = trim(substr(m, gt + 1))
+                props = substr(props, RSTART + RLENGTH)
             }
-            if (line ~ /<\/exclusions>/) in_excl = 0
         }
-        if (line ~ /<\/dependency>/) {
-            if (in_dep && g != "" && a != "" && have_v && v != "" && index(v, "${") == 0) {
-                print g ":" a "|" v
+        rest = doc
+        while (match(rest, /<dependency[[:space:]>]/)) {
+            rest = substr(rest, RSTART + RLENGTH)
+            e = index(rest, "</dependency>")
+            if (e == 0) break
+            block = substr(rest, 1, e - 1)
+            rest = substr(rest, e + 13)
+            while ((b = index(block, "<exclusions>")) > 0) {
+                x = index(substr(block, b), "</exclusions>")
+                block = substr(block, 1, b - 1) (x ? substr(block, b + x + 12) : "")
             }
-            in_dep = 0; in_excl = 0
+            g = inner(block, "groupId"); a = inner(block, "artifactId"); v = inner(block, "version")
+            if (g == "\001" || a == "\001" || g == "" || a == "") continue
+            if (v ~ /^\$\{[^}]+\}$/) {
+                name = substr(v, 3, length(v) - 3)
+                v = (name in prop) ? prop[name] : ""
+            }
+            # Missing or unresolved versions come from a parent POM or a BOM.
+            if (v == "\001" || v == "" || index(v, "${")) { unversioned++; continue }
+            # Version ranges are not installed versions.
+            if (v ~ /^[\[(]/ || index(v, ",")) continue
+            print g ":" a "|" v
         }
+        # "-" is never a groupId:artifactId: it carries the unversioned count.
+        if (unversioned) print "-|" unversioned
     }
     ' "$lockfile" 2>/dev/null | sort -u)
 
+    local unversioned=0
     while IFS='|' read -r pkg_name version; do
         [ -z "$pkg_name" ] || [ -z "$version" ] && continue
+        if [ "$pkg_name" = "-" ]; then unversioned="$version"; continue; fi
         check_vulnerability "$eco" "$pkg_name" "$version" "$lockfile" || true
     done <<< "$packages"
+
+    if [ "$unversioned" -gt 0 ]; then
+        echo -e "${YELLOW}⚠️  $unversioned dependencies in $lockfile have no version here (managed by a parent POM or BOM): scan a CycloneDX SBOM with --sbom (cyclonedx-maven-plugin) or a gradle.lockfile to check them${NC}"
+    fi
 
     local vuln_count_after=${#VULNERABLE_PACKAGES[@]}
     if [ "$vuln_count_after" -eq "$vuln_count_before" ]; then
@@ -4985,8 +4945,9 @@ analyze_pom_xml() {
 # levels deep below the root: a single top-level "dependencies" object keyed
 # by target framework moniker (e.g. "net8.0"; a multi-targeted project has one
 # sibling object per TFM), each holding package-name-keyed objects with a
-# "type" ("Direct" | "Transitive" | "Project") and, for Direct/Transitive, a
-# "resolved" version. This is one nesting level deeper than composer.lock's
+# "type" ("Direct" | "Transitive" | "CentralTransitive" | "Project") and,
+# except for Project, a "resolved" version. CentralTransitive marks transitive
+# packages pinned through Central Package Management (Directory.Packages.props). This is one nesting level deeper than composer.lock's
 # "packages"/"packages-dev" ARRAY of objects (src/50-ecosystems/30-php.sh), so
 # the same JSON brace/bracket DEPTH-TRACKING approach is used here but against
 # TWO thresholds instead of composer's one: package names are only captured
@@ -5007,7 +4968,8 @@ analyze_pom_xml() {
 # "type": "Project" entries (an in-solution ProjectReference resolved through
 # the lock file, e.g. a referenced class library) carry NO "resolved" field
 # at all, so they are skipped by construction: emit_pkg() only prints when
-# type is Direct or Transitive AND a resolved version was captured.
+# type is Direct, Transitive or CentralTransitive AND a resolved version was
+# captured.
 #
 # NORMALIZATION: package names (the JSON keys themselves) are LOWERCASED
 # (NuGet canon - the feed side, data/ghsa-nuget.purl / data/osv-nuget.purl,
@@ -5031,7 +4993,7 @@ analyze_nuget_lock() {
     local packages
     packages=$(json_structural_lines "$lockfile" | awk '
     function emit_pkg() {
-        if (pkg_name != "" && pkg_version != "" && (pkg_type == "Direct" || pkg_type == "Transitive")) {
+        if (pkg_name != "" && pkg_version != "" && (pkg_type == "Direct" || pkg_type == "Transitive" || pkg_type == "CentralTransitive")) {
             print pkg_name "|" pkg_version
         }
         pkg_name = ""
@@ -5387,7 +5349,8 @@ analyze_mix_lock() {
 # the "identity"/"package" field (a short, human-picked label with no
 # guaranteed uniqueness) but the resolved repository URL itself,
 # canonicalized the same way GHSA/OSV swift feed rows are: strip a leading
-# "http://" or "https://" scheme, strip a trailing ".git", lowercase the
+# scheme ("https://", "ssh://git@"), rewrite the scp-like "git@host:owner/repo"
+# form to "host/owner/repo", strip a trailing "/" and ".git", lowercase the
 # rest. E.g. "https://GitHub.com/Apple/Swift-NIO.git" becomes
 # "github.com/apple/swift-nio". This makes matching resilient to
 # mixed-case GitHub URLs (GitHub itself is case-insensitive) and to
@@ -5409,7 +5372,14 @@ analyze_package_resolved() {
     function emit_pkg() {
         if (url != "" && ver != "") {
             canon = url
-            sub(/^https?:\/\//, "", canon)
+            # https://host/o/r(.git)(/), ssh://git@host/o/r and the scp-like
+            # git@host:o/r all name the same repository: host/o/r.
+            if (sub(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, "", canon)) {
+                sub(/^[^@\/]*@/, "", canon)
+            } else if (sub(/^[^@\/:]*@/, "", canon)) {
+                sub(/:/, "/", canon)
+            }
+            sub(/\/+$/, "", canon)
             sub(/\.git$/, "", canon)
             canon = tolower(canon)
             v = ver
@@ -5561,6 +5531,9 @@ analyze_package_resolved() {
 #   * A subpath ref (`github/codeql-action/analyze@v3`) is keyed by its FULL
 #     `owner/repo/subpath` name; advisories published against the base repo
 #     (`github/codeql-action`) therefore do not match a subpathed `uses:`.
+#   * Floating tags with fewer than three parts (`@v4`, `@v4.1`) are skipped:
+#     they track the latest release of that line, so the resolved version is
+#     unknown and comparing `4` against `<4.0.1` would be a false positive.
 #   * Best-effort line matching: a literal `uses: owner/repo@ref` line buried
 #     inside a `run:` shell block would be treated as a step reference. This
 #     mirrors the line-oriented approach of the other lockfile parsers.
@@ -5628,6 +5601,11 @@ analyze_github_workflow() {
         # Branch names and 40-hex commit SHAs pass through unchanged.
         if (ref ~ /^v[0-9]/) sub(/^v/, "", ref)
 
+        # Floating major/minor tags (@v4, @v4.1) move with every release: the
+        # commit they resolve to is unknown here, so comparing "46" against
+        # "<46.0.1" would flag every user of a long-patched action. Skip them.
+        if (ref ~ /^[0-9]+(\.[0-9]+)?$/) next
+
         if (name != "" && ref != "") print name "|" ref
     }
     ' "$lockfile" 2>/dev/null | sort -u)
@@ -5658,39 +5636,67 @@ json_print_string() {
     printf '"%s"' "$value"
 }
 
-# Shared legacy metadata projection: one row per package occurrence.
+# Summary metadata of one finding: the most severe advisory's fields, the
+# version that fixes every advisory (see finalize_advisories) and, with
+# --go-reachability, whether the code calls it.
 export_metadata() {
-    local eco="$1" pkg="$2"
+    local eco="$1" pkg="$2" file="$3"
     local key="${eco}:${pkg}" name="${pkg%@*}"
     severity="${VULN_METADATA_SEVERITY[$key]:-${VULN_METADATA_SEVERITY[$name]:-}}"
     ghsa="${VULN_METADATA_GHSA[$key]:-${VULN_METADATA_GHSA[$name]:-}}"
     cve="${VULN_METADATA_CVE[$key]:-${VULN_METADATA_CVE[$name]:-}}"
     source="${VULN_METADATA_SOURCE[$key]:-${VULN_METADATA_SOURCE[$name]:-}}"
+    fixed_in="${VULN_METADATA_FIX[$key]:-}"
+    reachability_of "$file" "$key"
+    reachability="$REACHABILITY"
 }
 
+# The report is written even when nothing is vulnerable, so a CI job never
+# picks up a stale report from an earlier run.
 export_vulnerabilities_json() {
     local output_file="${1:-vulnerabilities.json}"
-    local vuln file eco pkg severity ghsa cve source field first=true
+    local vuln file eco pkg severity ghsa cve source fixed_in reachability field first=true
+    local advisories advisory a_first a_sev a_ghsa a_cve a_source a_fix a_id
     local -A unique=()
     {
-        printf '{\n  "vulnerabilities": [\n'
+        printf '{\n  "vulnerabilities": ['
         for vuln in "${VULNERABLE_PACKAGES[@]}"; do
             IFS='|' read -r file eco pkg <<< "$vuln"
             unique["${eco}:${pkg}"]=1
-            if [ "$first" = true ]; then first=false; else printf ',\n'; fi
-            export_metadata "$eco" "$pkg"
+            if [ "$first" = true ]; then first=false; printf '\n'; else printf ',\n'; fi
+            export_metadata "$eco" "$pkg" "$file"
             printf '    {"package": '; json_print_string "$pkg"
+            printf ', "name": '; json_print_string "${pkg%@*}"
+            printf ', "version": '; json_print_string "${pkg##*@}"
             printf ', "file": '; json_print_string "$file"
             printf ', "ecosystem": '; json_print_string "$eco"
-            for field in severity ghsa cve source; do
+            for field in severity ghsa cve source fixed_in reachability; do
                 if [ -n "${!field}" ]; then
                     printf ', "%s": ' "$field"
                     json_print_string "${!field}"
                 fi
             done
-            printf '}'
+            printf ', "advisories": ['
+            advisories="${VULN_ADVISORIES[$eco:$pkg]:-}"
+            a_first=true
+            while [ -n "$advisories" ]; do
+                advisory="${advisories%%||*}"
+                if [ "$advisory" = "$advisories" ]; then advisories=""; else advisories="${advisories#*||}"; fi
+                IFS=';' read -r a_sev a_ghsa a_cve a_source a_fix a_id <<< "$advisory"
+                [ -n "$a_sev$a_ghsa$a_cve$a_source$a_fix$a_id" ] || continue
+                if [ "$a_first" = true ]; then a_first=false; else printf ', '; fi
+                printf '{"severity": '; json_print_string "$a_sev"
+                printf ', "ghsa": '; json_print_string "$a_ghsa"
+                printf ', "cve": '; json_print_string "$a_cve"
+                printf ', "id": '; json_print_string "$a_id"
+                printf ', "source": '; json_print_string "$a_source"
+                printf ', "fix": '; json_print_string "$a_fix"
+                printf '}'
+            done
+            printf ']}'
         done
-        printf '\n  ],\n  "summary": {\n'
+        [ "$first" = true ] || printf '\n  '
+        printf '],\n  "summary": {\n'
         printf '    "total_unique_vulnerabilities": %s,\n' "${#unique[@]}"
         printf '    "total_occurrences": %s\n' "${#VULNERABLE_PACKAGES[@]}"
         printf '  }\n}\n'
@@ -5698,18 +5704,28 @@ export_vulnerabilities_json() {
     echo -e "${GREEN}✓ JSON report exported to: $output_file${NC}"
 }
 
+# Quote one CSV cell. A cell starting with = + - @ (or a tab/CR) is a formula
+# in spreadsheet applications: prefix it with an apostrophe.
+csv_cell() {
+    local value="$1"
+    case "$value" in
+        [=+@-]*|$'\t'*|$'\r'*) value="'$value" ;;
+    esac
+    printf '"%s"' "${value//\"/\"\"}"
+}
+
 export_vulnerabilities_csv() {
     local output_file="${1:-vulnerabilities.csv}"
-    local vuln file eco pkg severity ghsa cve source value first
+    local vuln file eco pkg severity ghsa cve source fixed_in reachability value first
     {
-        printf 'package,file,severity,ghsa,cve,source,ecosystem\n'
+        printf 'package,file,severity,ghsa,cve,source,ecosystem,version,fix,reachability\n'
         for vuln in "${VULNERABLE_PACKAGES[@]}"; do
             IFS='|' read -r file eco pkg <<< "$vuln"
-            export_metadata "$eco" "$pkg"
+            export_metadata "$eco" "$pkg" "$file"
             first=true
-            for value in "$pkg" "$file" "$severity" "$ghsa" "$cve" "$source" "$eco"; do
+            for value in "$pkg" "$file" "$severity" "$ghsa" "$cve" "$source" "$eco" "${pkg##*@}" "$fixed_in" "$reachability"; do
                 if [ "$first" = true ]; then first=false; else printf ','; fi
-                printf '"%s"' "${value//\"/\"\"}"
+                csv_cell "$value"
             done
             printf '\n'
         done
@@ -5805,44 +5821,86 @@ feed_build_ecomap() {
 # the scan-side parser (src/31-parsers-purl.sh):
 #   pypi           -> lowercase, collapse runs of [-_.] to a single '-'
 #   maven          -> groupId:artifactId emitted as groupId/artifactId
-#   composer/nuget/githubactions -> lowercase
-#   swift          -> strip http(s):// scheme and trailing .git, lowercase
+#   composer/nuget -> lowercase
+#   githubactions  -> strip any scheme and "github.com/", lowercase
+#   swift          -> strip any scheme, trailing "/" and ".git", lowercase
 #   npm/golang/cargo/gem/pub/hex -> name as-is
-# $source is "ghsa" or "osv" and controls the GHSA-id extraction + source= param.
+# $source is "ghsa" or "osv" (the source= param). Severity: the advisory's own
+# (GHSA database_specific), else the CVSS 3.x base score computed from the
+# first CVSS_V3 vector, MAL- (malicious package) advisories being critical.
 FEED_JQ_PROGRAM='
 def emit_name($type; $name):
     if $type == "pypi" then ($name | ascii_downcase | gsub("[-_.]+"; "-"))
     elif $type == "maven" then ($name | gsub(":"; "/"))
-    elif ($type == "composer" or $type == "nuget" or $type == "githubactions") then ($name | ascii_downcase)
-    elif $type == "swift" then ($name | sub("^https?://"; "") | sub("\\.git$"; "") | ascii_downcase)
+    elif ($type == "composer" or $type == "nuget") then ($name | ascii_downcase)
+    elif $type == "githubactions" then ($name | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "") | sub("^github\\.com/"; "") | sub("/+$"; "") | ascii_downcase)
+    elif $type == "swift" then ($name | sub("^[A-Za-z][A-Za-z0-9+.-]*://"; "") | sub("/+$"; "") | sub("\\.git$"; "") | ascii_downcase)
     else $name end;
+
+# CVSS 3.x base score of a vector ("CVSS:3.1/AV:N/AC:L/..."), null when the
+# vector is not a complete 3.x one. Roundup as defined by CVSS 3.1.
+def roundup: ((. * 100000) | round) as $i
+    | if ($i % 10000) == 0 then $i / 100000 else (($i / 10000 | floor) + 1) / 10 end;
+def cvss3_score:
+    if (type == "string" and test("^CVSS:3\\.[01]/")) then
+        # A missing metric reads as "" so the lookups give null, never an error.
+        ((split("/")[1:] | map(split(":") | {(.[0]): (.[1] // "")}) | add) // {}) as $m
+        | ($m.S == "C") as $changed
+        | ({"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}[$m.AV // ""]) as $av
+        | ({"L": 0.77, "H": 0.44}[$m.AC // ""]) as $ac
+        | (if $changed then {"N": 0.85, "L": 0.68, "H": 0.5} else {"N": 0.85, "L": 0.62, "H": 0.27} end)[$m.PR // ""] as $pr
+        | ({"N": 0.85, "R": 0.62}[$m.UI // ""]) as $ui
+        | ([$m.C, $m.I, $m.A] | map({"H": 0.56, "L": 0.22, "N": 0}[. // ""])) as $cia
+        | if ([$av, $ac, $pr, $ui] + $cia | any(. == null)) then null else
+            (1 - ((1 - $cia[0]) * (1 - $cia[1]) * (1 - $cia[2]))) as $iss
+            | (if $changed then 7.52 * ($iss - 0.029) - 3.25 * pow($iss - 0.02; 15) else 6.42 * $iss end) as $impact
+            | (8.22 * $av * $ac * $pr * $ui) as $exploit
+            | if $impact <= 0 then 0
+              elif $changed then ([1.08 * ($impact + $exploit), 10] | min | roundup)
+              else ([$impact + $exploit, 10] | min | roundup) end
+          end
+    elif (type == "string" and test("^[0-9]+(\\.[0-9]+)?$")) then tonumber
+    else null end;
+def score_severity:
+    if . >= 9.0 then "CRITICAL"
+    elif . >= 7.0 then "HIGH"
+    elif . >= 4.0 then "MODERATE"
+    elif . > 0 then "LOW"
+    else null end;
 
 select(.withdrawn == null) |
 .id as $id |
-(.database_specific.severity //
- (.severity[]? | select(.type == "CVSS_V3" or .type == "CVSS_V2") | .score |
-  if . then
-    (. | capture("CVSS:[^/]+/[^/]+/(?<score>[0-9.]+)") | .score | tonumber |
-     if . >= 9.0 then "CRITICAL"
-     elif . >= 7.0 then "HIGH"
-     elif . >= 4.0 then "MODERATE"
-     else "LOW" end)
-  else null end) //
- "UNKNOWN") as $severity |
+(if ($id | startswith("MAL-")) then "CRITICAL"
+ else (.database_specific.severity //
+       first(.severity[]? | select(.type == "CVSS_V3") | .score | cvss3_score | numbers | score_severity | strings) //
+       "UNKNOWN") end) as $severity |
 
 (.aliases // []) as $aliases |
-(if $source == "ghsa" then
-    (if ($id | startswith("GHSA-")) then $id else "" end)
- else
-    ($aliases | map(select(startswith("GHSA-"))) | .[0] // "")
- end) as $ghsa |
-($aliases | map(select(startswith("CVE-"))) | .[0] // "") as $cve |
+# The GHSA id is the advisory id itself (GHSA feed, and OSV copies of GHSA
+# advisories) or else a GHSA alias. Any other non-CVE id (PYSEC-, GO-,
+# RUSTSEC-, MAL-, ...) is kept as id=.
+(if ($id | startswith("GHSA-")) then $id
+ else ($aliases | map(select(startswith("GHSA-"))) | .[0] // "") end) as $ghsa |
+(if ($id | startswith("CVE-")) then $id
+ else ($aliases | map(select(startswith("CVE-"))) | .[0] // "") end) as $cve |
+(if ($id | startswith("GHSA-") or startswith("CVE-")) then "" else $id end) as $other_id |
+([
+    ("severity=" + ($severity | ascii_downcase)),
+    (if $ghsa != "" then "ghsa=" + $ghsa else empty end),
+    (if $cve != "" then "cve=" + $cve else empty end),
+    (if $other_id != "" then "id=" + $other_id else empty end),
+    ("source=" + $source)
+] | join("&")) as $params |
 
 .affected[]? |
 .package.ecosystem as $e |
 ($ecomap[$e // ""] // "") as $type |
 select($type != "") |
 (emit_name($type; .package.name)) as $pkg |
+# GHSA records the upper bound of an interval with no known fix here
+# ("< 3.0.0", "<= 2.26.11"): it bounds the open interval, but is no fix.
+((.database_specific.last_known_affected_version_range // "") | gsub(" "; "")
+ | if test("^<=?[0-9A-Za-z]") then . else "" end) as $last_known |
 (
     (.ranges[]? |
         select(.type == "SEMVER" or .type == "ECOSYSTEM") |
@@ -5863,23 +5921,19 @@ select($type != "") |
                 else . end
             ) |
             (.intervals + (if .current.introduced then [.current] else [] end))[] |
-            ([
-                ("severity=" + ($severity | ascii_downcase)),
-                (if $ghsa != "" then "ghsa=" + $ghsa else empty end),
-                (if $cve != "" then "cve=" + $cve else empty end),
-                ("source=" + $source)
-            ] | join("&")) as $params |
-
             . as $interval |
+            ($interval.fixed == null and $interval.last_affected == null and $last_known != "") as $bounded |
             ([
                 (if .introduced then ">=" + .introduced else empty end),
                 (if .fixed then "<" + .fixed else empty end),
-                (if .last_affected then "<=" + .last_affected else empty end)
+                (if .last_affected then "<=" + .last_affected else empty end),
+                (if $bounded then $last_known else empty end)
             ] | join(" ")) as $bounds |
             $limits[] as $limit |
             (if $limit == "*" then "" else " <" + $limit end) as $cap |
-            # A limit is an applicability boundary, not a known patched version.
-            (if $limit != "*" and ($interval.fixed == null) then "&fixed=" else "" end) as $fix_override |
+            # A limit or a last-known bound is an applicability boundary, not a
+            # known patched version.
+            (if ($limit != "*" or $bounded) and ($interval.fixed == null) then "&fixed=" else "" end) as $fix_override |
             "pkg:\($type)/\($pkg)@\($bounds)\($cap)?\($params)\($fix_override)"
         else empty end
     ),
@@ -5887,17 +5941,10 @@ select($type != "") |
     # advisories): OSV enumerates every version a range covers, so emitting them
     # alongside ranges is redundant and pushes feeds past the GitHub 100 MB file limit.
     (if ([.ranges[]? | select(.type == "SEMVER" or .type == "ECOSYSTEM")] | length) == 0 then
-        ([
-            ("severity=" + ($severity | ascii_downcase)),
-            (if $ghsa != "" then "ghsa=" + $ghsa else empty end),
-            (if $cve != "" then "cve=" + $cve else empty end),
-            ("source=" + $source)
-        ] | join("&")) as $params |
         .versions[]? |
         "pkg:\($type)/\($pkg)@\(.)?\($params)"
     else empty end)
-)
-'
+)'
 
 # Run FEED_JQ_PROGRAM over every *.json file under an input directory, in
 # parallel, and append the raw (unsorted) PURL lines to a combined file.
@@ -5906,29 +5953,43 @@ select($type != "") |
 # Robustness: 8 parallel workers each write to their OWN temp file — never a
 # shared pipe — because concurrent jq processes writing to one pipe interleave
 # non-atomically and tear PURL lines (observed frequently under load). Each
-# worker runs jq once per file (error isolation for the rare malformed
-# advisory). A failed worker prevents replacement of the existing feed. This keeps the
-# "xargs -P 8 parallel jq" design while producing deterministic, uncorrupted
-# feeds. Callers sort/split the combined file (LC_ALL=C for locale stability).
+# worker runs jq once per file, so a malformed advisory is isolated: it is
+# skipped and counted (its partial output discarded) instead of failing the
+# whole ecosystem. Only a failed worker, or every file failing, prevents
+# replacement of the existing feed. Callers sort/split the combined file
+# (LC_ALL=C for locale stability).
 feed_emit_raw() {
     local in_dir="$1" src="$2" ecomap="$3" combined="$4"
     [ -d "$in_dir" ] && command -v jq >/dev/null 2>&1 || return 1
-    local parts_dir
+    local parts_dir total skipped
     parts_dir=$(mktemp -d)
     export FEED_JQ_PROGRAM
     if ! (set -o pipefail; find "$in_dir" -name "*.json" -type f -print0 | \
         FEED_SRC="$src" FEED_ECOMAP="$ecomap" PARTS_DIR="$parts_dir" \
         xargs -0 -P 8 -n 400 sh -c '
             out=$(mktemp "$PARTS_DIR/part.XXXXXX") || exit 1
-            failed=0
+            bad=$(mktemp "$PARTS_DIR/bad.XXXXXX") || exit 1
             for f in "$@"; do
-                jq -r --arg source "$FEED_SRC" --argjson ecomap "$FEED_ECOMAP" "$FEED_JQ_PROGRAM" "$f" 2>/dev/null || failed=1
+                if lines=$(jq -r --arg source "$FEED_SRC" --argjson ecomap "$FEED_ECOMAP" "$FEED_JQ_PROGRAM" "$f" 2>/dev/null); then
+                    [ -z "$lines" ] || printf "%s\n" "$lines"
+                else
+                    printf "%s\n" "$f" >> "$bad"
+                fi
             done > "$out"
-            exit "$failed"
         ' _ 2>/dev/null); then
         echo "Error: Failed to generate feed; previous output preserved" >&2
         rm -rf "$parts_dir"
         return 1
+    fi
+    total=$(find "$in_dir" -name "*.json" -type f | wc -l | tr -d ' ')
+    skipped=$(cat "$parts_dir"/bad.* 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$skipped" -gt 0 ]; then
+        echo "⚠️  Skipped $skipped of $total advisory file(s) that jq could not process" >&2
+        if [ "$skipped" -ge "$total" ]; then
+            echo "Error: no advisory could be processed; previous output preserved" >&2
+            rm -rf "$parts_dir"
+            return 1
+        fi
     fi
     cat "$parts_dir"/part.* > "$combined" 2>/dev/null || true
     rm -rf "$parts_dir"
@@ -6114,14 +6175,17 @@ fetch_all() {
 
     export FEED_OUTPUT_DIR="$output_dir"
 
+    # An OSV failure must not prevent the GHSA feeds: run both, report both.
+    local status=0
+
     # Generate OSV feeds (one zip per ecosystem)
     echo "Generating OSV feeds for all ecosystems..."
-    fetch_osv
+    fetch_osv || status=1
     echo ""
 
     # Generate GHSA feeds (single clone, single pass, split per ecosystem)
     echo "Generating GHSA feeds for all ecosystems..."
-    fetch_ghsa
+    fetch_ghsa || status=1
     echo ""
 
     unset FEED_OUTPUT_DIR
@@ -6140,36 +6204,50 @@ fetch_all() {
     echo "  ---------------------------------------"
     printf '  - %-24s %s\n' "TOTAL" "$total"
     echo ""
+    [ "$status" -eq 0 ] || echo "⚠️  Some feeds could not be generated; previous files were kept" >&2
+    return "$status"
 }
 
-# Find default source file with fallback logic
-# Tries multiple locations in order:
-# 1. Homebrew installation path
-# 2. Local ./data/ directory
-# 3. Docker /app/data/ directory
-# 4. Remote GitHub URL
+# Find default source file with fallback logic. Tries, in order:
+# 1. the data/ directory next to this script (a git checkout or release)
+# 2. the Homebrew installation path
+# 3. the Docker /app/data/ directory
+# 4. ./data/ in the current directory
+# 5. the remote GitHub URL
+# The scanned project's own ./data must not shadow the built-in feeds, so the
+# current directory comes after every installation path.
 # Returns path/URL if found, empty string if not found
 find_default_source() {
     local source_file="$1"  # e.g., "ghsa.purl" or "osv.purl"
 
+    local script_dir=""
+    if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+        script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || script_dir=""
+    fi
+    if [ -n "$script_dir" ] && [ -f "$script_dir/data/$source_file" ]; then
+        echo "$script_dir/data/$source_file"
+        return 0
+    fi
+
     # Try Homebrew path
     if command -v brew &> /dev/null; then
-        local brew_path="$(brew --prefix)/share/package-checker/data/$source_file"
+        local brew_path
+        brew_path="$(brew --prefix)/share/package-checker/data/$source_file"
         if [ -f "$brew_path" ]; then
             echo "$brew_path"
             return 0
         fi
     fi
 
-    # Try local ./data/ directory
-    if [ -f "./data/$source_file" ]; then
-        echo "./data/$source_file"
-        return 0
-    fi
-
     # Try Docker /app/data/ directory
     if [ -f "/app/data/$source_file" ]; then
         echo "/app/data/$source_file"
+        return 0
+    fi
+
+    # Try local ./data/ directory
+    if [ -f "./data/$source_file" ]; then
+        echo "./data/$source_file"
         return 0
     fi
 
@@ -6265,12 +6343,12 @@ verify_command_for_eco() {
         cargo)         echo "cargo audit" ;;
         golang)        echo "govulncheck ./..." ;;
         pypi)          echo "pip-audit" ;;
-        gem)           echo "bundle audit" ;;
+        gem)           echo "bundle audit check --update  # needs bundler-audit: gem install bundler-audit" ;;
         composer)      echo "composer audit" ;;
         maven)         echo "# re-run your SCA scan (e.g. OWASP dependency-check, Trivy)" ;;
         nuget)         echo "dotnet list package --vulnerable" ;;
         pub)           echo "dart pub outdated" ;;
-        hex)           echo "mix hex.audit" ;;
+        hex)           echo "mix deps.audit  # needs mix_audit; mix hex.audit only lists retired packages" ;;
         swift)         echo "# re-resolve and re-scan Package.resolved" ;;
         githubactions) echo "# re-run package-checker (or pin to the patched commit SHA)" ;;
         *)             echo "# re-run package-checker after updating" ;;
@@ -6347,21 +6425,87 @@ resolve_feed_ecosystems() {
     printf '%s\n' "$ecos"
 }
 
+# Write the name tokens of every discovered project file (plus extra names
+# given as arguments) to a temp file and point PREFILTER_TOKENS_FILE at it, so
+# parse_purl_to_lookup_eval keeps only the feed entries this project can
+# match. A token is a run of [A-Za-z0-9._-] (and each of its dot-separated
+# parts), lowercased with runs of - _ . collapsed to "-". One awk pass reads
+# every file; split() keeps it linear on minified one-line lockfiles.
+# PACKAGE_CHECKER_NO_PREFILTER=1 disables the filter (diagnostics).
+build_project_tokens() {
+    PREFILTER_TOKENS_FILE=""
+    [ "${PACKAGE_CHECKER_NO_PREFILTER:-}" != 1 ] || return 0
+    local tokens_file
+    tokens_file=$(mktemp) || return 0
+    register_temp_file "$tokens_file"
+    # awk reads the files itself (no argument list to overflow). A file it
+    # cannot read leaves the filter off: a partial token list would silently
+    # drop real findings.
+    printf '%s\n' "${LOCKFILES}${LOCKFILES:+$'\n'}${PACKAGE_JSON_FILES}" | awk -v names="$(printf '%s\n' "$@")" '
+    function scan(line,   cnt, w) {
+        cnt = split(line, words, /[^A-Za-z0-9._-]+/)
+        for (w = 1; w <= cnt; w++) add(words[w])
+    }
+    function add(t,   n, parts, cnt, i) {
+        if (t == "" || length(t) > 214) return
+        n = tolower(t)
+        gsub(/[-_.]+/, "-", n)
+        seen[n] = 1
+        if (index(t, ".")) {
+            cnt = split(t, parts, ".")
+            for (i = 1; i <= cnt; i++) {
+                n = tolower(parts[i])
+                gsub(/[-_]+/, "-", n)
+                if (n != "") seen[n] = 1
+            }
+        }
+    }
+    BEGIN { scan(names) }
+    $0 != "" {
+        file = $0
+        while ((status = (getline line < file)) > 0) scan(line)
+        if (status < 0) exit 1
+        close(file)
+    }
+    END { for (t in seen) print t }
+    ' > "$tokens_file" || return 0
+    PREFILTER_TOKENS_FILE="$tokens_file"
+}
+
+# True when DIR declares workspaces (npm/yarn/bun "workspaces", pnpm
+# pnpm-workspace.yaml, deno "workspace"): its lockfile then pins the
+# dependencies of every member package.json below it.
+is_workspace_root() {
+    local dir="$1"
+    [ -f "$dir/pnpm-workspace.yaml" ] && return 0
+    [ -f "$dir/package.json" ] && grep -q '"workspaces"[[:space:]]*:' "$dir/package.json" && return 0
+    local deno
+    for deno in "$dir/deno.json" "$dir/deno.jsonc"; do
+        [ -f "$deno" ] && grep -q '"workspace"[[:space:]]*:' "$deno" && return 0
+    done
+    return 1
+}
+
 # Discover lockfiles and package.json files under the scan directory, populate
 # the LOCKFILES / PACKAGE_JSON_FILES globals, and record which ecosystems are
 # present in DETECTED_ECOSYSTEMS. Runs BEFORE feed loading so detection can
 # drive which default feeds are pulled. Reads main()'s locals (target_path,
-# lockfile_types, only_package_json, only_lockfiles, use_github) via bash
-# dynamic scope; sets SEARCH_DIR/LOCKFILES/PACKAGE_JSON_FILES as globals.
+# lockfile_types, only_package_json, only_lockfiles, use_github, sbom_files)
+# via bash dynamic scope; sets SEARCH_DIR/LOCKFILES/PACKAGE_JSON_FILES/
+# SBOM_FILES as globals.
 discover_project_files() {
-    # Determine the (global) search directory
+    # Determine the (global) search directory (no trailing slash, so found
+    # paths share an exact prefix)
     SEARCH_DIR="${target_path:-.}"
+    while [ "${#SEARCH_DIR}" -gt 1 ] && [ "${SEARCH_DIR%/}" != "$SEARCH_DIR" ]; do
+        SEARCH_DIR="${SEARCH_DIR%/}"
+    done
     if [ "$use_github" = true ] && [ -d "$GITHUB_OUTPUT_DIR" ]; then
         SEARCH_DIR="$GITHUB_OUTPUT_DIR"
     elif [ -n "$target_path" ]; then
         if [ ! -d "$SEARCH_DIR" ]; then
             echo -e "${RED}❌ Error: Target path does not exist: $target_path${NC}"
-            exit 1
+            exit "$EXIT_ERROR"
         fi
     fi
 
@@ -6385,7 +6529,7 @@ discover_project_files() {
                 *)
                     echo -e "${RED}❌ Unknown lockfile type: $t${NC}"
                     echo "Valid types: ${KNOWN_LOCKFILE_ALIASES// /, }"
-                    exit 1 ;;
+                    exit "$EXIT_ERROR" ;;
             esac
             requested="$requested$t "
         done
@@ -6408,110 +6552,144 @@ discover_project_files() {
         selected_path_entries=("${PATH_ECOSYSTEM_REGISTRY[@]}")
     fi
 
-    # ---- Find lockfiles ----
-    local TEMP_LOCKFILES=""
-    if [ "$only_package_json" = false ] && [ ${#selected_basenames[@]} -gt 0 ]; then
-        local find_args=( "$SEARCH_DIR" '(' )
-        local i=0
+    # ---- One find for every candidate file ----
+    # Ignored directories are pruned (never descended into), and a single
+    # traversal collects lockfiles, PATH-discovered files (GitHub Actions
+    # workflows, split requirements files) and package.json files.
+    local want_locks=false want_pj=false
+    [ "$only_package_json" = false ] && want_locks=true
+    [ "$only_lockfiles" = false ] && want_pj=true
+    local -a match_args=()
+    if [ "$want_locks" = true ]; then
         for bn in "${selected_basenames[@]}"; do
-            [ "$i" -gt 0 ] && find_args+=( -o )
-            find_args+=( -name "$bn" )
-            i=$((i + 1))
+            [ ${#match_args[@]} -gt 0 ] && match_args+=( -o )
+            match_args+=( -name "$bn" )
         done
-        find_args+=( ')' -type f )
-        local ignore_path
-        for ignore_path in "${CONFIG_IGNORE_PATHS[@]}"; do
-            find_args+=( ! -path "*/$ignore_path/*" )
-        done
-        TEMP_LOCKFILES=$(find "${find_args[@]}")
-    fi
-
-    # ---- Find PATH-discovered ecosystem files (e.g. GitHub Actions workflows)
-    # Selected by a directory PATH pattern rather than a lockfile basename, so
-    # each entry expands its stored path-glob + name-globs into a dedicated find
-    # predicate. Results are merged into TEMP_LOCKFILES so they flow through the
-    # SAME git-ignore filter and the SAME analysis loop as basename lockfiles
-    # (letting workflow findings coexist with npm/etc. in one scan). The `.git`
-    # ignore entry expands to `! -path "*/.git/*"`, which does NOT match
-    # ".../.github/workflows/..." (there is no "/.git/" segment there), so
-    # workflow discovery is never swallowed by the .git exclude.
-    if [ "$only_package_json" = false ] && [ ${#selected_path_entries[@]} -gt 0 ]; then
-        local pentry pglob nglobs palias ng gi ip
-        local -a nglob_arr pf_args
+        local pentry pglob nglobs palias ng gi
+        local -a nglob_arr
         for pentry in "${selected_path_entries[@]}"; do
             # peco/pparser are unused here (dispatch happens later); discard them.
             IFS='|' read -r pglob nglobs _ _ palias <<< "$pentry"
-            pf_args=( "$SEARCH_DIR" -path "$pglob" '(' )
+            [ ${#match_args[@]} -gt 0 ] && match_args+=( -o )
+            match_args+=( '(' -path "$pglob" '(' )
             IFS=',' read -ra nglob_arr <<< "$nglobs"
             gi=0
             for ng in "${nglob_arr[@]}"; do
-                [ "$gi" -gt 0 ] && pf_args+=( -o )
-                pf_args+=( -name "$ng" )
+                [ "$gi" -gt 0 ] && match_args+=( -o )
+                match_args+=( -name "$ng" )
                 gi=$((gi + 1))
             done
-            pf_args+=( ')' -type f )
-            for ip in "${CONFIG_IGNORE_PATHS[@]}"; do
-                pf_args+=( ! -path "*/$ip/*" )
+            match_args+=( ')' ')' )
+        done
+    fi
+    if [ "$want_pj" = true ]; then
+        [ ${#match_args[@]} -gt 0 ] && match_args+=( -o )
+        match_args+=( -name "package.json" )
+    fi
+
+    local found=""
+    if [ ${#match_args[@]} -gt 0 ]; then
+        local -a find_args=( "$SEARCH_DIR" )
+        local ignore_path
+        if [ ${#CONFIG_IGNORE_PATHS[@]} -gt 0 ]; then
+            find_args+=( '(' )
+            local first_ignore=true
+            for ignore_path in "${CONFIG_IGNORE_PATHS[@]}"; do
+                [ -n "$ignore_path" ] || continue
+                [ "$first_ignore" = true ] || find_args+=( -o )
+                first_ignore=false
+                find_args+=( -path "*/${ignore_path%/}" )
             done
-            local pfound
-            pfound=$(find "${pf_args[@]}")
-            if [ -n "$pfound" ]; then
-                if [ -z "$TEMP_LOCKFILES" ]; then
-                    TEMP_LOCKFILES="$pfound"
-                else
-                    TEMP_LOCKFILES="$TEMP_LOCKFILES
-$pfound"
-                fi
-            fi
-        done
-    fi
-
-    # Filter using git check-ignore (same behavior as before)
-    if git rev-parse --git-dir > /dev/null 2>&1; then
-        LOCKFILES=""
-        local file
-        while IFS= read -r file; do
-            if ! git check-ignore -q "$file" 2>/dev/null; then
-                if [ -z "$LOCKFILES" ]; then
-                    LOCKFILES="$file"
-                else
-                    LOCKFILES="$LOCKFILES
-$file"
-                fi
-            fi
-        done <<< "$TEMP_LOCKFILES"
-    else
-        LOCKFILES="$TEMP_LOCKFILES"
-    fi
-
-    # ---- Find package.json files ----
-    if [ "$only_lockfiles" = false ]; then
-        local pj_args=( "$SEARCH_DIR" -name "package.json" -type f )
-        local ignore_path2
-        for ignore_path2 in "${CONFIG_IGNORE_PATHS[@]}"; do
-            pj_args+=( ! -path "*/$ignore_path2/*" )
-        done
-        local TEMP_FILES
-        TEMP_FILES=$(find "${pj_args[@]}")
-
-        if git rev-parse --git-dir > /dev/null 2>&1; then
-            PACKAGE_JSON_FILES=""
-            local pfile
-            while IFS= read -r pfile; do
-                if ! git check-ignore -q "$pfile" 2>/dev/null; then
-                    if [ -z "$PACKAGE_JSON_FILES" ]; then
-                        PACKAGE_JSON_FILES="$pfile"
-                    else
-                        PACKAGE_JSON_FILES="$PACKAGE_JSON_FILES
-$pfile"
-                    fi
-                fi
-            done <<< "$TEMP_FILES"
-        else
-            PACKAGE_JSON_FILES="$TEMP_FILES"
+            find_args+=( ')' -prune -o )
         fi
-    else
-        PACKAGE_JSON_FILES=""
+        find_args+=( '(' "${match_args[@]}" ')' -type f -print )
+        # An unreadable directory must not abort the scan (set -e): report it
+        # and keep whatever was found.
+        if ! found=$(find "${find_args[@]}" 2>/dev/null); then
+            echo -e "${YELLOW}⚠️  Warning: some directories under $SEARCH_DIR could not be read; results may be incomplete${NC}" >&2
+        fi
+    fi
+
+    # ---- Drop git-ignored files ----
+    # The repository is the one containing the scanned directory (not the
+    # current one), checked once for all files. Files fetched from GitHub are
+    # never filtered: the output directory itself is often git-ignored.
+    if [ -n "$found" ] && [ "$SEARCH_DIR" != "$GITHUB_OUTPUT_DIR" ] &&
+        git -C "$SEARCH_DIR" rev-parse --is-inside-work-tree > /dev/null 2>&1; then
+        local prefix="${SEARCH_DIR%/}/" ignored
+        ignored=$(printf '%s\n' "$found" | while IFS= read -r f; do printf '%s\n' "${f#"$prefix"}"; done |
+            git -C "$SEARCH_DIR" check-ignore --stdin 2>/dev/null) || true
+        if [ -n "$ignored" ]; then
+            found=$(printf '%s\n' "$found" | awk -v prefix="$prefix" '
+                NR == FNR { ignored[$0] = 1; next }
+                { rel = $0; if (index(rel, prefix) == 1) rel = substr(rel, length(prefix) + 1) }
+                !(rel in ignored)' <(printf '%s\n' "$ignored") -)
+        fi
+    fi
+
+    # ---- Split lockfiles from package.json files ----
+    LOCKFILES=""
+    PACKAGE_JSON_FILES=""
+    local file
+    while IFS= read -r file; do
+        [ -n "$file" ] || continue
+        if [ "${file##*/}" = "package.json" ] && [ "$want_pj" = true ]; then
+            PACKAGE_JSON_FILES+="${PACKAGE_JSON_FILES:+$'\n'}$file"
+        elif [ "${file##*/}" != "package.json" ]; then
+            LOCKFILES+="${LOCKFILES:+$'\n'}$file"
+        fi
+    done <<< "$found"
+
+    # ---- CycloneDX SBOMs given with --sbom ----
+    # Scanned like lockfiles, whatever their name or location (often a
+    # git-ignored build output such as target/bom.json).
+    local sbom
+    for sbom in "${sbom_files[@]}"; do
+        [ -n "${SBOM_FILES[$sbom]+x}" ] && continue
+        SBOM_FILES["$sbom"]=1
+        LOCKFILES+="${LOCKFILES:+$'\n'}$sbom"
+    done
+
+    # ---- package.json files already covered by a lockfile ----
+    # A lockfile pins what is installed; the manifest only declares ranges
+    # (lodash ^4.17.0 would be checked as 4.17.0 while the lock has 4.18.1).
+    # Skip a package.json whose directory holds an npm-family lockfile, or
+    # whose ancestor (up to the scan root) is a workspace root with one.
+    SKIPPED_PACKAGE_JSON_COUNT=0
+    if [ -n "$PACKAGE_JSON_FILES" ] && [ -n "$LOCKFILES" ]; then
+        local -A npm_lock_dirs=()
+        local lf
+        while IFS= read -r lf; do
+            case "${lf##*/}" in
+                package-lock.json|npm-shrinkwrap.json|yarn.lock|pnpm-lock.yaml|bun.lock|deno.lock)
+                    npm_lock_dirs["${lf%/*}"]=1 ;;
+            esac
+        done <<< "$LOCKFILES"
+        if [ ${#npm_lock_dirs[@]} -gt 0 ]; then
+            local kept="" pj dir covered
+            while IFS= read -r pj; do
+                [ -n "$pj" ] || continue
+                dir="${pj%/*}"
+                covered=false
+                if [ -n "${npm_lock_dirs[$dir]+x}" ]; then
+                    covered=true
+                else
+                    while [ "$dir" != "$SEARCH_DIR" ] && [[ "$dir" == */* ]]; do
+                        dir="${dir%/*}"
+                        if [ -n "${npm_lock_dirs[$dir]+x}" ] && is_workspace_root "$dir"; then
+                            covered=true
+                            break
+                        fi
+                    done
+                fi
+                if [ "$covered" = true ]; then
+                    SKIPPED_PACKAGE_JSON_COUNT=$((SKIPPED_PACKAGE_JSON_COUNT + 1))
+                else
+                    kept+="${kept:+$'\n'}$pj"
+                fi
+            done <<< "$PACKAGE_JSON_FILES"
+            PACKAGE_JSON_FILES="$kept"
+        fi
     fi
 
     # ---- Record detected ecosystems ----
@@ -6519,7 +6697,16 @@ $pfile"
         local lfile b e _pe
         while IFS= read -r lfile; do
             [ -z "$lfile" ] && continue
-            b=$(basename "$lfile")
+            if [ -n "${SBOM_FILES[$lfile]+x}" ]; then
+                for e in $(cyclonedx_components "$lfile" | cut -d'|' -f1 | sort -u); do
+                    case "$e" in
+                        npm|pypi|golang|maven|cargo|gem|composer|nuget|pub|hex|swift|githubactions)
+                            DETECTED_ECOSYSTEMS["$e"]=1 ;;
+                    esac
+                done
+                continue
+            fi
+            b="${lfile##*/}"
             e="${LOCKFILE_ECO[$b]:-}"
             # Path-discovered files (workflows) have no basename row; resolve
             # their ecosystem by path so detection pulls the right default feed.
@@ -6534,9 +6721,56 @@ $pfile"
     fi
 }
 
+# Print the merged advisories of one finding ("rec||rec", each record
+# "severity;ghsa;cve;source;fix;id"). Returns non-zero when nothing was printed.
+print_advisories() {
+    local advisories="$1" advisory severity ghsa cve source fix id color printed=1
+    while [ -n "$advisories" ]; do
+        advisory="${advisories%%||*}"
+        if [ "$advisory" = "$advisories" ]; then advisories=""; else advisories="${advisories#*||}"; fi
+        IFS=';' read -r severity ghsa cve source fix id <<< "$advisory"
+        if [ -n "$severity" ]; then
+            severity_rank "$severity"
+            case "$SEV_RANK" in
+                4) color="$RED" ;;
+                3) color="$YELLOW" ;;
+                2) color="$BLUE" ;;
+                *) color="$NC" ;;
+            esac
+            echo -e "      ${color}Severity: $severity${NC}"
+            printed=0
+        fi
+        if [ -n "$ghsa" ]; then
+            case ", $source, " in
+                *", ghsa, "*) echo -e "      ${BLUE}GHSA: $ghsa (https://github.com/advisories/$ghsa)${NC}" ;;
+                *", osv, "*) echo -e "      ${BLUE}GHSA: $ghsa (https://osv.dev/vulnerability/$ghsa)${NC}" ;;
+                *) echo -e "      ${BLUE}GHSA: $ghsa${NC}" ;;
+            esac
+            printed=0
+        fi
+        if [ -n "$cve" ]; then
+            echo -e "      ${BLUE}CVE: $cve (https://nvd.nist.gov/vuln/detail/$cve)${NC}"
+            printed=0
+        fi
+        if [ -n "$id" ]; then
+            echo -e "      ${BLUE}ID: $id (https://osv.dev/vulnerability/$id)${NC}"
+            printed=0
+        fi
+        if [ -n "$source" ]; then
+            echo -e "      ${BLUE}Source: $source${NC}"
+            printed=0
+        fi
+        if [ -n "$fix" ]; then
+            echo -e "      ${GREEN}Fix: upgrade to >= $fix${NC}"
+            printed=0
+        fi
+    done
+    return "$printed"
+}
+
 main() {
-    local use_default=true
     local use_config=true
+    local cli_sources=false
     local use_default_ghsa=false
     local custom_config=""
     local custom_sources=()
@@ -6552,15 +6786,22 @@ main() {
     local target_path=""
     local default_feeds=""
     local cli_ecosystems=""
+    local sbom_files=()
+    local go_reachability=false
+
+    # Any unexpected failure that aborts the run (set -e) exits with
+    # EXIT_ERROR, never with 1, which means "vulnerable packages found".
+    # Command substitutions keep their usual non-fatal behavior.
+    set -E
+    trap '[ "$BASH_SUBSHELL" -ne 0 ] || exit "$EXIT_ERROR"' ERR
 
     # Parse command line arguments
-    local current_csv_columns=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            -s|--source|-f|--format|--csv-columns|-c|--config|--github-org|--github-repo|--github-token|--github-output|--package-name|--package-version|--ecosystem|--ecosystems|--lockfile-types)
+            -s|--source|-f|--format|--csv-columns|-c|--config|--github-org|--github-repo|--github-token|--github-output|--package-name|--package-version|--ecosystem|--ecosystems|--lockfile-types|--sbom)
                 if [ "$#" -lt 2 ] || [ -z "$2" ] || [[ "$2" == --* ]]; then
                     echo "Error: $1 requires a value"
-                    exit 1
+                    exit "$EXIT_ERROR"
                 fi
                 ;;
         esac
@@ -6580,62 +6821,51 @@ main() {
                 ;;
             -s|--source)
                 custom_sources+=("$2|")
-                use_default=false
-                use_config=false
+                cli_sources=true
                 shift 2
                 ;;
             --default-source-ghsa)
                 # Record intent; the feed is resolved per detected ecosystem
                 # after project discovery (see the source-loading section).
                 default_feeds="ghsa"
-                use_default=false
-                use_config=false
+                cli_sources=true
                 use_default_ghsa=true
                 shift
                 ;;
             --default-source-osv)
                 default_feeds="osv"
-                use_default=false
-                use_config=false
+                cli_sources=true
                 shift
                 ;;
             --default-source-ghsa-osv)
                 default_feeds="ghsa osv"
-                use_default=false
-                use_config=false
+                cli_sources=true
                 shift
                 ;;
-            -f|--format)
-                # Format for the previous URL
-                if [ ${#custom_sources[@]} -gt 0 ]; then
-                    local last_idx=$((${#custom_sources[@]} - 1))
-                    local last_source="${custom_sources[$last_idx]}"
-                    local url="${last_source%|*}"
-                    custom_sources[$last_idx]="$url|$2"
+            -f|--format|--csv-columns)
+                # Both qualify the preceding -s/--source, in either order:
+                # rebuild its "url|format|columns" entry from its parts.
+                if [ ${#custom_sources[@]} -eq 0 ]; then
+                    echo -e "${RED}❌ Error: $1 must follow the -s/--source it applies to${NC}"
+                    exit "$EXIT_ERROR"
                 fi
-                shift 2
-                ;;
-            --csv-columns)
-                current_csv_columns="$2"
-                # Apply columns to the last source if any
-                if [ ${#custom_sources[@]} -gt 0 ]; then
-                    local last_idx=$((${#custom_sources[@]} - 1))
-                    local last_source="${custom_sources[$last_idx]}"
-                    local url="${last_source%|*}"
-                    local format="${last_source#*|}"
-                    custom_sources[$last_idx]="$url|$format|$current_csv_columns"
+                local last_idx=$((${#custom_sources[@]} - 1))
+                local src_url src_format src_columns
+                IFS='|' read -r src_url src_format src_columns <<< "${custom_sources[$last_idx]}"
+                if [ "$1" = "--csv-columns" ]; then
+                    src_columns="$2"
+                else
+                    src_format="$2"
                 fi
-                current_csv_columns=""
+                custom_sources[$last_idx]="$src_url|$src_format|$src_columns"
                 shift 2
                 ;;
             -c|--config)
                 custom_config="$2"
-                use_default=false
                 shift 2
                 ;;
             --no-config)
                 use_config=false
-                use_default=false
                 shift
                 ;;
             --github-org)
@@ -6681,26 +6911,28 @@ main() {
                 ecosystem="$2"
                 shift 2
                 ;;
-            --export-json)
-                export_json_file="vulnerabilities.json"
-                if [ -n "${2:-}" ] && [[ "$2" != -* ]]; then
-                    export_json_file="$2"
+            --export-json|--export-csv)
+                # The file name is optional: a following option or an existing
+                # directory (the scan PATH) is not taken as the file name.
+                local export_option="$1" export_file="vulnerabilities.${1#--export-}"
+                if [ -n "${2:-}" ] && [[ "$2" != -* ]] && [ ! -d "$2" ]; then
+                    export_file="$2"
                     shift
                 fi
-                shift
-                ;;
-            --export-csv)
-                export_csv_file="vulnerabilities.csv"
-                if [ -n "${2:-}" ] && [[ "$2" != -* ]]; then
-                    export_csv_file="$2"
-                    shift
+                if [ "$export_option" = "--export-json" ]; then
+                    export_json_file="$export_file"
+                else
+                    export_csv_file="$export_file"
                 fi
                 shift
                 ;;
             --fetch-all)
                 # Optional DIR argument (default: data). Generates GHSA + OSV
                 # feeds for ALL supported ecosystems.
-                fetch_all "$2"
+                check_dependencies curl jq git unzip
+                local fetch_dir="data"
+                [ -z "${2:-}" ] || [[ "$2" == -* ]] || fetch_dir="$2"
+                fetch_all "$fetch_dir" || exit "$EXIT_ERROR"
                 exit 0
                 ;;
             --fetch-osv)
@@ -6708,20 +6940,28 @@ main() {
                 #   (none)            -> all ecosystems into data/
                 #   comma/space list  -> those ecosystems into data/ (e.g. pypi,go)
                 #   legacy file path  -> npm feed into that file's directory
+                check_dependencies curl jq unzip
                 case "${2:-}" in
                     ""|-*) fetch_osv ;;
-                    */*|*.purl) FEED_OUTPUT_DIR="$(dirname "$2")" fetch_osv npm ;;
+                    */) FEED_OUTPUT_DIR="${2%/}" fetch_osv ;;
+                    */*|*.purl)
+                        if [ -d "$2" ]; then FEED_OUTPUT_DIR="$2" fetch_osv
+                        else FEED_OUTPUT_DIR="$(dirname "$2")" fetch_osv npm; fi ;;
                     *) IFS=', ' read -ra _fetch_ecos <<< "$2"; fetch_osv "${_fetch_ecos[@]}" ;;
-                esac
+                esac || exit "$EXIT_ERROR"
                 exit 0
                 ;;
             --fetch-ghsa)
                 # Same argument semantics as --fetch-osv (single clone, all ecos).
+                check_dependencies jq git
                 case "${2:-}" in
                     ""|-*) fetch_ghsa ;;
-                    */*|*.purl) FEED_OUTPUT_DIR="$(dirname "$2")" fetch_ghsa npm ;;
+                    */) FEED_OUTPUT_DIR="${2%/}" fetch_ghsa ;;
+                    */*|*.purl)
+                        if [ -d "$2" ]; then FEED_OUTPUT_DIR="$2" fetch_ghsa
+                        else FEED_OUTPUT_DIR="$(dirname "$2")" fetch_ghsa npm; fi ;;
                     *) IFS=', ' read -ra _fetch_ecos <<< "$2"; fetch_ghsa "${_fetch_ecos[@]}" ;;
-                esac
+                esac || exit "$EXIT_ERROR"
                 exit 0
                 ;;
             --only-package-json)
@@ -6740,10 +6980,22 @@ main() {
                 cli_ecosystems="$2"
                 shift 2
                 ;;
+            --go-reachability)
+                go_reachability=true
+                shift
+                ;;
+            --sbom)
+                if [ ! -f "$2" ]; then
+                    echo -e "${RED}❌ Error: SBOM file not found: $2${NC}"
+                    exit "$EXIT_ERROR"
+                fi
+                sbom_files+=("$2")
+                shift 2
+                ;;
             -*)
                 echo -e "${RED}❌ Unknown option: $1${NC}"
                 echo "Use --help for usage information"
-                exit 1
+                exit "$EXIT_ERROR"
                 ;;
             *)
                 # Positional argument - treat as target path
@@ -6753,7 +7005,7 @@ main() {
                 else
                     echo -e "${RED}❌ Error: Multiple target paths specified${NC}"
                     echo "Use --help for usage information"
-                    exit 1
+                    exit "$EXIT_ERROR"
                 fi
                 ;;
         esac
@@ -6763,14 +7015,14 @@ main() {
     if [ "$only_package_json" = true ] && [ "$only_lockfiles" = true ]; then
         echo -e "${RED}❌ Error: --only-package-json and --only-lockfiles are mutually exclusive${NC}"
         echo "Use --help for usage information"
-        exit 1
+        exit "$EXIT_ERROR"
     fi
 
     # Validate lockfile-types only makes sense with lockfiles
     if [ -n "$lockfile_types" ] && [ "$only_package_json" = true ]; then
         echo -e "${RED}❌ Error: --lockfile-types cannot be used with --only-package-json${NC}"
         echo "Use --help for usage information"
-        exit 1
+        exit "$EXIT_ERROR"
     fi
 
     # Validate --ecosystem against the supported purl types
@@ -6780,7 +7032,7 @@ main() {
         *)
             echo -e "${RED}❌ Error: Unsupported ecosystem '$ecosystem'${NC}"
             echo "Valid ecosystems: npm, pypi, golang, maven, cargo, gem, composer, nuget, pub, hex, swift, githubactions"
-            exit 1
+            exit "$EXIT_ERROR"
             ;;
     esac
 
@@ -6790,33 +7042,27 @@ main() {
 
     # Validate the --ecosystems feed-loading override (aliases or purl types).
     if [ -n "$cli_ecosystems" ]; then
-        validate_ecosystems_list "$cli_ecosystems" || exit 1
+        validate_ecosystems_list "$cli_ecosystems" || exit "$EXIT_ERROR"
     fi
 
     check_dependencies
 
-    # If --package-name is specified, create a virtual PURL source
+    # --package-name: look the package up in the project through a virtual
+    # purl entry (NAME@VERSION, or every version when none is given) and, for
+    # an exact --package-version, check that version against the feeds. Only
+    # this package is reported; without another source, the default feed of
+    # --ecosystem is loaded.
+    local package_lookup_file=""
     if [ -n "$name" ]; then
-        # Create a temporary PURL file
-        local temp_purl_file=$(mktemp)
-        trap "rm -f $temp_purl_file" EXIT
-
-        # Build the PURL line: pkg:<ecosystem>/package-name@version
-        if [ -n "$package_version" ]; then
-            echo "pkg:${ecosystem}/$name@$package_version" > "$temp_purl_file"
-        else
-            # If no version specified, use a placeholder
-            # The actual vulnerable versions will come from the loaded sources
-            echo "pkg:${ecosystem}/$name@*" > "$temp_purl_file"
+        if ! package_lookup_file=$(mktemp); then
+            echo -e "${RED}❌ Error: Unable to create a temporary file${NC}"
+            exit "$EXIT_ERROR"
         fi
-
-        # Add this PURL file as a source
-        custom_sources+=("$temp_purl_file|purl|")
-        use_config=false
-
-        # Explicit package check: seed detection with the chosen ecosystem so
-        # its default feed is resolved even if no project files are found.
-        DETECTED_ECOSYSTEMS["$ecosystem"]=1
+        register_temp_file "$package_lookup_file"
+        printf 'pkg:%s/%s@%s\n' "$ecosystem" "$name" "${package_version:-*}" > "$package_lookup_file"
+        canonical_package_name "$ecosystem" "$name"
+        PACKAGE_FILTER="$ecosystem:$CANON_NAME"
+        cli_sources=true
     fi
 
     echo "╔════════════════════════════════════════════════════╗"
@@ -6826,25 +7072,39 @@ main() {
 
     # Configuration must precede fetching and discovery: it supplies GitHub
     # settings, exclusions and the default-feed ecosystem override.
-    local sources_loaded=false
-    if [ "$use_config" = true ]; then
-        local config_to_use="${custom_config:-$CONFIG_FILE}"
-        if [ -f "$config_to_use" ]; then
-            load_config_file "$config_to_use" || exit 1
-            validate_ecosystems_list "$CONFIG_ECOSYSTEMS" || exit 1
-            [ "$LOADED_SOURCE_COUNT" -eq 0 ] || sources_loaded=true
-            if [ -n "$GITHUB_REPO" ] || [ -n "$GITHUB_ORG" ]; then
-                use_github=true
-            fi
-        elif [ -n "$custom_config" ]; then
-            echo "Error: Configuration file not found: $custom_config"
-            exit 1
+    # Options and GitHub settings always apply; the configured sources only
+    # when no source was given on the command line. --no-config skips the
+    # default file, but an explicit -c/--config is always read.
+    local sources_loaded=false config_to_use=""
+    if [ -n "$custom_config" ]; then
+        config_to_use="$custom_config"
+    elif [ "$use_config" = true ] && [ -f "$CONFIG_FILE" ]; then
+        config_to_use="$CONFIG_FILE"
+    fi
+    if [ -n "$config_to_use" ]; then
+        if [ ! -f "$config_to_use" ]; then
+            echo "Error: Configuration file not found: $config_to_use"
+            exit "$EXIT_ERROR"
         fi
+        local config_sources=true
+        [ "$cli_sources" = false ] || config_sources=false
+        load_config_file "$config_to_use" "$config_sources" || exit "$EXIT_ERROR"
+        validate_ecosystems_list "$CONFIG_ECOSYSTEMS" || exit "$EXIT_ERROR"
+        [ "$LOADED_SOURCE_COUNT" -eq 0 ] || sources_loaded=true
+        if [ -n "$GITHUB_REPO" ] || [ -n "$GITHUB_ORG" ]; then
+            use_github=true
+        fi
+    fi
+
+    if { [ "$CREATE_GITHUB_ISSUE" = true ] || [ "$CREATE_SINGLE_ISSUE" = true ]; } && [ -z "$GITHUB_TOKEN" ]; then
+        echo -e "${RED}❌ Error: --create-multiple-issues and --create-single-issue require a GitHub token${NC}"
+        echo "   Use --github-token or set the GITHUB_TOKEN environment variable"
+        exit "$EXIT_ERROR"
     fi
 
     # Fetch packages from GitHub if requested
     if [ "$use_github" = true ]; then
-        fetch_github_packages || exit 1
+        fetch_github_packages || exit "$EXIT_ERROR"
         
         # If --github-only, exit after fetching
         if [ "$GITHUB_ONLY" = true ]; then
@@ -6864,20 +7124,24 @@ main() {
     while IFS= read -r project_input; do
         [ -z "$project_input" ] && continue
         case "${project_input##*/}" in
-            package.json|package-lock.json|npm-shrinkwrap.json|Pipfile.lock|composer.lock|packages.lock.json|Package.resolved|deno.lock)
-                if ! json_is_valid "$(<"$project_input")"; then
-                    echo -e "${RED}❌ Invalid JSON in project file: $project_input${NC}"
-                    exit 1
-                fi
-                ;;
+            package.json|package-lock.json|npm-shrinkwrap.json|Pipfile.lock|composer.lock|packages.lock.json|Package.resolved|deno.lock) ;;
+            *) [ -n "${SBOM_FILES[$project_input]+x}" ] || continue ;;
         esac
+        if ! json_is_valid_file "$project_input"; then
+            echo -e "${RED}❌ Invalid JSON in project file: $project_input${NC}"
+            exit "$EXIT_ERROR"
+        fi
     done <<< "${LOCKFILES}${LOCKFILES:+$'\n'}${PACKAGE_JSON_FILES}"
+
+    # Feed entries are pre-filtered on the names this project can contain.
+    build_project_tokens ${name:+"$name"}
 
     # 2. Explicit --source entries load unconditionally (no ecosystem filtering)
     if [ ${#custom_sources[@]} -gt 0 ]; then
+        local source url format columns
         for source in "${custom_sources[@]}"; do
             IFS='|' read -r url format columns <<< "$source"
-            load_data_source "$url" "$format" "Custom Source" "$columns"
+            load_data_source "$url" "$format" "Custom Source" "$columns" || exit "$EXIT_ERROR"
         done
         sources_loaded=true
     fi
@@ -6898,11 +7162,16 @@ main() {
             echo ""
         fi
 
-        # Ecosystems to load feeds for: --ecosystems > config > auto-detected.
+        # Ecosystems to load feeds for: --ecosystems > config > auto-detected;
+        # a --package-name lookup only needs its own ecosystem.
         local feed_ecos
-        feed_ecos=$(resolve_feed_ecosystems "$cli_ecosystems")
+        if [ -n "$name" ] && [ -z "$cli_ecosystems" ]; then
+            feed_ecos="$ecosystem"
+        else
+            feed_ecos=$(resolve_feed_ecosystems "$cli_ecosystems")
+        fi
 
-        local eco feed feed_file feed_path feed_label
+        local eco feed feed_file feed_path feed_label feeds_loaded=0 feed_entries=0
         for eco in $feed_ecos; do
             for feed in $feeds_to_load; do
                 feed_file=$(default_feed_filename "$feed" "$eco")
@@ -6914,13 +7183,32 @@ main() {
                     feed_label=$(printf '%s' "$feed" | tr '[:lower:]' '[:upper:]')
                     echo -e "${GREEN}✓ Using ${feed_label} source: $feed_path${NC}"
                     echo ""
-                    load_data_source "$feed_path" "purl" "Default ${feed_label} Source" ""
+                    load_data_source "$feed_path" "purl" "Default ${feed_label} Source" "" || exit "$EXIT_ERROR"
                     sources_loaded=true
+                    feeds_loaded=$((feeds_loaded + 1))
+                    feed_entries=$((feed_entries + LAST_SOURCE_ENTRY_COUNT))
                 else
                     echo -e "${YELLOW}⚠️  Warning: Unable to find ${feed} feed for ${eco} (${feed_file})${NC}"
                 fi
             done
         done
+
+        # A default feed always lists advisories: none at all means the feed
+        # files are empty or unreadable, and a clean result would be a lie.
+        if [ "$feeds_loaded" -gt 0 ] && [ "$feed_entries" -eq 0 ]; then
+            echo -e "${RED}❌ Error: the default vulnerability feeds are empty or unreadable${NC}"
+            exit "$EXIT_ERROR"
+        fi
+    fi
+
+    # 4. --package-name: check the exact version itself, then add the lookup
+    #    entry (loaded last so the version check cannot match it).
+    if [ -n "$name" ]; then
+        if [ -n "$package_version" ] && [[ "$package_version" != *[\ \<\>=\^~*,\|]* ]]; then
+            check_vulnerability "$ecosystem" "$CANON_NAME" "$package_version" "--package-name" || true
+        fi
+        load_data_source "$package_lookup_file" "purl" "Package lookup: $name" "" || exit "$EXIT_ERROR"
+        sources_loaded=true
     fi
 
     if [ "$sources_loaded" = false ]; then
@@ -6930,9 +7218,10 @@ main() {
         echo "If you see this message, no source could be found or loaded."
         echo ""
         echo "Tried the following locations for each detected ecosystem:"
+        echo "  - Next to the script: <script dir>/data/"
         echo "  - Homebrew: \$(brew --prefix)/share/package-checker/data/"
-        echo "  - Local: ./data/"
         echo "  - Docker: /app/data/"
+        echo "  - Local: ./data/"
         echo "  - Remote: https://raw.githubusercontent.com/maxgfr/package-checker.sh/refs/heads/main/data/"
         echo ""
         echo "You can explicitly specify a data source using:"
@@ -6943,54 +7232,27 @@ main() {
         echo "  A .package-checker.config.json file"
         echo ""
         echo "Use --help for more information"
-        exit 1
+        exit "$EXIT_ERROR"
     fi
 
-    # Count total packages - OPTIMIZED: use associative array for O(1) uniqueness check
-    local total_packages=0
+    # Count unique vulnerable packages across every loaded source.
+    local total_packages=0 pkg
+    local -A unique_pkgs_temp=()
+    for pkg in "${!VULN_EXACT_LOOKUP[@]}" "${!VULN_RANGE_LOOKUP[@]}"; do
+        unique_pkgs_temp["$pkg"]=1
+    done
+    total_packages=${#unique_pkgs_temp[@]}
+    unset unique_pkgs_temp
 
-    # First check if lookup tables have data (from CSV, PURL, or JSON)
-    local lookup_count=0
-    if [ ${#VULN_EXACT_LOOKUP[@]} -gt 0 ] || [ ${#VULN_RANGE_LOOKUP[@]} -gt 0 ]; then
-        # OPTIMIZED: Use associative array to count unique packages (much faster than sort -u)
-        declare -A unique_pkgs_temp
-        for pkg in "${!VULN_EXACT_LOOKUP[@]}"; do
-            unique_pkgs_temp["$pkg"]=1
-        done
-        for pkg in "${!VULN_RANGE_LOOKUP[@]}"; do
-            unique_pkgs_temp["$pkg"]=1
-        done
-        lookup_count=${#unique_pkgs_temp[@]}
-        unset unique_pkgs_temp
-    fi
-
-    # Also check VULN_DATA (may have JSON data not yet in lookup tables)
-    local json_count=0
-    if [ -n "$VULN_DATA" ] && [ "$VULN_DATA" != "{}" ]; then
-        json_count=$(json_object_length "$VULN_DATA")
-    fi
-
-    # Use the maximum of the two counts (they should converge after build_vulnerability_lookup)
-    if [ $lookup_count -gt $json_count ]; then
-        total_packages=$lookup_count
+    if [ -n "${PREFILTER_TOKENS_FILE:-}" ]; then
+        echo -e "${BLUE}📊 Total unique vulnerable packages: $total_packages relevant to this project (of ${TOTAL_SOURCE_ENTRIES:-0} entries loaded)${NC}"
     else
-        total_packages=$json_count
+        echo -e "${BLUE}📊 Total unique vulnerable packages: $total_packages${NC}"
     fi
-    
-    echo -e "${BLUE}📊 Total unique vulnerable packages: $total_packages${NC}"
+    if [ "${TOTAL_SOURCE_ENTRIES:-0}" -eq 0 ]; then
+        echo -e "${YELLOW}⚠️  The data sources contain no vulnerability entry${NC}"
+    fi
 
-    # If there are no vulnerability entries loaded, stop early — nothing to scan
-    if [ "$total_packages" -eq 0 ]; then
-        echo ""
-        echo -e "${YELLOW}⚠️  No vulnerability data loaded. Nothing to scan, exiting.${NC}"
-        exit 0
-    fi
-    
-    # Build vulnerability lookup tables for fast O(1) checking (if not already built)
-    if [ "$VULN_LOOKUP_BUILT" != true ]; then
-        echo -e "${BLUE}⚡ Building vulnerability lookup tables...${NC}"
-        build_vulnerability_lookup
-    fi
     echo -e "${GREEN}✅ Lookup tables ready (${#VULN_EXACT_LOOKUP[@]} packages with exact versions, ${#VULN_RANGE_LOOKUP[@]} with ranges)${NC}"
     echo ""
 
@@ -7024,9 +7286,11 @@ main() {
 
         while IFS= read -r lockfile; do
             [ -z "$lockfile" ] && continue
-            lockname=$(basename "$lockfile")
+            lockname="${lockfile##*/}"
             local lock_parser="${LOCKFILE_PARSER[$lockname]:-}"
-            if [ -n "$lock_parser" ]; then
+            if [ -n "${SBOM_FILES[$lockfile]+x}" ]; then
+                analyze_cyclonedx_inventory "$lockfile"
+            elif [ -n "$lock_parser" ]; then
                 "$lock_parser" "$lockfile" "${LOCKFILE_ECO[$lockname]}"
             else
                 # Path-discovered ecosystem (e.g. GitHub Actions workflows):
@@ -7041,15 +7305,18 @@ main() {
     fi
 
     # Analyze package.json files (discovered before feed loading)
+    if [ "${SKIPPED_PACKAGE_JSON_COUNT:-0}" -gt 0 ]; then
+        echo "   ⏩ Skipping $SKIPPED_PACKAGE_JSON_COUNT package.json file(s) covered by a lockfile"
+    fi
     if [ -z "$PACKAGE_JSON_FILES" ]; then
         if [ "$only_lockfiles" = true ]; then
             echo "   ⏩ Skipping package.json files (--only-lockfiles specified)"
-        else
+        elif [ "${SKIPPED_PACKAGE_JSON_COUNT:-0}" -eq 0 ]; then
             echo "   ℹ️  No package.json files found"
         fi
     else
         PACKAGE_COUNT=$(echo "$PACKAGE_JSON_FILES" | wc -l | tr -d ' ')
-        echo "📦 Analyzing $PACKAGE_COUNT package.json file(s)..."
+        echo "📦 Analyzing $PACKAGE_COUNT package.json file(s) (declared versions: no lockfile covers them)..."
         
         # Build regex pattern of dependency types to match
         local dep_types_pattern=$(printf '%s|' "${CONFIG_DEPENDENCY_TYPES[@]}")
@@ -7082,14 +7349,21 @@ main() {
                             if (depth == 1) pending = (token ~ ("^(" dep_pattern ")$"))
                             else if (active && depth == 2) pkg = token
                         } else if (active && depth == 2 && pkg != "") {
+                            # Only semver specs name a version: git+, github:,
+                            # catalog:, patch:, file:, workspace:, npm: aliases,
+                            # URLs and dist-tags (latest, next) do not.
                             ver = token
-                            if (ver !~ /^(workspace|file|link|npm):/ && ver != "*" && ver != "latest") {
-                                gsub(/^[\\^~>=<]+/, "", ver)
-                                gsub(/[[:space:]].*/, "", ver)
-                                if (ver != "") print pkg "|" ver
-                            }
+                            gsub(/^[\\^~>=<v[:space:]]+/, "", ver)
+                            gsub(/[[:space:]].*/, "", ver)
+                            if (ver ~ /^[0-9]/ && ver !~ /:/) print pkg "|" ver
                             pkg = ""
+                        } else if (depth == 1) {
+                            pending = 0
                         }
+                    } else if (depth == 1 && c ~ /[^[:space:],:{}]/) {
+                        # A non-object value ("dependencies": null) closes the
+                        # pending dependency section without opening it.
+                        pending = 0
                     } else if (c == "{") {
                         if (depth == 1) { active = pending; pending = 0; pkg = "" }
                         depth++
@@ -7117,7 +7391,9 @@ main() {
             fi
         done <<< "$PACKAGE_JSON_FILES"
     fi
-    
+
+    [ "$go_reachability" = false ] || go_reachability
+
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo -e "${BLUE}📊 SUMMARY${NC}"
@@ -7158,117 +7434,21 @@ main() {
                 echo -e "${RED}   ⚠️  [$disp_eco] $disp_rest${NC}"
             fi
 
-            local has_metadata=false
-
-            # Display all advisories from VULN_ADVISORIES if available
-            if [ -n "${VULN_ADVISORIES[$pkg]+x}" ] && [ -n "${VULN_ADVISORIES[$pkg]}" ]; then
-                local advisories_str="${VULN_ADVISORIES[$pkg]}"
-                # Split by || to get individual advisories
-                while [ -n "$advisories_str" ]; do
-                    local advisory="${advisories_str%%||*}"
-                    if [ "$advisory" = "$advisories_str" ]; then
-                        advisories_str=""  # Last entry
-                    else
-                        advisories_str="${advisories_str#*||}"
-                    fi
-                    # Parse advisory: severity;ghsa;cve;source;fix
-                    IFS=';' read -r severity ghsa cve adv_source fix_version <<< "$advisory"
-
-                    if [ -n "$severity" ]; then
-                        local severity_color=""
-                        case "$severity" in
-                            critical) severity_color="${RED}" ;;
-                            high) severity_color="${YELLOW}" ;;
-                            medium) severity_color="${BLUE}" ;;
-                            low) severity_color="${NC}" ;;
-                            *) severity_color="${NC}" ;;
-                        esac
-                        echo -e "      ${severity_color}Severity: $severity${NC}"
-                        has_metadata=true
-                    fi
-
-                    if [ -n "$ghsa" ]; then
-                        if [ "$adv_source" = "ghsa" ]; then
-                            echo -e "      ${BLUE}GHSA: $ghsa (https://github.com/advisories/$ghsa)${NC}"
-                        elif [ "$adv_source" = "osv" ]; then
-                            echo -e "      ${BLUE}GHSA: $ghsa (https://osv.dev/vulnerability/$ghsa)${NC}"
-                        else
-                            echo -e "      ${BLUE}GHSA: $ghsa${NC}"
-                        fi
-                        has_metadata=true
-                    fi
-
-                    if [ -n "$cve" ]; then
-                        echo -e "      ${BLUE}CVE: $cve (https://nvd.nist.gov/vuln/detail/$cve)${NC}"
-                        has_metadata=true
-                    fi
-
-                    if [ -n "$adv_source" ]; then
-                        echo -e "      ${BLUE}Source: $adv_source${NC}"
-                        has_metadata=true
-                    fi
-
-                    if [ -n "$fix_version" ]; then
-                        echo -e "      ${GREEN}Fix: upgrade to >= $fix_version${NC}"
-                        has_metadata=true
-                    fi
-                done
-            else
-                # Fallback to VULN_METADATA_* arrays (for parsers without per-range metadata)
-                # meta_key is the group key (eco:name@version); strip at LAST '@' for name (scoped-safe)
-                local meta_key="$pkg"
-                local pkg_name_only="${pkg%@*}"
-                local severity="${VULN_METADATA_SEVERITY[$meta_key]:-${VULN_METADATA_SEVERITY[$pkg_name_only]}}"
-                local ghsa="${VULN_METADATA_GHSA[$meta_key]:-${VULN_METADATA_GHSA[$pkg_name_only]}}"
-                local cve="${VULN_METADATA_CVE[$meta_key]:-${VULN_METADATA_CVE[$pkg_name_only]}}"
-                local source="${VULN_METADATA_SOURCE[$meta_key]:-${VULN_METADATA_SOURCE[$pkg_name_only]}}"
-                local fix="${VULN_METADATA_FIX[$meta_key]:-${VULN_METADATA_FIX[$pkg_name_only]}}"
-
-                if [ -n "$severity" ]; then
-                    local severity_color=""
-                    case "$severity" in
-                        critical) severity_color="${RED}" ;;
-                        high) severity_color="${YELLOW}" ;;
-                        medium) severity_color="${BLUE}" ;;
-                        low) severity_color="${NC}" ;;
-                        *) severity_color="${NC}" ;;
-                    esac
-                    echo -e "      ${severity_color}Severity: $severity${NC}"
-                    has_metadata=true
-                fi
-
-                if [ -n "$ghsa" ]; then
-                    if [ "$source" = "ghsa" ]; then
-                        echo -e "      ${BLUE}GHSA: $ghsa (https://github.com/advisories/$ghsa)${NC}"
-                    elif [ "$source" = "osv" ]; then
-                        echo -e "      ${BLUE}GHSA: $ghsa (https://osv.dev/vulnerability/$ghsa)${NC}"
-                    else
-                        echo -e "      ${BLUE}GHSA: $ghsa${NC}"
-                    fi
-                    has_metadata=true
-                fi
-
-                if [ -n "$cve" ]; then
-                    echo -e "      ${BLUE}CVE: $cve (https://nvd.nist.gov/vuln/detail/$cve)${NC}"
-                    has_metadata=true
-                fi
-
-                if [ -n "$source" ]; then
-                    echo -e "      ${BLUE}Source: $source${NC}"
-                    has_metadata=true
-                fi
-
-                if [ -n "$fix" ]; then
-                    echo -e "      ${GREEN}Fix: upgrade to >= $fix${NC}"
-                    has_metadata=true
-                fi
-            fi
-
-            if [ "$has_metadata" = true ]; then
-                echo ""
-            fi
-
             IFS='|' read -ra files <<< "${pkg_files[$pkg]}"
+            # Called in any location wins; "not called" needs every location.
+            if [ ${#VULN_REACHABILITY[@]} -gt 0 ]; then
+                local reach="not called"
+                for file in "${files[@]}"; do
+                    reachability_of "$file" "$pkg"
+                    case "$REACHABILITY" in
+                        called) reach=called; break ;;
+                        "") reach="" ;;
+                    esac
+                done
+                [ -z "$reach" ] || echo -e "      ${BLUE}Reachability: $reach (govulncheck)${NC}"
+            fi
+            print_advisories "${VULN_ADVISORIES[$pkg]:-}" && echo ""
+
             for file in "${files[@]}"; do
                 echo -e "${YELLOW}      └─ $file${NC}"
             done
@@ -7286,512 +7466,31 @@ main() {
             echo -e "${BLUE}📝 Creating GitHub Issues (1 issue per package)${NC}"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo ""
-
-            # Determine repository full name
-            local repo_full_name=""
-            if [ -n "$GITHUB_REPO" ]; then
-                repo_full_name="$GITHUB_REPO"
-            elif [ -n "$GITHUB_ORG" ]; then
-                # For org scanning, we need to handle multiple repos
-                # Get the first repo from the packages directory
-                local first_repo=""
-                for vuln in "${VULNERABLE_PACKAGES[@]}"; do
-                    IFS='|' read -r file eco pkg <<< "$vuln"
-                    if [[ "$file" =~ packages/([^/]+)/ ]]; then
-                        first_repo="${BASH_REMATCH[1]}"
-                        break
-                    fi
-                done
-                if [ -n "$first_repo" ]; then
-                    repo_full_name="${GITHUB_ORG}/${first_repo}"
-                fi
-            fi
-
-            if [ -z "$repo_full_name" ]; then
-                echo -e "${YELLOW}⚠️  Cannot determine repository. Use --github-repo or --github-org${NC}"
-            else
-                # Group vulnerabilities by package name (not version)
-                # Structure: pkg_vulns[package_name] = "version1|severity|ghsa|cve|source|files\nversion2|..."
-                declare -A pkg_vulns
-                declare -A pkg_version_seen
-                declare -A pkg_eco
-
-                for vuln in "${VULNERABLE_PACKAGES[@]}"; do
-                    IFS='|' read -r file eco pkg_with_version <<< "$vuln"
-
-                    # Extract package name and version (scoped-safe: split at LAST '@')
-                    local pkg_name="${pkg_with_version%@*}"
-                    local pkg_version="${pkg_with_version##*@}"
-
-                    # Record the ecosystem so the remediation block can print the
-                    # commands for THIS package's stack (npm/cargo/pypi/…).
-                    pkg_eco[$pkg_name]="$eco"
-
-                    # Get metadata (namespaced by ecosystem)
-                    local meta_key="${eco}:${pkg_with_version}"
-                    local severity="${VULN_METADATA_SEVERITY[$meta_key]:-${VULN_METADATA_SEVERITY[$pkg_name]:-unknown}}"
-                    local ghsa="${VULN_METADATA_GHSA[$meta_key]:-${VULN_METADATA_GHSA[$pkg_name]:--}}"
-                    local cve="${VULN_METADATA_CVE[$meta_key]:-${VULN_METADATA_CVE[$pkg_name]:--}}"
-                    local source="${VULN_METADATA_SOURCE[$meta_key]:-${VULN_METADATA_SOURCE[$pkg_name]:--}}"
-
-                    # Create a unique key for this version to avoid duplicates
-                    local version_key="${pkg_name}@${pkg_version}"
-
-                    if [ -z "${pkg_version_seen[$version_key]}" ]; then
-                        pkg_version_seen[$version_key]=1
-
-                        # Build vulnerability entry: version|severity|ghsa|cve|source|files
-                        local vuln_entry="${pkg_version}|${severity}|${ghsa}|${cve}|${source}|${file}"
-
-                        if [ -z "${pkg_vulns[$pkg_name]}" ]; then
-                            pkg_vulns[$pkg_name]="$vuln_entry"
-                        else
-                            pkg_vulns[$pkg_name]="${pkg_vulns[$pkg_name]}"$'\n'"$vuln_entry"
-                        fi
-                    else
-                        # Same version seen again, just add the file to existing entry
-                        local updated_vulns=""
-                        while IFS= read -r line; do
-                            local line_version="${line%%|*}"
-                            if [ "$line_version" = "$pkg_version" ]; then
-                                # Append file to this entry
-                                line="${line},${file}"
-                            fi
-                            if [ -z "$updated_vulns" ]; then
-                                updated_vulns="$line"
-                            else
-                                updated_vulns="${updated_vulns}"$'\n'"$line"
-                            fi
-                        done <<< "${pkg_vulns[$pkg_name]}"
-                        pkg_vulns[$pkg_name]="$updated_vulns"
-                    fi
-                done
-
-                # Create one issue per package
-                local issues_created=0
-                local unique_packages=$(printf '%s\n' "${!pkg_vulns[@]}" | sort -u)
-                local total_packages=$(echo "$unique_packages" | wc -l | tr -d ' ')
-
-                echo -e "${BLUE}Found ${total_packages} unique vulnerable package(s)${NC}"
-                echo ""
-
-                for pkg_name in $unique_packages; do
-                    [ -z "$pkg_name" ] && continue
-
-                    local vuln_data="${pkg_vulns[$pkg_name]}"
-                    local vuln_count=$(echo "$vuln_data" | wc -l | tr -d ' ')
-
-                    echo -e "${BLUE}📦 ${pkg_name}${NC} (${vuln_count} vulnerability/ies)"
-
-                    # Determine highest severity for the title
-                    local max_severity="unknown"
-                    local has_critical=false
-                    local has_high=false
-                    local has_medium=false
-                    local has_low=false
-
-                    while IFS='|' read -r ver sev ghsa cve src files; do
-                        case "${sev,,}" in
-                            critical) has_critical=true ;;
-                            high) has_high=true ;;
-                            medium) has_medium=true ;;
-                            low) has_low=true ;;
-                        esac
-                    done <<< "$vuln_data"
-
-                    if [ "$has_critical" = true ]; then
-                        max_severity="CRITICAL"
-                    elif [ "$has_high" = true ]; then
-                        max_severity="HIGH"
-                    elif [ "$has_medium" = true ]; then
-                        max_severity="MEDIUM"
-                    elif [ "$has_low" = true ]; then
-                        max_severity="LOW"
-                    fi
-
-                    # Build issue title with severity indicator
-                    local severity_emoji=""
-                    case "$max_severity" in
-                        CRITICAL) severity_emoji="🔴" ;;
-                        HIGH) severity_emoji="🟠" ;;
-                        MEDIUM) severity_emoji="🟡" ;;
-                        LOW) severity_emoji="🟢" ;;
-                        *) severity_emoji="⚪" ;;
-                    esac
-
-                    local issue_title="${severity_emoji} Security: ${vuln_count} vulnerabilit"
-                    if [ "$vuln_count" -eq 1 ]; then
-                        issue_title="${issue_title}y in \`${pkg_name}\`"
-                    else
-                        issue_title="${issue_title}ies in \`${pkg_name}\`"
-                    fi
-
-                    if [ "$max_severity" != "unknown" ]; then
-                        issue_title="${issue_title} [${max_severity}]"
-                    fi
-
-                    # Build issue body
-                    local issue_body=""
-                    issue_body+="## 🔒 Security Vulnerabilities in \`${pkg_name}\`"$'\n\n'
-
-                    # Summary table
-                    issue_body+="### 📊 Summary"$'\n\n'
-                    issue_body+="| Metric | Count |"$'\n'
-                    issue_body+="|--------|-------|"$'\n'
-                    issue_body+="| **Total Vulnerabilities** | ${vuln_count} |"$'\n'
-
-                    # Count by severity
-                    local crit_cnt=0 high_cnt=0 med_cnt=0 low_cnt=0 unk_cnt=0
-                    while IFS='|' read -r ver sev ghsa cve src files; do
-                        case "${sev,,}" in
-                            critical) crit_cnt=$((crit_cnt + 1)) ;;
-                            high) high_cnt=$((high_cnt + 1)) ;;
-                            medium) med_cnt=$((med_cnt + 1)) ;;
-                            low) low_cnt=$((low_cnt + 1)) ;;
-                            *) unk_cnt=$((unk_cnt + 1)) ;;
-                        esac
-                    done <<< "$vuln_data"
-
-                    [ "$crit_cnt" -gt 0 ] && issue_body+="| 🔴 Critical | ${crit_cnt} |"$'\n'
-                    [ "$high_cnt" -gt 0 ] && issue_body+="| 🟠 High | ${high_cnt} |"$'\n'
-                    [ "$med_cnt" -gt 0 ] && issue_body+="| 🟡 Medium | ${med_cnt} |"$'\n'
-                    [ "$low_cnt" -gt 0 ] && issue_body+="| 🟢 Low | ${low_cnt} |"$'\n'
-                    [ "$unk_cnt" -gt 0 ] && issue_body+="| ⚪ Unknown | ${unk_cnt} |"$'\n'
-
-                    issue_body+=$'\n'"---"$'\n\n'
-                    issue_body+="### 🔍 Vulnerability Details"$'\n\n'
-
-                    # Detail each vulnerability
-                    local vuln_num=0
-                    while IFS='|' read -r ver sev ghsa cve src files; do
-                        [ -z "$ver" ] && continue
-                        vuln_num=$((vuln_num + 1))
-
-                        # Severity badge
-                        local sev_badge="⚪ Unknown"
-                        case "${sev,,}" in
-                            critical) sev_badge="🔴 **CRITICAL**" ;;
-                            high) sev_badge="🟠 **HIGH**" ;;
-                            medium) sev_badge="🟡 **MEDIUM**" ;;
-                            low) sev_badge="🟢 **LOW**" ;;
-                        esac
-
-                        issue_body+="#### ${vuln_num}. Version \`${ver}\`"$'\n\n'
-                        issue_body+="| Property | Value |"$'\n'
-                        issue_body+="|----------|-------|"$'\n'
-                        issue_body+="| **Severity** | ${sev_badge} |"$'\n'
-
-                        if [ -n "$ghsa" ] && [ "$ghsa" != "-" ]; then
-                            issue_body+="| **GHSA** | [${ghsa}](https://github.com/advisories/${ghsa}) |"$'\n'
-                        fi
-
-                        if [ -n "$cve" ] && [ "$cve" != "-" ]; then
-                            issue_body+="| **CVE** | [${cve}](https://nvd.nist.gov/vuln/detail/${cve}) |"$'\n'
-                        fi
-
-                        if [ -n "$src" ] && [ "$src" != "-" ]; then
-                            issue_body+="| **Source** | ${src} |"$'\n'
-                        fi
-
-                        issue_body+=$'\n'
-
-                        # Affected files
-                        if [ -n "$files" ] && [ "$files" != "-" ]; then
-                            issue_body+="<details>"$'\n'
-                            issue_body+="<summary>📁 Affected files</summary>"$'\n\n'
-                            local file_list=""
-                            IFS=',' read -ra file_array <<< "$files"
-                            for f in "${file_array[@]}"; do
-                                [ -n "$f" ] && file_list+="- \`${f}\`"$'\n'
-                            done
-                            issue_body+="${file_list}"$'\n'
-                            issue_body+="</details>"$'\n\n'
-                        fi
-
-                        issue_body+="---"$'\n\n'
-                    done <<< "$vuln_data"
-
-                    # Recommendations — ecosystem-aware fix + verify commands.
-                    local rec_eco="${pkg_eco[$pkg_name]:-npm}"
-                    issue_body+="### ✅ Recommendations"$'\n\n'
-                    issue_body+="1. **Update the package** to the latest patched version:"$'\n'
-                    issue_body+="   \`\`\`bash"$'\n'
-                    issue_body+="$(fix_commands_for_eco "$rec_eco" "$pkg_name" "   ")"$'\n'
-                    issue_body+="   \`\`\`"$'\n\n'
-                    issue_body+="2. **Check for breaking changes** before updating major versions"$'\n\n'
-                    issue_body+="3. **Run a security audit** after updating:"$'\n'
-                    issue_body+="   \`\`\`bash"$'\n'
-                    issue_body+="   $(verify_command_for_eco "$rec_eco")"$'\n'
-                    issue_body+="   \`\`\`"$'\n\n'
-                    issue_body+="4. **Review the advisories** linked above for specific remediation steps"$'\n\n'
-                    issue_body+="---"$'\n\n'
-                    issue_body+="*🤖 Generated by [package-checker.sh](https://github.com/maxgfr/package-checker.sh)*"
-
-                    # Create the issue
-                    if create_github_issue "$repo_full_name" "$issue_title" "$issue_body" "security,vulnerability,dependencies"; then
-                        issues_created=$((issues_created + 1))
-                    fi
-
-                    sleep 1  # Rate limiting
-                    echo ""
-                done
-
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                echo -e "${GREEN}✅ Created ${issues_created} issue(s) for ${total_packages} package(s)${NC}"
-                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            fi
+            create_package_issues
         fi
 
-        # Create a single consolidated GitHub issue if requested
+        # Create a single consolidated GitHub issue per repository if requested
         if [ "$CREATE_SINGLE_ISSUE" = true ]; then
             echo ""
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo -e "${BLUE}📝 Creating Single Consolidated GitHub Issue${NC}"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
             echo ""
-
-            # Determine repository full name
-            local repo_full_name=""
-            if [ -n "$GITHUB_REPO" ]; then
-                repo_full_name="$GITHUB_REPO"
-            elif [ -n "$GITHUB_ORG" ]; then
-                local first_repo=""
-                for vuln in "${VULNERABLE_PACKAGES[@]}"; do
-                    IFS='|' read -r file eco pkg <<< "$vuln"
-                    if [[ "$file" =~ packages/([^/]+)/ ]]; then
-                        first_repo="${BASH_REMATCH[1]}"
-                        break
-                    fi
-                done
-                if [ -n "$first_repo" ]; then
-                    repo_full_name="${GITHUB_ORG}/${first_repo}"
-                fi
-            fi
-
-            if [ -z "$repo_full_name" ]; then
-                echo -e "${YELLOW}⚠️  Cannot determine repository. Use --github-repo or --github-org${NC}"
-            else
-                # Count unique packages and total vulnerabilities (name is field 3, scoped-safe)
-                local unique_packages=$(printf '%s\n' "${VULNERABLE_PACKAGES[@]}" | cut -d'|' -f3 | sed 's/@[^@]*$//' | sort -u)
-                local unique_pkg_count=$(echo "$unique_packages" | wc -l | tr -d ' ')
-                local total_vulns=${#VULNERABLE_PACKAGES[@]}
-
-                # Count severities across all vulnerabilities
-                local global_critical=0 global_high=0 global_medium=0 global_low=0 global_unknown=0
-
-                for vuln in "${VULNERABLE_PACKAGES[@]}"; do
-                    IFS='|' read -r file eco pkg_with_version <<< "$vuln"
-                    local pkg_name="${pkg_with_version%@*}"
-                    local meta_key="${eco}:${pkg_with_version}"
-                    local severity="${VULN_METADATA_SEVERITY[$meta_key]:-${VULN_METADATA_SEVERITY[$pkg_name]:-unknown}}"
-
-                    case "${severity,,}" in
-                        critical) global_critical=$((global_critical + 1)) ;;
-                        high) global_high=$((global_high + 1)) ;;
-                        medium) global_medium=$((global_medium + 1)) ;;
-                        low) global_low=$((global_low + 1)) ;;
-                        *) global_unknown=$((global_unknown + 1)) ;;
-                    esac
-                done
-
-                # Determine highest severity for the title
-                local max_severity="UNKNOWN"
-                local severity_emoji="⚪"
-                if [ "$global_critical" -gt 0 ]; then
-                    max_severity="CRITICAL"; severity_emoji="🔴"
-                elif [ "$global_high" -gt 0 ]; then
-                    max_severity="HIGH"; severity_emoji="🟠"
-                elif [ "$global_medium" -gt 0 ]; then
-                    max_severity="MEDIUM"; severity_emoji="🟡"
-                elif [ "$global_low" -gt 0 ]; then
-                    max_severity="LOW"; severity_emoji="🟢"
-                fi
-
-                # Build issue title
-                local issue_title="${severity_emoji} Security Report: ${total_vulns} vulnerabilities in ${unique_pkg_count} packages [${max_severity}]"
-
-                # Build issue body
-                local issue_body=""
-                issue_body+="## 🔒 Security Vulnerability Report"$'\n\n'
-                issue_body+="This issue contains a consolidated report of all security vulnerabilities detected in this repository."$'\n\n'
-
-                # Global summary
-                issue_body+="### 📊 Global Summary"$'\n\n'
-                issue_body+="| Metric | Count |"$'\n'
-                issue_body+="|--------|-------|"$'\n'
-                issue_body+="| **Total Vulnerabilities** | ${total_vulns} |"$'\n'
-                issue_body+="| **Affected Packages** | ${unique_pkg_count} |"$'\n'
-                [ "$global_critical" -gt 0 ] && issue_body+="| 🔴 Critical | ${global_critical} |"$'\n'
-                [ "$global_high" -gt 0 ] && issue_body+="| 🟠 High | ${global_high} |"$'\n'
-                [ "$global_medium" -gt 0 ] && issue_body+="| 🟡 Medium | ${global_medium} |"$'\n'
-                [ "$global_low" -gt 0 ] && issue_body+="| 🟢 Low | ${global_low} |"$'\n'
-                [ "$global_unknown" -gt 0 ] && issue_body+="| ⚪ Unknown | ${global_unknown} |"$'\n'
-
-                issue_body+=$'\n'"---"$'\n\n'
-
-                # Group vulnerabilities by package
-                declare -A single_pkg_vulns
-                declare -A single_pkg_version_seen
-
-                for vuln in "${VULNERABLE_PACKAGES[@]}"; do
-                    IFS='|' read -r file eco pkg_with_version <<< "$vuln"
-                    local pkg_name="${pkg_with_version%@*}"
-                    local pkg_version="${pkg_with_version##*@}"
-                    local meta_key="${eco}:${pkg_with_version}"
-                    local severity="${VULN_METADATA_SEVERITY[$meta_key]:-${VULN_METADATA_SEVERITY[$pkg_name]:-unknown}}"
-                    local ghsa="${VULN_METADATA_GHSA[$meta_key]:-${VULN_METADATA_GHSA[$pkg_name]:--}}"
-                    local cve="${VULN_METADATA_CVE[$meta_key]:-${VULN_METADATA_CVE[$pkg_name]:--}}"
-                    local source="${VULN_METADATA_SOURCE[$meta_key]:-${VULN_METADATA_SOURCE[$pkg_name]:--}}"
-
-                    local version_key="${pkg_name}@${pkg_version}"
-
-                    if [ -z "${single_pkg_version_seen[$version_key]}" ]; then
-                        single_pkg_version_seen[$version_key]=1
-                        local vuln_entry="${pkg_version}|${severity}|${ghsa}|${cve}|${source}|${file}"
-
-                        if [ -z "${single_pkg_vulns[$pkg_name]}" ]; then
-                            single_pkg_vulns[$pkg_name]="$vuln_entry"
-                        else
-                            single_pkg_vulns[$pkg_name]="${single_pkg_vulns[$pkg_name]}"$'\n'"$vuln_entry"
-                        fi
-                    else
-                        local updated_vulns=""
-                        while IFS= read -r line; do
-                            local line_version="${line%%|*}"
-                            if [ "$line_version" = "$pkg_version" ]; then
-                                line="${line},${file}"
-                            fi
-                            if [ -z "$updated_vulns" ]; then
-                                updated_vulns="$line"
-                            else
-                                updated_vulns="${updated_vulns}"$'\n'"$line"
-                            fi
-                        done <<< "${single_pkg_vulns[$pkg_name]}"
-                        single_pkg_vulns[$pkg_name]="$updated_vulns"
-                    fi
-                done
-
-                # Detail each package
-                issue_body+="### 📦 Vulnerable Packages"$'\n\n'
-
-                local pkg_num=0
-                for pkg_name in $(printf '%s\n' "${!single_pkg_vulns[@]}" | sort); do
-                    [ -z "$pkg_name" ] && continue
-                    pkg_num=$((pkg_num + 1))
-
-                    local vuln_data="${single_pkg_vulns[$pkg_name]}"
-                    local vuln_count=$(echo "$vuln_data" | wc -l | tr -d ' ')
-
-                    # Count package severities
-                    local pkg_crit=0 pkg_high=0 pkg_med=0 pkg_low=0
-                    while IFS='|' read -r ver sev ghsa cve src files; do
-                        case "${sev,,}" in
-                            critical) pkg_crit=$((pkg_crit + 1)) ;;
-                            high) pkg_high=$((pkg_high + 1)) ;;
-                            medium) pkg_med=$((pkg_med + 1)) ;;
-                            low) pkg_low=$((pkg_low + 1)) ;;
-                        esac
-                    done <<< "$vuln_data"
-
-                    # Package severity indicator
-                    local pkg_sev_emoji="⚪"
-                    if [ "$pkg_crit" -gt 0 ]; then pkg_sev_emoji="🔴"
-                    elif [ "$pkg_high" -gt 0 ]; then pkg_sev_emoji="🟠"
-                    elif [ "$pkg_med" -gt 0 ]; then pkg_sev_emoji="🟡"
-                    elif [ "$pkg_low" -gt 0 ]; then pkg_sev_emoji="🟢"
-                    fi
-
-                    issue_body+="<details>"$'\n'
-                    issue_body+="<summary>${pkg_sev_emoji} <strong>${pkg_name}</strong> (${vuln_count} vulnerabilities)</summary>"$'\n\n'
-
-                    # Vulnerability table for this package
-                    issue_body+="| Version | Severity | GHSA | CVE |"$'\n'
-                    issue_body+="|---------|----------|------|-----|"$'\n'
-
-                    while IFS='|' read -r ver sev ghsa cve src files; do
-                        [ -z "$ver" ] && continue
-
-                        local sev_badge="⚪ Unknown"
-                        case "${sev,,}" in
-                            critical) sev_badge="🔴 Critical" ;;
-                            high) sev_badge="🟠 High" ;;
-                            medium) sev_badge="🟡 Medium" ;;
-                            low) sev_badge="🟢 Low" ;;
-                        esac
-
-                        local ghsa_link="-"
-                        if [ -n "$ghsa" ] && [ "$ghsa" != "-" ]; then
-                            ghsa_link="[${ghsa}](https://github.com/advisories/${ghsa})"
-                        fi
-
-                        local cve_link="-"
-                        if [ -n "$cve" ] && [ "$cve" != "-" ]; then
-                            cve_link="[${cve}](https://nvd.nist.gov/vuln/detail/${cve})"
-                        fi
-
-                        issue_body+="| \`${ver}\` | ${sev_badge} | ${ghsa_link} | ${cve_link} |"$'\n'
-                    done <<< "$vuln_data"
-
-                    issue_body+=$'\n'"**Affected files:**"$'\n'
-                    while IFS='|' read -r ver sev ghsa cve src files; do
-                        [ -z "$ver" ] && continue
-                        IFS=',' read -ra file_array <<< "$files"
-                        for f in "${file_array[@]}"; do
-                            [ -n "$f" ] && issue_body+="- \`${f}\`"$'\n'
-                        done
-                    done <<< "$vuln_data"
-
-                    issue_body+=$'\n'"</details>"$'\n\n'
-                done
-
-                # Recommendations — one remediation block per ecosystem present
-                # in the findings (a polyglot repo gets npm + cargo + pypi + …).
-                local present_ecos
-                present_ecos=$(printf '%s\n' "${VULNERABLE_PACKAGES[@]}" | cut -d'|' -f2 | sort -u)
-                issue_body+="---"$'\n\n'
-                issue_body+="### ✅ Recommended Actions"$'\n\n'
-                issue_body+="1. **Review each vulnerability** using the GHSA/CVE links above."$'\n'
-                issue_body+="2. **Update the affected packages** to their latest patched versions. Commands per detected ecosystem:"$'\n\n'
-                local rec_eco
-                while IFS= read -r rec_eco; do
-                    [ -z "$rec_eco" ] && continue
-                    issue_body+="#### $(eco_display_name "$rec_eco")"$'\n\n'
-                    issue_body+="\`\`\`bash"$'\n'
-                    issue_body+="$(fix_commands_for_eco "$rec_eco" "<package-name>")"$'\n'
-                    issue_body+="\`\`\`"$'\n\n'
-                    issue_body+="Verify: \`$(verify_command_for_eco "$rec_eco")\`"$'\n\n'
-                done <<< "$present_ecos"
-                issue_body+="---"$'\n\n'
-                issue_body+="*🤖 Generated by [package-checker.sh](https://github.com/maxgfr/package-checker.sh)*"
-
-                # Create the single consolidated issue
-                echo -e "${BLUE}Creating consolidated security report...${NC}"
-                if create_github_issue "$repo_full_name" "$issue_title" "$issue_body" "security,vulnerability,dependencies"; then
-                    echo ""
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    echo -e "${GREEN}✅ Created 1 consolidated issue with ${total_vulns} vulnerabilities${NC}"
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                else
-                    echo ""
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                    echo -e "${RED}❌ Failed to create consolidated issue${NC}"
-                    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                fi
-            fi
+            create_consolidated_issues
         fi
     fi
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
-    # Export results if requested
-    if [ -n "$export_json_file" ] && [ ${#VULNERABLE_PACKAGES[@]} -gt 0 ]; then
+    # Export results if requested (also when empty: see export_vulnerabilities_json)
+    if [ -n "$export_json_file" ]; then
         echo ""
-        export_vulnerabilities_json "$export_json_file"
+        export_vulnerabilities_json "$export_json_file" || exit "$EXIT_ERROR"
     fi
 
-    if [ -n "$export_csv_file" ] && [ ${#VULNERABLE_PACKAGES[@]} -gt 0 ]; then
+    if [ -n "$export_csv_file" ]; then
         echo ""
-        export_vulnerabilities_csv "$export_csv_file"
+        export_vulnerabilities_csv "$export_csv_file" || exit "$EXIT_ERROR"
     fi
 
     exit $FOUND_VULNERABLE
