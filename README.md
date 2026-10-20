@@ -641,13 +641,12 @@ The agent calls it when you ask, not on its own. Use `$ultrasec` in Codex,
 `/ultrasec` in Claude Code, prefixing the plugin namespace when it is installed
 as a Claude plugin, or ask the agent for a security audit in plain words.
 
-Making it explicit-only, so that only the command starts it, is one setting per
-host, applied to the **installed** copy of the skill:
+Making it explicit-only, so that only the command starts it, is one setting,
+applied to the **installed** copy of the skill:
 
 | Host | Shipped, on request | Explicit-only |
 | --- | --- | --- |
 | Claude Code | no `disable-model-invocation` in `SKILL.md` | add `disable-model-invocation: true` |
-| Codex | `allow_implicit_invocation: true` under `policy:` in `agents/openai.yaml` | set it to `false` |
 
 Claude Code can do it without touching the file:
 `"skillOverrides": { "ultrasec": "user-invocable-only" }` in `settings.json`
