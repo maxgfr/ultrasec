@@ -64,7 +64,7 @@ gate failed · **2** usage/runtime error. Full flags, defaults and artifacts:
 ```bash
 ultrasec audit   --repo . --out .ultrasec       # ONE command → .ultrasec/REPORT.md, nothing else kept
   # --html (REPORT.html) · --full (exhaustive annexes) · --keep-work (keep the JSON worklists)
-  # --powered <cli> / --council "<reviewer:model,…>" (opt-in agent calls) · scan flags pass through
+  # --powered "<cli> {prompt}" / --council "<reviewer:model,…>" (opt-in agent calls) · scan flags pass through
 ultrasec tools                                  # which scanners are installed (+ --upgrade)
 ultrasec map     --repo . --out .ultrasec       # cheap attack-surface recon; no taint, no network
 ultrasec context --repo . --out .ultrasec       # scaffold → you author .ultrasec/CONTEXT.md

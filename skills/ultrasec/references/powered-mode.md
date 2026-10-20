@@ -7,7 +7,7 @@ list — **zero external calls**. Powered mode is a thin automation layer that d
 *your* agent CLI to fill those worklists; it calls the **same** emit/apply functions
 as the manual path (no duplicated logic).
 
-**One command:** `audit --powered <cli>` is the autonomous path end to end — scan, every stage
+**One command:** `audit --powered "<cli> … {prompt}"` is the autonomous path end to end — scan, every stage
 driven through that CLI, `check`, `REPORT.md`, then the intermediates removed (`--keep-work` keeps
 them). `audit` without `--powered` (or `--council`) calls nothing and emits no worklists.
 
@@ -16,8 +16,8 @@ ultrasec audit --repo . --out .ultrasec --powered "mycli exec {prompt}"
 ultrasec audit --repo . --out .ultrasec --powered "mycli exec {prompt}" --cross-check "othercli run {prompt}" --keep-work
 ```
 
-`--powered` must name the CLI (`--powered <cli>`, `--powered=<cli>` or `--powered --agent <cli>`);
-a bare `--powered` exits 2.
+`--powered` must name the CLI as an argv template that passes `{prompt}` (`--powered "<cli> … {prompt}"`,
+`--powered="…"` or `--powered --agent "…"`); a bare `--powered`, or a template without `{prompt}`, exits 2.
 
 ## Default (no keys, no calls)
 

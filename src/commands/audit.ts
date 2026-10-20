@@ -83,7 +83,8 @@ export async function runAudit(args: ParsedArgs): Promise<number> {
 
   if (!isScannableDir(repo)) return fail(`--repo '${repo}' is not a directory. Aborting — an unscannable path must not report a clean audit.`);
   const { powered, agent } = poweredAgent(args);
-  if (powered && !agent) return fail(`--powered needs the agent CLI to drive: \`--powered <cli>\` (its keys live in that CLI, never in ultrasec).`);
+  if (powered && !agent)
+    return fail(`--powered needs the agent CLI to drive: \`--powered "<cli> … {prompt}"\` (its keys live in that CLI, never in ultrasec).`);
   try {
     for (const tpl of [agent, flagStr(args, "cross-check")]) if (powered && tpl) resolveTemplate(tpl);
   } catch (e) {
