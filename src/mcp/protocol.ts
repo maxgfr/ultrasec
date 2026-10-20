@@ -176,7 +176,7 @@ const LOOPBACK_ORIGIN = /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
 // 127.0.0.1:<port> and drive this server — which clones arbitrary git URLs and
 // reads files off disk.
 //
-// An absent Origin is allowed: non-browser clients (Claude Code, Cursor, curl)
+// An absent Origin is allowed: non-browser clients (Claude Code, Codex, Cursor, curl)
 // don't send one, and a browser always does, so absence is not something an
 // attacker can use.
 //

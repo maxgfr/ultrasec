@@ -71,10 +71,11 @@ targets ultrasec deliberately does *not* handle.
 
 ## Install
 
-**As an agent skill** (Claude Code, Cursor, … via [skills.sh](https://skills.sh)):
+**As an agent skill** (any agent the [skills](https://skills.sh) CLI supports — Codex,
+Claude Code, OpenCode, Cursor, …):
 
 ```bash
-npx skills add maxgfr/ultrasec
+npx skills add maxgfr/ultrasec            # add -a <agent> to target one agent
 ```
 
 This drops `SKILL.md` + the `references/` + the committed `scripts/ultrasec.mjs`
@@ -206,13 +207,21 @@ results out. Same engine, same run directory, no wrapper — the tools call the
 same command handlers the CLI does, so a tool result and a CLI run cannot
 disagree.
 
-```bash
-# stdio — the default, and what Claude Code / Claude Desktop / Cursor expect
-claude mcp add ultrasec -- node /abs/path/to/scripts/ultrasec.mjs mcp
+Any MCP client works. Register the command (stdio, the default) or the URL
+(HTTP) with your agent:
 
-# or over HTTP, on loopback
+```bash
+# stdio — the default: the client launches this command
+node /abs/path/to/scripts/ultrasec.mjs mcp
+claude mcp add ultrasec -- node /abs/path/to/scripts/ultrasec.mjs mcp     # Claude Code
+codex mcp add ultrasec -- node /abs/path/to/scripts/ultrasec.mjs mcp      # Codex
+opencode mcp add ultrasec -- node /abs/path/to/scripts/ultrasec.mjs mcp   # OpenCode
+
+# or over HTTP, on loopback (the server prints the same hints on start)
 node scripts/ultrasec.mjs mcp --transport http --port 7340
-claude mcp add --transport http ultrasec http://127.0.0.1:7340/mcp
+claude mcp add --transport http ultrasec http://127.0.0.1:7340/mcp        # Claude Code
+codex mcp add ultrasec --url http://127.0.0.1:7340/mcp                    # Codex
+opencode mcp add ultrasec --url http://127.0.0.1:7340/mcp                 # OpenCode
 ```
 
 ```jsonc

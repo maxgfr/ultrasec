@@ -28,14 +28,17 @@ conservative folds; only wall-clock differs. Fan-out is an optimization, not a r
 6. **Gate**: \`node <ENGINE> check --run <RUN> --semantic\` must exit 0 before presenting anything.
 7. **Render**: \`node <ENGINE> render --run <RUN>\` (optionally author the narrative first: \`node <ENGINE> narrative --run <RUN>\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
 
-With subagents available, prefer the emitted workflows instead: \`orchestrate --run <RUN> --phase <p>\` then \`Workflow({ scriptPath: "<RUN>/.work/orchestration/<p>.workflow.mjs" })\` — you stay the sole writer either way.
+With subagents available, fan out instead: \`orchestrate --run <RUN> --phase <p>\`, then dispatch one subagent per batch following \`<RUN>/.work/orchestration/agents/<role>.md\` (any host with native subagents). Optional — Claude Code: launch \`<RUN>/.work/orchestration/<p>.workflow.mjs\` with the Workflow tool for one-call parallel fan-out. You stay the sole writer either way.
 "
 `;
 
 exports[`orchestrate — contracts & runbook > golden shape (paths normalized) > adjudicate.workflow.mjs 1`] = `
 "export const meta = {"name":"ultrasec-adjudicate","description":"Adjudicate the 1 open candidate(s) of an ultrasec audit from dossier evidence (analyzer fan-out, conservative fold)","phases":[{"title":"Adjudicate"}]}
 
-// NOT a plain Node script: launch via the Workflow tool — Workflow({ scriptPath: "<RUN>/.work/orchestration/adjudicate.workflow.mjs" }).
+// Any host with subagents: dispatch the sibling agents/*.md contracts (one subagent per batch below);
+// a single agent: \`orchestrate --eco\` and follow RUNBOOK.md sequentially.
+// Optional — Claude Code: this file is NOT a plain Node script; launch it with the Workflow tool for
+// one-call parallel fan-out — Workflow({ scriptPath: "<RUN>/.work/orchestration/adjudicate.workflow.mjs" }).
 // Emitted by \`ultrasec orchestrate\` from the CURRENT worklist. The worklist is the source
 // of truth: if it changes, re-run \`orchestrate --phase adjudicate\` before launching.
 

@@ -259,9 +259,9 @@ ultrasec orchestrate --run <dir> [--phase adjudicate|verify|revalidate|investiga
 
 | Your harness | How to run each judgment phase |
 |---|---|
-| Claude Code exposes Workflow | `orchestrate --run <run> --phase <p>`, then `Workflow({ scriptPath: "<run>/.work/orchestration/<p>.workflow.mjs" })`. Subagents RETURN verdict/discovery fragments; merge them into one apply file yourself, then run the `--apply` fold shown at the end of the workflow. |
-| Codex/other host has subagents | Same `orchestrate`; dispatch one subagent per batch following `<run>/.work/orchestration/agents/<role>.md` (the workflow script shows batches + prompts). One writer: you merge and fold. |
-| Eco mode, or no subagents | `orchestrate --run <run> --eco` → follow `<run>/.work/orchestration/RUNBOOK.md` sequentially, playing each role yourself. Correctness-identical; only wall-clock differs. |
+| Any host with subagents (Codex, Claude Code, OpenCode, …) | `orchestrate --run <run> --phase <p>`, then dispatch one subagent per batch following `<run>/.work/orchestration/agents/<role>.md` (`<p>.workflow.mjs` lists batches + prompts). Subagents RETURN fragments; merge them into one apply file, then run the `--apply` fold shown at the end of the workflow. |
+| Single agent / no subagents | `orchestrate --run <run> --eco` → follow `<run>/.work/orchestration/RUNBOOK.md` sequentially, playing each role yourself. Correctness-identical; only wall-clock differs. |
+| Optional — Claude Code | Launch `<p>.workflow.mjs` with the Workflow tool for one-call parallel fan-out. |
 
 Fan-out is an optimization, never a requirement — every phase has a sequential fallback with
 identical artifacts. Subagents never write: the contracts end with the one-writer rule (read-only

@@ -5,8 +5,8 @@ import { join, resolve } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 // The stdio transport driven against the REAL committed bundle, as a separate
-// process — the exact file `claude mcp add -- node scripts/ultrasec.mjs mcp`
-// runs. In-process tests against src/ cannot see a bundling or wiring
+// process — the exact file any MCP client (`claude mcp add`, `codex mcp add`,
+// `opencode mcp add`, …) runs as `node scripts/ultrasec.mjs mcp`. In-process tests against src/ cannot see a bundling or wiring
 // regression, and they cannot see the one property that matters most here:
 // that stdout carries JSON-RPC frames and nothing else.
 //

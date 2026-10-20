@@ -44779,7 +44779,10 @@ function phaseWorkflowScript(ph, runAbs, engineAbs, batchSize, extras = {}) {
   return [
     `export const meta = ${JSON.stringify(meta)}`,
     ``,
-    `// NOT a plain Node script: launch via the Workflow tool \u2014 Workflow({ scriptPath: ${JSON.stringify(scriptPath2)} }).`,
+    `// Any host with subagents: dispatch the sibling agents/*.md contracts (one subagent per batch below);`,
+    `// a single agent: \`orchestrate --eco\` and follow RUNBOOK.md sequentially.`,
+    `// Optional \u2014 Claude Code: this file is NOT a plain Node script; launch it with the Workflow tool for`,
+    `// one-call parallel fan-out \u2014 Workflow({ scriptPath: ${JSON.stringify(scriptPath2)} }).`,
     `// Emitted by \`ultrasec orchestrate\` from the CURRENT worklist. The worklist is the source`,
     `// of truth: if it changes, re-run \`orchestrate --phase ${ph.name}\` before launching.`,
     ``,
@@ -44928,7 +44931,7 @@ ${status}
 6. **Gate**: \`${engine} check --run ${runAbs} --semantic\` must exit 0 before presenting anything.
 7. **Render**: \`${engine} render --run ${runAbs}\` (optionally author the narrative first: \`${engine} narrative --run ${runAbs}\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
 
-With subagents available, prefer the emitted workflows instead: \`orchestrate --run ${runAbs} --phase <p>\` then \`Workflow({ scriptPath: "${workPath(runAbs, "orchestration", "<p>.workflow.mjs")}" })\` \u2014 you stay the sole writer either way.
+With subagents available, fan out instead: \`orchestrate --run ${runAbs} --phase <p>\`, then dispatch one subagent per batch following \`${workPath(runAbs, "orchestration", "agents")}/<role>.md\` (any host with native subagents). Optional \u2014 Claude Code: launch \`${workPath(runAbs, "orchestration", "<p>.workflow.mjs")}\` with the Workflow tool for one-call parallel fan-out. You stay the sole writer either way.
 `;
 }
 
@@ -50696,7 +50699,11 @@ function runOrchestrate(args2) {
   const workflows = res.written.filter((w) => w.endsWith(".workflow.mjs"));
   if (workflows.length) {
     println("");
-    for (const w of workflows) println(`Launch: Workflow({ scriptPath: ${JSON.stringify(w)} })`);
+    println(
+      `Dispatch: one subagent per batch, following ${workPath(runFlag, "orchestration", "agents")}/<role>.md (any host with native subagents; batches + prompts are in each workflow script).`
+    );
+    println(`Single agent: \`orchestrate --eco\`, then follow ${workPath(runFlag, "orchestration", "RUNBOOK.md")} sequentially.`);
+    for (const w of workflows) println(`Optional \u2014 Claude Code: Workflow({ scriptPath: ${JSON.stringify(w)} }) for one-call parallel fan-out.`);
     println("Then merge the returned fragments into one apply file and run the `--apply` fold shown at the end of each workflow (you stay the sole writer).");
   } else {
     println(`Follow ${workPath(runFlag, "orchestration", "RUNBOOK.md")} sequentially (the eco path).`);
@@ -54344,7 +54351,10 @@ async function runMcp(args2) {
     return 2;
   }
   eprintln(`ultrasec: MCP server listening on ${running.url}`);
-  eprintln(`  client: claude mcp add --transport http ultrasec ${running.url}`);
+  eprintln(`  connect: ${running.url}`);
+  eprintln(`    Claude Code: claude mcp add --transport http ultrasec ${running.url}`);
+  eprintln(`    Codex:       codex mcp add ultrasec --url ${running.url}`);
+  eprintln(`    OpenCode:    opencode mcp add ultrasec --url ${running.url}`);
   for (const sig of ["SIGINT", "SIGTERM"]) {
     process.once(sig, () => {
       void running.close().then(() => process.exit(0));

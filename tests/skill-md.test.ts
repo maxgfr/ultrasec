@@ -49,8 +49,8 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
     expect((desc ?? "").length).toBeGreaterThan(0);
   });
 
-  // Claude Code caps skill descriptions at 1024 characters when matching a
-  // request to a skill; a longer description risks truncation at the exact
+  // The Agent Skills format caps skill descriptions at 1024 characters, and
+  // hosts (Claude Code, Codex, …) match a request to a skill on it; a longer description risks truncation at the exact
   // moment the skill needs to be recognized. We budget at 1000 (mirrors
   // DESC_MAX in scripts/verify-skill-bundle.mjs) to keep a safety margin so a
   // future edit can't silently cross the cap.
