@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.78.0](https://github.com/maxgfr/ultrasec/compare/v1.77.0...v1.78.0) (2026-10-20)
+
+
+### Features
+
+* make orchestration and MCP hints agent-neutral ([#44](https://github.com/maxgfr/ultrasec/issues/44)) ([0641761](https://github.com/maxgfr/ultrasec/commit/0641761c3ed24828884dc22665795b3255927692))
+
 # [1.77.0](https://github.com/maxgfr/ultrasec/compare/v1.76.0...v1.77.0) (2026-10-20)
 
 
