@@ -5,8 +5,8 @@ import { wantsMdTwin } from "../stage.js";
 import { CliAgentRunner, resolveTemplate } from "../powered/agent.js";
 import { runPipeline, ALL_STAGES, type StageName, type PipelineOptions } from "../powered/pipeline.js";
 
-// `ultrasec run --repo <dir> [--out <run>] [--powered] [--agent <name|tpl>]
-//    [--cross-check <name|tpl>] [--stages a,b,c] [--no-scan]`
+// `ultrasec run --repo <dir> [--out <run>] [--powered] [--agent "<cli> … {prompt}"]
+//    [--cross-check "<cli> … {prompt}"] [--stages a,b,c] [--no-scan]`
 //
 // Sequences the AI stages (context → assumptions → triage → investigate → verify →
 // revalidate → variants → narrative → implement → check → render). The DEFAULT (no --powered) makes ZERO external
@@ -110,7 +110,7 @@ export function runRun(args: ParsedArgs): number {
     println(`ultrasec run → ${run} (no --powered: emitted worklists, ZERO external calls)`);
     println(`  stages: ${stages.join(" → ")}`);
     printNotices();
-    println(`  agent TODO — fill each worklist, then apply (or re-run with --powered --agent <cli>):`);
+    println(`  agent TODO — fill each worklist, then apply (or re-run with --powered --agent "<cli> … {prompt}"):`);
     for (const e of res.emitted) {
       const noApply = e.outName === "CONTEXT.md" || e.outName === "NARRATIVE.json" || e.outName === "REMEDIATION_PRD.md";
       const apply = noApply ? "" : ` → \`ultrasec ${e.stage} --apply ${e.outName} --run ${run}\``;

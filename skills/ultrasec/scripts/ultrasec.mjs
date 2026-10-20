@@ -50641,7 +50641,7 @@ function runRun(args2) {
     println(`ultrasec run \u2192 ${run2} (no --powered: emitted worklists, ZERO external calls)`);
     println(`  stages: ${stages.join(" \u2192 ")}`);
     printNotices();
-    println(`  agent TODO \u2014 fill each worklist, then apply (or re-run with --powered --agent <cli>):`);
+    println(`  agent TODO \u2014 fill each worklist, then apply (or re-run with --powered --agent "<cli> \u2026 {prompt}"):`);
     for (const e of res.emitted) {
       const noApply = e.outName === "CONTEXT.md" || e.outName === "NARRATIVE.json" || e.outName === "REMEDIATION_PRD.md";
       const apply = noApply ? "" : ` \u2192 \`ultrasec ${e.stage} --apply ${e.outName} --run ${run2}\``;
@@ -52638,7 +52638,8 @@ async function runAudit(args2) {
   };
   if (!isScannableDir(repo)) return fail2(`--repo '${repo}' is not a directory. Aborting \u2014 an unscannable path must not report a clean audit.`);
   const { powered, agent } = poweredAgent(args2);
-  if (powered && !agent) return fail2(`--powered needs the agent CLI to drive: \`--powered <cli>\` (its keys live in that CLI, never in ultrasec).`);
+  if (powered && !agent)
+    return fail2(`--powered needs the agent CLI to drive: \`--powered "<cli> \u2026 {prompt}"\` (its keys live in that CLI, never in ultrasec).`);
   try {
     for (const tpl of [agent, flagStr(args2, "cross-check")]) if (powered && tpl) resolveTemplate(tpl);
   } catch (e) {

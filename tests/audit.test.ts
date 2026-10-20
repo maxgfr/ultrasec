@@ -127,7 +127,7 @@ describe("audit — one command, one report", () => {
     expect(r1.result).toBe(2);
     const r2 = await captureOutput(() => runAudit(parseArgs(["audit", "--repo", FIXTURE, "--out", tmpRun(), "--powered"])));
     expect(r2.result).toBe(2);
-    expect(r2.stderr).toMatch(/--powered <cli>/);
+    expect(r2.stderr).toMatch(/--powered "<cli> … \{prompt\}"/);
     const r3 = await captureOutput(() => runAudit(parseArgs(["audit", "--repo", FIXTURE, "--out", tmpRun(), "--powered", "mycli"])));
     expect(r3.result).toBe(2);
     expect(r3.stderr).toMatch(/\{prompt\}/);
