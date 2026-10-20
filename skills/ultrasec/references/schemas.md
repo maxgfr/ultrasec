@@ -592,7 +592,7 @@ repository. Validated fail-closed: an unknown key, an unknown placeholder or a b
       "quotaPatterns": ["daily allowance used"],
       "creditPatterns": ["wallet empty"] },
     "my-gateway": {
-      "extends": "opencode",
+      "extends": "kilo",
       "modelPrefix": "gateway/" } },
   "placeholderPatterns": ["@@[A-Z0-9]{6,}@@"] }
 ```

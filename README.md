@@ -28,7 +28,7 @@ the report is written, and `--strict` exits 1 on a DRAFT.
 ## Invocation
 
 **On request by default.** `ultrasec` runs when you ask for it: `$ultrasec` in Codex,
-`/ultrasec` in Claude Code or OpenCode, or simply asking the agent for a security audit. Its
+`/ultrasec` in Claude Code, or simply asking the agent for a security audit. Its
 description restricts it to explicit requests, so the agent calls it when you
 ask, not on its own, and CLI commands are unchanged. One setting per host makes
 it explicit-only — see [On request or explicit-only](#on-request-or-explicit-only).
@@ -142,8 +142,8 @@ CLI to fill the worklists), use `run`:
 
 ```bash
 node scripts/ultrasec.mjs run --repo . --out .ultrasec    # emits every worklist + a TODO; ZERO external calls
-node scripts/ultrasec.mjs run --repo . --powered --agent claude --cross-check codex   # autonomous (keys live in the CLI)
-node scripts/ultrasec.mjs audit --repo . --powered <cli>   # the same, end to end, down to one REPORT.md
+node scripts/ultrasec.mjs run --repo . --powered --agent "<cli> … {prompt}"   # autonomous (keys live in the CLI)
+node scripts/ultrasec.mjs audit --repo . --powered "<cli> … {prompt}"   # the same, end to end, down to one REPORT.md
 node scripts/ultrasec.mjs council --run .ultrasec     # second opinion from other model families: plan only, ZERO calls
 node scripts/ultrasec.mjs council --run .ultrasec --models "<reviewer>:<provider>/<model>,…"   # blind reviewers on a HEAD snapshot
 ```
@@ -638,8 +638,8 @@ See [shared engine maintenance](ENGINE-MAINTENANCE.md) for pins, source adoption
 way. Its description restricts it to explicit requests:
 "Use only when the user explicitly asks for ultrasec or a security audit."
 The agent calls it when you ask, not on its own. Use `$ultrasec` in Codex,
-`/ultrasec` in Claude Code or OpenCode, prefixing the plugin namespace when it is
-installed as a Claude plugin, or ask the agent for a security audit in plain words.
+`/ultrasec` in Claude Code, prefixing the plugin namespace when it is installed
+as a Claude plugin, or ask the agent for a security audit in plain words.
 
 Making it explicit-only, so that only the command starts it, is one setting per
 host, applied to the **installed** copy of the skill:
@@ -648,28 +648,9 @@ host, applied to the **installed** copy of the skill:
 | --- | --- | --- |
 | Claude Code | no `disable-model-invocation` in `SKILL.md` | add `disable-model-invocation: true` |
 | Codex | `allow_implicit_invocation: true` under `policy:` in `agents/openai.yaml` | set it to `false` |
-| OpenCode | `metadata.opencode/autoinvoke: 'true'` in `SKILL.md` | set it to `'false'` |
 
 Claude Code can do it without touching the file:
 `"skillOverrides": { "ultrasec": "user-invocable-only" }` in `settings.json`
 leaves `/ultrasec` working while hiding the skill from the model. Plugin installs
 ignore `skillOverrides`, so edit the frontmatter there. Updating or reinstalling
 the skill restores the shipped default, so reapply the change afterwards.
-
-OpenCode V1 reads no `autoinvoke` metadata; `permission.skill` in
-`~/.config/opencode/opencode.json` or the project configuration is how you force
-explicit-only there. Retain unrelated permissions:
-
-```json
-{
-  "permission": {
-    "skill": {
-      "ultrasec": "deny"
-    }
-  }
-}
-```
-
-On OpenCode 1.18.30 that rule hides the skill from the agent and rejects
-skill-tool loading, while the explicit `/ultrasec` command still works.
-Installation with `skills add` does not write this OpenCode V1 configuration.

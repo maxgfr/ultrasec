@@ -11,11 +11,9 @@ const FIXTURE = join(import.meta.dirname, "fixtures", "vuln-express");
 const tmpRun = () => mkdtempSync(join(tmpdir(), "ultrasec-powered-"));
 
 describe("agent argv hardening", () => {
-  it("built-in claude/codex pass the instruction as a SINGLE argv element (no shell)", () => {
+  it("passes the instruction as a SINGLE argv element (no shell)", () => {
     const instr = "audit; rm -rf / `whoami` $(touch x) && echo pwned";
-    const claude = buildAgentArgv("claude", instr, "/run");
-    expect(claude).toEqual(["claude", "-p", instr]); // metacharacters inert — one element
-    expect(buildAgentArgv("codex", instr, "/run")).toEqual(["codex", "exec", instr]);
+    expect(buildAgentArgv("mytool -p {prompt}", instr, "/run")).toEqual(["mytool", "-p", instr]); // metacharacters inert — one element
   });
 
   it("a generic template substitutes {prompt}/{run} per token", () => {
@@ -24,6 +22,10 @@ describe("agent argv hardening", () => {
 
   it("rejects an empty template", () => {
     expect(() => resolveTemplate("   ")).toThrow();
+  });
+
+  it("rejects a template that does not pass the instruction", () => {
+    expect(() => resolveTemplate("mytool")).toThrow(/\{prompt\}/);
   });
 });
 
@@ -38,21 +40,21 @@ describe("CliAgentRunner — drives an argv-only CLI, verifies output", () => {
       writeFileSync(out, "[]"); // the "agent" produced output
       return { status: 0, stderr: "" };
     };
-    const r = new CliAgentRunner("claude", spawn).fill(task(out));
+    const r = new CliAgentRunner("mytool -p {prompt}", spawn).fill(task(out));
     expect(r.ok).toBe(true);
-    expect(seen).toEqual({ cmd: "claude", args: ["-p", "fill it"] }); // argv-only
+    expect(seen).toEqual({ cmd: "mytool", args: ["-p", "fill it"] }); // argv-only
   });
 
   it("fails when the CLI exits non-zero", () => {
     const out = join(tmpRun(), "verdicts.json");
     const spawn: SpawnFn = () => ({ status: 1, stderr: "boom" });
-    expect(new CliAgentRunner("claude", spawn).fill(task(out)).ok).toBe(false);
+    expect(new CliAgentRunner("mytool -p {prompt}", spawn).fill(task(out)).ok).toBe(false);
   });
 
   it("fails when the CLI exits 0 but writes nothing (no hallucinated success)", () => {
     const out = join(tmpRun(), "missing.json");
     const spawn: SpawnFn = () => ({ status: 0, stderr: "" });
-    expect(new CliAgentRunner("claude", spawn).fill(task(out)).ok).toBe(false);
+    expect(new CliAgentRunner("mytool -p {prompt}", spawn).fill(task(out)).ok).toBe(false);
   });
 });
 

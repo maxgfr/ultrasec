@@ -235,7 +235,7 @@ COMMANDS
              stage names above — 'check'/'render' are unconditional post-steps
              and are NOT valid --stages tokens. Worklists are JSON only (--md
              adds the human .md twins). Flags: --repo · --out · --powered ·
-             --agent <name|tpl> · --cross-check <name|tpl> · --stages · --no-scan ·
+             --agent <tpl> · --cross-check <tpl> · --stages · --no-scan ·
              --scope/--include/--exclude/--max-files/--gitignore · --json.
   council    A second opinion from OTHER model families, through their own
              agent CLIs. Reviewers are data: built-in presets for common agent

@@ -110,7 +110,7 @@ describe("references/schemas.md examples round-trip through the real --apply par
     );
     expect(Object.keys(cfg.reviewers).sort()).toEqual(["my-agent", "my-gateway"]);
     // `extends` keeps the preset's argv and adds only what it overrides.
-    expect(cfg.reviewers["my-gateway"]!.args).toEqual(PRESETS.opencode!.args);
+    expect(cfg.reviewers["my-gateway"]!.args).toEqual(PRESETS.kilo!.args);
     expect(cfg.placeholderPatterns).toHaveLength(1);
   });
 

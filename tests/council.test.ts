@@ -12,7 +12,7 @@ import { classifyFailure, detectorFor, digest, isContractShaped } from "../src/c
 import { loadLedger } from "../src/council/ledger.js";
 import { placeholderArtefacts, redactJsonLine, redactReviewerText } from "../src/council/redact.js";
 import type { CouncilSpawner } from "../src/council/runner.js";
-import { buildArgs, parseCouncilConfig, parseModelList, presetRegistry, PRESETS, reviewersFrom } from "../src/council/reviewers.js";
+import { buildArgs, parseCouncilConfig, parseModelList, parseReviewerEntry, presetRegistry, PRESETS, reviewersFrom } from "../src/council/reviewers.js";
 import { councilEnv, createSnapshot, snapshotFiles } from "../src/council/snapshot.js";
 import { countBySeverity, loadDossier, writeDossier } from "../src/store.js";
 import type { Finding } from "../src/types.js";
@@ -274,7 +274,7 @@ else {
 function deps(script: string, spawnCount?: { n: number }, configHome?: string): CouncilDeps {
   const prefix = [process.execPath, script];
   return {
-    commands: { opencode: prefix, kilo: prefix, vibe: prefix, claude: prefix, codex: prefix, mycli: prefix, "oc-strict": prefix },
+    commands: { kilo: prefix, vibe: prefix, mycli: prefix, "kilo-strict": prefix },
     // Hermetic: the default config location is a temp dir, never the developer's own.
     baseEnv: { ...process.env, XDG_CONFIG_HOME: configHome ?? tmp("xdg") },
     ...(spawnCount
@@ -338,7 +338,7 @@ describe("council --models (blind)", () => {
     process.env.COUNCIL_PARENT_TOKEN = "parent-shell-token-must-not-leak";
     let out: Awaited<ReturnType<typeof council>>;
     try {
-      out = await council(["--run", run, "--repo", repo, "--models", "opencode:prov/a,kilo:prov/b"], deps(fake.script));
+      out = await council(["--run", run, "--repo", repo, "--models", "kilo:prov/b,kilo:prov/a"], deps(fake.script));
     } finally {
       delete process.env.COUNCIL_PARENT_TOKEN;
     }
@@ -356,35 +356,35 @@ describe("council --models (blind)", () => {
       expect(c.cwd).toBe(join(realpathSync(run), "council", "snapshot"));
       const msg = c.args.at(-1)!;
       expect(msg.length).toBeLessThan(300);
-      expect(msg).toMatch(/_COUNCIL_BRIEF\.blind\.(opencode|kilo)\.md/);
+      expect(msg).toMatch(/_COUNCIL_BRIEF\.blind\.kilo(-2)?\.md/);
     }
-    // The read-only agent, with user plugins off.
-    const oc = calls.find((c) => c.args.includes("prov/a"))!;
-    expect(oc.args).toEqual(expect.arrayContaining(["--agent", "plan", "--pure", "--format", "json", "--dir", snapshot]));
+    // The read-only agent, with user plugins off; the same entry twice is two reviewers.
+    const ka = calls.find((c) => c.args.includes("kilo/prov/a"))!;
+    expect(ka.args).toEqual(expect.arrayContaining(["--agent", "plan", "--pure", "--auto", "--format", "json", "--dir", snapshot]));
     const kc = calls.find((c) => c.args.includes("kilo/prov/b"))!;
     expect(kc.args).toEqual(expect.arrayContaining(["--auto", "--agent", "plan"]));
     // The brief was a file inside the snapshot when the reviewer ran, carrying the
     // output contract; a copy stays beside the logs.
-    expect(oc.brief).toMatch(/### <ID> — <title>/);
-    expect(oc.brief).toMatch(/no git history/);
-    expect(readFileSync(join(run, "council", "blind", "opencode", "brief.md"), "utf8")).toBe(oc.brief);
+    expect(ka.brief).toMatch(/### <ID> — <title>/);
+    expect(ka.brief).toMatch(/no git history/);
+    expect(readFileSync(join(run, "council", "blind", "kilo-2", "brief.md"), "utf8")).toBe(ka.brief);
     // The source copy does not outlive the command (a later scan would index it).
     expect(existsSync(snapshot)).toBe(false);
 
     // Usage aggregated from step_finish events, recorded in the ledger.
     const ledger = loadLedger(run)!;
-    const a = ledger.reviewers.find((r) => r.name === "opencode")!;
+    const a = ledger.reviewers.find((r) => r.name === "kilo-2")!;
     expect(a.status).toBe("ok");
     expect(a.session).toBe("ses_a");
     expect(a.usage).toMatchObject({ exposed: true, input: 2000, output: 400, reasoning: 100, cacheRead: 600, steps: 2, cost: 0.03 });
     expect(ledger.totals.cost).toBeCloseTo(0.06);
 
     // Logs, redacted: out.md is the LAST message's text (the report), events stay valid JSONL.
-    const outMd = readFileSync(join(run, "council", "blind", "opencode", "out.md"), "utf8");
+    const outMd = readFileSync(join(run, "council", "blind", "kilo-2", "out.md"), "utf8");
     expect(outMd).toMatch(/^## Findings/);
     expect(outMd).not.toContain("hunter2hunter2xyz");
     expect(outMd).not.toContain("c2FsdHNhbHRzYWx0");
-    const events = readFileSync(join(run, "council", "blind", "opencode", "events.jsonl"), "utf8")
+    const events = readFileSync(join(run, "council", "blind", "kilo-2", "events.jsonl"), "utf8")
       .trim()
       .split("\n");
     for (const l of events) expect(() => JSON.parse(l)).not.toThrow();
@@ -395,7 +395,7 @@ describe("council --models (blind)", () => {
     // Titled after the first reviewer in name order; both claims are listed.
     const idor = todo.candidates.find((c: { title: string }) => /ownership check/.test(c.title));
     expect(idor.claims.map((c: { ref: string }) => c.ref)).toEqual(["K1", "R1"]);
-    expect(idor.sources).toEqual(["kilo", "opencode"]);
+    expect(idor.sources).toEqual(["kilo", "kilo-2"]);
     expect(idor.corroboration).toBe(2);
     // The SQLi lands on the finding the run already holds: reported by id, not as a candidate.
     expect(todo.corroborations.map((c: { findingId: string }) => c.findingId)).toEqual(["aaaaaaaaaaa1"]);
@@ -451,22 +451,22 @@ describe("council interruption handling", () => {
     const repo = fixtureRepo();
     const run = fixtureRun(repo);
     const fake = fakeCli();
-    const first = await council(["--run", run, "--repo", repo, "--models", "opencode:prov/quota"], deps(fake.script));
+    const first = await council(["--run", run, "--repo", repo, "--models", "kilo:prov/quota"], deps(fake.script));
     expect(first.result).toBe(1);
     let rec = loadLedger(run)!.reviewers[0]!;
     expect(rec.status).toBe("quota");
     expect(rec.resetAt).toBe("2026-10-09 01:52:02");
     expect(first.stdout).toMatch(/quota resets at 2026-10-09 01:52:02/);
 
-    const again = await council(["--run", run, "--resume", "opencode"], deps(fake.script));
+    const again = await council(["--run", run, "--resume", "kilo"], deps(fake.script));
     expect(again.result).toBe(0);
     expect(again.stdout).toMatch(/resets at 2026-10-09 01:52:02/);
     const last = fake.calls().at(-1)!;
-    expect(last.args).toEqual(expect.arrayContaining(["-s", "ses_quota", "-m", "prov/quota"]));
+    expect(last.args).toEqual(expect.arrayContaining(["-s", "ses_quota", "-m", "kilo/prov/quota"]));
     rec = loadLedger(run)!.reviewers[0]!;
     expect(rec.status).toBe("ok");
     expect(rec.attempts.map((a) => a.status)).toEqual(["quota", "ok"]);
-    expect(existsSync(join(run, "council", "blind", "opencode", "out.md"))).toBe(true);
+    expect(existsSync(join(run, "council", "blind", "kilo", "out.md"))).toBe(true);
   });
 
   it("credit exhaustion is told apart from a quota", async () => {
@@ -481,7 +481,7 @@ describe("council interruption handling", () => {
     const repo = fixtureRepo();
     const run = fixtureRun(repo);
     const fake = fakeCli();
-    const out = await council(["--run", run, "--repo", repo, "--models", "opencode:prov/notes"], deps(fake.script));
+    const out = await council(["--run", run, "--repo", repo, "--models", "kilo:prov/notes"], deps(fake.script));
     expect(out.result).toBe(0);
     const rec = loadLedger(run)!.reviewers[0]!;
     expect(rec.attempts.map((a) => [a.status, a.resume, a.model])).toEqual([
@@ -495,7 +495,7 @@ describe("council interruption handling", () => {
     const run = fixtureRun(repo);
     const fake = fakeCli();
     const t0 = Date.now();
-    const out = await council(["--run", run, "--repo", repo, "--models", "opencode:prov/pricey", "--max-cost", "2"], deps(fake.script));
+    const out = await council(["--run", run, "--repo", repo, "--models", "kilo:prov/pricey", "--max-cost", "2"], deps(fake.script));
     expect(Date.now() - t0).toBeLessThan(15000); // killed, not waited out
     expect(out.result).toBe(0);
     expect(loadLedger(run)!.reviewers[0]!.attempts.map((a) => a.status)).toEqual(["budget", "ok"]);
@@ -509,7 +509,7 @@ describe("council interruption handling", () => {
     expect(out.result).toBe(2);
     expect(count.n).toBe(0);
     expect(out.stderr).toMatch(/unknown reviewer "nosuch"/);
-    expect(out.stderr).toMatch(/known: opencode, kilo, vibe, claude, codex/);
+    expect(out.stderr).toMatch(/known: kilo, vibe;/);
     expect(out.stderr).toMatch(/--reviewer-config/);
   });
 });
@@ -525,7 +525,7 @@ describe("reviewer event parsing", () => {
       { type: "text", sessionID: "ses_1", part: { messageID: "m2", text: "### R1 — x" } },
       { type: "step_finish", sessionID: "ses_1", part: { tokens: { input: 10, output: 5, reasoning: 1, cache: { read: 2, write: 3 } }, cost: 0.2 } },
     ];
-    const d = digest(PRESETS.opencode!, lines.map((l) => JSON.stringify(l)).join("\n"), "", 0);
+    const d = digest(PRESETS.kilo!, lines.map((l) => JSON.stringify(l)).join("\n"), "", 0);
     expect(d.session).toBe("ses_1");
     expect(d.text).toBe("### R1 — x");
     expect(d.usage).toMatchObject({ input: 20, output: 10, reasoning: 2, cacheRead: 4, cacheWrite: 6, steps: 2 });
@@ -571,7 +571,7 @@ describe("reviewer event parsing", () => {
     expect(classifyFailure('{"statusCode":429}').kind).toBe("quota");
     expect(classifyFailure('{"statusCode":429}', detectorFor(undefined), false).kind).toBe("error");
     // A text CLI's stderr echoing a report line is not a stop.
-    const text = PRESETS.codex!;
+    const text = PRESETS.vibe!;
     expect(digest(text, "", "see src/app.ts:429 for the rate limiting logic", 0).failure).toBeUndefined();
     expect(digest(text, "", "ERROR: quota exceeded for this account", 0).failure?.kind).toBe("quota");
   });
@@ -603,7 +603,7 @@ function snapIndex() {
 describe("claim parsing", () => {
   it("extracts title/severity/CWE and resolves every citation against the snapshot", () => {
     const idx = snapIndex();
-    const claims = parseReport(REPORT_A, { reviewer: "opencode", phase: "blind" }, idx);
+    const claims = parseReport(REPORT_A, { reviewer: "kilo", phase: "blind" }, idx);
     expect(claims.map((c) => c.ref)).toEqual(["R1", "R2", "R3", "R4", "R5"]); // To verify / Coverage carry no claims
     const [r1, r2, r3, r4] = claims as [Claim, Claim, Claim, Claim];
     expect(r1).toMatchObject({ title: "IDOR: any user reads any invoice", severity: "high", cwe: "CWE-639" });
@@ -759,7 +759,7 @@ describe("council --apply", () => {
     const repo = fixtureRepo();
     const run = fixtureRun(repo);
     const fake = fakeCli();
-    await council(["--run", run, "--repo", repo, "--models", "opencode:prov/a,kilo:prov/b"], deps(fake.script));
+    await council(["--run", run, "--repo", repo, "--models", "kilo:prov/b,kilo:prov/a"], deps(fake.script));
     await council(["--run", run, "--repo", repo, "--phase", "devil", "--lang", "fr", "--models", "vibe:devil"], deps(fake.script));
     const todo = JSON.parse(readFileSync(join(run, "council", "COUNCIL.todo.json"), "utf8"));
     const find = (re: RegExp) => todo.candidates.find((c: { title: string }) => re.test(c.title)).id as string;
@@ -785,7 +785,7 @@ describe("council --apply", () => {
     const added = findings.filter((f) => f.tool === "ultrasec-ai");
     expect(added).toHaveLength(1);
     expect(added[0]).toMatchObject({ title: "Missing ownership check on invoice read", status: "open", category: "authz", severity: "high", cwe: "CWE-862" });
-    expect(added[0]!.message).toMatch(/raised by kilo, opencode/);
+    expect(added[0]!.message).toMatch(/raised by kilo, kilo-2/);
     // The contested finding is untouched.
     expect(findings.find((f) => f.id === "aaaaaaaaaaa1")!.status).toBe("confirmed");
 
@@ -830,21 +830,22 @@ describe("reviewer presets", () => {
   const values = { model: "m", dir: "/s", message: "x", title: "t", maxTurns: "5", brief: "b.md", briefPath: "/s/b.md", outFile: "/o" };
 
   it("splits reviewer:model on the first colon only (a model id may carry one)", () => {
-    expect(parseModelList("kilo:prov/x:variant,opencode:a/b", "--models", reg)).toEqual([
+    expect(parseModelList("kilo:prov/x:variant,vibe:a/b", "--models", reg)).toEqual([
       { cli: "kilo", model: "prov/x:variant" },
-      { cli: "opencode", model: "a/b" },
+      { cli: "vibe", model: "a/b" },
     ]);
     expect(reviewersFrom(parseModelList("kilo:a,kilo:b", "--models", reg)).map((r) => r.name)).toEqual(["kilo", "kilo-2"]);
   });
 
   it("keeps each preset's validated argv", () => {
-    expect(buildArgs(PRESETS.opencode!, values, false)).toEqual([
+    expect(buildArgs(PRESETS.kilo!, values, false)).toEqual([
       "run",
       "-m",
-      "m",
+      "kilo/m",
       "--agent",
       "plan",
       "--pure",
+      "--auto",
       "--dir",
       "/s",
       "--format",
@@ -887,14 +888,19 @@ describe("reviewer presets", () => {
   });
 
   it("drops an argument group whose placeholder has no value", () => {
-    expect(buildArgs(PRESETS.claude!, { ...values, model: "" }, false)).not.toContain("--model");
-    expect(buildArgs(PRESETS.codex!, { ...values, model: "" }, false)).toEqual(["exec", "--sandbox", "read-only", "--skip-git-repo-check", "-C", "/s", "x"]);
+    const grouped = parseReviewerEntry(
+      "grouped",
+      { bin: "g", args: ["exec", "-C", "{dir}", ["-m", "{model}"], "{message}"], events: "text", readOnly: "test" },
+      undefined,
+      "t",
+    );
+    expect(buildArgs(grouped, values, false)).toEqual(["exec", "-C", "/s", "-m", "m", "x"]);
+    expect(buildArgs(grouped, { ...values, model: "" }, false)).toEqual(["exec", "-C", "/s", "x"]);
   });
 
   it("a reviewer with no resumeArgs, or no session, cannot resume", () => {
-    expect(buildArgs(PRESETS.codex!, { ...values, session: "s" }, true)).toBeNull();
     expect(buildArgs(PRESETS.vibe!, { ...values, session: "s" }, true)).toBeNull();
-    expect(buildArgs(PRESETS.opencode!, values, true)).toBeNull();
+    expect(buildArgs(PRESETS.kilo!, values, true)).toBeNull();
   });
 
   it("presets name no model", () => {
@@ -969,31 +975,31 @@ describe("council reviewer config", () => {
     const fake = fakeCli();
     const cfg = writeConfig({
       reviewers: {
-        opencode: { modelPrefix: "gw/" },
-        "oc-strict": { extends: "opencode", envPassthrough: ["COUNCIL_TEST_ALLOWED"] },
+        kilo: { modelPrefix: "gw/" },
+        "kilo-strict": { extends: "kilo", envPassthrough: ["COUNCIL_TEST_ALLOWED"] },
       },
     });
     process.env.COUNCIL_TEST_ALLOWED = "yes";
     process.env.COUNCIL_TEST_OTHER = "no";
     try {
-      const out = await council(["--run", run, "--repo", repo, "--reviewer-config", cfg, "--models", "opencode:prov/a,oc-strict:prov/b"], deps(fake.script));
+      const out = await council(["--run", run, "--repo", repo, "--reviewer-config", cfg, "--models", "kilo:prov/a,kilo-strict:prov/b"], deps(fake.script));
       expect(out.result).toBe(0);
     } finally {
       delete process.env.COUNCIL_TEST_ALLOWED;
       delete process.env.COUNCIL_TEST_OTHER;
     }
     const calls = fake.calls();
-    const oc = calls.find((c) => c.args.includes("gw/prov/a"))!;
-    expect(oc.args).toEqual(expect.arrayContaining(["--agent", "plan", "--pure"])); // the rest of the preset stays
-    expect(oc.env.COUNCIL_TEST_ALLOWED).toBeUndefined();
-    const strict = calls.find((c) => c.args.includes("prov/b"))!;
+    const ka = calls.find((c) => c.args.includes("gw/prov/a"))!;
+    expect(ka.args).toEqual(expect.arrayContaining(["--agent", "plan", "--pure"])); // the rest of the preset stays
+    expect(ka.env.COUNCIL_TEST_ALLOWED).toBeUndefined();
+    const strict = calls.find((c) => c.args.includes("kilo/prov/b"))!;
     expect(strict.env.COUNCIL_TEST_ALLOWED).toBe("yes");
     expect(strict.env.COUNCIL_TEST_OTHER).toBeUndefined();
     expect(
       loadLedger(run)!
         .reviewers.map((r) => r.name)
         .sort(),
-    ).toEqual(["oc-strict", "opencode"]);
+    ).toEqual(["kilo", "kilo-strict"]);
   });
 
   it("validates a config fail-closed", () => {
@@ -1044,7 +1050,7 @@ describe("masking placeholders", () => {
     const repo = fixtureRepo();
     const run = fixtureRun(repo);
     const fake = fakeCli();
-    await council(["--run", run, "--repo", repo, "--models", "opencode:prov/a"], deps(fake.script));
+    await council(["--run", run, "--repo", repo, "--models", "kilo:prov/a"], deps(fake.script));
     const before = JSON.parse(readFileSync(join(run, "council", "COUNCIL.todo.json"), "utf8"));
     const idor = (t: { candidates: { title: string; flags: string[] }[] }) => t.candidates.find((c) => /IDOR/.test(c.title))!;
     expect(idor(before).flags.join(" ")).not.toMatch(/placeholder/);

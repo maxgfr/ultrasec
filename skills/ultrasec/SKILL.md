@@ -4,7 +4,6 @@ description: Audit a codebase for exploitable security issues with cross-file tr
 license: MIT
 metadata:
   version: 1.75.1
-  opencode/autoinvoke: 'true'
 ---
 
 # ultrasec — cross-file security audit, grounded not guessed

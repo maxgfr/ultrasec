@@ -47432,15 +47432,6 @@ var stepRun = (extra) => [
 ];
 var stepResume = (extra) => ["run", "-s", "{session}", ...stepRun(extra).slice(1)];
 var PRESETS = {
-  opencode: {
-    name: "opencode",
-    bin: "opencode",
-    args: stepRun([]),
-    resumeArgs: stepResume([]),
-    events: "jsonl-steps",
-    ...STEP_EVENTS,
-    readOnly: "`--agent plan` (read-only primary agent), `--pure` (user plugins off)"
-  },
   kilo: {
     name: "kilo",
     bin: "kilo",
@@ -47461,44 +47452,6 @@ var PRESETS = {
     events: "text",
     env: { VIBE_ACTIVE_MODEL: "{model}" },
     readOnly: "`--agent plan`"
-  },
-  claude: {
-    name: "claude",
-    bin: "claude",
-    args: ["-p", "{message}", "--output-format", "json", "--allowedTools", "Read,Grep,Glob", "--max-turns", "{maxTurns}", ["--model", "{model}"]],
-    resumeArgs: [
-      "-p",
-      "{message}",
-      "--resume",
-      "{session}",
-      "--output-format",
-      "json",
-      "--allowedTools",
-      "Read,Grep,Glob",
-      "--max-turns",
-      "1",
-      ["--model", "{model}"]
-    ],
-    events: "jsonl",
-    sessionIdPath: ["session_id"],
-    usagePaths: {
-      input: "usage.input_tokens",
-      output: "usage.output_tokens",
-      cacheRead: "usage.cache_read_input_tokens",
-      cacheWrite: "usage.cache_creation_input_tokens",
-      cost: "total_cost_usd",
-      steps: "num_turns"
-    },
-    eventPaths: { text: "result", errorFlag: "is_error" },
-    readOnly: "`--allowedTools Read,Grep,Glob`"
-  },
-  codex: {
-    name: "codex",
-    bin: "codex",
-    // The snapshot is not a git checkout, which this CLI refuses without the flag.
-    args: ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "-C", "{dir}", ["-m", "{model}"], "{message}"],
-    events: "text",
-    readOnly: "`--sandbox read-only`"
   }
 };
 function defaultConfigPath(env = process.env) {
@@ -50236,14 +50189,10 @@ import { join as join82, resolve as resolve40 } from "path";
 // src/powered/agent.ts
 import { spawnSync as spawnSync3 } from "child_process";
 import { existsSync as existsSync44, statSync as statSync20 } from "fs";
-var BUILTINS2 = {
-  claude: { name: "claude", argv: (p) => ["claude", "-p", p] },
-  codex: { name: "codex", argv: (p) => ["codex", "exec", p] }
-};
 function resolveTemplate(tpl) {
-  if (Object.hasOwn(BUILTINS2, tpl)) return BUILTINS2[tpl];
   const parts2 = tpl.trim().split(/\s+/).filter(Boolean);
   if (!parts2.length) throw new Error("empty agent template");
+  if (!parts2.some((t) => t.includes("{prompt}"))) throw new Error(`agent template "${tpl}" must pass the instruction as {prompt}, e.g. "mytool exec {prompt}"`);
   return {
     name: parts2[0],
     argv: (instruction, run2) => parts2.map((t) => t.replace(/\{prompt\}/g, instruction).replace(/\{run\}/g, run2))
@@ -50625,8 +50574,20 @@ function runRun(args2) {
     eprintln(`ultrasec run: --no-scan but no dossier at ${run2} \u2014 run \`scan\` first or drop --no-scan.`);
     return 2;
   }
-  const agent = flagStr(args2, "agent") ?? "claude";
+  const agent = flagStr(args2, "agent");
   const crossCheck = flagStr(args2, "cross-check");
+  if (powered) {
+    if (!agent) {
+      eprintln(`ultrasec run: --powered needs the agent CLI to drive: \`--agent "<cli> \u2026 {prompt}"\` (its keys live in that CLI, never in ultrasec).`);
+      return 2;
+    }
+    try {
+      for (const tpl of [agent, crossCheck]) if (tpl) resolveTemplate(tpl);
+    } catch (e) {
+      eprintln(`ultrasec run: ${e.message}`);
+      return 2;
+    }
+  }
   const opts = {
     repo,
     run: run2,
@@ -50643,7 +50604,7 @@ function runRun(args2) {
     md: wantsMdTwin(args2),
     report: { html: flagBool(args2, "html"), md: flagBool(args2, "md"), full: flagBool(args2, "full") }
   };
-  if (powered) {
+  if (powered && agent) {
     opts.runner = new CliAgentRunner(agent);
     if (crossCheck) opts.crossRunner = new CliAgentRunner(crossCheck);
   }
@@ -52671,6 +52632,11 @@ async function runAudit(args2) {
   if (!isScannableDir(repo)) return fail2(`--repo '${repo}' is not a directory. Aborting \u2014 an unscannable path must not report a clean audit.`);
   const { powered, agent } = poweredAgent(args2);
   if (powered && !agent) return fail2(`--powered needs the agent CLI to drive: \`--powered <cli>\` (its keys live in that CLI, never in ultrasec).`);
+  try {
+    for (const tpl of [agent, flagStr(args2, "cross-check")]) if (powered && tpl) resolveTemplate(tpl);
+  } catch (e) {
+    return fail2(e.message);
+  }
   const requested = listFlag(args2, "stages");
   const unknown = (requested ?? []).filter((s) => !ALL_STAGES.includes(s));
   if (unknown.length) return fail2(`unknown stage(s): ${unknown.join(", ")} (known: ${ALL_STAGES.join(", ")}).`);
@@ -54232,7 +54198,7 @@ COMMANDS
              stage names above \u2014 'check'/'render' are unconditional post-steps
              and are NOT valid --stages tokens. Worklists are JSON only (--md
              adds the human .md twins). Flags: --repo \xB7 --out \xB7 --powered \xB7
-             --agent <name|tpl> \xB7 --cross-check <name|tpl> \xB7 --stages \xB7 --no-scan \xB7
+             --agent <tpl> \xB7 --cross-check <tpl> \xB7 --stages \xB7 --no-scan \xB7
              --scope/--include/--exclude/--max-files/--gitignore \xB7 --json.
   council    A second opinion from OTHER model families, through their own
              agent CLIs. Reviewers are data: built-in presets for common agent

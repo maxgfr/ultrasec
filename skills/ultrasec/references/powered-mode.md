@@ -12,8 +12,8 @@ driven through that CLI, `check`, `REPORT.md`, then the intermediates removed (`
 them). `audit` without `--powered` (or `--council`) calls nothing and emits no worklists.
 
 ```
-ultrasec audit --repo . --out .ultrasec --powered mycli
-ultrasec audit --repo . --out .ultrasec --powered mycli --cross-check othercli --keep-work
+ultrasec audit --repo . --out .ultrasec --powered "mycli exec {prompt}"
+ultrasec audit --repo . --out .ultrasec --powered "mycli exec {prompt}" --cross-check "othercli run {prompt}" --keep-work
 ```
 
 `--powered` must name the CLI (`--powered <cli>`, `--powered=<cli>` or `--powered --agent <cli>`);
@@ -34,13 +34,13 @@ them to any agent) and `--apply`, exactly as in the manual workflow.
 ## Powered (drive an external agent CLI)
 
 ```
-ultrasec run --repo . --powered --agent claude
-ultrasec run --repo . --powered --agent codex --cross-check claude
 ultrasec run --repo . --powered --agent "mytool exec {prompt} --cwd {run}"
+ultrasec run --repo . --powered --agent "mytool exec {prompt}" --cross-check "othertool run {prompt}"
 ```
 
-- `--agent` is a built-in name (`claude`, `codex`) or a generic argv template where
-  `{prompt}` / `{run}` are substituted **per token** (each becomes one argv element).
+- `--agent` (required with `--powered`) is an argv template where `{prompt}` / `{run}` are
+  substituted **per token** (each becomes one argv element). A template without `{prompt}`
+  exits 2: the CLI would start without its instruction.
 - For each stage, ultrasec invokes the CLI with an instruction to read the JSON worklist
   (`*.todo.json`) and write the stage's output file, then applies the result through the normal
   conservative apply.
@@ -81,7 +81,7 @@ stay in the default keyless mode and adjudicate yourself.
 
 ## Security model
 
-- **ultrasec holds no keys.** API keys live in your agent CLI (`claude`/`codex`/…),
+- **ultrasec holds no keys.** API keys live in your agent CLI,
   never in ultrasec. The deterministic core stays network-free.
 - **Argv-only invocation.** The CLI is spawned with an **argv array, never a shell
   string** — a branch/file name can't inject a command (cf. the 2026 Codex

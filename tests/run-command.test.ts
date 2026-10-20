@@ -28,6 +28,12 @@ describe("run command — stage selection & order", () => {
     errSpy.mockRestore();
   });
 
+  it("--powered needs an agent template that passes {prompt}", () => {
+    const run = mkdtempSync(join(tmpdir(), "ultrasec-runcmd-"));
+    expect(runRun(parseArgs(["run", "--repo", FIXTURE, "--out", run, "--powered"]))).toBe(2);
+    expect(runRun(parseArgs(["run", "--repo", FIXTURE, "--out", run, "--powered", "--agent", "mycli"]))).toBe(2);
+  });
+
   it("non-powered: emits all stages in canonical order, zero external calls", () => {
     const run = mkdtempSync(join(tmpdir(), "ultrasec-runcmd-"));
     const code = runRun(parseArgs(["run", "--repo", FIXTURE, "--out", run, "--json"]));

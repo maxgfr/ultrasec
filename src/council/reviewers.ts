@@ -108,7 +108,7 @@ export type TemplateValues = Partial<Record<Placeholder, string>>;
 // Common agent CLIs, as data. No model names: the model is always the user's
 // `--models "<reviewer>:<model>"`. Each preset uses its CLI's read-only mode.
 
-/** The `jsonl-steps` event layout these CLIs share. */
+/** The `jsonl-steps` event layout of `kilo run --format json`. */
 const STEP_EVENTS = {
   sessionIdPath: ["sessionID", "part.sessionID"],
   usagePaths: {
@@ -149,15 +149,6 @@ const stepRun = (extra: string[]): ArgTemplate[] => [
 const stepResume = (extra: string[]): ArgTemplate[] => ["run", "-s", "{session}", ...stepRun(extra).slice(1)];
 
 export const PRESETS: Readonly<Record<string, ReviewerSpec>> = {
-  opencode: {
-    name: "opencode",
-    bin: "opencode",
-    args: stepRun([]),
-    resumeArgs: stepResume([]),
-    events: "jsonl-steps",
-    ...STEP_EVENTS,
-    readOnly: "`--agent plan` (read-only primary agent), `--pure` (user plugins off)",
-  },
   kilo: {
     name: "kilo",
     bin: "kilo",
@@ -178,44 +169,6 @@ export const PRESETS: Readonly<Record<string, ReviewerSpec>> = {
     events: "text",
     env: { VIBE_ACTIVE_MODEL: "{model}" },
     readOnly: "`--agent plan`",
-  },
-  claude: {
-    name: "claude",
-    bin: "claude",
-    args: ["-p", "{message}", "--output-format", "json", "--allowedTools", "Read,Grep,Glob", "--max-turns", "{maxTurns}", ["--model", "{model}"]],
-    resumeArgs: [
-      "-p",
-      "{message}",
-      "--resume",
-      "{session}",
-      "--output-format",
-      "json",
-      "--allowedTools",
-      "Read,Grep,Glob",
-      "--max-turns",
-      "1",
-      ["--model", "{model}"],
-    ],
-    events: "jsonl",
-    sessionIdPath: ["session_id"],
-    usagePaths: {
-      input: "usage.input_tokens",
-      output: "usage.output_tokens",
-      cacheRead: "usage.cache_read_input_tokens",
-      cacheWrite: "usage.cache_creation_input_tokens",
-      cost: "total_cost_usd",
-      steps: "num_turns",
-    },
-    eventPaths: { text: "result", errorFlag: "is_error" },
-    readOnly: "`--allowedTools Read,Grep,Glob`",
-  },
-  codex: {
-    name: "codex",
-    bin: "codex",
-    // The snapshot is not a git checkout, which this CLI refuses without the flag.
-    args: ["exec", "--sandbox", "read-only", "--skip-git-repo-check", "-C", "{dir}", ["-m", "{model}"], "{message}"],
-    events: "text",
-    readOnly: "`--sandbox read-only`",
   },
 };
 
