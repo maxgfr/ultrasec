@@ -56,7 +56,11 @@ export function runOrchestrate(args: ParsedArgs): number {
   const workflows = res.written.filter((w) => w.endsWith(".workflow.mjs"));
   if (workflows.length) {
     println("");
-    for (const w of workflows) println(`Launch: Workflow({ scriptPath: ${JSON.stringify(w)} })`);
+    println(
+      `Dispatch: one subagent per batch, following ${workPath(runFlag, "orchestration", "agents")}/<role>.md (any host with native subagents; batches + prompts are in each workflow script).`,
+    );
+    println(`Single agent: \`orchestrate --eco\`, then follow ${workPath(runFlag, "orchestration", "RUNBOOK.md")} sequentially.`);
+    for (const w of workflows) println(`Optional — Claude Code: Workflow({ scriptPath: ${JSON.stringify(w)} }) for one-call parallel fan-out.`);
     println("Then merge the returned fragments into one apply file and run the `--apply` fold shown at the end of each workflow (you stay the sole writer).");
   } else {
     println(`Follow ${workPath(runFlag, "orchestration", "RUNBOOK.md")} sequentially (the eco path).`);

@@ -232,7 +232,10 @@ export function phaseWorkflowScript(ph: PhaseInfo, runAbs: string, engineAbs: st
   return [
     `export const meta = ${JSON.stringify(meta)}`,
     ``,
-    `// NOT a plain Node script: launch via the Workflow tool — Workflow({ scriptPath: ${JSON.stringify(scriptPath)} }).`,
+    `// Any host with subagents: dispatch the sibling agents/*.md contracts (one subagent per batch below);`,
+    `// a single agent: \`orchestrate --eco\` and follow RUNBOOK.md sequentially.`,
+    `// Optional — Claude Code: this file is NOT a plain Node script; launch it with the Workflow tool for`,
+    `// one-call parallel fan-out — Workflow({ scriptPath: ${JSON.stringify(scriptPath)} }).`,
     `// Emitted by \`ultrasec orchestrate\` from the CURRENT worklist. The worklist is the source`,
     `// of truth: if it changes, re-run \`orchestrate --phase ${ph.name}\` before launching.`,
     ``,
@@ -385,6 +388,6 @@ ${status}
 6. **Gate**: \`${engine} check --run ${runAbs} --semantic\` must exit 0 before presenting anything.
 7. **Render**: \`${engine} render --run ${runAbs}\` (optionally author the narrative first: \`${engine} narrative --run ${runAbs}\`). Loop from step 2 on a new sub-question until a round surfaces nothing new.
 
-With subagents available, prefer the emitted workflows instead: \`orchestrate --run ${runAbs} --phase <p>\` then \`Workflow({ scriptPath: "${workPath(runAbs, "orchestration", "<p>.workflow.mjs")}" })\` — you stay the sole writer either way.
+With subagents available, fan out instead: \`orchestrate --run ${runAbs} --phase <p>\`, then dispatch one subagent per batch following \`${workPath(runAbs, "orchestration", "agents")}/<role>.md\` (any host with native subagents). Optional — Claude Code: launch \`${workPath(runAbs, "orchestration", "<p>.workflow.mjs")}\` with the Workflow tool for one-call parallel fan-out. You stay the sole writer either way.
 `;
 }

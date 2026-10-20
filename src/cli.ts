@@ -408,7 +408,10 @@ async function runMcp(args: ParsedArgs): Promise<number> {
   // keeping the two transports identical here means no one has to remember
   // which is which.
   eprintln(`ultrasec: MCP server listening on ${running.url}`);
-  eprintln(`  client: claude mcp add --transport http ultrasec ${running.url}`);
+  eprintln(`  connect: ${running.url}`);
+  eprintln(`    Claude Code: claude mcp add --transport http ultrasec ${running.url}`);
+  eprintln(`    Codex:       codex mcp add ultrasec --url ${running.url}`);
+  eprintln(`    OpenCode:    opencode mcp add ultrasec --url ${running.url}`);
   for (const sig of ["SIGINT", "SIGTERM"] as const) {
     process.once(sig, () => {
       void running.close().then(() => process.exit(0));
