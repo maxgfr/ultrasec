@@ -128,6 +128,9 @@ describe("audit — one command, one report", () => {
     const r2 = await captureOutput(() => runAudit(parseArgs(["audit", "--repo", FIXTURE, "--out", tmpRun(), "--powered"])));
     expect(r2.result).toBe(2);
     expect(r2.stderr).toMatch(/--powered <cli>/);
+    const r3 = await captureOutput(() => runAudit(parseArgs(["audit", "--repo", FIXTURE, "--out", tmpRun(), "--powered", "mycli"])));
+    expect(r3.result).toBe(2);
+    expect(r3.stderr).toMatch(/\{prompt\}/);
   });
 
   it.runIf(existsSync(BUNDLE))("through the CLI, the journal does not recreate .work/ after the clean-up", () => {

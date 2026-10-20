@@ -4,7 +4,7 @@ import { enginePath, flagBool, flagStr, isScannableDir, listFlag, println, eprin
 import { runScan } from "./scan.js";
 import { runCouncil } from "./council.js";
 import { cleanRunDir } from "./clean.js";
-import { CliAgentRunner } from "../powered/agent.js";
+import { CliAgentRunner, resolveTemplate } from "../powered/agent.js";
 import { runPipeline, ALL_STAGES, type PipelineOptions, type StageName } from "../powered/pipeline.js";
 import { loadDossier } from "../store.js";
 import { statusLine } from "../render/audit-report.js";
@@ -84,6 +84,11 @@ export async function runAudit(args: ParsedArgs): Promise<number> {
   if (!isScannableDir(repo)) return fail(`--repo '${repo}' is not a directory. Aborting — an unscannable path must not report a clean audit.`);
   const { powered, agent } = poweredAgent(args);
   if (powered && !agent) return fail(`--powered needs the agent CLI to drive: \`--powered <cli>\` (its keys live in that CLI, never in ultrasec).`);
+  try {
+    for (const tpl of [agent, flagStr(args, "cross-check")]) if (powered && tpl) resolveTemplate(tpl);
+  } catch (e) {
+    return fail((e as Error).message);
+  }
   const requested = listFlag(args, "stages");
   const unknown = (requested ?? []).filter((s) => !(ALL_STAGES as readonly string[]).includes(s));
   if (unknown.length) return fail(`unknown stage(s): ${unknown.join(", ")} (known: ${ALL_STAGES.join(", ")}).`);

@@ -72,12 +72,12 @@ through — `--offline`, `--tools`, `--scope`, `--budget`, …), then the same s
 ```bash
 ultrasec audit --repo . --out .ultrasec                  # keyless: REPORT.md, nothing else
 ultrasec audit --repo . --out .ultrasec --keep-work      # keep .work/ + JSON worklists to adjudicate
-ultrasec audit --repo . --out .ultrasec --powered mycli  # drive that CLI per worklist
+ultrasec audit --repo . --out .ultrasec --powered "mycli exec {prompt}"  # drive that CLI per worklist
 ```
 
 `--repo` · `--out` (default `.ultrasec`) · `--html` · `--md` · `--full` · `--keep-work` ·
-`--powered <cli>` (also `--powered=<cli>` or `--powered --agent <cli>`; a bare `--powered` exits
-2) · `--cross-check <cli>` · `--council "<reviewer:model,…>"` · `--stages a,b` · `--fresh` ·
+`--powered <cli>` (also `--powered=<cli>` or `--powered --agent <cli>`; an argv template with
+`{prompt}`, see [powered-mode.md](powered-mode.md); a bare `--powered` exits 2) · `--cross-check <cli>` · `--council "<reviewer:model,…>"` · `--stages a,b` · `--fresh` ·
 `--strict` · `--json` · the scan flags.
 
 Why: getting a report used to take ten commands and left thirty-odd artifacts — on a
@@ -536,8 +536,8 @@ volume — nothing else of yours) · `--dry-run` · `--json`. Always exits 0.
 Sequences the AI stages, then always `check` + the report (exactly as `render`). `audit` is the
 same pipeline plus the cleanup; `run` keeps every intermediate.
 
-`--repo` (default `.`) · `--out` (default `.ultrasec`) · `--powered` · `--agent <name|tpl>`
-(default `claude`) · `--cross-check <name|tpl>` · `--stages <a,b,c>` · `--no-scan` · `--html` ·
+`--repo` (default `.`) · `--out` (default `.ultrasec`) · `--powered` · `--agent <tpl>`
+(required with `--powered`) · `--cross-check <tpl>` · `--stages <a,b,c>` · `--no-scan` · `--html` ·
 `--md` · `--full` · the focus flags · `--json` (the summary: stages, worklists, report, errors)
 
 The **default (no `--powered`)** scans, emits every worklist (JSON; `--md` adds the briefs) and
@@ -574,11 +574,8 @@ mode:
 
 | preset | output (`events`) | read-only | resume | usage |
 |---|---|---|---|---|
-| `opencode` | `jsonl-steps` | `--agent plan`, `--pure` (user plugins off) | yes | yes |
 | `kilo` | `jsonl-steps` | `--agent plan --auto`, `--pure` | yes | yes |
 | `vibe` | `text` | `--agent plan` | no | no |
-| `claude` | `jsonl` | `--allowedTools Read,Grep,Glob` | yes | yes |
-| `codex` | `text` | `--sandbox read-only` | no | no |
 
 A preset is a convenience, not a recommendation; none names a model. Add a reviewer, or override
 a preset field by field (same name, or `"extends": "<preset>"` under a new name), in

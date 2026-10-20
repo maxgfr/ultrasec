@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { flagStr, flagBool, listFlag, numFlag, println, eprintln, type ParsedArgs, listCapped } from "../util.js";
 import { wantsMdTwin } from "../stage.js";
-import { CliAgentRunner } from "../powered/agent.js";
+import { CliAgentRunner, resolveTemplate } from "../powered/agent.js";
 import { runPipeline, ALL_STAGES, type StageName, type PipelineOptions } from "../powered/pipeline.js";
 
 // `ultrasec run --repo <dir> [--out <run>] [--powered] [--agent <name|tpl>]
@@ -36,8 +36,20 @@ export function runRun(args: ParsedArgs): number {
     return 2;
   }
 
-  const agent = flagStr(args, "agent") ?? "claude";
+  const agent = flagStr(args, "agent");
   const crossCheck = flagStr(args, "cross-check");
+  if (powered) {
+    if (!agent) {
+      eprintln(`ultrasec run: --powered needs the agent CLI to drive: \`--agent "<cli> … {prompt}"\` (its keys live in that CLI, never in ultrasec).`);
+      return 2;
+    }
+    try {
+      for (const tpl of [agent, crossCheck]) if (tpl) resolveTemplate(tpl);
+    } catch (e) {
+      eprintln(`ultrasec run: ${(e as Error).message}`);
+      return 2;
+    }
+  }
 
   const opts: PipelineOptions = {
     repo,
@@ -55,7 +67,7 @@ export function runRun(args: ParsedArgs): number {
     md: wantsMdTwin(args),
     report: { html: flagBool(args, "html"), md: flagBool(args, "md"), full: flagBool(args, "full") },
   };
-  if (powered) {
+  if (powered && agent) {
     opts.runner = new CliAgentRunner(agent);
     if (crossCheck) opts.crossRunner = new CliAgentRunner(crossCheck);
   }

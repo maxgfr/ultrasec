@@ -2,7 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 
 // Powered mode's thin automation layer (Phase 7). ultrasec holds NO keys — they
-// live in the user's own agent CLI (claude/codex/…). This runner invokes that CLI
+// live in the user's own agent CLI. This runner invokes that CLI
 // to FILL a worklist the deterministic engine emitted, then the pipeline applies
 // the result through the SAME conservative apply functions as the manual path.
 //
@@ -19,23 +19,20 @@ export interface ArgvTemplate {
   argv: (instruction: string, run: string) => string[];
 }
 
-// Built-in headless invocations. The instruction is a SINGLE argv element (so its
-// spaces/metacharacters are inert) referencing the worklist + output file PATHS.
-const BUILTINS: Record<string, ArgvTemplate> = {
-  claude: { name: "claude", argv: (p) => ["claude", "-p", p] },
-  codex: { name: "codex", argv: (p) => ["codex", "exec", p] },
-};
-
 /**
- * Resolve a template name (built-in) or a generic argv template string where the
- * tokens `{prompt}` and `{run}` are substituted per-token. e.g.
- * `"mytool exec {prompt}"` → `["mytool","exec", instruction]`. Whitespace-split,
- * so each token is its own argv element — never a shell string.
+ * Resolve a generic argv template string where the tokens `{prompt}` and `{run}`
+ * are substituted per-token. e.g. `"mytool exec {prompt}"` →
+ * `["mytool","exec", instruction]`. Whitespace-split, so each token is its own
+ * argv element — never a shell string. The instruction is then a SINGLE argv
+ * element (its spaces/metacharacters are inert) referencing the worklist +
+ * output file PATHS.
  */
 export function resolveTemplate(tpl: string): ArgvTemplate {
-  if (Object.hasOwn(BUILTINS, tpl)) return BUILTINS[tpl]!;
   const parts = tpl.trim().split(/\s+/).filter(Boolean);
   if (!parts.length) throw new Error("empty agent template");
+  // Fail closed: a template without {prompt} would start the CLI without the
+  // instruction, and the stage would then fail for a reason nobody can see.
+  if (!parts.some((t) => t.includes("{prompt}"))) throw new Error(`agent template "${tpl}" must pass the instruction as {prompt}, e.g. "mytool exec {prompt}"`);
   return {
     name: parts[0]!,
     argv: (instruction, run) => parts.map((t) => t.replace(/\{prompt\}/g, instruction).replace(/\{run\}/g, run)),
