@@ -14,3 +14,8 @@ coverage/
 **/.ult/
 .superpowers/
 .impeccable/
+
+# agent skill installs (produced by `npx skills add .`, never committed)
+.agents/skills/
+.claude/skills/
+skills-lock.json
