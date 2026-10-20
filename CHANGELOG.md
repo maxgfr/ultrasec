@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.76.0](https://github.com/maxgfr/ultrasec/compare/v1.75.1...v1.76.0) (2026-10-20)
+
+
+### Features
+
+* drop the OpenCode, Claude Code and Codex agent integrations ([#42](https://github.com/maxgfr/ultrasec/issues/42)) ([2b0c420](https://github.com/maxgfr/ultrasec/commit/2b0c42085a2f75f23a6162af664cab44f2fe627a))
+
 ## [1.75.1](https://github.com/maxgfr/ultrasec/compare/v1.75.0...v1.75.1) (2026-10-19)
 
 
