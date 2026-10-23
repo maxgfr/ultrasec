@@ -28,7 +28,7 @@ the report is written, and `--strict` exits 1 on a DRAFT.
 ## Invocation
 
 **On request by default.** `ultrasec` runs when you ask for it: `$ultrasec` in Codex,
-`/ultrasec` in Claude Code, or simply asking the agent for a security audit. Its
+`/ultrasec` in Claude Code or OpenCode, or simply asking the agent for a security audit. Its
 description restricts it to explicit requests, so the agent calls it when you
 ask, not on its own, and CLI commands are unchanged. One setting per host makes
 it explicit-only — see [On request or explicit-only](#on-request-or-explicit-only).
@@ -647,18 +647,16 @@ See [shared engine maintenance](ENGINE-MAINTENANCE.md) for pins, source adoption
 way. Its description restricts it to explicit requests:
 "Use only when the user explicitly asks for ultrasec or a security audit."
 The agent calls it when you ask, not on its own. Use `$ultrasec` in Codex,
-`/ultrasec` in Claude Code, prefixing the plugin namespace when it is installed
-as a Claude plugin, or ask the agent for a security audit in plain words.
+`/ultrasec` in Claude Code or OpenCode, or ask the agent for a security audit in plain words.
 
 Making it explicit-only, so that only the command starts it, is one setting,
 applied to the **installed** copy of the skill:
 
 | Host | Shipped, on request | Explicit-only |
 | --- | --- | --- |
-| Claude Code | no `disable-model-invocation` in `SKILL.md` | add `disable-model-invocation: true` |
+| Claude Code, OpenCode | no `disable-model-invocation` in `SKILL.md` | add `disable-model-invocation: true` |
 
 Claude Code can do it without touching the file:
 `"skillOverrides": { "ultrasec": "user-invocable-only" }` in `settings.json`
-leaves `/ultrasec` working while hiding the skill from the model. Plugin installs
-ignore `skillOverrides`, so edit the frontmatter there. Updating or reinstalling
-the skill restores the shipped default, so reapply the change afterwards.
+leaves `/ultrasec` working while hiding the skill from the model.
+Updating or reinstalling the skill restores the shipped default, so reapply the change afterwards.
