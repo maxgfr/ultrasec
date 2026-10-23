@@ -30,7 +30,7 @@ the report is written, and `--strict` exits 1 on a DRAFT.
 **On request by default.** `ultrasec` runs when you ask for it: `$ultrasec` in Codex,
 `/ultrasec` in Claude Code or OpenCode, or simply asking the agent for a security audit. Its
 description restricts it to explicit requests, so the agent calls it when you
-ask, not on its own, and CLI commands are unchanged. One setting per host makes
+ask, not on its own, and CLI commands are unchanged. One setting makes
 it explicit-only — see [On request or explicit-only](#on-request-or-explicit-only).
 
 > Cross-file security audit for whole repos — trace untrusted data across
