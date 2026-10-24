@@ -47516,10 +47516,30 @@ var PRESETS = {
     name: "vibe",
     bin: "vibe",
     // Text only when the run ends, no usage, no session id; the model is configuration.
-    args: ["-p", "{message}", "--agent", "plan", "--trust", "--workdir", "{dir}", "--max-turns", "{maxTurns}", "--output", "text"],
+    // Vibe 3 has no `plan` agent (`Error: Agent 'plan' not found`). `ask` blocks shell and
+    // edits in a headless run but still hunts for a way around the refusal, so the
+    // tools are cut down to reading as well: in headless mode `--enabled-tools`
+    // disables every tool it does not name.
+    args: [
+      "-p",
+      "{message}",
+      "--agent",
+      "ask",
+      "--enabled-tools",
+      "read_file",
+      "--enabled-tools",
+      "grep",
+      "--trust",
+      "--workdir",
+      "{dir}",
+      "--max-turns",
+      "{maxTurns}",
+      "--output",
+      "text"
+    ],
     events: "text",
     env: { VIBE_ACTIVE_MODEL: "{model}" },
-    readOnly: "`--agent plan`"
+    readOnly: "`--agent ask`, only `read_file` and `grep` enabled"
   }
 };
 function defaultConfigPath(env = process.env) {

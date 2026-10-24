@@ -593,7 +593,7 @@ mode:
 | preset | output (`events`) | read-only | resume | usage |
 |---|---|---|---|---|
 | `kilo` | `jsonl-steps` | `--agent plan --auto`, `--pure` | yes | yes |
-| `vibe` | `text` | `--agent plan` | no | no |
+| `vibe` | `text` | `--agent ask`, only `read_file` + `grep` enabled | no | no |
 
 A preset is a convenience, not a recommendation; none names a model. Add a reviewer, or override
 a preset field by field (same name, or `"extends": "<preset>"` under a new name), in
