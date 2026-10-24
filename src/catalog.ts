@@ -2735,6 +2735,15 @@ export const SOURCES: SourceRule[] = [
   { kind: "cli", languages: ["javascript"], re: /\bprocess\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["python"], re: /\bsys\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["go"], re: /\bos\.Args\b/, title: "CLI argument" },
+  // C/C++ had no source but `getenv`, so the `buffer` sink (strcpy/memcpy/…) could
+  // never be reached and a native target scanned to zero candidates.
+  { kind: "cli", languages: ["c_cpp"], re: /\bargv\s*\[/, title: "CLI argument" },
+  {
+    kind: "input",
+    languages: ["c_cpp"],
+    re: /(?<![\w.>:])(?:fread|fgets|getline|getdelim|fscanf|scanf|read|recv|recvfrom|recvmsg)\s*\(/,
+    title: "File / socket / stdin read",
+  },
   { kind: "env", languages: ["javascript"], re: /\bprocess\.env\b/, title: "Environment variable" },
   { kind: "env", languages: ["python"], re: /\bos\.(?:environ|getenv)\b/, title: "Environment variable" },
   { kind: "env", languages: ["*"], re: /\bgetenv\s*\(/, title: "Environment variable" },

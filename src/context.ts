@@ -67,6 +67,7 @@ function inferTrustBoundaries(surface: AttackSurface, authCount: number): string
   if (kinds.has("cli")) out.push("CLI arguments are untrusted when the program is invoked with attacker-controlled args.");
   if (kinds.has("env")) out.push("Environment variables — trust depends on the deployment / secret-management model.");
   if (kinds.has("stdin")) out.push("Interactive/stdin input is untrusted.");
+  if (kinds.has("input")) out.push("File, socket and stdin reads are untrusted when the bytes come from outside the process (a parsed file, a peer, a pipe).");
   out.push(
     authCount > 0
       ? `Authentication boundary: ${authCount} candidate auth/authorization site(s) detected — confirm which routes they actually protect.`

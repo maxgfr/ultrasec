@@ -127,6 +127,15 @@ holding tokens, world-readable files. Secrets compiled into the binary are visib
 readable only by the same intended OS account — name the lower-trust reader and what the
 credential grants, or there is no finding.
 
+**Release flags and sensitive input fields.** The manifest and layout files carry their own
+findings, cheap to check and easy to skip: `android:debuggable="true"` in a release build (any
+local debugger reads memory and calls code as the app), `allowBackup` without exclusion rules, a
+component exported by an intent filter on an old `targetSdk`. On secret fields — password, PIN,
+card, OTP — an `inputType` without `textPassword`/`textNoSuggestions` lets the keyboard learn and
+suggest the value, copy-and-paste puts it on a clipboard other apps read, and no `FLAG_SECURE`
+lets it reach screenshots and the app switcher. Rate these by the lower-trust reader you can name:
+`debuggable` in a shipped build is **MEDIUM**, the input-field items **LOW** or informational.
+
 **Transport trust on the device.** App Transport Security disabled (`NSAllowsArbitraryLoads`), a
 trust-all `X509TrustManager` or `HostnameVerifier`, `onReceivedSslError` calling `proceed()`, or a
 `network_security_config` permitting cleartext. A network attacker then reads or alters what the

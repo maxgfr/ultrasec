@@ -49,6 +49,13 @@ length narrowed into a 32-bit field, `-1` as a sentinel becoming a huge size. Fi
 representation the *check* used and which one the *use* reads — the bug is the gap. In Rust
 release builds arithmetic wraps silently unless `checked_*`/`overflow-checks` is set.
 
+**Unchecked allocation and attacker divisors.** A `malloc`/`calloc`/`realloc` whose result is
+used without a NULL check, after a size the input chose (a huge or negative-turned-huge size makes
+the allocation fail on demand); `realloc` assigned back to its own pointer, losing it on failure;
+a division or modulo by a field read from the input (`width / height`). Each is a reliable crash,
+so rate it as availability — **LOW**, or **MEDIUM** when one input stops a shared process — unless
+the NULL lands at an attacker-chosen offset you can show.
+
 **Unit and pointer-depth confusion.** Bytes vs elements vs UTF-16 code units vs pages vs wire
 units, or `sizeof(T*)` where `sizeof(T)` was meant. Write down the unit at parse, validation,
 allocation, API call and copy. A bounds check computed in the same wrong unit as the allocation

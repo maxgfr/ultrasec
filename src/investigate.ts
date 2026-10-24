@@ -112,6 +112,28 @@ export const LENSES: Record<string, string> = {
     "Release, update and plugin integrity in the APPLICATION's own code. An updater: is metadata signed, fresh and monotonic (no rollback or freeze), is the downloaded artifact verified against a pinned identity before it runs? Signing: is a signature checked against the EXPECTED signer and digest, or merely present? Plugins and extensions: does loading one expand its trust beyond what was granted — filesystem, network, other plugins' data? Build and codegen: are generated sources, build contexts and cached artifacts produced from inputs a lower-trust party controls? The CI half of this lives in references/agentic-ci.md; the rest in references/supply-chain.md (Release, signing, update and plugin integrity).",
 };
 
+// Which domain lenses a region's files point at. Without a `--lens` (every
+// powered/`audit` run) the domain references were never named in a prompt, so
+// the knowledge sat unread. A hint, not a lens: the lens text stays opt-in, and
+// the line asks whether the boundary is real before the domain applies.
+const DOMAIN_BY_ENTRY: Record<string, string> = { llm: "ai", ws: "messaging", dom: "browser", postmessage: "browser" };
+const DOMAIN_BY_PATH: [string, RegExp][] = [
+  ["native", /\.(?:c|h|cc|cpp|cxx|hpp|hh|hxx|m|mm)$/i],
+  ["ai", /(?:^|[/_.-])(?:llm|agents?|prompts?|mcp|rag|embeddings?|langchain|openai|anthropic)(?:[/_.-]|$)/i],
+  ["browser", /\.(?:html?|jsx|tsx|vue|svelte)$|(?:^|\/)(?:public|static|frontend|client|web)\//i],
+  ["messaging", /\.(?:proto|graphql|gql)$|(?:^|[/_.-])(?:queues?|consumers?|workers?|kafka|amqp|grpc|websockets?|pubsub|broker)(?:[/_.-]|$)/i],
+  ["lifecycle", /(?:^|[/_.-])(?:exports?|backups?|restore|migrations?|retention|purge|archive)(?:[/_.-]|$)/i],
+  ["local-ipc", /AndroidManifest\.xml$|\.(?:kt|swift|plist)$|(?:^|[/_.-])(?:android|ios|electron|preload|ipc|xpc|dbus)(?:[/_.-]|$)/i],
+  ["release", /(?:^|[/_.-])(?:updater|autoupdate|auto-update|plugins?|extensions?)(?:[/_.-]|$)/i],
+];
+
+export function domainHints(files: readonly string[], entryKinds: ReadonlySet<string> = new Set()): string[] {
+  const out = new Set<string>();
+  for (const k of entryKinds) if (DOMAIN_BY_ENTRY[k]) out.add(DOMAIN_BY_ENTRY[k]);
+  for (const [lens, re] of DOMAIN_BY_PATH) if (files.some((f) => re.test(f))) out.add(lens);
+  return Object.keys(LENSES).filter((l) => out.has(l));
+}
+
 /** Build the investigation worklist, grouped by attack-surface region. */
 export function buildInvestigateWorklist(
   surface: AttackSurface,
@@ -133,6 +155,10 @@ export function buildInvestigateWorklist(
     if (arr.length < MAX_FILES_PER_REGION) arr.push(fs.file);
   }
 
+  const entryKindsByFile = new Map<string, Set<string>>();
+  for (const g of surface.entryPoints)
+    for (const s of g.samples) (entryKindsByFile.get(s.file) ?? entryKindsByFile.set(s.file, new Set()).get(s.file)!).add(g.kind);
+
   const regions: InvestigateRegion[] = [];
   for (const t of surface.suggestedTargets) {
     const files = [...(filesByRegion.get(t.scope) ?? [])];
@@ -143,6 +169,7 @@ export function buildInvestigateWorklist(
     }
     for (const f of files) nb.delete(f);
     const leads = leadsForRegion(assumptionLeads, t.scope, files);
+    const hints = lens ? [] : domainHints(files, new Set(files.flatMap((f) => [...(entryKindsByFile.get(f) ?? [])])));
     regions.push({
       region: t.scope,
       score: t.score,
@@ -155,7 +182,10 @@ export function buildInvestigateWorklist(
         "business-logic flaws, multi-hop taint that crosses these files, and personal-data " +
         "handling (data leaving to a third-party processor, a control narrower than its name, " +
         "reversible pseudonymisation, absent retention). Cite resolvable [file:line]." +
-        (lens && LENSES[lens] ? `\n\nLENS — ${lens}: ${LENSES[lens]}` : ""),
+        (lens && LENSES[lens] ? `\n\nLENS — ${lens}: ${LENSES[lens]}` : "") +
+        (hints.length
+          ? `\n\nDOMAINS these files touch — apply one only where its trust boundary is real: ${hints.map((h) => `${h} (${LENSES[h]!.match(/references\/[a-z0-9-]+\.md/)?.[0]})`).join(", ")}.`
+          : ""),
       ...(leads.length ? { leads } : {}),
     });
   }
