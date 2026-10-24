@@ -11,6 +11,41 @@ finding with a real `[file:line]` — held to the same `check` bar as the engine
 > validation, transformation, storage, retrieval, and output. **Bugs live in the gaps
 > between layers.** Use `graph <file>` and `dossier <id>` to follow the data across files.
 
+> Parts adapted from Cloudflare's [security-audit skill](https://github.com/cloudflare/security-audit-skill) (MIT).
+
+## Work from a concrete invariant
+
+"Look for authz bugs in `src/billing`" produces impressions. A hunt produces a verdict when every
+unit (a region, a route group, a candidate) is worked as one sentence with six slots:
+
+1. **The lower-trust principal** — who, starting with what capability (anonymous, a member of
+   another tenant, a fork PR, a plugin, a model reading attacker text).
+2. **The accepted value or action** — the parameter, state transition or resource selector they
+   control.
+3. **The intended control** — what should reject, bind, isolate, limit or revoke it, and where.
+4. **The trace to the decision point** — the exact path after that control, every step a
+   `[file:line]`. This is the Discovery's `path[]`.
+5. **The smallest observable effect** — a wrong return value, another tenant's record, one
+   unauthorized write. Stop there; a bigger effect proves nothing more and costs reading time.
+6. **The fix and its regression test** — the change that enforces the invariant at the last
+   trusted decision point, and the exploit turned into a test
+   ([implement-playbook.md](implement-playbook.md)).
+
+A slot you cannot fill is the answer: no principal or no effect ⇒ not a finding (at most a
+hardening note); a slot that depends on a fact outside the repository ⇒ `needs-human` naming the
+fact ([severity-and-discipline.md](severity-and-discipline.md)).
+
+**Depth bound.** Trace only what can reach the unit's boundary or what that boundary relies on,
+and stop as soon as the invariant is settled — broken (emit the Discovery) or held (name the
+control that holds it, and move on). Surfaces you didn't reach are reported as **not looked at**
+— they show in `coverage` — never as clean. "I read three of the eleven routes and they were
+fine" is a coverage statement, not a negative finding.
+
+**Choose a domain lens because the trust boundary exists, not because a library name appears.**
+An `openai` import doesn't call for the AI lens; model output reaching a tool call does. A
+`ws` dependency doesn't call for the messaging lens; an unauthenticated socket handler does. The
+lens list and what each reads is in [investigate-playbook.md](investigate-playbook.md).
+
 ## How to hunt — the angles
 
 Don't ask "does a defense exist?" Ask "can I break it?" For each region (`investigate`

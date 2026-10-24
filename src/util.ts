@@ -257,6 +257,14 @@ export function withStageNote(message: string, stage: (typeof STAGE_LABELS)[numb
   return `${kept.join("\n\n")}\n\n${stage} (${label})${safe ? `: ${safe}` : ""}`;
 }
 
+/** True when some stage block in `message` carries a note, not just its label. */
+export function hasStageNote(message: string): boolean {
+  return message
+    .split(STAGE_SPLIT)
+    .slice(1)
+    .some((part) => /^\S[^\n]*?\): \S/.test(part) || /^Triage: \S/.test(part));
+}
+
 /**
  * A freshly-scanned message with a prior message's stage blocks carried onto it.
  *

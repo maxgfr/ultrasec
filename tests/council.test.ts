@@ -413,7 +413,10 @@ describe("council --models (blind)", () => {
     expect(out.result).toBe(0);
     const [call] = fake.calls();
     expect(call!.env.VIBE_ACTIVE_MODEL).toBe("b");
-    expect(call!.args).toEqual(expect.arrayContaining(["--agent", "plan", "--trust", "--output", "text"]));
+    expect(call!.args).toEqual(expect.arrayContaining(["--agent", "ask", "--trust", "--output", "text"]));
+    // Read-only by tool list, not by agent alone: headless `--enabled-tools` disables the rest.
+    expect(call!.args.join(" ")).toMatch(/--enabled-tools read_file --enabled-tools grep/);
+    expect(call!.args).not.toContain("plan");
     const rec = loadLedger(run)!.reviewers[0]!;
     expect(rec.status).toBe("ok");
     expect(rec.usage.exposed).toBe(false);
@@ -876,7 +879,11 @@ describe("reviewer presets", () => {
       "-p",
       "x",
       "--agent",
-      "plan",
+      "ask",
+      "--enabled-tools",
+      "read_file",
+      "--enabled-tools",
+      "grep",
       "--trust",
       "--workdir",
       "/s",

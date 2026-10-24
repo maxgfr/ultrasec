@@ -6,7 +6,7 @@ import { byStr, carryStageNotes, eprintln } from "./util.js";
 import { redactSecrets } from "./redact.js";
 import { SEVERITIES, type Finding, type Manifest, type Severity } from "./types.js";
 import { proposedFor, renderProposalSummary } from "./noise.js";
-import { sortFindings } from "./rank.js";
+import { severityRank, sortFindings } from "./rank.js";
 
 // The on-disk audit dossier — the hand-off between the deterministic engine and
 // the AI. Plain JSON + a Markdown index, so it is reviewable and diffable.
@@ -172,6 +172,11 @@ export function preserveAdjudication(next: Finding, old: Finding): Finding {
   // introduces an explicit `undefined` the JSON round-trip would drop anyway.
   if (old.brocard) merged.brocard = old.brocard;
   if (old.fixedIn) merged.fixedIn = old.fixedIn;
+  // A ceiling, not a copy: if the engine now rates it lower still, that stands.
+  if (old.demonstratedSeverity) {
+    merged.demonstratedSeverity = old.demonstratedSeverity;
+    if (severityRank(old.demonstratedSeverity) > severityRank(merged.severity)) merged.severity = old.demonstratedSeverity;
+  }
   // Blame is opt-in (`--blame`): a scoped re-scan run without it would otherwise
   // erase the commit `revalidate` counts "commits since the finding" from.
   if (!next.provenance && old.provenance) merged.provenance = old.provenance;

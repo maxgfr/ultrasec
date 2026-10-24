@@ -70,6 +70,8 @@ the flow is **real and exploitable**, and set a verdict:
 \`supported\` · \`partial\` · \`unsupported\` · \`refuted\` (+ a short note, and an
 \`exploitPath\` when supported). Save as verdicts.json (array of
 {id, verdict, note, exploitPath, brocard}) and run \`ultrasec verify --apply verdicts.json\`.
+A \`partial\`/\`unsupported\` note names the fact still missing; an optional \`severity\`
+on \`supported\` lowers the rating to the impact you demonstrated, never raises it.
 
 > Be skeptical, but do NOT dismiss a high/critical finding unless you can
 > positively **refute** it. Uncertain ⇒ leave it for a human.
@@ -116,6 +118,8 @@ the flow is **real and exploitable**, and set a verdict:
 \`supported\` · \`partial\` · \`unsupported\` · \`refuted\` (+ a short note, and an
 \`exploitPath\` when supported). Save as verdicts.json (array of
 {id, verdict, note, exploitPath, brocard}) and run \`ultrasec verify --apply verdicts.json\`.
+A \`partial\`/\`unsupported\` note names the fact still missing; an optional \`severity\`
+on \`supported\` lowers the rating to the impact you demonstrated, never raises it.
 
 > Be skeptical, but do NOT dismiss a high/critical finding unless you can
 > positively **refute** it. Uncertain ⇒ leave it for a human.

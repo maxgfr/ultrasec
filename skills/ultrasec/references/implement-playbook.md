@@ -59,8 +59,12 @@ regression test reproduces-then-passes).
 
 ## 4. Fix patterns per class
 
-The draft carries *your* suggested fix from `NARRATIVE.json`, or a stub. These are the patterns
-worth reaching for, and — more useful — the ways each is commonly got wrong.
+The draft carries *your* suggested fix from `NARRATIVE.json`, or a stub. The smallest effective fix
+names the invariant the finding broke and enforces it at the **last trusted decision point** — the
+place the value is used under the authority it needs, not an earlier filter a parallel path can
+skip — and ships with a regression test: the exploit becomes the test (§5). A fix that only moves
+trust (a check added upstream of a second caller) is not done. These are the patterns worth
+reaching for, and — more useful — the ways each is commonly got wrong.
 
 | class | the fix | the trap |
 |---|---|---|

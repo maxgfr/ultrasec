@@ -105,13 +105,15 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
           keptForHuman: res.keptForHuman,
           ignored: res.ignored,
           reVerdicted: res.reVerdicted,
+          noScenario: res.noScenario,
+          lowered: res.lowered,
           dropped: parsed.dropped,
         },
         null,
         2,
       ),
     );
-    return strict && (parsed.dropped.length > 0 || (res.reVerdicted.length > 0 && !reVerdictOk)) ? 1 : 0;
+    return strict && (parsed.dropped.length > 0 || (res.reVerdicted.length > 0 && !reVerdictOk) || res.noScenario.length > 0) ? 1 : 0;
   }
   println(`ultrasec verify --apply → updated ${join(run, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed · ${res.dismissed} dismissed · ${res.needsHuman} needs-human`);
@@ -129,6 +131,21 @@ function applyMode(run: string, dossier: ReturnType<typeof loadDossier>, applyPa
     println(`  ⚠ ${res.reVerdicted.length} verdict(s) CHANGED an already-adjudicated finding:`);
     for (const line of linesCapped(res.reVerdicted.map((r) => `    - ${r.id} [${r.wasStatus}] ${r.from ?? "(none)"} → ${r.to}`))) println(line);
     println(`    Re-verifying an escalation is legitimate; doing it by accident is not. Pass --re-verdict to accept under --strict.`);
+  }
+  if (res.lowered.length)
+    println(
+      `  ${listCapped(
+        `${res.lowered.length} severity(ies) lowered to the demonstrated impact`,
+        res.lowered.map((l) => `${l.id} ${l.from} → ${l.to}`),
+      )}`,
+    );
+  // A confirmation is a claim that someone can do something to someone. With no
+  // scenario the report prints "not recorded" under a confirmed finding.
+  if (res.noScenario.length)
+    println(`  ⚠ ${listCapped(`${res.noScenario.length} supported verdict(s) without an exploitPath (who · what they send · what they get)`, res.noScenario)}`);
+  if (strict && res.noScenario.length > 0) {
+    eprintln(`ultrasec verify --apply: ${res.noScenario.length} supported verdict(s) carry no exploitPath under --strict — add the attacker scenario.`);
+    return 1;
   }
   if (strict && res.reVerdicted.length > 0 && !reVerdictOk) {
     eprintln(

@@ -549,6 +549,9 @@ export interface Finding {
   vulnClass?: string;
   /** Concrete trigger path / proof-of-exploit sketch, once reasoned. */
   exploitPath?: string;
+  /** The impact a `supported` verdict demonstrated, when below the engine's
+   *  severity. Authored, so `scan --merge` re-applies it as a ceiling. */
+  demonstratedSeverity?: Severity;
   /** Deterministic git-blame / CODEOWNERS provenance (opt-in `--blame`). Evidence only. */
   provenance?: Provenance;
   /** Commit that fixed/moved the cited line, set by `revalidate --apply` on a

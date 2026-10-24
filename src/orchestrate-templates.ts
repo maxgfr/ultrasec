@@ -40,6 +40,10 @@ const VERDICT_SCHEMA = {
           note: { type: "string", description: "one line grounded in the source you read, citing [file:line]" },
           exploitPath: { type: "string", description: "REQUIRED for supported: who · what they send · what they get" },
           brocard: { enum: [...BROCARDS], description: "REQUIRED for refuted: the named ground of the dismissal (references/dismissal-brocards.md)" },
+          severity: {
+            enum: [...SEVERITIES],
+            description: "optional, supported only: the impact you demonstrated when LOWER than the finding's severity (never raises it)",
+          },
         },
       },
     },
@@ -292,7 +296,8 @@ For EACH family:
    - \`partial\` — a real issue, but weaker or narrower than claimed.
    - \`unsupported\` — the evidence does not establish the claim.
    - \`refuted\` — the source positively contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\` — exactly one of ${BROCARDS.map((b) => `\`${b}\``).join(" · ")}; the reasoning goes in \`note\`).
-   Default to the harsher verdict ONLY when you can disprove it; otherwise mark \`partial\`/leave it for a human.
+   Default to the harsher verdict ONLY when you can disprove it; otherwise mark \`partial\`/leave it for a human — and say in \`note\` the exact fact still missing (a deployment, provider or proxy setting the repo does not show) and a safe way to check it.
+   On \`supported\`, set \`severity\` only if the impact you demonstrated is LOWER than the finding's — it never raises one.
 4. Be conservative. The fold never auto-dismisses a high/critical finding on anything short of an explicit \`refuted\` — an uncertain high-severity finding stays **needs-human**, never dropped. Every claim in your \`note\` must cite resolvable \`[file:line]\` hops you actually read.
 
 Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath", "brocard" }] }\` — one row per id in your prompt, family members included.
