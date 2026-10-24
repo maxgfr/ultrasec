@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.84.0](https://github.com/maxgfr/ultrasec/compare/v1.83.0...v1.84.0) (2026-10-24)
+
+
+### Features
+
+* **engine:** C/C++ taint sources and domain hints for lens-less runs ([#51](https://github.com/maxgfr/ultrasec/issues/51)) ([0f44bb0](https://github.com/maxgfr/ultrasec/commit/0f44bb087608136900316553728d675ae99a39dd))
+
 # [1.83.0](https://github.com/maxgfr/ultrasec/compare/v1.82.0...v1.83.0) (2026-10-24)
 
 
