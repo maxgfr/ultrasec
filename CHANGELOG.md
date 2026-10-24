@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.83.0](https://github.com/maxgfr/ultrasec/compare/v1.82.0...v1.83.0) (2026-10-24)
+
+
+### Features
+
+* adapt Cloudflare's security-audit skill into ultrasec ([#50](https://github.com/maxgfr/ultrasec/issues/50)) ([7464956](https://github.com/maxgfr/ultrasec/commit/7464956e61f1b9ace191c00256044d8e7d7466eb))
+
 # [1.82.0](https://github.com/maxgfr/ultrasec/compare/v1.81.0...v1.82.0) (2026-10-24)
 
 
