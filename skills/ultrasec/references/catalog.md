@@ -151,8 +151,9 @@ Action, wherever the file sits.
 rather than attacker-typed, and the reason the `llm` class runs in both directions.
 
 **Everything else** — WebSocket/stream messages (`.on("message"…)`), CLI args (`process.argv`,
-`sys.argv`, `os.Args`, `env::args`, shell `$1`/`$@`, `read`), env (`process.env`, `os.environ`,
-`getenv`), stdin (`input()`).
+`sys.argv`, `os.Args`, `env::args`, C/C++ `argv[…]`, shell `$1`/`$@`, `read`), env (`process.env`,
+`os.environ`, `getenv`), stdin (`input()`), and the C/C++ read family (`fread`, `fgets`,
+`getline`, `scanf`, `read`, `recv`…) — without which the `buffer` sink had nothing to reach it.
 
 > The framework rules matter more than they look. Before them, a Spring Boot, ASP.NET, Actix or
 > Phoenix repo produced a link-graph and almost **no entry surface** — the engine came back clean by

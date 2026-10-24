@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { LENSES, buildInvestigateWorklist } from "../src/investigate.js";
+import { LENSES, buildInvestigateWorklist, domainHints } from "../src/investigate.js";
 import type { AttackSurface } from "../src/map.js";
 import type { Graph } from "../src/graph.js";
 
@@ -71,5 +71,35 @@ describe("domain lenses", () => {
 
   it("keeps the AI lens from treating prompt injection alone as a finding", () => {
     expect(LENSES.ai).toMatch(/Prompt injection alone is not a finding/);
+  });
+});
+
+// Powered and `audit` runs never pass a lens, so without a hint the domain
+// references were named in no prompt at all.
+describe("domain hints without a lens", () => {
+  it("reads the domain off file types, paths and entry kinds", () => {
+    expect(domainHints(["src/parser.c"])).toEqual(["native"]);
+    expect(domainHints(["app/AndroidManifest.xml", "app/java/Login.java"])).toEqual(["local-ipc"]);
+    expect(domainHints(["tools.py"], new Set(["llm"]))).toEqual(["ai"]);
+    expect(domainHints(["src/jobs/consumer.ts", "src/exports/run.ts"])).toEqual(["messaging", "lifecycle"]);
+    expect(domainHints(["src/routes.js"])).toEqual([]);
+  });
+
+  it("names the domain and its reference in the region prompt when no lens is set", () => {
+    const native: AttackSurface = {
+      ...surface,
+      byFile: [{ file: "src/parser.c", region: "src", sources: 1, sinks: 1, score: 5 }],
+    };
+    const [r] = buildInvestigateWorklist(native, { files: ["src/parser.c"], edges: [], symbolDefs: {} }, []);
+    expect(r!.prompt).toMatch(/DOMAINS these files touch.*native \(references\/memory-safety-and-native\.md\)/);
+  });
+
+  it("stays out of the way when a lens is set", () => {
+    const native: AttackSurface = {
+      ...surface,
+      byFile: [{ file: "src/parser.c", region: "src", sources: 1, sinks: 1, score: 5 }],
+    };
+    const [r] = buildInvestigateWorklist(native, { files: ["src/parser.c"], edges: [], symbolDefs: {} }, [], "crypto");
+    expect(r!.prompt).not.toMatch(/DOMAINS/);
   });
 });

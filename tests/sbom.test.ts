@@ -137,5 +137,6 @@ describe("scan --json output — includes SBOM field", () => {
     if (result.sbom !== undefined) {
       expect(result.sbom).toBe("sbom.cdx.json");
     }
-  }, 15000);
+    // A real scan runs every installed scanner; 15 s timed out under full-suite load.
+  }, 120_000);
 });

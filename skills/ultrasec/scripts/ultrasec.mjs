@@ -32407,6 +32407,15 @@ var SOURCES = [
   { kind: "cli", languages: ["javascript"], re: /\bprocess\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["python"], re: /\bsys\.argv\b/, title: "CLI argument" },
   { kind: "cli", languages: ["go"], re: /\bos\.Args\b/, title: "CLI argument" },
+  // C/C++ had no source but `getenv`, so the `buffer` sink (strcpy/memcpy/…) could
+  // never be reached and a native target scanned to zero candidates.
+  { kind: "cli", languages: ["c_cpp"], re: /\bargv\s*\[/, title: "CLI argument" },
+  {
+    kind: "input",
+    languages: ["c_cpp"],
+    re: /(?<![\w.>:])(?:fread|fgets|getline|getdelim|fscanf|scanf|read|recv|recvfrom|recvmsg)\s*\(/,
+    title: "File / socket / stdin read"
+  },
   { kind: "env", languages: ["javascript"], re: /\bprocess\.env\b/, title: "Environment variable" },
   { kind: "env", languages: ["python"], re: /\bos\.(?:environ|getenv)\b/, title: "Environment variable" },
   { kind: "env", languages: ["*"], re: /\bgetenv\s*\(/, title: "Environment variable" },
@@ -38678,6 +38687,7 @@ function inferTrustBoundaries(surface, authCount) {
   if (kinds2.has("cli")) out2.push("CLI arguments are untrusted when the program is invoked with attacker-controlled args.");
   if (kinds2.has("env")) out2.push("Environment variables \u2014 trust depends on the deployment / secret-management model.");
   if (kinds2.has("stdin")) out2.push("Interactive/stdin input is untrusted.");
+  if (kinds2.has("input")) out2.push("File, socket and stdin reads are untrusted when the bytes come from outside the process (a parsed file, a peer, a pipe).");
   out2.push(
     authCount > 0 ? `Authentication boundary: ${authCount} candidate auth/authorization site(s) detected \u2014 confirm which routes they actually protect.` : `No auth/authorization middleware detected \u2014 confirm whether endpoints are intentionally public.`
   );
@@ -39648,12 +39658,31 @@ var LENSES = {
   "local-ipc": "Desktop, mobile and local IPC. Deep links and URL schemes: is the handler's input validated, and can a link trigger an action without the user's intent? Exported components, intents, XPC/D-Bus/Binder/named pipes/local sockets: is the PEER authenticated (code signature, UID, package), or only the claimed identity in the message? Webview bridges: which origins can reach the JS interface, can navigation leave the allow-list, is file access on? Privileged helpers and installers: do they trust paths, environment or a caller-writable directory? Local files: TOCTOU between check and use, world-readable secrets, credentials outside the platform keystore, data leaking across account switches. See references/desktop-mobile-and-ipc.md.",
   release: "Release, update and plugin integrity in the APPLICATION's own code. An updater: is metadata signed, fresh and monotonic (no rollback or freeze), is the downloaded artifact verified against a pinned identity before it runs? Signing: is a signature checked against the EXPECTED signer and digest, or merely present? Plugins and extensions: does loading one expand its trust beyond what was granted \u2014 filesystem, network, other plugins' data? Build and codegen: are generated sources, build contexts and cached artifacts produced from inputs a lower-trust party controls? The CI half of this lives in references/agentic-ci.md; the rest in references/supply-chain.md (Release, signing, update and plugin integrity)."
 };
+var DOMAIN_BY_ENTRY = { llm: "ai", ws: "messaging", dom: "browser", postmessage: "browser" };
+var DOMAIN_BY_PATH = [
+  ["native", /\.(?:c|h|cc|cpp|cxx|hpp|hh|hxx|m|mm)$/i],
+  ["ai", /(?:^|[/_.-])(?:llm|agents?|prompts?|mcp|rag|embeddings?|langchain|openai|anthropic)(?:[/_.-]|$)/i],
+  ["browser", /\.(?:html?|jsx|tsx|vue|svelte)$|(?:^|\/)(?:public|static|frontend|client|web)\//i],
+  ["messaging", /\.(?:proto|graphql|gql)$|(?:^|[/_.-])(?:queues?|consumers?|workers?|kafka|amqp|grpc|websockets?|pubsub|broker)(?:[/_.-]|$)/i],
+  ["lifecycle", /(?:^|[/_.-])(?:exports?|backups?|restore|migrations?|retention|purge|archive)(?:[/_.-]|$)/i],
+  ["local-ipc", /AndroidManifest\.xml$|\.(?:kt|swift|plist)$|(?:^|[/_.-])(?:android|ios|electron|preload|ipc|xpc|dbus)(?:[/_.-]|$)/i],
+  ["release", /(?:^|[/_.-])(?:updater|autoupdate|auto-update|plugins?|extensions?)(?:[/_.-]|$)/i]
+];
+function domainHints(files, entryKinds = /* @__PURE__ */ new Set()) {
+  const out2 = /* @__PURE__ */ new Set();
+  for (const k of entryKinds) if (DOMAIN_BY_ENTRY[k]) out2.add(DOMAIN_BY_ENTRY[k]);
+  for (const [lens, re] of DOMAIN_BY_PATH) if (files.some((f) => re.test(f))) out2.add(lens);
+  return Object.keys(LENSES).filter((l) => out2.has(l));
+}
 function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens, classHunts = []) {
   const filesByRegion = /* @__PURE__ */ new Map();
   for (const fs2 of surface.byFile) {
     const arr = filesByRegion.get(fs2.region) ?? filesByRegion.set(fs2.region, []).get(fs2.region);
     if (arr.length < MAX_FILES_PER_REGION) arr.push(fs2.file);
   }
+  const entryKindsByFile = /* @__PURE__ */ new Map();
+  for (const g of surface.entryPoints)
+    for (const s of g.samples) (entryKindsByFile.get(s.file) ?? entryKindsByFile.set(s.file, /* @__PURE__ */ new Set()).get(s.file)).add(g.kind);
   const regions = [];
   for (const t of surface.suggestedTargets) {
     const files = [...filesByRegion.get(t.scope) ?? []];
@@ -39664,6 +39693,7 @@ function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens, cl
     }
     for (const f of files) nb.delete(f);
     const leads = leadsForRegion(assumptionLeads, t.scope, files);
+    const hints = lens ? [] : domainHints(files, new Set(files.flatMap((f) => [...entryKindsByFile.get(f) ?? []])));
     regions.push({
       region: t.scope,
       score: t.score,
@@ -39673,7 +39703,9 @@ function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens, cl
       neighbors: [...nb].sort(byStr).slice(0, MAX_NEIGHBORS_PER_REGION),
       prompt: "What the deterministic pass can't see: missing/incorrect authorization & IDOR, business-logic flaws, multi-hop taint that crosses these files, and personal-data handling (data leaving to a third-party processor, a control narrower than its name, reversible pseudonymisation, absent retention). Cite resolvable [file:line]." + (lens && LENSES[lens] ? `
 
-LENS \u2014 ${lens}: ${LENSES[lens]}` : ""),
+LENS \u2014 ${lens}: ${LENSES[lens]}` : "") + (hints.length ? `
+
+DOMAINS these files touch \u2014 apply one only where its trust boundary is real: ${hints.map((h) => `${h} (${LENSES[h].match(/references\/[a-z0-9-]+\.md/)?.[0]})`).join(", ")}.` : ""),
       ...leads.length ? { leads } : {}
     });
   }

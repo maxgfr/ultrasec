@@ -87,7 +87,9 @@ describe("the bundled MCP server over stdio", () => {
     const s = await session([INIT, { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "ultrasec_tools", arguments: {} } }]);
     const call = s.lines.map((l) => JSON.parse(l)).find((m) => m.id === 2);
     expect(JSON.parse(call.result.content[0].text).ok).toBe(true);
-  });
+    // `ultrasec_tools` probes every scanner on PATH: a few seconds alone, past
+    // vitest's 5 s default when the full suite runs beside it.
+  }, 60_000);
 
   it("scans through the bundle and reads the run back", async () => {
     // The full loop an MCP client actually runs: scan writes, paths reads what

@@ -419,7 +419,9 @@ lowered to the demonstrated impact (`noScenario` / `lowered` in `--json`). `inve
 `lifecycle` ([data-isolation-and-lifecycle.md](data-isolation-and-lifecycle.md)) · `local-ipc`
 ([desktop-mobile-and-ipc.md](desktop-mobile-and-ipc.md)) · `release`
 ([supply-chain.md](supply-chain.md)). Pick one because the boundary exists in the code, not
-because a library name appears.
+because a library name appears. Without `--lens` — every `audit --powered` run — each region's
+prompt ends with a `DOMAINS` line naming the domains its files touch (file types, paths, LLM /
+WebSocket / DOM entry points) and their references; a hint to weigh, never a lens applied.
 
 ## Report
 
