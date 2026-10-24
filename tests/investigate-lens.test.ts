@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { LENSES, buildInvestigateWorklist } from "../src/investigate.js";
 import type { AttackSurface } from "../src/map.js";
 import type { Graph } from "../src/graph.js";
@@ -40,5 +42,34 @@ describe("access-control lens", () => {
     // Without a lens the base prompt carries no LENS section.
     const noLens = buildInvestigateWorklist(surface, graph, []);
     expect(noLens[0]!.prompt).not.toMatch(/LENS —/);
+  });
+});
+
+// The domain lenses carry the discipline of one reference each. Every lens must
+// name a reference that ships with the skill, or the prompt points at nothing.
+describe("domain lenses", () => {
+  const SKILL_DIR = join(import.meta.dirname, "..", "skills", "ultrasec");
+  const DOMAIN = ["native", "ai", "authn", "browser", "messaging", "dos", "lifecycle", "local-ipc", "release"];
+
+  it("registers every domain lens", () => {
+    expect(Object.keys(LENSES)).toEqual(expect.arrayContaining(DOMAIN));
+  });
+
+  it("points every lens at references that exist", () => {
+    for (const [name, text] of Object.entries(LENSES)) {
+      const refs = text.match(/references\/[a-z0-9-]+\.md/g) ?? [];
+      expect(refs.length, `${name} names no reference`).toBeGreaterThan(0);
+      for (const ref of refs) expect(existsSync(join(SKILL_DIR, ref)), `${name} → ${ref}`).toBe(true);
+    }
+  });
+
+  it("folds a domain lens into the region prompt", () => {
+    const withLens = buildInvestigateWorklist(surface, graph, [], "messaging");
+    expect(withLens[0]!.prompt).toMatch(/LENS — messaging/);
+    expect(withLens[0]!.prompt).toMatch(/references\/protocols-and-messaging\.md/);
+  });
+
+  it("keeps the AI lens from treating prompt injection alone as a finding", () => {
+    expect(LENSES.ai).toMatch(/Prompt injection alone is not a finding/);
   });
 });

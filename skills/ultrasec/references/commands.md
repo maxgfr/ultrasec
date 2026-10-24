@@ -403,8 +403,23 @@ an escalation is legitimate — it is why the re-emission exists — but it has 
 
 `--apply` reports every verdict that **changes** a finding already ruled on (`⚠ N verdict(s)
 CHANGED an already-adjudicated finding`, the first ten listed, all of them in `--json`). Re-applying the same verdict is a silent no-op. Under
-`--strict` a change fails the fold unless `--re-verdict` says it was intended. `investigate` accepts the focus flags (`--scope`/`--include`/
+`--strict` a change fails the fold unless `--re-verdict` says it was intended. It also lists
+`supported` rows with no `exploitPath` (`--strict` exits 1 on them) and severities a verdict
+lowered to the demonstrated impact (`noScenario` / `lowered` in `--json`). `investigate` accepts the focus flags (`--scope`/`--include`/
 `--exclude`/`--max-files`/`--gitignore`); `investigate` and `revalidate` accept `--repo`.
+
+`investigate --lens <name>` asks a different question of the same regions; an unknown name exits
+2 and lists the valid ones. `sharp-edges` · `access-control` (alias `idor`) · `crypto` · `privacy`
+· `cloud`, plus one domain lens per boundary taint never sees: `native`
+([memory-safety-and-native.md](memory-safety-and-native.md)) · `ai`
+([ai-and-agents.md](ai-and-agents.md)) · `authn` ([attack-classes.md](attack-classes.md)) ·
+`browser` ([client-side.md](client-side.md)) · `messaging`
+([protocols-and-messaging.md](protocols-and-messaging.md)) · `dos`
+([availability-and-resource-exhaustion.md](availability-and-resource-exhaustion.md)) ·
+`lifecycle` ([data-isolation-and-lifecycle.md](data-isolation-and-lifecycle.md)) · `local-ipc`
+([desktop-mobile-and-ipc.md](desktop-mobile-and-ipc.md)) · `release`
+([supply-chain.md](supply-chain.md)). Pick one because the boundary exists in the code, not
+because a library name appears.
 
 ## Report
 
@@ -488,7 +503,10 @@ whose cited `[file:line]` doesn't resolve (the anti-hallucination gate); `--sema
 fails when a HIGH/CRITICAL candidate outside the dependency surface is still `open` — the
 predicate `render`'s DRAFT banner uses — or a finding carries no recognised status, or when
 **CONTEXT.md contradicts itself against the code** (below). Open dependency advisories and open
-medium/low candidates are reported as information, never failing.
+medium/low candidates are reported as information, never failing. So are the verdicts a reviewer
+cannot check: a high/critical dismissal with no `brocard`, a confirmed finding with no
+`exploitPath`, a needs-human whose note names no missing fact (`unarguedDismissals`,
+`unscenarioedConfirmations`, `unexplainedNeedsHuman` in `--json`).
 
 `--run` (default `.ultrasec`) · `--repo` · `--semantic` ·
 `--min-severity critical|high|medium|low|info` · `--json`. Exit **0** ok · **1** gate failed ·

@@ -102,6 +102,7 @@ Written by `scan`/`import`, rewritten by every `--apply`. The dossier's core rec
 | `provenance` | `{author?, commit?, date?, owner?}` from `--blame`. Evidence only — never a suppression rule. |
 | `fixedIn` | commit recorded by `revalidate --apply` on a `fixed` verdict. |
 | `brocard` | the named ground for a `refuted` verdict (see the list below). Optional and never blocking, but it is the ONLY field `check --semantic` reads as a ground — a refutation argued in `note` still reports as unargued. |
+| `demonstratedSeverity` | set when a `supported` verdict carried a `severity` LOWER than the engine's: the impact actually shown. `severity` is lowered to it, and `scan --merge` re-applies it as a ceiling. |
 | `noise` | the noise-by-construction class the finding was DEMOTED under (never dismissed). Engine-set, re-derived every scan. See below. |
 | `flow` | `{assigned?, tainted?}` — for an assignment sink the value assigned, plus the bindings the def-use walk followed. Evidence for the **Reachability evidence** block; the engine never acts on it. Note the walk is PER FILE, so on a cross-file path the assigned value is a parameter and "no tracked binding" is expected, not suspicious. |
 | `atCommit` | set when the finding came from a scan of git HISTORY: the commit its `file:line` belongs to. `check` resolves the citation against THAT tree, so a secret in a file since deleted is still graded — and a fabricated path still fails. |
@@ -306,8 +307,8 @@ For a family of rows (same category, CWE, sink and title under one path root),
 `dossier <id>,<id>,… --brief` prints one packet: the first member in full, a ±3-line window per
 other member — still one verdict per id.
 
-You write an array of `{id, verdict, note?, exploitPath?, brocard?}` — or add those fields to the
-rows in place. The emitting command names them (`exploitPath` on supported, `brocard` on refuted),
+You write an array of `{id, verdict, note?, exploitPath?, brocard?, severity?}` — or add those
+fields to the rows in place. The emitting command names them (`exploitPath` on supported, `brocard` on refuted),
 and the orchestrated fan-out's schema carries `brocard` too:
 
 ```json
@@ -327,6 +328,18 @@ unrecognized name is dropped rather than failing the fold (a typo must not cost 
 reports as unargued — on the first real-world audit that was 96 dismissals, 0 brocards, because
 nothing named a `brocard` field at all. The emit line, the agent contracts and the fan-out schema
 now name it.
+
+Each verdict has its own reviewable half, reported by `check --semantic` and never gate-failing:
+
+- `supported` carries an `exploitPath` — who · what they send · what they get. Without one, the
+  report prints *not recorded* under a confirmed finding; `verify --apply` lists it and
+  `--strict` exits 1.
+- `partial`, and `unsupported` on a high/critical, land as `needs-human`: the `note` names the
+  **exact fact still missing** (a proxy, provider, identity or deployment setting the repo does not
+  show) and a safe way for the owner to check it. "Unclear" is not a fact.
+- `severity` (optional, `supported` only) lowers the rating to the impact you demonstrated —
+  never raises it, and is ignored on every other verdict, because `isHigh` is what keeps an
+  uncertain high finding in front of a human. An unknown value is dropped, not refused.
 
 Where the engine recognised a noise class it also emits `proposed: "<class>"` on the item — a
 suggestion to accept or refuse, never a filled-in verdict. A pre-filled `verdict` would make

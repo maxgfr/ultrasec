@@ -1,5 +1,6 @@
 import type { Dossier } from "./store.js";
-import { BROCARDS, VERDICTS, type Brocard, type Finding, type NoiseClass, type Status, type Verdict } from "./types.js";
+import { BROCARDS, SEVERITIES, VERDICTS, type Brocard, type Finding, type NoiseClass, type Severity, type Status, type Verdict } from "./types.js";
+import { severityRank } from "./rank.js";
 import { byStr, engineProse, withStageNote } from "./util.js";
 import { redactSecrets } from "./redact.js";
 import { proposalOf, renderProposalSummary } from "./noise.js";
@@ -65,6 +66,9 @@ export interface VerdictInput {
   exploitPath?: string;
   /** Named ground for a refutation (see BROCARDS). Ignored on other verdicts. */
   brocard?: Brocard;
+  /** The impact the adjudicator actually demonstrated, on a `supported` verdict.
+   *  It can only LOWER the engine's severity — see `applyVerdicts`. */
+  severity?: Severity;
 }
 
 /**
@@ -227,6 +231,8 @@ export function renderWorklistMd(items: VerifyItem[], context?: string, counts?:
   L.push(`\`supported\` · \`partial\` · \`unsupported\` · \`refuted\` (+ a short note, and an`);
   L.push(`\`exploitPath\` when supported). Save as verdicts.json (array of`);
   L.push(`{id, verdict, note, exploitPath, brocard}) and run \`ultrasec verify --apply verdicts.json\`.`);
+  L.push(`A \`partial\`/\`unsupported\` note names the fact still missing; an optional \`severity\``);
+  L.push(`on \`supported\` lowers the rating to the impact you demonstrated, never raises it.`);
   L.push("");
   L.push(`> Be skeptical, but do NOT dismiss a high/critical finding unless you can`);
   L.push(`> positively **refute** it. Uncertain ⇒ leave it for a human.`);
@@ -285,6 +291,11 @@ export interface ApplyResult {
    * under `--strict`.
    */
   reVerdicted: { id: string; from: Verdict | undefined; to: Verdict; wasStatus: Status }[];
+  /** `supported` rows that carried no `exploitPath` (sorted): confirmed with no
+   *  attacker scenario. Reported always, failing under `--strict`. */
+  noScenario: string[];
+  /** Confirmed findings whose severity the verdict lowered to the demonstrated impact. */
+  lowered: { id: string; from: Severity; to: Severity }[];
 }
 
 /** Critical/high — the tier the conservative policy refuses to auto-dismiss on
@@ -323,6 +334,8 @@ export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): Apply
     applied = 0;
   const keptForHuman: ApplyResult["keptForHuman"] = [];
   const reVerdicted: ApplyResult["reVerdicted"] = [];
+  const noScenario: string[] = [];
+  const lowered: ApplyResult["lowered"] = [];
 
   const findings = dossier.findings.map((f) => {
     const v = byId.get(f.id);
@@ -347,12 +360,24 @@ export function applyVerdicts(dossier: Dossier, verdicts: VerdictInput[]): Apply
     if (v.exploitPath) next.exploitPath = redactSecrets(v.exploitPath);
     // Only meaningful on a refutation: it names the ground the dismissal stands on.
     if (v.brocard && v.verdict === "refuted") next.brocard = v.brocard;
+    if (v.verdict === "supported" && !v.exploitPath?.trim() && !f.exploitPath) noScenario.push(f.id);
+    // Severity never exceeds the impact demonstrated. A verdict may LOWER it on a
+    // confirmation, never raise it, and never touch a needs-human: `isHigh` is
+    // what keeps an uncertain high finding in front of a human, and a verifier
+    // that could not confirm it has no demonstrated impact to cap it at.
+    if (v.severity && v.verdict === "supported" && severityRank(v.severity) > severityRank(f.severity)) {
+      lowered.push({ id: f.id, from: f.severity, to: v.severity });
+      next.severity = v.severity;
+      next.demonstratedSeverity = v.severity;
+    }
     if (v.note) next.message = withStageNote(f.message, "Verdict", v.verdict, v.note);
     return next;
   });
 
   reVerdicted.sort((a, b) => byStr(a.id, b.id));
-  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored, reVerdicted };
+  noScenario.sort(byStr);
+  lowered.sort((a, b) => byStr(a.id, b.id));
+  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored, reVerdicted, noScenario, lowered };
 }
 
 /**
@@ -374,6 +399,8 @@ export function parseVerdicts(raw: string): ParseResult<VerdictInput> {
       // Unrecognized names are dropped rather than rejected: a mistyped ground
       // must not cost the whole fold, and the missing-ground report will show it.
       brocard: (BROCARDS as readonly string[]).includes(v.brocard as string) ? (v.brocard as Brocard) : undefined,
+      // Same leniency: an unknown severity is dropped, leaving the engine's.
+      severity: (SEVERITIES as readonly string[]).includes(v.severity as string) ? (v.severity as Severity) : undefined,
     }),
   });
 }

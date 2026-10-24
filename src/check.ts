@@ -2,7 +2,7 @@ import { existsSync, openSync, readSync, closeSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
 import type { Dossier } from "./store.js";
 import { SEVERITIES, type CodeLoc, type Finding, type Severity } from "./types.js";
-import { byStr } from "./util.js";
+import { byStr, hasStageNote } from "./util.js";
 import { lineCountAtCommit } from "./git.js";
 import { contradictedClaims, extractNegativeClaims, loadContextDoc, type ContradictedClaim } from "./context.js";
 import { surfaceOf, unadjudicatedCode } from "./surface.js";
@@ -36,6 +36,10 @@ export interface CheckResult {
   openAdvisories: number;
   /** High/critical dismissals that name no ground for the refutation (see BROCARDS). */
   unarguedDismissals: string[];
+  /** Confirmed findings with no attacker scenario (`exploitPath`). Reported, never a failure. */
+  unscenarioedConfirmations: string[];
+  /** needs-human findings whose verdict names no unresolved fact (no note). Reported, never a failure. */
+  unexplainedNeedsHuman: string[];
   /** Citations resolved against a HISTORICAL commit rather than HEAD — a secret
    *  in a file that has since been deleted. Reported, never a failure. */
   historical: number;
@@ -225,6 +229,16 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     .filter((f) => f.status === "dismissed" && (f.severity === "critical" || f.severity === "high") && !f.brocard)
     .map((f) => f.id)
     .sort(byStr);
+  // The other two halves of a verdict that can be reviewed: a confirmation says
+  // who does what to whom, a needs-human says which fact is still missing.
+  const unscenarioed = findings
+    .filter((f) => f.status === "confirmed" && !f.exploitPath?.trim())
+    .map((f) => f.id)
+    .sort(byStr);
+  const unexplained = findings
+    .filter((f) => f.status === "needs-human" && !hasStageNote(f.message ?? ""))
+    .map((f) => f.id)
+    .sort(byStr);
 
   const messages: string[] = [];
   let ok = true;
@@ -260,6 +274,15 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     if (unargued.length > 0)
       messages.push(
         `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", …" : ""}) — set the verdict's \`brocard\` field so the refutation can be reviewed. A prose \`note\` is not read as a ground, however carefully argued: references/dismissal-brocards.md.`,
+      );
+    // Same contract, same reason to report rather than fail.
+    if (unscenarioed.length > 0)
+      messages.push(
+        `${unscenarioed.length} confirmed finding(s) carry no attacker scenario (${unscenarioed.slice(0, 5).join(", ")}${unscenarioed.length > 5 ? ", …" : ""}) — set the verdict's \`exploitPath\` (who · what they send · what they get).`,
+      );
+    if (unexplained.length > 0)
+      messages.push(
+        `${unexplained.length} needs-human finding(s) name no missing fact (${unexplained.slice(0, 5).join(", ")}${unexplained.length > 5 ? ", …" : ""}) — the verdict's \`note\` says what a human must establish, and how to check it safely.`,
       );
   }
   // CONTEXT.md's negations, confronted with the tree. Presence-gated: no run
@@ -297,6 +320,8 @@ export function check(dossier: Dossier, opts: CheckOptions = {}): CheckResult {
     gated: findings.length,
     openAdvisories,
     unarguedDismissals: unargued,
+    unscenarioedConfirmations: unscenarioed,
+    unexplainedNeedsHuman: unexplained,
     historical,
     contradictions: claims,
     messages,

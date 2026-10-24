@@ -130,7 +130,9 @@ COMMANDS
              existing findings' sources). --lens sharp-edges|access-control|idor|
              crypto|privacy|cloud asks a DIFFERENT question of the same regions
              (access-control: IDOR/BOLA/BFLA — the guard vs. the object returned;
-             cloud: SSRF-to-metadata, over-broad IAM, container escape).
+             cloud: SSRF-to-metadata, over-broad IAM, container escape). Domain
+             lenses: native|ai|authn|browser|messaging|dos|lifecycle|local-ipc|
+             release — one per boundary taint never sees.
              Unenforced
              assumptions from 'assumptions' are folded into the region prompts.
              Flags: --run · --repo · --apply · --lens ·

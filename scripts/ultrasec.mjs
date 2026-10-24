@@ -28519,6 +28519,9 @@ function withStageNote(message, stage, label2, note) {
 
 ${stage} (${label2})${safe ? `: ${safe}` : ""}`;
 }
+function hasStageNote(message) {
+  return message.split(STAGE_SPLIT).slice(1).some((part) => /^\S[^\n]*?\): \S/.test(part) || /^Triage: \S/.test(part));
+}
 function carryStageNotes(fresh3, prior) {
   const base = fresh3.split(STAGE_SPLIT)[0] ?? "";
   const blocks = prior.split(STAGE_SPLIT).slice(1).map((block) => redactSecrets(block));
@@ -33548,6 +33551,10 @@ function preserveAdjudication(next, old) {
   };
   if (old.brocard) merged.brocard = old.brocard;
   if (old.fixedIn) merged.fixedIn = old.fixedIn;
+  if (old.demonstratedSeverity) {
+    merged.demonstratedSeverity = old.demonstratedSeverity;
+    if (severityRank(old.demonstratedSeverity) > severityRank(merged.severity)) merged.severity = old.demonstratedSeverity;
+  }
   if (!next.provenance && old.provenance) merged.provenance = old.provenance;
   return merged;
 }
@@ -39102,6 +39109,8 @@ function check(dossier, opts = {}) {
   const openAdvisories = findings.filter((f) => f.status === "open" && surfaceOf(f) === "deps").length;
   const openBelow = findings.filter((f) => f.status === "open" && surfaceOf(f) !== "deps").length - unadjudicatedCode(findings).length;
   const unargued = findings.filter((f) => f.status === "dismissed" && (f.severity === "critical" || f.severity === "high") && !f.brocard).map((f) => f.id).sort(byStr);
+  const unscenarioed = findings.filter((f) => f.status === "confirmed" && !f.exploitPath?.trim()).map((f) => f.id).sort(byStr);
+  const unexplained = findings.filter((f) => f.status === "needs-human" && !hasStageNote(f.message ?? "")).map((f) => f.id).sort(byStr);
   const messages = [];
   let ok = true;
   if (dossier.manifest.scannerPolicy && !dossier.manifest.scannerPolicy.complete) {
@@ -39128,6 +39137,14 @@ function check(dossier, opts = {}) {
       messages.push(
         `${unargued.length} high/critical dismissal(s) name no ground (${unargued.slice(0, 5).join(", ")}${unargued.length > 5 ? ", \u2026" : ""}) \u2014 set the verdict's \`brocard\` field so the refutation can be reviewed. A prose \`note\` is not read as a ground, however carefully argued: references/dismissal-brocards.md.`
       );
+    if (unscenarioed.length > 0)
+      messages.push(
+        `${unscenarioed.length} confirmed finding(s) carry no attacker scenario (${unscenarioed.slice(0, 5).join(", ")}${unscenarioed.length > 5 ? ", \u2026" : ""}) \u2014 set the verdict's \`exploitPath\` (who \xB7 what they send \xB7 what they get).`
+      );
+    if (unexplained.length > 0)
+      messages.push(
+        `${unexplained.length} needs-human finding(s) name no missing fact (${unexplained.slice(0, 5).join(", ")}${unexplained.length > 5 ? ", \u2026" : ""}) \u2014 the verdict's \`note\` says what a human must establish, and how to check it safely.`
+      );
   }
   const claims = opts.run ? contradicted(repo, opts.run) : [];
   if (claims.length && opts.semantic) {
@@ -39148,6 +39165,8 @@ function check(dossier, opts = {}) {
     gated: findings.length,
     openAdvisories,
     unarguedDismissals: unargued,
+    unscenarioedConfirmations: unscenarioed,
+    unexplainedNeedsHuman: unexplained,
     historical,
     contradictions: claims,
     messages
@@ -39615,7 +39634,19 @@ var LENSES = {
   idor: ACCESS_CONTROL_LENS,
   crypto: "Crypto-specific: secrets compared with == or equals() rather than a constant-time helper; key material in a plain buffer never zeroed; a nonce or IV reused or derived from a counter the attacker sees; an algorithm read from attacker-supplied data. See references/attack-classes.md \xA7Cryptography.",
   privacy: "Personal data: where it goes (a third-party processor, a log, an analytics beacon), how long it stays, and whether a control named 'anonymisation' actually prevents re-identification. See references/privacy-and-data-protection.md.",
-  cloud: "Cloud / container reachability, the half the IaC scan can't decide: can any user-controlled URL reach the instance-metadata endpoint (169.254.169.254 / metadata.google.internal) \u2014 SSRF to short-lived credentials? Is a wildcard/over-broad IAM role actually assumed on this path? Are instance/CI secrets read from env or a mounted file that a compromised container can exfiltrate? Does a container escape (privileged/hostPath/hostNetwork) turn a bug into node takeover? See references/frameworks.md \xA7Cloud."
+  cloud: "Cloud / container reachability, the half the IaC scan can't decide: can any user-controlled URL reach the instance-metadata endpoint (169.254.169.254 / metadata.google.internal) \u2014 SSRF to short-lived credentials? Is a wildcard/over-broad IAM role actually assumed on this path? Are instance/CI secrets read from env or a mounted file that a compromised container can exfiltrate? Does a container escape (privileged/hostPath/hostNetwork) turn a bug into node takeover? Beyond the scan: does the app authorize on cloud metadata, labels or namespaces a tenant can set? Is a presigned/signed URL scoped (method, key, expiry, content type)? Is an event source verified (signature, account, topic) before its envelope is trusted? Does credential renewal fall back to a broader identity? Does the edge enforce what the origin assumes? See references/frameworks.md \xA7Cloud and references/supply-chain.md \xA7IaC and cloud.",
+  // The domain lenses: one per class of boundary taint never sees. Each string is
+  // the reference's discipline condensed — pick one because the boundary EXISTS
+  // in these files, not because a library name appears.
+  native: "Native code, memory safety and privileged binaries. Follow every length, index and count from the input to the allocation and the access: signedness, truncation, unit confusion (bytes vs elements), off-by-one at the boundary. Track ownership across FFI, callbacks and error paths: use-after-free, double free, uninitialized reads, type confusion on a tagged union, refcount races. Check loader search order, signature-to-mapped-image gaps, and privileged dispatch (ioctl/syscall/XPC handlers) that copies user memory or trusts a caller-supplied size. A crash is not code execution: rate what you observed under a sanitizer, not what an exploit chain might reach. See references/memory-safety-and-native.md.",
+  ai: "LLM, agent and tool surfaces. Prompt injection alone is not a finding: require a code-level boundary failure \u2014 attacker-written content (retrieved document, memory, tool or MCP response, tool description) reaching ANOTHER principal's context, invoking authority the requester lacks, reading data they cannot, or driving a sink they cannot reach directly. Treat model output and tool arguments as untrusted input to the handler: validate and authorize there. Check that the effective identity is the requester's, not a broad service credential; that irreversible actions are bound to an explicit approval of THAT action; that memory and caches are scoped per principal; that sub-agents inherit no more than they need; that loops and delegation are budgeted. A guardrail prompt is not a control. See references/ai-and-agents.md.",
+  authn: "Authentication protocols, not authorization. Sessions: fixation, rotation on login and privilege change, invalidation on logout/password change, cookie Domain/Path scope against sibling subdomains. Tokens: JWT algorithm and key selection, audience/issuer/expiry, OAuth redirect_uri matching, state/PKCE, OIDC nonce, SAML signature wrapping and assertion binding. MFA: can a factor be enrolled or removed without step-up, can the flow be downgraded, is step-up bound to the action it protects? Passkeys: RP ID, origin and challenge checked server-side. Account linking by unverified email, recovery flows that bypass every factor, API keys used beyond their scope or publishable keys accepted as secret ones, mTLS identity read from a header the edge may not strip. See references/attack-classes.md (Authentication, JWT, MFA/passkeys, API keys/mTLS, HTTP framing).",
+  browser: "Client-side and browser trust. Trace attacker-reachable values (URL fragment and query, postMessage data, storage, WebSocket frames, server-rendered JSON) into DOM sinks \u2014 innerHTML, script src, javascript: URLs, framework escape hatches. Check postMessage origin checks and target origins, cross-site WebSocket handshakes without an Origin check, credentialed CORS reflecting the origin, prototype-pollution sources with a reachable gadget, DOM clobbering of configuration globals, service-worker scope and cache keys, auth state surviving logout in storage or other tabs, window.opener and navigation to attacker URLs, framing of state-changing UI, and cross-site leaks through timing, errors or frame counts. Prove it in a local browser, never against a shared deployment. See references/client-side.md.",
+  messaging: "Protocols, RPC, queues and streams. Ask whether every hop agrees on the message: canonicalization and duplicate-field handling, enum/union defaults on unknown values, envelope claims (tenant, user, type) trusted over the authenticated channel. Does every RPC method and streamed item pass the same interceptor/authz, or only the first? Is the peer's transport identity mapped to the principal acting? Can a producer write to a topic that acts as a control plane, or read a dead-letter queue full of other tenants' payloads? Check duplicate and out-of-order delivery, ack-before-commit, and correlation ids an attacker can collide. GraphQL and WebSocket: authorize per resolver and per message, not just at connect. See references/protocols-and-messaging.md.",
+  dos: "Availability and resource exhaustion \u2014 the CHEAP-for-attacker, EXPENSIVE-for-service asymmetry, not volume. Look for superlinear work on attacker input (regex, nested parsing, sorting, similarity), decompression and expansion ratios, query amplification (unbounded pagination, N+1, GraphQL depth), unbounded buffers, maps keyed by attacker values, file-descriptor or connection leaks on error paths, work that keeps running after the client cancels, expensive work before authentication, quotas keyed or reset wrongly, one tenant starving a shared worker pool, a poison message that blocks a queue, and retry storms. One unauthenticated request that stops a shared service is high; an effect that needs sustained traffic is low. See references/availability-and-resource-exhaustion.md.",
+  lifecycle: "Data isolation across the whole lifecycle, not just the request. For every derived copy \u2014 cache, search index, export, report, log, analytics, backup, replica \u2014 does the same tenant/object authorization apply as on the primary read? Check composite keys and cache keys that omit the tenant, row-level policy bypassed by an unscoped client, signed blob references that outlive or exceed the grant, aggregate endpoints that work as an oracle, imports and restores that accept another tenant's ids, migrations whose defaults widen access, soft-deleted rows still served, authorization copied into a derived record and never revoked, and retention that outlives deletion. See references/data-isolation-and-lifecycle.md.",
+  "local-ipc": "Desktop, mobile and local IPC. Deep links and URL schemes: is the handler's input validated, and can a link trigger an action without the user's intent? Exported components, intents, XPC/D-Bus/Binder/named pipes/local sockets: is the PEER authenticated (code signature, UID, package), or only the claimed identity in the message? Webview bridges: which origins can reach the JS interface, can navigation leave the allow-list, is file access on? Privileged helpers and installers: do they trust paths, environment or a caller-writable directory? Local files: TOCTOU between check and use, world-readable secrets, credentials outside the platform keystore, data leaking across account switches. See references/desktop-mobile-and-ipc.md.",
+  release: "Release, update and plugin integrity in the APPLICATION's own code. An updater: is metadata signed, fresh and monotonic (no rollback or freeze), is the downloaded artifact verified against a pinned identity before it runs? Signing: is a signature checked against the EXPECTED signer and digest, or merely present? Plugins and extensions: does loading one expand its trust beyond what was granted \u2014 filesystem, network, other plugins' data? Build and codegen: are generated sources, build contexts and cached artifacts produced from inputs a lower-trust party controls? The CI half of this lives in references/agentic-ci.md; the rest in references/supply-chain.md (Release, signing, update and plugin integrity)."
 };
 function buildInvestigateWorklist(surface, graph, assumptionLeads = [], lens, classHunts = []) {
   const filesByRegion = /* @__PURE__ */ new Map();
@@ -44165,6 +44196,8 @@ function renderWorklistMd(items, context, counts) {
   L.push(`\`supported\` \xB7 \`partial\` \xB7 \`unsupported\` \xB7 \`refuted\` (+ a short note, and an`);
   L.push(`\`exploitPath\` when supported). Save as verdicts.json (array of`);
   L.push(`{id, verdict, note, exploitPath, brocard}) and run \`ultrasec verify --apply verdicts.json\`.`);
+  L.push(`A \`partial\`/\`unsupported\` note names the fact still missing; an optional \`severity\``);
+  L.push(`on \`supported\` lowers the rating to the impact you demonstrated, never raises it.`);
   L.push("");
   L.push(`> Be skeptical, but do NOT dismiss a high/critical finding unless you can`);
   L.push(`> positively **refute** it. Uncertain \u21D2 leave it for a human.`);
@@ -44227,6 +44260,8 @@ function applyVerdicts(dossier, verdicts) {
   let confirmed = 0, dismissed = 0, needsHuman = 0, applied = 0;
   const keptForHuman = [];
   const reVerdicted = [];
+  const noScenario = [];
+  const lowered = [];
   const findings = dossier.findings.map((f) => {
     const v = byId.get(f.id);
     if (!v) return f;
@@ -44245,11 +44280,19 @@ function applyVerdicts(dossier, verdicts) {
     };
     if (v.exploitPath) next.exploitPath = redactSecrets(v.exploitPath);
     if (v.brocard && v.verdict === "refuted") next.brocard = v.brocard;
+    if (v.verdict === "supported" && !v.exploitPath?.trim() && !f.exploitPath) noScenario.push(f.id);
+    if (v.severity && v.verdict === "supported" && severityRank(v.severity) > severityRank(f.severity)) {
+      lowered.push({ id: f.id, from: f.severity, to: v.severity });
+      next.severity = v.severity;
+      next.demonstratedSeverity = v.severity;
+    }
     if (v.note) next.message = withStageNote(f.message, "Verdict", v.verdict, v.note);
     return next;
   });
   reVerdicted.sort((a, b) => byStr(a.id, b.id));
-  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored, reVerdicted };
+  noScenario.sort(byStr);
+  lowered.sort((a, b) => byStr(a.id, b.id));
+  return { findings, applied, confirmed, dismissed, needsHuman, keptForHuman, ignored, reVerdicted, noScenario, lowered };
 }
 function parseVerdicts(raw) {
   return parseIdVerdictRows(raw, {
@@ -44263,7 +44306,9 @@ function parseVerdicts(raw) {
       exploitPath: v.exploitPath,
       // Unrecognized names are dropped rather than rejected: a mistyped ground
       // must not cost the whole fold, and the missing-ground report will show it.
-      brocard: BROCARDS.includes(v.brocard) ? v.brocard : void 0
+      brocard: BROCARDS.includes(v.brocard) ? v.brocard : void 0,
+      // Same leniency: an unknown severity is dropped, leaving the engine's.
+      severity: SEVERITIES2.includes(v.severity) ? v.severity : void 0
     })
   });
 }
@@ -44626,7 +44671,11 @@ var VERDICT_SCHEMA = {
           verdict: { enum: [...VERDICTS] },
           note: { type: "string", description: "one line grounded in the source you read, citing [file:line]" },
           exploitPath: { type: "string", description: "REQUIRED for supported: who \xB7 what they send \xB7 what they get" },
-          brocard: { enum: [...BROCARDS], description: "REQUIRED for refuted: the named ground of the dismissal (references/dismissal-brocards.md)" }
+          brocard: { enum: [...BROCARDS], description: "REQUIRED for refuted: the named ground of the dismissal (references/dismissal-brocards.md)" },
+          severity: {
+            enum: [...SEVERITIES2],
+            description: "optional, supported only: the impact you demonstrated when LOWER than the finding's severity (never raises it)"
+          }
         }
       }
     }
@@ -44838,7 +44887,8 @@ For EACH family:
    - \`partial\` \u2014 a real issue, but weaker or narrower than claimed.
    - \`unsupported\` \u2014 the evidence does not establish the claim.
    - \`refuted\` \u2014 the source positively contradicts the claim (name the guard/sanitizer \`[file:line]\`, and the ground in \`brocard\` \u2014 exactly one of ${BROCARDS.map((b) => `\`${b}\``).join(" \xB7 ")}; the reasoning goes in \`note\`).
-   Default to the harsher verdict ONLY when you can disprove it; otherwise mark \`partial\`/leave it for a human.
+   Default to the harsher verdict ONLY when you can disprove it; otherwise mark \`partial\`/leave it for a human \u2014 and say in \`note\` the exact fact still missing (a deployment, provider or proxy setting the repo does not show) and a safe way to check it.
+   On \`supported\`, set \`severity\` only if the impact you demonstrated is LOWER than the finding's \u2014 it never raises one.
 4. Be conservative. The fold never auto-dismisses a high/critical finding on anything short of an explicit \`refuted\` \u2014 an uncertain high-severity finding stays **needs-human**, never dropped. Every claim in your \`note\` must cite resolvable \`[file:line]\` hops you actually read.
 
 Return (structured output): \`{ "verdicts": [{ "id", "verdict", "note", "exploitPath", "brocard" }] }\` \u2014 one row per id in your prompt, family members included.
@@ -45490,13 +45540,15 @@ function applyMode(run2, dossier, applyPath, args2) {
           keptForHuman: res.keptForHuman,
           ignored: res.ignored,
           reVerdicted: res.reVerdicted,
+          noScenario: res.noScenario,
+          lowered: res.lowered,
           dropped: parsed2.dropped
         },
         null,
         2
       )
     );
-    return strict && (parsed2.dropped.length > 0 || res.reVerdicted.length > 0 && !reVerdictOk) ? 1 : 0;
+    return strict && (parsed2.dropped.length > 0 || res.reVerdicted.length > 0 && !reVerdictOk || res.noScenario.length > 0) ? 1 : 0;
   }
   println(`ultrasec verify --apply \u2192 updated ${join71(run2, "findings.json")}`);
   println(`  applied ${res.applied} verdict(s): ${res.confirmed} confirmed \xB7 ${res.dismissed} dismissed \xB7 ${res.needsHuman} needs-human`);
@@ -45512,6 +45564,19 @@ function applyMode(run2, dossier, applyPath, args2) {
     println(`  \u26A0 ${res.reVerdicted.length} verdict(s) CHANGED an already-adjudicated finding:`);
     for (const line2 of linesCapped(res.reVerdicted.map((r) => `    - ${r.id} [${r.wasStatus}] ${r.from ?? "(none)"} \u2192 ${r.to}`))) println(line2);
     println(`    Re-verifying an escalation is legitimate; doing it by accident is not. Pass --re-verdict to accept under --strict.`);
+  }
+  if (res.lowered.length)
+    println(
+      `  ${listCapped(
+        `${res.lowered.length} severity(ies) lowered to the demonstrated impact`,
+        res.lowered.map((l) => `${l.id} ${l.from} \u2192 ${l.to}`)
+      )}`
+    );
+  if (res.noScenario.length)
+    println(`  \u26A0 ${listCapped(`${res.noScenario.length} supported verdict(s) without an exploitPath (who \xB7 what they send \xB7 what they get)`, res.noScenario)}`);
+  if (strict && res.noScenario.length > 0) {
+    eprintln(`ultrasec verify --apply: ${res.noScenario.length} supported verdict(s) carry no exploitPath under --strict \u2014 add the attacker scenario.`);
+    return 1;
   }
   if (strict && res.reVerdicted.length > 0 && !reVerdictOk) {
     eprintln(
@@ -54101,7 +54166,9 @@ COMMANDS
              existing findings' sources). --lens sharp-edges|access-control|idor|
              crypto|privacy|cloud asks a DIFFERENT question of the same regions
              (access-control: IDOR/BOLA/BFLA \u2014 the guard vs. the object returned;
-             cloud: SSRF-to-metadata, over-broad IAM, container escape).
+             cloud: SSRF-to-metadata, over-broad IAM, container escape). Domain
+             lenses: native|ai|authn|browser|messaging|dos|lifecycle|local-ipc|
+             release \u2014 one per boundary taint never sees.
              Unenforced
              assumptions from 'assumptions' are folded into the region prompts.
              Flags: --run \xB7 --repo \xB7 --apply \xB7 --lens \xB7
