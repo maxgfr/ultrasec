@@ -5,6 +5,8 @@ call and the false-positive call are yours.** A short report with 3 real finding
 worth more than a long one with 30 theoretical ones. This is the discipline that keeps
 ultrasec's output trusted.
 
+> Parts adapted from Cloudflare's [security-audit skill](https://github.com/cloudflare/security-audit-skill) (MIT).
+
 ## Only report what you can exploit
 
 Every finding needs a concrete attacker scenario: **who** is the attacker, **what** do
@@ -20,6 +22,33 @@ not a vulnerability — it gets no severity. Report it in the report's hardening
 section (the `hardeningNotes` narrative field), never inflated into a finding. "Missing
 a second validation where the query builder already parameterizes" is hardening, not
 HIGH.
+
+## Require a boundary and a result
+
+"Who sends what, gets what" is necessary, not sufficient: the attacker's gain has to cross a line
+the system draws. For every candidate name the lower-trust principal, the input or action they
+control, the intended control, the boundary crossed, the affected principal or resource, and the
+concrete result ([hunting-heuristics.md](hunting-heuristics.md) §Work from a concrete invariant).
+A missing best practice, a guessed deployment behavior, a parser crash with no consequence, or an
+effect on the attacker's own data and session fills fewer than six slots — it is not a finding.
+
+## Respect source visibility
+
+Reverse proxies, CDN rules, cloud and provider settings, IdP policy, broker ACLs, branch
+protection and the live topology are real controls — and usually absent from the repository. When
+one of them decides a candidate, **assume it neither present nor absent**: refuting because "the
+gateway surely rate-limits" and confirming because "nothing here does" are the same error. Leave it
+`needs-human` with a `note` naming the exact missing fact and how its owner can observe it ("is
+`/internal/*` reachable from the public load balancer?"), and list it among `CONTEXT.md`'s open
+questions ([context-playbook.md](context-playbook.md)).
+
+## Separate priority from certainty
+
+`needs-human` is a **specific, source-grounded hypothesis blocked on one fact** — not a
+low-confidence `confirmed`, and not a parking place for a vague worry. Its severity ranks where a
+human looks first; it is not a claim of demonstrated impact. A candidate the code disproves is
+`refuted` with its brocard, not `needs-human`; a candidate you could settle by reading more code is
+not blocked yet.
 
 ## Calibrate against a baseline (do this in `context`)
 
@@ -49,18 +78,31 @@ If you can't describe the concrete damage, the severity is lower than you think.
 
 - **CRITICAL** — unauthenticated RCE, full DB dump, admin takeover without credentials.
 - **HIGH** — authenticated RCE, SQLi with data exfiltration, stored XSS firing for all
-  users, auth bypass. Also any finding where an **explicit security boundary is defeated**:
-  a user performs an action the system gates behind a higher role, with real consequences.
+  users, auth bypass, cross-tenant read or write. Also any finding where an **explicit security
+  boundary is defeated**: a user performs an action the system gates behind a higher role, with
+  real consequences — and **one unauthenticated input that stops a shared service** (a single
+  request that crashes or wedges the process every tenant uses).
 - **MEDIUM** — targeted XSS needing specific conditions, CSRF with meaningful state change,
   disclosure of secrets/credentials. Also business-logic bypasses with real but limited
   blast radius (requires auth, or confined to the attacker's own data, or needs uncommon
   conditions).
-- **LOW** — disclosure of non-secret data, DoS needing sustained effort, hardening gaps.
+- **LOW** — disclosure of non-secret data, DoS needing sustained effort (an effect that only
+  appears under sustained request volume), hardening gaps.
+- **INFORMATIONAL** — confirmed, but the impact on its own is minimal; it matters mainly as a
+  prerequisite inside a larger chain (a version banner, an internal hostname, a user-id oracle).
+  Report it in the chain's finding, or alone as `info` — never rounded up to LOW.
 
-**HIGH vs MEDIUM for business logic:** does it **defeat an explicit security boundary**?
-A user doing what the system explicitly gates behind a higher role = HIGH. A data
-inconsistency, or a bypass that itself requires privileged access, or limited blast
-radius = MEDIUM.
+**HIGH vs MEDIUM:** does the demonstrated result **fully defeat** an explicit control for an action
+with real consequences, or only **weaken** it? Defeat = HIGH; weaken = MEDIUM. For business logic:
+a user doing what the system explicitly gates behind a higher role = HIGH; a data inconsistency, a
+bypass that itself requires privileged access, or limited blast radius = MEDIUM. If you cannot
+state the concrete damage, it is lower than it feels.
+
+**Severity never exceeds demonstrated impact.** Rate what the exploit path showed, not what the
+class can do in the worst case. A verifier who finds the impact smaller than the candidate's label
+can say so with the verdict's optional `severity` field — **lower-only**: a higher value is
+ignored, and so is any value on a verdict that lands `needs-human` (field reference:
+[schemas.md](schemas.md) §`VERIFY.todo.json` → `verdicts.json`).
 
 > This rubric calibrates *your* judgement; it never overrides ultrasec's conservative
 > gate. An uncertain high/critical finding stays **needs-human** — `verify`/`revalidate`
@@ -176,6 +218,16 @@ like a vulnerability in production.
 11. **Reporting a degraded run as a complete one.** If `manifest.extraction.ast` is `false`,
     `truncation` is non-zero, or `toolStatus` shows scanners skipped, the audit covered less
     than it looks like. Say so — it's the same contract as never dropping a finding silently.
+12. **Escalating the effect past what was shown.** A crash is not RCE, ordinary load is not a
+    shared-service DoS, and a same-principal action is not privilege gain. Rate the observed
+    effect; name the missing step if you believe in a bigger one.
+13. **Letting prior findings steer the hunt.** Confirmed findings from an earlier pass are
+    exclusions (don't re-report the same root cause), not exemplars. A hunter shown "here's what we
+    found last time" finds that shape again and stops looking for the others.
+14. **A `confirmed` with no exploit path.** Without `exploitPath` there is no evidence the claim was
+    tested, only believed. `check --semantic` flags it.
+15. **A `needs-human` with no note naming the missing fact.** It hands the reader a job without
+    saying what to look at, and nobody can ever close it. `check --semantic` flags it.
 
 ## Reporting completeness
 

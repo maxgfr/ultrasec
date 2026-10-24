@@ -30,6 +30,30 @@ Regions are ranked by attack-surface score, but **override that with judgment**:
 auth/payments module with three sinks outranks a logging directory with thirty. Weight toward
 crown-jewel data, internet-exposed entry points, recent churn, and code with no CODEOWNER.
 
+`--lens <name>` asks a **different question of the same regions**. Pick a lens because the trust
+boundary it covers exists in this repository — found in `CONTEXT.md`, `map` or the code — not
+because a library name appears in a manifest:
+
+| lens | the boundary it reads | method |
+|---|---|---|
+| `native` | memory safety, FFI, unsafe blocks, native parsers | [memory-safety-and-native.md](memory-safety-and-native.md) |
+| `ai` | model input/output, tool calls, agent permissions, RAG | [ai-and-agents.md](ai-and-agents.md) |
+| `authn` | login, sessions, tokens, MFA, recovery, SSO | [attack-classes.md](attack-classes.md) |
+| `browser` | DOM sinks, postMessage, CSP, service workers, extensions | [client-side.md](client-side.md) |
+| `messaging` | RPC, queues, WebSocket, webhooks, protocol parsers | [protocols-and-messaging.md](protocols-and-messaging.md) |
+| `dos` | unbounded work, amplification, shared-resource exhaustion | [availability-and-resource-exhaustion.md](availability-and-resource-exhaustion.md) |
+| `lifecycle` | tenant isolation in stores and derived copies, retention, deletion | [data-isolation-and-lifecycle.md](data-isolation-and-lifecycle.md) |
+| `local-ipc` | desktop/mobile IPC, deep links, webviews, local sockets | [desktop-mobile-and-ipc.md](desktop-mobile-and-ipc.md) |
+| `release` | updaters, plugin loaders, signing and provenance checks | [supply-chain.md](supply-chain.md) |
+| `sharp-edges` | APIs whose obvious use is the unsafe one | [sharp-edges.md](sharp-edges.md) |
+| `access-control` / `idor` | the guard vs. the object returned (IDOR/BOLA/BFLA) | [access-control.md](access-control.md) |
+| `crypto` | keys, hashing, randomness, comparisons | [attack-classes.md](attack-classes.md) |
+| `privacy` | personal-data flows, minimization, exposure | [privacy-and-data-protection.md](privacy-and-data-protection.md) |
+| `cloud` | SSRF-to-metadata, IAM, workload identity, container escape | [frameworks.md](frameworks.md) |
+
+A lens with no matching boundary costs a wave and returns impressions; a boundary with no lens
+still gets hunted from the region prompt.
+
 For each region, read the real code and look for what the engine can't. The mechanism-level
 method per class — what to grep, how to prove it, how to rate it, what turns out to be nothing —
 is [attack-classes.md](attack-classes.md); the lenses to apply before you know the class are in

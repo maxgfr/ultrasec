@@ -28,7 +28,9 @@ flows are real and exploitable, find the subtle bugs the tools miss, and verify.
 >    Uncertain ⇒ `needs-human`. Aggressive auto-suppression discards real bugs.
 > 4. **Use the tools, then go beyond them.** Run the installed scanners (`tools`), triage their
 >    output, and add what only semantic reasoning finds — authz/IDOR, business logic, auth,
->    crypto, races: [references/attack-classes.md](references/attack-classes.md). Personal data
+>    crypto, races: [references/attack-classes.md](references/attack-classes.md); native, AI,
+>    browser, messaging, DoS, data lifecycle and local IPC each have a reference and an
+>    `investigate --lens`. Personal data
 >    asks a different question — where it goes, how long it stays:
 >    [references/privacy-and-data-protection.md](references/privacy-and-data-protection.md).
 > 5. **Only report what you can exploit.** Every finding needs a concrete attacker scenario
@@ -348,7 +350,15 @@ can't reach) · [access-control.md](references/access-control.md) (IDOR/BOLA/BFL
 retention, pseudonymisation) ·
 [frameworks.md](references/frameworks.md) (per-stack hiding places) ·
 [hunting-heuristics.md](references/hunting-heuristics.md) (attacker lenses + recon commands) ·
-[supply-chain.md](references/supply-chain.md) (deps, secrets, CI, IaC) ·
+[supply-chain.md](references/supply-chain.md) (deps, secrets, CI, IaC, releases) ·
+domains, each an `investigate --lens`:
+[memory-safety-and-native.md](references/memory-safety-and-native.md) ·
+[ai-and-agents.md](references/ai-and-agents.md) ·
+[client-side.md](references/client-side.md) ·
+[protocols-and-messaging.md](references/protocols-and-messaging.md) ·
+[availability-and-resource-exhaustion.md](references/availability-and-resource-exhaustion.md) ·
+[data-isolation-and-lifecycle.md](references/data-isolation-and-lifecycle.md) ·
+[desktop-mobile-and-ipc.md](references/desktop-mobile-and-ipc.md) ·
 [catalog.md](references/catalog.md) (what the engine enumerates).
 
 **Playbooks** — [audit-playbook.md](references/audit-playbook.md) (standard) ·

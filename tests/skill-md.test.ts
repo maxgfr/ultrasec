@@ -177,9 +177,15 @@ describe("SKILL.md is installable by the `skills` CLI", () => {
   //                 command nobody runs: one cheat-sheet line and one "Route by situation"
   //                 entry. The protocol, the CLI quirks and the file shapes went to
   //                 references/deep-audit-playbook.md, commands.md and schemas.md.
+  //   3380 -> 3420: seven domain references (native, AI, browser, messaging, DoS, data
+  //                 lifecycle, local IPC), adapted from Cloudflare's security-audit skill,
+  //                 each behind a new `investigate --lens`. A reference the body never routes
+  //                 to is a reference nobody opens: one clause in rule 4 and seven index links.
+  //                 The classes, the discipline and the lens list went to the references
+  //                 themselves, commands.md and investigate-playbook.md.
   it("keeps the SKILL.md body within its word budget", () => {
     const words = (match?.[2] ?? "").split(/\s+/).filter(Boolean).length;
-    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(3380);
+    expect(words, `SKILL.md body is ${words} words — move detail into references/ or raise the cap deliberately`).toBeLessThanOrEqual(3420);
   });
 
   // The engine lives at <skill-dir>/scripts/ultrasec.mjs. An installed skill sits

@@ -639,6 +639,11 @@ a release that does not exist. Write `issue 24` or `n°24`, or keep the referenc
 
 MIT
 
+The domain references (native, AI, browser, messaging, availability, data lifecycle, local IPC),
+parts of the method references and the matching `investigate --lens` domain lenses are adapted
+from Cloudflare's [security-audit skill](https://github.com/cloudflare/security-audit-skill)
+(MIT, © 2025-2026 Cloudflare, Inc.) — see [skills/ultrasec/NOTICE](skills/ultrasec/NOTICE).
+
 See [shared engine maintenance](ENGINE-MAINTENANCE.md) for pins, source adoption checks and the daily repin workflow.
 
 ## On request or explicit-only

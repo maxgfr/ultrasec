@@ -13,6 +13,8 @@ The engine stays deterministic and keyless — you supply the judgement
 supplies determinism (graph, candidate enumeration, tool runs, the worklist, the
 gate). No LLM calls and no API keys are added by the engine.
 
+> Parts adapted from Cloudflare's [security-audit skill](https://github.com/cloudflare/security-audit-skill) (MIT).
+
 > Compose the deep tier with the dedicated AI stages: `context` to prime the trust
 > model, `investigate` to systematically hunt authz/business-logic bugs per
 > attack-surface region ([investigate-playbook.md](investigate-playbook.md)), and
@@ -72,6 +74,18 @@ an **optimization, not a requirement**:
    `investigate --apply` so their citations are checked; for enumerated candidates, collect the
    verdicts for `verify --apply`.
 
+   **4b. Coverage critic.** After every hunting wave, hand one **fresh** agent — one that hunted
+   nothing — `coverage --full`, the current `INVESTIGATE.todo.json` (with what was recorded as
+   `hunted`) and the list of facets you dispatched. It reads source but proposes **coverage, not
+   findings**, and returns three lists:
+   - **missing units** — entry points, regions or classes no facet owned;
+   - **unchecked parallel paths** — the sibling handler, the other HTTP method on the same route,
+     the older API version, the background job or import path that reaches the same state change;
+   - **unjustified exclusions** — a class or region skipped with no stated reason.
+
+   Each gap you accept becomes a facet of the next wave, emitted through `investigate` like the
+   rest; a gap you reject gets a one-line reason. The critic never edits the run — you do.
+
 5. **Verify adversarially.** `verify --run <run>` emits the ONE
    `VERIFY.todo.json`; `orchestrate --run <run> --phase verify` batches its ids
    into read-only skeptic subagents (contract + workflow, emitted). Each skeptic
@@ -93,7 +107,8 @@ an **optimization, not a requirement**:
 7. **Loop until dry.** Did a facet surface a new entry point, a new sink, or a new
    sub-question? If so and you're under budget, fan those out and merge into the
    **same** run, then re-verify only the new claims. Stop when a round surfaces
-   nothing new.
+   nothing new — and only after a **final clean critic pass** (step 4b on the finished state)
+   also finds nothing new; if it finds work, that work is the next round.
 
 8. **Render & present.** `render --run <run>` → `<run>/REPORT.md` (`--html` for
    `REPORT.html`). Present the status line and dashboard, confirmed findings with exploit paths,
@@ -125,15 +140,35 @@ narrowed the repo, and reading a `dossier` packet is the unit of spend.
 
 | ask | facets | verify | loop |
 |---|---|---|---|
-| "any obvious bugs" | 3–4 classes, top-`risk` candidates only | one skeptic pass | none |
-| standard audit | every enumerated class + the 3–4 non-taint classes the app's trust model makes serious | one skeptic pass over the full worklist | one round |
-| "thorough" / "be exhaustive" | every class × every entry-point group | 3 shards, independent skeptics per finding | until dry |
+| "any obvious bugs" | 3–4 classes, top-`risk` candidates only | one skeptic pass | none — one critic pass, gaps recorded |
+| standard audit | every enumerated class + the 3–4 non-taint classes the app's trust model makes serious | one skeptic pass over the full worklist | one round + final critic |
+| "thorough" / "be exhaustive" | every class × every entry-point group | 3 shards, independent skeptics per finding | until dry, critic clean |
 
 `orchestrate` batches **8 ids per subagent**; that is the granularity to plan around. "Under
 budget" at step 7 means you can still afford a full round — a fan-out plus the merge and re-verify
 of whatever it surfaces. **"Nothing new"** means a round produced no candidate at a location you
 hadn't already adjudicated; a round that only re-derives known findings is dry even if it is
-loud. Two consecutive dry rounds is a reasonable stopping rule for an exhaustive audit.
+loud. Two consecutive dry rounds is a reasonable stopping rule for an exhaustive audit — the
+second one ending on a critic pass that accepts no new gap.
+
+The rows line up with `--budget quick|standard|thorough`, which bounds the engine (depth ×
+candidates); on the agent side each profile means:
+
+- **quick** (`--budget quick`) — one hunting wave, one critic pass whose accepted gaps are
+  *recorded* as not looked at rather than hunted, one skeptic per candidate. The report says it is
+  partial.
+- **standard** (`--budget standard`) — the loop as written: a critic after each wave, one skeptic
+  pass over the full worklist.
+- **thorough** (`--budget thorough`) — facets split per subsystem, critics until a clean pass, a
+  separate fresh skeptic for every high/critical candidate, and an independent re-verification of
+  the confirmed set before `render` — `council --phase devil`, or a fresh skeptic subagent that
+  never saw the first verdicts.
+
+Profiles change **breadth and redundancy, never the evidence bar**: the `[file:line]` gate, the
+conservative verdict policy, brocards on refutations and `check --semantic` are the same in all
+three. A **scoped** run (`--scope`, one region, a diff) or a **quick** one must present itself as
+partial coverage in the report — the profile, what was out of scope, and that the rest was not
+looked at rather than found clean.
 
 ## Second opinion from other models
 

@@ -5,6 +5,8 @@ triage, not detection, the skill: a 200-CVE list nobody acts on is worth less th
 proved matter. This file is the decision method for dependency findings and secrets, plus the
 CI/IaC classes no scanner in the belt covers well.
 
+> Parts adapted from Cloudflare's [security-audit skill](https://github.com/cloudflare/security-audit-skill) (MIT).
+
 ---
 
 ## Dependency CVEs: what to do with 200 of them
@@ -183,6 +185,55 @@ public registry, a missing scope, a registry configuration that falls back to pu
 lockfile integrity (`integrity`/hashes present and verified) and whether the private registry is
 the *only* source for internal scopes.
 
+## Release, signing, update and plugin integrity
+
+The CI section asks who can run code inside a privileged job. This one follows the artifact
+*after* the build: is what a user installs provably what the reviewed source produced? Work it
+backward — from the promoted digest or the installed update to every input, worker, cache, test
+result and authorization decision it passed through. `investigate --lens release` points the
+region worklist at updater, plugin-loader and signing code.
+
+- **Codegen and vendored provenance.** Generated clients, schemas compiled to code, vendored
+  archives, binary blobs and translation bundles ship without the review a source change gets.
+  Regenerate locally and diff against what is committed, then ask who controls the generator's
+  input.
+- **Build-context inclusion.** The build context is wider than the release: a `.dockerignore`
+  without `.env`, `.git` or `*.pem`, a `COPY . .` ahead of any exclusion, a package `files` list
+  or `MANIFEST.in` that sweeps in fixtures. A finding only once the shipped image or tarball
+  actually carries a working credential, private data or privileged config — unpack it and look.
+- **Mutable inputs.** Branches, tags, floating base-image tags, `curl | sh` tool installs,
+  unverified submodules, remote includes. It needs a lower-trust writer who can change the content
+  and a path into trusted output; a reproducible build is not an authentic one.
+- **Cache and artifact mixing across trust levels.** A fork-triggered job populates a cache key,
+  artifact or shared workspace that a release job later restores and runs or ships. Check the key
+  namespace, the producer's identity, and whether promotion re-resolves by name.
+- **Automation identity.** Job tokens, deploy keys and OIDC roles scoped wider than the operation,
+  especially when a job input picks the target. Breadth alone is a hardening note; a reachable
+  privileged action is the finding.
+- **Digest binding from build to promotion.** Test, review, signature and publication must all
+  name the *same* immutable digest. Every re-tag, repack, multi-arch merge or "promote `:latest`"
+  step is a substitution point.
+- **Signing and attestation identity policy.** "Signed" is not a control; "signed by the expected
+  identity" is. A `cosign verify` with no pinned certificate identity and OIDC issuer accepts any
+  Sigstore signer; SLSA provenance must be checked for builder, source repository, ref and
+  workflow, not merely for a valid signature. Expired or revoked keys and a missing attestation
+  must fail closed.
+- **Updater metadata.** An updater that authenticates the payload bytes but not version, channel,
+  platform, target path or expiry is open to **rollback** (serve an older, signed, vulnerable
+  release) and **freeze** (serve stale metadata forever). Look for a monotonic version check,
+  metadata expiry, metadata and payload bound to one transaction, and an atomic install.
+- **Plugin and extension trust expansion.** An extension obtaining host authority beyond its
+  declared scope, one publisher able to take over another's identifier, install or update hooks
+  running before the signature and capability checks. Installing arbitrary plugins as the same
+  user, by design, is not a boundary.
+
+Rate each with a named chain: lower-trust actor → input they control → trusted consumer → result
+(an unauthorized publication, code in a shipped artifact, a disclosed secret). Branch protection,
+environment approvals, registry settings and signing-service policy live outside the repository:
+when one is decisive, the finding is `needs-human` naming that fact
+([severity-and-discipline.md](severity-and-discipline.md)). Reproduce with a fixture repository or
+a local registry; never publish or alter a real release.
+
 ## IaC and cloud
 
 Checkov, trivy misconfig and hadolint cover the catalog; your job is to rate them against the
@@ -203,9 +254,52 @@ deployment, because these findings are the most context-dependent in the report.
 - **Dockerfiles** — secrets in `ENV`/build args baked into layers, `latest` base images, `USER`
   never dropped from root, `ADD` of a remote URL.
 
+The catalog stops at misconfigurations a rule can match. The classes below are about **who the
+deployed thing is and who can reach it**, and no checker sees them; hunt them with
+`investigate --lens cloud` (stack hiding places: [frameworks.md](frameworks.md) §Cloud /
+Kubernetes / IaC).
+
+- **Workload identity overreach** — a pod, function or node role that can act beyond its job, where
+  request input selects the target (a bucket name, an account id, a tenant). Broad policy is a
+  finding only when lower-trust input reaches the extra authority.
+- **Cross-account role confusion** — trust policies, federation and token exchange that accept a
+  claim not bound to the intended account, audience, repository or workload: a missing external
+  id, a CI OIDC trust on `repo:org/*`, a confused-deputy role.
+- **App authorization delegated to cloud metadata or labels** — the app trusts forwarded identity
+  headers, resource tags, labels or account ids it cannot prove came from the control plane or a
+  trusted proxy. Cloud IAM and application authorization are two separate checks.
+- **Management-plane reachability** — admin, debug, metrics or actuator endpoints, the kubelet, a
+  container-runtime socket or an internal API bound to every interface or published by an ingress
+  or load-balancer annotation. A repo-defined public route to a sensitive handler is confirmable;
+  a merely absent network policy is `needs-human`.
+- **Proxy and mesh bypass** — a backend accepts identity headers or an mTLS subject from peers
+  outside the ingress or sidecar; an alternate port, health or legacy path skips the mesh; nothing
+  strips the header; the service fails open when the proxy is absent.
+- **Admission-path inconsistencies** — policy enforced on Deployments but not on Jobs, CronJobs,
+  upgrade or restore hooks, or a second controller that creates the same objects.
+- **Label and namespace selector trust** — network, admission or workload-identity policy keyed on
+  labels, annotations or namespaces that a lower-trust principal can set.
+- **Config precedence drift** — chart defaults, overlays, env vars, flags or feature gates that
+  switch off auth, TLS or tenant scoping in one environment. Render each maintained environment
+  and diff: the base file is not what runs.
+- **Credential renewal fallback** — when a secret mount or token refresh fails, does the app keep
+  stale credentials alive, or drop to a weaker identity mode (anonymous, a static key)?
+- **Signed and presigned URL policy** — are expiry, method, object key or prefix, content type and
+  principal bound? A long expiry or a caller-chosen prefix turns a download link into a grant on
+  the bucket; check list and write paths, not just reads.
+- **Event-source identity** — a function trusting body fields (`source`, `account`, `userId`)
+  without verifying the provider-signed envelope, the subscription or topic, and replay. Compare
+  push, retry and dead-letter paths.
+- **Edge/origin mismatch** — the edge worker enforces auth, tenant or cache policy the origin
+  doesn't, and the origin is reachable directly or through a fallback; or the cache key ignores the
+  header authorization depends on.
+
 **Rate these against the deployment model, always.** "Rate-limiting belongs at the CDN" and
 "this bucket is a public asset host" are valid architectures. A misconfiguration finding with no
-statement about what it exposes is a checklist item, not a finding.
+statement about what it exposes is a checklist item, not a finding. A manifest states intent, not
+live fact: establish which environment consumes it and what overlays change it, and when the
+decisive fact (account policy, network attachment, runtime admission) isn't in the repository, the
+finding is `needs-human` naming it — neither assumed present nor absent.
 
 ## SBOM
 

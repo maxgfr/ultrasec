@@ -85,3 +85,18 @@ Apply never touches `path`/`source`/`sink`/`title`/`severity`. Re-run `check` af
 - `revalidate` is most powerful with `--blame` provenance (gives `commitsSinceFinding`)
   and on a real git repo; without git it still surfaces `fileExists`/`currentLine`.
 - It's idempotent: a finding already dismissed/escalated is out of scope on re-emit.
+
+## Prior runs never suppress coverage
+
+A verdict carried from an earlier run (`--merge`, a re-audit of the same repository) settles that
+**finding**, never the **surface** around it:
+
+- A prior verdict on **unchanged** source is carried, but it is not a fresh look: report that
+  surface as carried from the earlier run, not as examined in this one.
+- **Changed** source reopens the finding: it goes back through `verify` on the current code, and the
+  prior verdict is a hint for the skeptic, not an answer.
+- **Unresolved** prior work — `needs-human`, a region the last pass never reached, a hunt it
+  skipped — stays a gap in this run, at the top of the worklist, until this run settles it.
+
+The same holds for a prior `quick` or scoped pass: it contributes what it recorded and what it
+left out, never an implied "the rest was fine".

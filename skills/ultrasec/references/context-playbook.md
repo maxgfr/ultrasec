@@ -69,6 +69,18 @@ user-generated content that is stored and later rendered (the second-order surfa
 external integration — OAuth providers, webhooks, plugins, dynamically loaded code, and any
 LLM/agent tool bindings.
 
+For each surface, two more lines:
+
+- **Derived copies.** Where does the data go after the primary store — caches, search indexes,
+  exports and reports, logs, backups, analytics and warehouse feeds, queue payloads? Each copy is
+  another reader that must enforce the same authorization, and it usually doesn't: the API checks
+  the tenant, the search endpoint queries an index that never heard of tenants.
+- **Deployment facts the source can't show.** The proxy that strips headers, the network policy,
+  the IdP's MFA rule, the broker ACL, whether `/admin` is reachable from the internet. List them in
+  `CONTEXT.md` as **open questions**, one line each. A finding that depends on one becomes
+  `needs-human` naming that fact ([severity-and-discipline.md](severity-and-discipline.md)
+  §Respect source visibility) — the list is what lets the reader answer them in one sitting.
+
 ### Framework protections already in force
 
 What does the template layer autoescape? Does the ORM parameterize by default, and where are its
