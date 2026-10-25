@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.85.1](https://github.com/maxgfr/ultrasec/compare/v1.85.0...v1.85.1) (2026-10-25)
+
+
+### Bug Fixes
+
+* **engine:** update shared engines and maintenance tool ([f9ada9d](https://github.com/maxgfr/ultrasec/commit/f9ada9ddd69a996967930a80afe06b12ef92668a))
+
 # [1.85.0](https://github.com/maxgfr/ultrasec/compare/v1.84.0...v1.85.0) (2026-10-25)
 
 
