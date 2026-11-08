@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.99.0](https://github.com/maxgfr/ultrasec/compare/v1.98.0...v1.99.0) (2026-11-08)
+
+
+### Bug Fixes
+
+* **engine:** update shared engines and maintenance tool ([e6a59aa](https://github.com/maxgfr/ultrasec/commit/e6a59aa6c01a90232d76554ad0ab757a2056d413))
+
+
+### Features
+
+* **deps:** re-pin package-checker at v1.15.22 ([f6e3137](https://github.com/maxgfr/ultrasec/commit/f6e31374c9ffe46bb54fea269efdc946c9a8f646))
+
 # [1.98.0](https://github.com/maxgfr/ultrasec/compare/v1.97.0...v1.98.0) (2026-11-07)
 
 
