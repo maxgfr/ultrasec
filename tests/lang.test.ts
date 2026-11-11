@@ -63,6 +63,16 @@ describe("recordToFileScan: engine FileRecord → ultrasec FileScan", () => {
     ]);
   });
 
+  it("reads codeindex's unnamed receiver as no known receiver", () => {
+    // Since codeindex 2.31.19 a call on something with no simple name —
+    // `response.getWriter().format(…)`, `db.collection('u').find(q)` — carries
+    // the receiver "?" instead of none. Taken for a known receiver, it failed
+    // every sink rule that lists receivers: a Java XSS and a NoSQL injection
+    // vanished from the bench.
+    const { calls } = recordToFileScan({ ...base, calls: [{ name: "format", line: 7, receiver: "?" }] })!;
+    expect(calls).toEqual([{ callee: "format", receiver: undefined, line: 7 }]);
+  });
+
   it("passes symbol endLine through faithfully (undefined stays undefined)", () => {
     const { symbols } = recordToFileScan(base)!;
     expect(symbols[0]).toEqual({ name: "handle", kind: "function", line: 2, endLine: 5, exported: true });

@@ -165,7 +165,10 @@ export function recordToFileScan(f: FileRecord): FileScan | undefined {
     lang: spec.id,
     symbols: f.symbols.map((s) => ({ name: s.name, kind: s.kind, line: s.line, endLine: s.endLine, exported: s.exported })),
     imports: f.refs.filter((r) => r.kind === "import").map((r) => ({ spec: r.spec })),
-    calls: (f.calls ?? []).map((c) => ({ callee: c.name, receiver: c.receiver, line: c.line })),
+    // codeindex marks a receiver that is there but has no name (`a().b()`,
+    // `x[0].run()`) with "?" (its UNNAMED_RECEIVER, 2.31.19 on). For the sink
+    // rules that is no KNOWN receiver: one that lists receivers must not skip it.
+    calls: (f.calls ?? []).map((c) => ({ callee: c.name, receiver: c.receiver === "?" ? undefined : c.receiver, line: c.line })),
   };
 }
 
