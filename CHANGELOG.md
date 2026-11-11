@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+## [1.102.2](https://github.com/maxgfr/ultrasec/compare/v1.102.1...v1.102.2) (2026-11-11)
+
+
+### Bug Fixes
+
+* **engine:** update shared engines and maintenance tool ([3633685](https://github.com/maxgfr/ultrasec/commit/3633685ec006d07de4d11df89ac922107cd84020))
+* **scan:** read codeindex's unnamed receiver as no known receiver ([8e35ef9](https://github.com/maxgfr/ultrasec/commit/8e35ef9aae2bb1551ab7867f1f5d6f6823fe6bc9))
+
 ## [1.102.1](https://github.com/maxgfr/ultrasec/compare/v1.102.0...v1.102.1) (2026-11-11)
 
 
