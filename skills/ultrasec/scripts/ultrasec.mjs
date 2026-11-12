@@ -111,9 +111,9 @@ var UNNAMED_RECEIVER;
 var init_types = __esm({
   "src/types.ts"() {
     "use strict";
-    ENGINE_VERSION = "2.31.19";
+    ENGINE_VERSION = "2.31.20";
     SCHEMA_VERSION = 5;
-    EXTRACTOR_VERSION = 21;
+    EXTRACTOR_VERSION = 22;
     UNNAMED_RECEIVER = "?";
   }
 });
@@ -374,15 +374,15 @@ var init_util = __esm({
       "our"
     ]);
     NON_ASCII = /[^\x00-\x7F]/;
-    NON_WORD = /[^\p{L}\p{N}_]+/u;
+    NON_WORD = /(?:[^\p{L}\p{M}\p{N}_]|[\u{FE00}-\u{FE0F}\u{20D0}-\u{20FF}\u{E0100}-\u{E01EF}])+/u;
     ASCII_CASE_1 = /([a-z0-9])([A-Z])/g;
     ASCII_CASE_2 = /([A-Z]+)([A-Z][a-z])/g;
     ASCII_GLUE = /[^a-z0-9_]+/g;
     ASCII_SPLIT = /[^A-Za-z0-9]+/;
     UNICODE_CASE_1 = new RegExp("([\\p{Ll}\\p{N}])(\\p{Lu})", "gu");
     UNICODE_CASE_2 = new RegExp("(\\p{Lu}+)(\\p{Lu}\\p{Ll})", "gu");
-    UNICODE_GLUE = /[^\p{L}\p{N}_]+/gu;
-    UNICODE_SPLIT = /[^\p{L}\p{N}]+/u;
+    UNICODE_GLUE = /(?:[^\p{L}\p{M}\p{N}_]|[\u{FE00}-\u{FE0F}\u{20D0}-\u{20FF}\u{E0100}-\u{E01EF}])+/gu;
+    UNICODE_SPLIT = /(?:[^\p{L}\p{M}\p{N}]|[\u{FE00}-\u{FE0F}\u{20D0}-\u{20FF}\u{E0100}-\u{E01EF}])+/u;
   }
 });
 function wildcardSource(tokens) {
@@ -1080,7 +1080,7 @@ function walk(root, opts = {}) {
       else if (LOCKFILES.has(name2.toLowerCase()) && !opts.includeLockfiles) reason = "lockfile";
       else if ((opts.binaryExtensions ?? BINARY_EXT).has(ext) && !opts.includeBinary) reason = "binary-ext";
       else if (/\.min\.(?:js|css)$/i.test(name2) && !opts.includeMinified) reason = "minified";
-      else if (cannotRead(st.mode, abs)) reason = "unreadable";
+      else if (cannotRead(st, abs)) reason = "unreadable";
       if (reason) {
         excluded++;
         if (reason === "over-max-bytes") oversized.push({ rel: rel2.split(sep).join("/"), size: st.size });
@@ -1116,8 +1116,10 @@ function walk(root, opts = {}) {
 function readText(abs) {
   return readTextEx(abs).text;
 }
-function cannotRead(mode, abs) {
-  if (mode & 4) return false;
+function cannotRead(st, abs) {
+  const uid = process.getuid?.();
+  if (uid === 0) return false;
+  if (uid === void 0 ? (st.mode & 4) !== 0 : st.uid === uid ? (st.mode & 256) !== 0 : (st.mode & 36) === 36) return false;
   try {
     accessSync(abs, fsConstants.R_OK);
     return false;
@@ -1267,14 +1269,31 @@ function headCommit(dir) {
   return res.ok ? res.stdout.trim().slice(0, COMMIT_CHARS) : void 0;
 }
 function repoFilterOverrides(dir) {
-  const res = sh("git", ["-C", dir, "config", "--show-scope", "--get-regexp", "^filter\\."]);
+  let res = sh("git", ["-C", dir, "config", "--show-scope", "--name-only", "--get-regexp", "^filter\\."]);
+  const scoped = res.ok || res.status === 1;
+  if (!scoped) res = sh("git", ["-C", dir, "config", "--name-only", "--get-regexp", "^filter\\."]);
   if (!res.ok) return [];
   const drivers = /* @__PURE__ */ new Set();
   for (const line2 of res.stdout.split("\n")) {
-    const m = /^(\S+)\tfilter\.(.+)\.(?:clean|smudge|process|required) /.exec(line2);
-    if (m && m[1] !== "global" && m[1] !== "system") drivers.add(m[2]);
+    if (!line2) continue;
+    const [scope, key] = scoped ? line2.split("	") : ["unknown", line2];
+    if (!key || !key.startsWith("filter.") || scope === "global" || scope === "system") continue;
+    const name2 = key.slice("filter.".length, key.lastIndexOf("."));
+    if (name2) drivers.add(name2);
   }
-  return [...drivers].sort().flatMap((d) => ["-c", `filter.${d}.clean=`, "-c", `filter.${d}.smudge=`, "-c", `filter.${d}.process=`, "-c", `filter.${d}.required=false`]);
+  return [...drivers].filter((d) => !(d === "lfs" && isStandardLfsDriver(dir))).sort().flatMap((d) => ["-c", `filter.${d}.clean=`, "-c", `filter.${d}.smudge=`, "-c", `filter.${d}.process=`, "-c", `filter.${d}.required=false`]);
+}
+function isStandardLfsDriver(dir) {
+  const res = sh("git", ["-C", dir, "config", "--get-regexp", "^filter\\.lfs\\."]);
+  if (!res.ok) return false;
+  for (const line2 of res.stdout.split("\n")) {
+    if (!line2) continue;
+    const space = line2.indexOf(" ");
+    const variable = (space === -1 ? line2 : line2.slice(0, space)).slice("filter.lfs.".length);
+    const value = space === -1 ? "" : line2.slice(space + 1);
+    if (LFS_STANDARD[variable] !== value) return false;
+  }
+  return true;
 }
 function emptyTreeId(dir) {
   const res = sh("git", [...gitArgs(dir), "hash-object", "-t", "tree", "--stdin"], { input: "" });
@@ -1323,7 +1342,7 @@ function resolveBaseRef(dir, base) {
 function diffFiles(dir, spec) {
   const out2 = [];
   if (!diffable(spec)) return out2;
-  const ns = sh("git", [...worktreeGitArgs(dir), "diff", "--no-color", "--relative", "-z", "-M", "--name-status", ...rangeArgs(spec)]);
+  const ns = sh("git", [...worktreeGitArgs(dir), "diff", "--ignore-submodules=dirty", "--no-color", "--relative", "-z", "-M", "--name-status", ...rangeArgs(spec)]);
   if (ns.ok) {
     const toks = ns.stdout.split("\0");
     let i2 = 0;
@@ -1344,7 +1363,7 @@ function diffFiles(dir, spec) {
     }
   }
   const byPath = new Map(out2.map((f) => [f.path, f]));
-  const num22 = sh("git", [...worktreeGitArgs(dir), "diff", "--no-color", "--relative", "-z", "-M", "--numstat", ...rangeArgs(spec)]);
+  const num22 = sh("git", [...worktreeGitArgs(dir), "diff", "--ignore-submodules=dirty", "--no-color", "--relative", "-z", "-M", "--numstat", ...rangeArgs(spec)]);
   if (num22.ok) {
     const toks = num22.stdout.split("\0");
     let i2 = 0;
@@ -1375,6 +1394,7 @@ function diffHunks(dir, spec) {
   const res = sh("git", [
     ...worktreeGitArgs(dir),
     "diff",
+    "--ignore-submodules=dirty",
     "--no-color",
     "--no-ext-diff",
     "--no-textconv",
@@ -1573,7 +1593,7 @@ function firstLine(text) {
 function changedSince(dir, ref2) {
   const out2 = /* @__PURE__ */ new Set();
   if (optionLike(ref2)) return out2;
-  const diff = sh("git", [...worktreeGitArgs(dir), "diff", "--no-color", "--relative", "-z", "--name-only", "--end-of-options", ref2, "--"]);
+  const diff = sh("git", [...worktreeGitArgs(dir), "diff", "--ignore-submodules=dirty", "--no-color", "--relative", "-z", "--name-only", "--end-of-options", ref2, "--"]);
   if (diff.ok) {
     for (const p of diff.stdout.split("\0")) if (p) out2.add(p);
   }
@@ -1583,6 +1603,7 @@ function changedSince(dir, ref2) {
 var COMMIT_CHARS;
 var GIT_CONFIG;
 var gitArgs;
+var LFS_STANDARD;
 var worktreeGitArgs;
 var optionLike;
 var rangeArgs;
@@ -1618,6 +1639,12 @@ var init_git = __esm({
       "log.showRoot=true"
     ];
     gitArgs = (dir) => ["-C", dir, ...GIT_CONFIG];
+    LFS_STANDARD = {
+      clean: "git-lfs clean -- %f",
+      smudge: "git-lfs smudge -- %f",
+      process: "git-lfs filter-process",
+      required: "true"
+    };
     worktreeGitArgs = (dir) => [...gitArgs(dir), ...repoFilterOverrides(dir)];
     optionLike = (ref2) => ref2.startsWith("-");
     rangeArgs = (spec) => spec.staged ? ["--cached"] : ["--end-of-options", spec.mergeBase];
@@ -8348,10 +8375,11 @@ function grammarFile(key, known) {
   if (!path) return void 0;
   try {
     const st = statSync2(path);
-    if (known && known.path === path && known.engine === ENGINE_VERSION && known.size === st.size && known.mtimeMs === st.mtimeMs) return known;
+    const at2 = sha1(path).slice(0, 16);
+    if (known && known.at === at2 && known.engine === ENGINE_VERSION && known.size === st.size && known.mtimeMs === st.mtimeMs) return known;
     const seen = grammarFiles.get(path);
     if (seen && seen.size === st.size && seen.mtimeMs === st.mtimeMs) return seen;
-    const file = { sha1: sha1(readFileSync4(path)), size: st.size, mtimeMs: st.mtimeMs, path, engine: ENGINE_VERSION };
+    const file = { sha1: sha1(readFileSync4(path)), size: st.size, mtimeMs: st.mtimeMs, at: at2, engine: ENGINE_VERSION };
     grammarFiles.set(path, file);
     return file;
   } catch {
@@ -8581,6 +8609,10 @@ function readName(node) {
   if (!node) return void 0;
   const kids = node.namedChildren;
   if (kids.length === 0) return IDENT_LEAF.test(node.type) ? node.text : void 0;
+  if (node.type === "generic_name") return readName(kids[0]);
+  if (node.type === "generic_type") return readName(node.childForFieldName("type") ?? kids[0]);
+  if (isGoInstantiation(node)) return readName(node.childForFieldName("operand"));
+  if (node.type === "index_expression" && node.childForFieldName("operand")) return void 0;
   const seg = node.childForFieldName("name") ?? node.childForFieldName("property") ?? node.childForFieldName("attribute") ?? node.childForFieldName("field") ?? // Callee wrappers that point at the real callee via a `function` field:
   // scala's generic_function (`foo[Int](x)`) and a curried/chained
   // call_expression callee (`curried(a)(b)`) — descend to the inner name
@@ -8590,37 +8622,126 @@ function readName(node) {
   const last = kids[kids.length - 1];
   return last && last !== node ? readName(last) : void 0;
 }
-function readReceiver(node, onCallNode = false) {
+function readReceiver(node, onCallNode = false, typeCalls) {
   if (!node || node.namedChildren.length === 0) return void 0;
-  if (node.type === "generic_function") return readReceiver(node.childForFieldName("function"), onCallNode);
+  if (node.type === "generic_function") return readReceiver(node.childForFieldName("function"), onCallNode, typeCalls);
+  if (node.type === "generic_type") return readReceiver(node.childForFieldName("type"), onCallNode, typeCalls);
+  if (isGoInstantiation(node)) return readReceiver(node.childForFieldName("operand"), onCallNode, typeCalls);
+  if (node.type === "expression" && node.namedChildren.length === 1) return readReceiver(node.namedChildren[0], onCallNode, typeCalls);
   let obj = null;
   let field2 = "";
-  for (const candidate of RECEIVER_FIELDS) {
-    obj = node.childForFieldName(candidate);
-    if (obj) {
-      field2 = candidate;
-      break;
+  if (node.type === "navigation_expression") [obj, field2] = [node.namedChildren[0], "object"];
+  else if (node.type === "dot") [obj, field2] = [node.childForFieldName("left"), "object"];
+  else if (node.type === "scoped_call_expression") [obj, field2] = [node.childForFieldName("scope"), "object"];
+  else {
+    for (const candidate of RECEIVER_FIELDS) {
+      obj = node.childForFieldName(candidate);
+      if (obj) {
+        field2 = candidate;
+        break;
+      }
     }
   }
-  if (obj?.type === "super" || obj?.type === "crate" && node.type === "scoped_identifier") return obj.type;
-  if (obj?.type === "self" && node.type === "scoped_identifier") return void 0;
-  if (obj?.type === "composite_literal") {
-    const type = obj.childForFieldName("type");
-    const name3 = type ? readTypeName(type) : void 0;
-    return name3 && /^[A-Za-z_]\w*$/.test(name3) ? name3 : void 0;
-  }
   if (!obj) return void 0;
-  while (PARENTHESIZED.test(obj.type) && obj.namedChildren.length === 1) obj = obj.namedChildren[0];
-  if (obj.type === "call" && obj.childForFieldName("function")?.text === "super") return "super";
-  if (UNNAMED_OBJECT.test(obj.type) || obj.childForFieldName("arguments") !== null && obj.type !== "composite_literal") return UNNAMED_RECEIVER;
-  const name2 = readName(obj) ?? (obj.namedChildren.length === 0 && RUBY_VARIABLE.test(obj.type) ? obj.text : void 0);
-  const kept = receiverName(name2);
-  if (kept !== void 0) return kept;
-  const self = SELF_NODE.exec(obj.type);
-  if (self) return self[1];
-  if (BASE_NODE.test(obj.type)) return void 0;
+  if (obj.type === "relative_scope") return obj.text === "parent" ? "super" : "self";
   if (onCallNode && field2 !== "object" && field2 !== "receiver") return void 0;
+  if (obj.type === "super" || obj.type === "crate" && node.type === "scoped_identifier") return obj.type;
+  if (obj.type === "self" && node.type === "scoped_identifier") return void 0;
+  return receiverOf(obj, typeCalls);
+}
+function receiverOf(start2, typeCalls) {
+  let obj = start2;
+  for (; ; ) {
+    const only = obj.namedChildren.length === 1 ? obj.namedChildren[0] : void 0;
+    if (only && TRANSPARENT.test(obj.type)) obj = only;
+    else if (only && obj.type === "postfix_unary_expression" && obj.text.endsWith("!")) obj = only;
+    else if (POINTER.test(obj.type) && /^[*&]|!$/.test(obj.text)) {
+      const inner = obj.childForFieldName("operand") ?? obj.childForFieldName("argument") ?? obj.childForFieldName("value") ?? only;
+      if (!inner) break;
+      obj = inner;
+    } else break;
+  }
+  if (obj.type === "binary_expression" && start2.type === "non_null_expression") obj = obj.childForFieldName("right") ?? obj;
+  const kids = obj.namedChildren;
+  if (kids.length === 0) {
+    if (obj.type === "this") return thisReceiver(obj);
+    const self = SELF_NODE.exec(obj.type);
+    if (self) return self[1];
+    if (/^super(?:_expression)?$/.test(obj.type)) return "super";
+    if (obj.text === "__MODULE__") return "self";
+    if (BASE_NODE.test(obj.type)) return void 0;
+    if (IDENT_LEAF.test(obj.type) || RUBY_VARIABLE.test(obj.type)) return receiverName(obj.text) ?? UNNAMED_RECEIVER;
+    if (obj.type === "alias") return receiverName(obj.text.slice(obj.text.lastIndexOf(".") + 1)) ?? UNNAMED_RECEIVER;
+    return UNNAMED_RECEIVER;
+  }
+  if (/^super(?:_expression)?$/.test(obj.type)) return "super";
+  if (SELF_NODE.test(obj.type)) return SELF_NODE.exec(obj.type)[1];
+  if (obj.type === "bracketed_type") {
+    const inner = kids[0];
+    return typeReceiver(readTypeName(inner.type === "qualified_type" ? inner.childForFieldName("alias") ?? inner.childForFieldName("type") : inner));
+  }
+  if (obj.type === "qualified_name") return receiverOf(kids[kids.length - 1], typeCalls);
+  if (obj.type === "conditional_access_expression") return receiverOf(kids[kids.length - 1], typeCalls);
+  if (obj.type === "navigation_expression") return receiverOf(kids[kids.length - 1], typeCalls);
+  if (obj.type === "composite_literal" || NEW_NODE.test(obj.type)) {
+    const type = obj.childForFieldName("type") ?? obj.childForFieldName("constructor") ?? kids.find((c2) => IDENT_LEAF.test(c2.type) || /qualified|scoped/.test(c2.type)) ?? null;
+    return typeReceiver(readTypeName(type));
+  }
+  if (GENERIC.test(obj.type)) return typeReceiver(readTypeName(obj.childForFieldName("type") ?? kids[0]));
+  if (CAST.test(obj.type)) {
+    const type = obj.type === "type_assertion" && kids[0]?.type === "type_arguments" ? kids[0].namedChildren[0] : obj.childForFieldName("type") ?? obj.childForFieldName("right") ?? kids[kids.length - 1];
+    return castReceiver(type ?? null);
+  }
+  if (INDEXED.test(obj.type)) return UNNAMED_RECEIVER;
+  const rubyRead = obj.type === "call" && obj.childForFieldName("method") !== null && obj.childForFieldName("arguments") === null && obj.childForFieldName("block") === null;
+  if (rubyRead && obj.childForFieldName("method").text !== "new") return receiverName(readName(obj.childForFieldName("method"))) ?? UNNAMED_RECEIVER;
+  if (CALL_NODE.test(obj.type) || obj.childForFieldName("arguments") !== null) return calledReceiver(obj, typeCalls);
+  const seg = obj.childForFieldName("name") ?? obj.childForFieldName("property") ?? obj.childForFieldName("attribute") ?? obj.childForFieldName("field") ?? obj.childForFieldName("member");
+  if (seg) return receiverOf(seg, typeCalls) ?? UNNAMED_RECEIVER;
+  if (kids.length === 1 && NAME_WRAPPER.test(obj.type)) return receiverOf(kids[0], typeCalls);
   return UNNAMED_RECEIVER;
+}
+function calledReceiver(call2, typeCalls) {
+  const callee = call2.childForFieldName("function") ?? call2.childForFieldName("method") ?? call2.childForFieldName("name") ?? call2.childForFieldName("callee") ?? call2.namedChildren[0] ?? null;
+  if (callee?.text === "super") return "super";
+  let bare = callee;
+  while (bare && bare.type === "expression" && bare.namedChildren.length === 1) bare = bare.namedChildren[0];
+  if (bare?.type === "template_function" && /^(?:static|dynamic|reinterpret|const)_cast$/.test(bare.childForFieldName("name")?.text ?? "")) {
+    return castReceiver(bare.childForFieldName("arguments")?.namedChildren[0] ?? null);
+  }
+  const name2 = readName(bare);
+  if (name2 === "new") {
+    const owner = readReceiver(callee) ?? readReceiver(call2, true);
+    return owner !== void 0 && TYPE_LIKE.test(owner) ? owner : UNNAMED_RECEIVER;
+  }
+  if (typeCalls === void 0 || typeCalls === "plain" && bare.namedChildren.length > 0) return UNNAMED_RECEIVER;
+  return name2 !== void 0 && TYPE_LIKE.test(name2) ? name2 : UNNAMED_RECEIVER;
+}
+function typeReceiver(name2) {
+  return name2 !== void 0 && /^[A-Za-z_$][\w$]*$/.test(name2) ? name2 : UNNAMED_RECEIVER;
+}
+function castReceiver(type) {
+  let t = type;
+  if (t?.type === "type_descriptor") t = t.childForFieldName("type");
+  while (t && POINTER_TYPE.test(t.type) && t.namedChildren.length === 1) t = t.namedChildren[0];
+  return t && NAMED_TYPE.test(t.type) ? typeReceiver(readTypeName(t)) : UNNAMED_RECEIVER;
+}
+function thisReceiver(node) {
+  for (let n = node.parent; n; n = n.parent) {
+    if (n.type === "function_expression" && n.parent?.type === "pair" && n.parent.parent?.type === "object") return UNNAMED_RECEIVER;
+    if (THIS_OWNER.test(n.type)) return "this";
+    if (n.type === "method_definition") return n.parent?.type === "class_body" ? "this" : UNNAMED_RECEIVER;
+    if (n.type === "program") return UNNAMED_RECEIVER;
+  }
+  return "this";
+}
+function isGoInstantiation(node) {
+  if (node.type !== "index_expression" || !node.childForFieldName("operand")) return false;
+  const index = node.childForFieldName("index");
+  if (!index) return false;
+  if (/type/.test(index.type)) return true;
+  const named = index.type === "unary_expression" && index.text.startsWith("*") ? index.childForFieldName("operand") : index;
+  return named?.type === "identifier" && (/^[A-Z]/.test(named.text) || GO_PREDECLARED.has(named.text));
 }
 function receiverName(name2) {
   if (!name2) return void 0;
@@ -8648,9 +8769,20 @@ var IDENT_LEAF;
 var COMMENT_NODE;
 var UNNAMED_CHAIN;
 var RECEIVER_FIELDS;
+var THIS_OWNER;
+var GO_PREDECLARED;
 var RUBY_VARIABLE;
-var UNNAMED_OBJECT;
-var PARENTHESIZED;
+var TRANSPARENT;
+var POINTER;
+var POINTER_TYPE;
+var NAMED_TYPE;
+var NAME_WRAPPER;
+var GENERIC;
+var NEW_NODE;
+var CAST;
+var INDEXED;
+var CALL_NODE;
+var TYPE_LIKE;
 var SELF_NODE;
 var BASE_NODE;
 var TYPE_LEAF;
@@ -8661,10 +8793,23 @@ var init_node = __esm({
     IDENT_LEAF = /(^|_)(identifier|name|constant|word)$/;
     COMMENT_NODE = /(^|_)comment$/;
     UNNAMED_CHAIN = /* @__PURE__ */ new Set(["reference_declarator", "parenthesized_declarator"]);
-    RECEIVER_FIELDS = ["object", "operand", "value", "path", "expression", "argument", "receiver", "table"];
+    RECEIVER_FIELDS = ["object", "operand", "value", "path", "expression", "argument", "receiver", "table", "condition", "package"];
+    THIS_OWNER = /^(?:function_declaration|function_expression|function|generator_function|generator_function_declaration|class_body|enum_body|enum_body_declarations|interface_body|annotation_type_body)$/;
+    GO_PREDECLARED = new Set(
+      "any bool byte comparable complex64 complex128 error float32 float64 int int8 int16 int32 int64 rune string uint uint8 uint16 uint32 uint64 uintptr".split(" ")
+    );
     RUBY_VARIABLE = /^(?:instance|class|global)_variable$/;
-    UNNAMED_OBJECT = /^(?:subscript(?:_expression)?|index_expression|indexing_expression|element_access_expression|element_reference|array_access|parenthesized_expression|parenthesized_primary_expression|binary_expression|binary_operator|await_expression|conditional_expression|ternary_expression)$/;
-    PARENTHESIZED = /^(?:parenthesized_expression|parenthesized_primary_expression)$/;
+    TRANSPARENT = /^(?:parenthesized_expression|parenthesized_primary_expression|parenthesized_statements|non_null_expression|try_expression|expression)$/;
+    POINTER = /^(?:unary_expression|pointer_expression|reference_expression)$/;
+    POINTER_TYPE = /^(?:pointer_type|reference_type)$/;
+    NAMED_TYPE = /^(?:type_identifier|identifier|generic_type|generic_name|qualified_type|qualified_name|qualified_identifier|nested_type_identifier|scoped_type_identifier|scoped_identifier|user_type|simple_identifier)$/;
+    NAME_WRAPPER = /^variable_name$/;
+    GENERIC = /^generic_(?:type|name)$/;
+    NEW_NODE = /^(?:new_expression|object_creation_expression|instance_expression)$/;
+    CAST = /^(?:as_expression|satisfies_expression|cast_expression|type_assertion|type_assertion_expression)$/;
+    INDEXED = /^(?:subscript(?:_expression)?|index_expression|indexing_expression|element_access_expression|element_reference|array_access|bracket_index_expression|slice_expression)$/;
+    CALL_NODE = /^(?:call|call_expression|function_call|function_call_expression|method_invocation|invocation_expression|member_call_expression|scoped_call_expression|nullsafe_member_call_expression|method_call_expression)$/;
+    TYPE_LIKE = /^[A-Z][\w$]*$/;
     SELF_NODE = /^(this|self)(?:_expression)?$/;
     BASE_NODE = /^base(?:_expression)?$/;
     TYPE_LEAF = /identifier|constant|(^|_)name$/;
@@ -9188,6 +9333,7 @@ var init_specs = __esm({
         publicNames: pythonAll,
         imports: { import_statement: "path", import_from_statement: "path" },
         calls: { call: "function" },
+        typeCalls: "qualified",
         docstring: true,
         // Python has no interfaces, so every base is an `extends`; graph resolution
         // reclassifies one that turns out to name a Protocol.
@@ -9277,7 +9423,13 @@ var init_specs = __esm({
         ]),
         exported: byCapital,
         imports: { import_declaration: "string" },
-        calls: { call_expression: "function" },
+        // A generic call (`pkg.Fn[Widget](x)`) parses as a conversion to a generic
+        // type, which no grammar rule can tell apart from one: it is read as the
+        // call it usually is, as `T(x)` is. Any other conversion (`[]byte(s)`) is
+        // not a call site.
+        calls: { call_expression: "function", type_conversion_expression: "function" },
+        typeCalls: "plain",
+        skipCall: (node) => node.type === "type_conversion_expression" && node.childForFieldName("type")?.type !== "generic_type",
         // A method's receiver is what it belongs to: `func (s *Scheduler) Start()`
         // is Scheduler.Start, not a free function named Start.
         parentFrom: {
@@ -9491,6 +9643,7 @@ var init_specs = __esm({
         ]),
         exported: byPub,
         calls: { call_expression: "function" },
+        typeCalls: "qualified",
         parentFrom: {
           // `impl Scheduler` / `impl Display for Scheduler` — the members belong to
           // the TYPE in both forms (the trait is recorded as a relation, not a parent).
@@ -9609,6 +9762,9 @@ var init_specs = __esm({
         calls: {
           function_call_expression: "function",
           member_call_expression: "member",
+          // `$a?->run()` and `A::create()` / `self::make()`.
+          nullsafe_member_call_expression: "member",
+          scoped_call_expression: "member",
           object_creation_expression: "constructor"
         },
         extraMembers: phpPromotedProperties,
@@ -9720,6 +9876,7 @@ var init_specs = __esm({
         ]),
         exported: always,
         calls: { call_expression: "function", new_expression: "constructor" },
+        typeCalls: "plain",
         kindFrom: {
           // C++ spells a member FUNCTION declaration and a data member with the same
           // node; only a function_declarator inside tells them apart. Likewise a
@@ -9805,6 +9962,7 @@ var init_specs = __esm({
         // Qualified calls are call_expression → field_expression (value/field);
         // `new Widget(...)` is an instance_expression with a bare type child.
         calls: { call_expression: "function", instance_expression: "constructor" },
+        typeCalls: "qualified",
         relationsFrom: {
           // `extends Base with A with B` — the first parent is the superclass, the
           // `with` mixins are traits, i.e. Scala's `implements`.
@@ -9860,6 +10018,7 @@ var init_specs = __esm({
         // as reachable from outside the file.
         exported: byNotPrivate,
         calls: { call_expression: "function" },
+        typeCalls: "qualified",
         kindFrom: {
           // A bare `(queue: String)` parameter is an argument, not a property; only
           // `val`/`var` (or a `data class`, where every parameter is one) declares a member.
@@ -10013,6 +10172,8 @@ var init_specs = __esm({
         // contract's ABI, `internal`/`private` is not.
         exported: (header3, name2) => /\b(public|external)\b/.test(header3) ? true : /\b(internal|private)\b/.test(header3) ? false : byCapital(header3, name2) || true,
         calls: { call_expression: "function" },
+        // `IToken(token).transfer(…)`: a cast to a contract or interface.
+        typeCalls: "plain",
         nameFrom: {
           // `uint256 public constant MAX = 5` leads with its TYPE, and `type_name`
           // ends in "name", so the generic reader's last resort would return the type.
@@ -10251,8 +10412,44 @@ function readGo(node, out2) {
     if (name2?.type === "package_identifier" && path) out2.push({ local: name2.text, name: "*", from: unquote2(path.text) });
   }
 }
+function readRust(node, out2, prefix = "") {
+  if (node.type === "use_declaration") {
+    const arg = node.childForFieldName("argument");
+    if (arg) readRust(arg, out2, prefix);
+  } else if (node.type === "use_as_clause") {
+    const path = node.childForFieldName("path")?.text;
+    const alias = node.childForFieldName("alias")?.text;
+    if (!path || !alias || alias === "_") return;
+    const from = prefix ? `${prefix}::${path}` : path;
+    const name2 = from.slice(from.lastIndexOf("::") + 2);
+    if (alias === name2) return;
+    out2.push({ local: alias, name: name2, from });
+  } else if (node.type === "scoped_use_list") {
+    const path = node.childForFieldName("path")?.text;
+    const next = path ? prefix ? `${prefix}::${path}` : path : prefix;
+    const list2 = node.childForFieldName("list");
+    if (list2) for (const c2 of list2.namedChildren) readRust(c2, out2, next);
+  } else if (node.type === "use_list") {
+    for (const c2 of node.namedChildren) readRust(c2, out2, prefix);
+  }
+}
+function readPhp(node, out2) {
+  if (node.type === "namespace_use_declaration") {
+    for (const c2 of node.namedChildren) readPhp(c2, out2);
+  } else if (node.type === "namespace_use_clause") {
+    const alias = node.childForFieldName("alias")?.text ?? node.namedChildren.find((c2, i2) => i2 > 0 && c2.type === "name")?.text;
+    const path = node.namedChildren.find((c2) => c2.type === "qualified_name" || c2.type === "name");
+    if (!alias || !path || path.text === alias) return;
+    const from = path.text.replace(/^\\/, "");
+    const name2 = from.slice(from.lastIndexOf("\\") + 1);
+    if (alias !== name2) out2.push({ local: alias, name: name2, from });
+  } else if (node.type === "namespace_definition") {
+    const body2 = node.childForFieldName("body");
+    for (const c2 of body2?.namedChildren ?? []) readPhp(c2, out2);
+  }
+}
 function readImportAliases(root, lang) {
-  const read = lang === "typescript" || lang === "javascript" ? readJs : lang === "python" ? readPython : lang === "go" ? readGo : void 0;
+  const read = lang === "typescript" || lang === "javascript" ? readJs : lang === "python" ? readPython : lang === "go" ? readGo : lang === "rust" ? (node, out3) => readRust(node, out3) : lang === "php" ? readPhp : void 0;
   if (!read) return [];
   const found = [];
   for (const node of root.namedChildren) read(node, found);
@@ -10375,9 +10572,9 @@ function collectAll(root, spec, defNames, maxCalls) {
       if (how === "function") {
         const callee = node.childForFieldName("function") ?? node.childForFieldName("callee") ?? node.childForFieldName("method") ?? node.childForFieldName("name") ?? node.childForFieldName("target") ?? kids[0] ?? null;
         const inner = callee && spec.calls[callee.type] === "function" ? callee.childForFieldName("function") : null;
-        addCall(readName(callee), node, readReceiver(inner ?? callee) ?? readReceiver(node, true));
+        addCall(readName(callee), node, readReceiver(inner ?? callee, false, spec.typeCalls) ?? readReceiver(node, true, spec.typeCalls));
       } else if (how === "member") {
-        addCall(readName(node.childForFieldName("name")), node, readReceiver(node));
+        addCall(readName(node.childForFieldName("name")), node, readReceiver(node, false, spec.typeCalls));
       } else if (how === "constructor") {
         let t = node.childForFieldName("constructor") ?? node.childForFieldName("type") ?? node.childForFieldName("name");
         for (let i2 = 0; !t && i2 < kids.length; i2++) {
@@ -11161,7 +11358,7 @@ function collectCallsRegex(content, symbols = [], maxCalls = DEFAULT_MAX_CALLS) 
   const out2 = /* @__PURE__ */ new Map();
   const ownDefLines = new Set(symbols.map((s) => `${s.name} ${s.line}`));
   const lines5 = content.split("\n");
-  const CALL_RE = /(?:\bnew\s+)?(?:([A-Za-z_$][\w$]*)\s*(?:[?!]\s*)?\.\s*)?([A-Za-z_$][\w$]*)\s*\(/g;
+  const CALL_RE = /(?:\bnew\s+)?(?:(?<![\w$])([A-Za-z_$][\w$]*)\s*(?:[?!]\s*)?\.\s*)?(?<![\w$])([A-Za-z_$][\w$]*)\s*\(/g;
   for (let i2 = 0; i2 < lines5.length; i2++) {
     const line2 = lines5[i2];
     const trimmed = line2.trimStart();
@@ -11835,7 +12032,7 @@ function sameGrammarStamps(stored, current) {
   return keys.length === Object.keys(a).length && keys.every((k) => {
     const x = a[k];
     const y = b[k];
-    return x !== void 0 && x.sha1 === y.sha1 && x.size === y.size && x.mtimeMs === y.mtimeMs && x.path === y.path && x.engine === y.engine;
+    return x !== void 0 && x.sha1 === y.sha1 && x.size === y.size && x.mtimeMs === y.mtimeMs && x.engine === y.engine;
   });
 }
 function parseGrammarFiles(value) {
@@ -11847,7 +12044,7 @@ function parseGrammarFiles(value) {
         sha1: file.sha1,
         size: file.size,
         mtimeMs: file.mtimeMs,
-        ...typeof file.path === "string" ? { path: file.path } : {},
+        ...typeof file.at === "string" ? { at: file.at } : {},
         ...typeof file.engine === "string" ? { engine: file.engine } : {}
       };
     }
@@ -16089,6 +16286,7 @@ function createBindScope(scan2, pairs, ctxIn) {
       const r = resolveImport(f.rel, f.ext, spec, ctx);
       return r.kind === "resolved" && r.target !== f.rel ? r.target : null;
     };
+    const external = (spec) => !(f.lang === "rust" && /^(?:crate|super|self)::/.test(spec)) && resolveImport(f.rel, f.ext, spec, ctx).kind === "external";
     const addModule = (local, targets) => {
       const prev = a.modules.get(local);
       if (prev === void 0 || prev === null) a.modules.set(local, targets);
@@ -16112,6 +16310,10 @@ function createBindScope(scan2, pairs, ctxIn) {
           addModule(al.local, t ? [t] : null);
           continue;
         }
+        if (f.lang === "rust" && t && (t.endsWith(`/${al.name}.rs`) || t.endsWith(`/${al.name}/mod.rs`) || t === `${al.name}.rs`)) {
+          addModule(al.local, [t]);
+          continue;
+        }
         if (f.lang === "python") {
           const sub = resolved(al.from.endsWith(".") ? al.from + al.name : `${al.from}.${al.name}`);
           if (sub && sub !== t) {
@@ -16121,7 +16323,7 @@ function createBindScope(scan2, pairs, ctxIn) {
         }
         if (a.names.has(al.local)) continue;
         const name2 = al.name === "default" ? (t ? defaultOf(t) : void 0) ?? al.local : al.name;
-        a.names.set(al.local, { name: name2, files: t ? [t] : null });
+        a.names.set(al.local, { name: name2, files: t ? [t] : null, ...t ? {} : { external: external(al.from) } });
       }
     }
     files.set(f.rel, a);
@@ -16147,6 +16349,27 @@ function createCallBinder(scan2, pairs, opts = {}) {
   const recall = opts.recall === true;
   const only = opts.only;
   const scope = createBindScope(scan2, pairs, opts.ctx);
+  let traits;
+  let bases;
+  const ancestorsOf = (type) => {
+    if (!bases) {
+      bases = /* @__PURE__ */ new Map();
+      for (const file of scan2.files)
+        for (const r of file.relations ?? []) {
+          const from = lastSegment(r.from);
+          const list2 = bases.get(from) ?? [];
+          list2.push(lastSegment(r.to));
+          bases.set(from, list2);
+        }
+    }
+    const out2 = /* @__PURE__ */ new Set();
+    const queue = [type];
+    while (queue.length && out2.size < 32) {
+      for (const b of bases.get(queue.shift()) ?? []) if (!out2.has(b) && b !== type) out2.add(b), queue.push(b);
+    }
+    return out2;
+  };
+  const inTrait = (d) => d.parent !== void 0 && (traits ??= new Set(scan2.files.flatMap((f) => f.symbols.filter((s) => TRAIT_KINDS.has(s.kind)).map((s) => `${f.rel}\0${s.name}`)))).has(`${d.file}\0${d.parent}`);
   let byRel;
   const fnParentsMemo = /* @__PURE__ */ new Map();
   const noParents = /* @__PURE__ */ new Set();
@@ -16311,6 +16534,26 @@ function createCallBinder(scan2, pairs, opts = {}) {
       }
       return best?.name ?? e.parent;
     };
+    let ownByLast;
+    const ownTypeByLast = (name2) => {
+      if (!ownByLast) {
+        ownByLast = /* @__PURE__ */ new Map();
+        for (const t of ownTypes) {
+          const k = lastSegment(t);
+          if (k !== t) ownByLast.set(k, ownByLast.has(k) ? null : t);
+        }
+      }
+      return ownByLast.get(name2) ?? void 0;
+    };
+    const typeAround = (e) => {
+      if (e?.parent === void 0 || ownTypes.has(e.parent)) return e?.parent;
+      let best;
+      for (const s of f.symbols) {
+        if (s.endLine === void 0 || s.line > e.line || e.line > s.endLine || !ownTypes.has(s.name)) continue;
+        if (!best || s.line > best.line) best = s;
+      }
+      return best?.name ?? e.parent;
+    };
     let usedPaths;
     const variantInScope = (d) => {
       if (d.file !== f.rel || d.parent === void 0) return false;
@@ -16340,11 +16583,26 @@ function createCallBinder(scan2, pairs, opts = {}) {
     };
     const preferParent = (list2, typeHint, receiver) => {
       if (typeHint !== void 0 && list2.some((d) => d.parent === typeHint)) return list2.filter((d) => d.parent === typeHint);
+      if (typeHint !== void 0 && list2.some((d) => d.parent !== void 0 && lastSegment(d.parent) === typeHint))
+        return list2.filter((d) => d.parent !== void 0 && lastSegment(d.parent) === typeHint);
       const lower = receiver?.toLowerCase();
       if (lower !== void 0 && list2.some((d) => d.parent?.toLowerCase() === lower)) return list2.filter((d) => d.parent?.toLowerCase() === lower);
       return list2;
     };
-    const reading = (shape, receiver, selfType, typeHint) => ({ shape, receiver, selfType, typeHint, results: /* @__PURE__ */ new Map() });
+    const reading = (shape, receiver, selfType, typeHint, typed) => ({ shape, receiver, selfType, typeHint, typed, results: /* @__PURE__ */ new Map() });
+    const receiverKind = (receiver) => {
+      const own2 = ownAny.get(receiver);
+      const defs = [...own2 ? [own2] : [], ...corroborated(receiver, "any"), ...exportedGroup(receiver, family, "any")?.list ?? []];
+      if (defs.some((d) => TYPE_KINDS3.has(d.kind))) return "type";
+      if (defs.some((d) => CALLABLE_KINDS.has(d.kind) && d.parent === void 0)) return "function";
+      return defs.length ? "value" : "unknown";
+    };
+    const namesType = (receiver) => {
+      if (!TYPE_CASE.has(family) || !/^[A-Z]/.test(receiver) || !/[a-z]/.test(receiver)) return false;
+      const kind = receiverKind(receiver);
+      return kind === "type" || kind === "unknown" || kind === "function" && !CAPITAL_FUNCTIONS.has(family);
+    };
+    const functionResult = (receiver) => CAPITAL_FUNCTIONS.has(family) && /^[A-Z]/.test(receiver) && receiverKind(receiver) === "function";
     const BARE = reading("bare");
     const OUTSIDE = reading("outside");
     const UNNAMED = reading("foreign", UNNAMED_RECEIVER);
@@ -16368,9 +16626,12 @@ function createCallBinder(scan2, pairs, opts = {}) {
         if (rustModules?.has(receiver)) r = reading("module", receiver);
         else if (aliases.modules.has(receiver)) r = reading("module", receiver);
         else if (ownTypes.has(receiver)) r = self(receiver);
+        else if (ownTypeByLast(receiver)) r = self(ownTypeByLast(receiver));
+        else if (!recall && aliases.names.get(receiver)?.external === true) r = OUTSIDE;
+        else if (!recall && functionResult(receiver)) r = UNNAMED;
         else if (!SHAPED.has(family)) {
           const named = typeNamedLike(receiver);
-          r = named ? self(named) : reading("foreign", receiver, void 0, aliases.names.get(receiver)?.name ?? receiver);
+          r = named ? self(named) : reading("foreign", receiver, void 0, aliases.names.get(receiver)?.name ?? receiver, namesType(receiver));
         }
         if (r) {
           byReceiver.set(receiver, r);
@@ -16390,8 +16651,8 @@ function createCallBinder(scan2, pairs, opts = {}) {
       return r;
     };
     const readInScope = (receiver, e, self) => {
-      if (SELF_NAMES.has(receiver) && family === "js" && e?.parent === void 0) return BARE;
-      if (SELF_NAMES.has(receiver)) return self(e?.parent);
+      if (receiver === "this" && family === "js" && e?.parent === void 0) return BARE;
+      if (SELF_NAMES.has(receiver)) return self(typeAround(e));
       if (receiver === "super") {
         const cls = classAround(e);
         const base = cls !== void 0 ? baseOf(cls) : void 0;
@@ -16403,10 +16664,18 @@ function createCallBinder(scan2, pairs, opts = {}) {
       if (d !== void 0 && ownTypes.has(d.type)) return self(d.type);
       const named = d === void 0 ? typeNamedLike(receiver) : void 0;
       if (named) return self(named);
-      return reading("foreign", receiver, void 0, d?.type ?? aliases.names.get(receiver)?.name ?? receiver);
+      return reading("foreign", receiver, void 0, d?.type ?? aliases.names.get(receiver)?.name ?? receiver, d === void 0 && namesType(receiver));
     };
     const resolve132 = (name2, how) => {
       const { shape, receiver, selfType, typeHint } = how;
+      const prefer = (list2) => {
+        if (!how.typed || recall) return preferParent(list2, typeHint, receiver);
+        const own2 = list2.filter((d) => d.parent !== void 0 && lastSegment(d.parent) === typeHint);
+        if (own2.length) return own2;
+        const up = typeHint !== void 0 ? ancestorsOf(typeHint) : /* @__PURE__ */ new Set();
+        const inherited = list2.filter((d) => d.parent !== void 0 && up.has(lastSegment(d.parent)));
+        return inherited.length ? inherited : list2.filter(inTrait);
+      };
       if (shape === "outside") return null;
       const bareRust = family === "rust" && shape === "bare";
       const scopeLine = receiver?.startsWith(INLINE_SUPER) ? Number(receiver.slice(INLINE_SUPER.length)) : void 0;
@@ -16455,7 +16724,7 @@ function createCallBinder(scan2, pairs, opts = {}) {
         }
       }
       const reached = corroborated(callee, pool);
-      const stated = preferParent(family === "rust" ? reached.filter(reachable) : reached, typeHint, receiver);
+      const stated = prefer(family === "rust" ? reached.filter(reachable) : reached);
       if (stated.length) {
         const chosen2 = pickCandidate(f.rel, stated);
         return chosen2 ? { hit: { def: chosen2, corroborated: true }, local: false } : null;
@@ -16473,7 +16742,7 @@ function createCallBinder(scan2, pairs, opts = {}) {
         const tail = isTail2(f.rel);
         guesses = guesses.filter((d) => !isTestCase(d.file) && (tail || !isTail2(d.file)));
       }
-      const chosen = pickCandidate(f.rel, preferParent(guesses, typeHint, receiver));
+      const chosen = pickCandidate(f.rel, prefer(guesses));
       return chosen ? { hit: { def: chosen, corroborated: false }, local: false } : null;
     };
     return (c2, enclosing) => {
@@ -16491,6 +16760,12 @@ function createCallBinder(scan2, pairs, opts = {}) {
 var REFERENCE_KINDS3;
 var STRICT;
 var SHAPED;
+var TYPE_CASE;
+var TRAIT_KINDS;
+var TYPE_KINDS3;
+var CALLABLE_KINDS;
+var CAPITAL_FUNCTIONS;
+var lastSegment;
 var PACKAGE_DIR;
 var PRIVATE_REACH;
 var NOT_CALLABLE;
@@ -16520,6 +16795,12 @@ var init_bind = __esm({
     REFERENCE_KINDS3 = /* @__PURE__ */ new Set(["reexport", "reexport-all", "default"]);
     STRICT = /* @__PURE__ */ new Set(["js", "go"]);
     SHAPED = /* @__PURE__ */ new Set(["go", "python"]);
+    TYPE_CASE = /* @__PURE__ */ new Set(["js", "python", "java", "ruby", "rust", "kotlin", "scala", "php", "c", "swift", "dart"]);
+    TRAIT_KINDS = /* @__PURE__ */ new Set(["trait", "interface", "protocol"]);
+    TYPE_KINDS3 = /* @__PURE__ */ new Set(["class", "struct", "interface", "trait", "enum", "type", "union", "record", "object", "protocol", "module", "namespace", "contract", "library"]);
+    CALLABLE_KINDS = /* @__PURE__ */ new Set(["function", "macro"]);
+    CAPITAL_FUNCTIONS = /* @__PURE__ */ new Set(["go", "c"]);
+    lastSegment = (name2) => name2.slice(Math.max(name2.lastIndexOf(":"), name2.lastIndexOf(".")) + 1);
     PACKAGE_DIR = /* @__PURE__ */ new Set(["go", "java"]);
     PRIVATE_REACH = { go: "package", java: "package", python: "import", rust: "path" };
     NOT_CALLABLE = /* @__PURE__ */ new Set(["mod", "module", "package", "namespace"]);
@@ -19850,7 +20131,7 @@ async function readCapped(res, max, url) {
     }
     chunks.push(value);
   }
-  return Buffer.concat(chunks).toString("utf8");
+  return new TextDecoder().decode(Buffer.concat(chunks));
 }
 function capText(text) {
   if (text.length <= ENDPOINT_MAX_TEXT_CHARS) return text;
@@ -19970,7 +20251,7 @@ var init_endpoint = __esm({
     init_encode();
     init_model();
     init_embed();
-    EMBED_IMAGE_VERSION = "1.0.1";
+    EMBED_IMAGE_VERSION = "1.0.2";
     ENDPOINT_MAX_TEXT_CHARS = 8192;
     MAX_RESPONSE_BYTES = 64 * 1024 * 1024;
     CANARY = "codeindex endpoint fingerprint: parse the request, retry on timeout";
@@ -19978,7 +20259,7 @@ var init_endpoint = __esm({
 });
 function tierOf2(s) {
   const member = s.parent !== void 0;
-  if (TYPE_KINDS3.has(s.kind) || CALLABLE_KINDS.has(s.kind)) return member ? 2 : TYPE_KINDS3.has(s.kind) ? 0 : 1;
+  if (TYPE_KINDS4.has(s.kind) || CALLABLE_KINDS2.has(s.kind)) return member ? 2 : TYPE_KINDS4.has(s.kind) ? 0 : 1;
   return member ? 4 : 3;
 }
 function mostSalient(symbols, max) {
@@ -20037,8 +20318,8 @@ ${node.rel}:
 }
 var CHARS_PER_TOKEN;
 var SKIP_KINDS;
-var TYPE_KINDS3;
-var CALLABLE_KINDS;
+var TYPE_KINDS4;
+var CALLABLE_KINDS2;
 var MAX_MISSES;
 var init_repomap = __esm({
   "src/repomap.ts"() {
@@ -20047,7 +20328,7 @@ var init_repomap = __esm({
     init_sort();
     CHARS_PER_TOKEN = 4;
     SKIP_KINDS = /* @__PURE__ */ new Set(["reexport", "reexport-all", "package"]);
-    TYPE_KINDS3 = /* @__PURE__ */ new Set([
+    TYPE_KINDS4 = /* @__PURE__ */ new Set([
       "class",
       "struct",
       "interface",
@@ -20061,7 +20342,7 @@ var init_repomap = __esm({
       "object",
       "module"
     ]);
-    CALLABLE_KINDS = /* @__PURE__ */ new Set(["function", "def", "fn", "func", "method", "constructor", "macro"]);
+    CALLABLE_KINDS2 = /* @__PURE__ */ new Set(["function", "def", "fn", "func", "method", "constructor", "macro"]);
     MAX_MISSES = 32;
   }
 });
@@ -21765,7 +22046,7 @@ function isTail(rel2) {
   return tierForPath(dirOf(rel2) || "(root)") === 2 || /(^|\/)testdata\//.test(rel2);
 }
 function isCallable(s) {
-  if (CALLABLE_KINDS2.has(s.kind)) return true;
+  if (CALLABLE_KINDS3.has(s.kind)) return true;
   if (s.kind !== "const" || !s.signature) return false;
   const family = familyOf(s.lang);
   return family === "js" ? FN_INITIALIZER.test(s.signature) : family === "python" && PY_LAMBDA.test(s.signature);
@@ -22081,7 +22362,7 @@ function capDeadCode(all2, limit) {
   return { total: all2.length, shown: limit, truncated: true, candidates: all2.slice(0, limit) };
 }
 var REFERENCE_KINDS8;
-var CALLABLE_KINDS2;
+var CALLABLE_KINDS3;
 var FN_INITIALIZER;
 var PY_LAMBDA;
 var CONTAINER_KINDS2;
@@ -22104,7 +22385,7 @@ var init_deadcode = __esm({
     init_complexity();
     init_util();
     REFERENCE_KINDS8 = /* @__PURE__ */ new Set(["reexport", "reexport-all", "default"]);
-    CALLABLE_KINDS2 = /* @__PURE__ */ new Set(["function", "method", "def", "constructor", "operator", "class", "macro"]);
+    CALLABLE_KINDS3 = /* @__PURE__ */ new Set(["function", "method", "def", "constructor", "operator", "class", "macro"]);
     FN_INITIALIZER = /^[\w$]+\s*(?::[^=]*)?=\s*(?:async\s+)?(?:function\b|\(|[\w$]+\s*=>)/;
     PY_LAMBDA = /^\w+\s*(?::[^=]*)?=\s*lambda\b/;
     CONTAINER_KINDS2 = /* @__PURE__ */ new Set(["class", "interface", "struct", "trait", "object", "enum", "record", "protocol", "module", "type"]);
@@ -30840,10 +31121,10 @@ function toEngineOptions(repo, opts) {
   };
 }
 var REFERENCE_KINDS9 = /* @__PURE__ */ new Set(["reexport", "reexport-all", "default"]);
-var CALLABLE_KINDS3 = /* @__PURE__ */ new Set(["function", "method", "def", "getter", "setter", "macro"]);
+var CALLABLE_KINDS4 = /* @__PURE__ */ new Set(["function", "method", "def", "getter", "setter", "macro"]);
 function localDefNames(symbols) {
   const names = /* @__PURE__ */ new Set();
-  for (const s of symbols) if (CALLABLE_KINDS3.has(s.kind)) names.add(s.name);
+  for (const s of symbols) if (CALLABLE_KINDS4.has(s.kind)) names.add(s.name);
   return names;
 }
 function enclosingSymbolName(symbols, line2) {
