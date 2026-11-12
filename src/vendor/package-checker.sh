@@ -26,7 +26,7 @@ export LC_ALL=C
 # Version - automatically updated by release workflow
 # Last release: https://github.com/maxgfr/package-checker.sh/releases
 # NOTE: this exact 'VERSION="..."' format is sed-matched by .releaserc.json — do not reformat.
-VERSION="1.15.28"
+VERSION="1.16.3"
 
 # Default configuration
 CONFIG_FILE=".package-checker.config.json"
@@ -38,7 +38,6 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Global variables
-DATA_SOURCES=()
 LOADED_SOURCE_COUNT=0
 FOUND_VULNERABLE=0
 VULNERABLE_PACKAGES=()
@@ -46,13 +45,15 @@ VULNERABLE_PACKAGES=()
 # Pre-built vulnerability lookup tables (for O(1) lookup)
 declare -A VULN_EXACT_LOOKUP      # VULN_EXACT_LOOKUP[package]="ver1|ver2|..."
 declare -A VULN_RANGE_LOOKUP      # VULN_RANGE_LOOKUP[package]="range1|range2|..."
-declare -A VULN_METADATA_SEVERITY # VULN_METADATA_SEVERITY[package@version OR package]="critical|high|medium|low"
-declare -A VULN_METADATA_GHSA     # VULN_METADATA_GHSA[package@version OR package]="GHSA-xxxx-xxxx-xxxx"
-declare -A VULN_METADATA_CVE      # VULN_METADATA_CVE[package@version OR package]="CVE-YYYY-NNNNN"
-declare -A VULN_METADATA_SOURCE   # VULN_METADATA_SOURCE[package@version OR package]="ghsa|osv|custom"
-declare -A VULN_ADVISORIES        # VULN_ADVISORIES[package@version]="sev;ghsa;cve;src||sev;ghsa;cve;src" (all matching advisories)
-declare -A VULN_METADATA_FIX      # VULN_METADATA_FIX[package:range]="fix_version" (upper bound from range)
-declare -A VULN_RECORDS           # lookup key -> newline-separated advisory records
+# Per finding (key "eco:package@version"): the most severe advisory's fields,
+# every matching advisory, and the version that fixes them all.
+declare -A VULN_METADATA_SEVERITY # ="critical|high|medium|low"
+declare -A VULN_METADATA_GHSA     # ="GHSA-xxxx-xxxx-xxxx"
+declare -A VULN_METADATA_CVE      # ="CVE-YYYY-NNNNN"
+declare -A VULN_METADATA_SOURCE   # ="ghsa|osv|custom" (merged: "ghsa, osv")
+declare -A VULN_ADVISORIES        # ="sev;ghsa;cve;src;fix;id||..." (all matching advisories)
+declare -A VULN_METADATA_FIX      # ="fix_version"
+declare -A VULN_RECORDS           # lookup key (eco:name@version or eco:name:range) -> advisory records
 
 # Configuration defaults (can be overridden by config file)
 CONFIG_IGNORE_PATHS=("node_modules" ".yarn" ".git" "vendor")
@@ -67,7 +68,6 @@ UNREADABLE_FILE_COUNT=0
 # build_ecosystem_tables() (see src/50-ecosystems/01-registry.sh)
 declare -A LOCKFILE_PARSER   # LOCKFILE_PARSER[basename]="analyze_fn"
 declare -A LOCKFILE_ECO      # LOCKFILE_ECO[basename]="purl-type"
-declare -A LOCKFILE_ALIAS    # LOCKFILE_ALIAS[basename]="type-alias"
 KNOWN_LOCKFILE_ALIASES=""    # space-separated unique alias list (validation + help)
 
 # Ecosystems detected in the scanned project (eco -> 1); drives default-feed loading
@@ -78,6 +78,7 @@ declare -A VULN_REACHABILITY      # VULN_REACHABILITY[dir|golang:module@version]
 
 # CycloneDX SBOMs given with --sbom (path -> 1), scanned as project inventories
 declare -A SBOM_FILES
+declare -A SBOM_COMPONENTS   # path -> "eco|name|version" lines (cyclonedx_components)
 # Syntax validation for JSON inputs; scan-time code must not require jq.
 # Stream tokens through a small grammar stack. Repeated indexing into a growing
 # whole-document string becomes quadratic with some awk implementations.
@@ -185,179 +186,147 @@ json_is_valid_file() {
     ' "$1"
 }
 # ============================================================================
-# Pure Bash JSON Parser Functions (no jq dependency)
+# Minimal JSON accessors (awk, no jq dependency)
+# For configuration files, package.json / composer files and GitHub API answers.
 # ============================================================================
 
-# Escape special regex characters in a string
-escape_regex() {
-    local str="$1"
-    printf '%s' "$str" | sed 's/[.[\*^$()+?{|\\]/\\&/g'
+# One scanner for every accessor, fed with json_structural_lines records (one
+# member per record, an opening { or [ at the end of its record, a closing }
+# or ] alone): layout, escapes and document size are handled there.
+#   mode=value  print the raw value of the top-level KEY of the root object
+#   mode=items  print each element of the root array on its own line
+# Only members of the root are considered, so a key name that appears as a
+# string value or inside a nested object is never mistaken for the key.
+AWK_JSON_SCAN='
+function trim(t) {
+    sub(/^[[:space:]]+/, "", t)
+    sub(/[[:space:]]+$/, "", t)
+    return t
+}
+# Split a member record into M_KEY ("" and M_HAS_KEY=0 for an array element)
+# and M_VAL, the rest of the record.
+function member(rec,   i, c, n, rest) {
+    M_KEY = ""; M_VAL = rec; M_HAS_KEY = 0
+    if (substr(rec, 1, 1) != "\"") return
+    n = length(rec)
+    for (i = 2; i <= n; i++) {
+        c = substr(rec, i, 1)
+        if (c == "\\") i++
+        else if (c == "\"") break
+    }
+    rest = trim(substr(rec, i + 1))
+    if (substr(rest, 1, 1) != ":") return
+    M_HAS_KEY = 1
+    M_KEY = substr(rec, 2, i - 2)
+    M_VAL = trim(substr(rest, 2))
+}
+{
+    rec = trim($0)
+    if (rec == "") next
+    closing = (rec == "}" || rec == "]")
+    last = substr(rec, length(rec))
+    opening = (!closing && (last == "{" || last == "["))
+    if (capturing) {
+        # Rebuild the nested value, restoring the commas between members.
+        if (closing) {
+            out = out rec
+            if (--cdepth == 0) {
+                print out
+                capturing = 0
+                if (mode == "value") exit
+            }
+            next
+        }
+        out = out (count[cdepth]++ ? "," : "") rec
+        if (opening) count[++cdepth] = 0
+        next
+    }
+    if (closing) { depth--; next }
+    if (depth == 0) {
+        if (rec != (mode == "value" ? "{" : "[")) exit
+        depth = 1
+        next
+    }
+    if (depth == 1) {
+        member(rec)
+        if (mode == "value") {
+            wanted = (M_HAS_KEY && M_KEY == key)
+            if (opening && wanted) { capturing = 1; out = M_VAL; cdepth = 1; count[1] = 0 }
+            else if (opening) depth++
+            else if (wanted) { print M_VAL; exit }
+        } else if (opening) {
+            capturing = 1; out = rec; cdepth = 1; count[1] = 0
+        } else {
+            print rec
+        }
+        next
+    }
+    if (opening) depth++
+}
+'
+
+# Raw JSON value of a top-level key ("" when the key is absent).
+# Usage: json_get_raw "$json" "key"
+json_get_raw() {
+    printf '%s\n' "$1" | json_structural_lines - | awk -v mode=value -v key="$2" "$AWK_JSON_SCAN"
 }
 
-# Get a simple string value from JSON by key (top-level only)
+# Scalar value of a top-level key: a string without its quotes (\" \/ and \\
+# unescaped), or a number / true / false / null as written. Objects, arrays
+# and absent keys print nothing.
 # Usage: json_get_value "$json" "key"
 json_get_value() {
-    local json="$1"
-    local key="$2"
-    local escaped_key=$(escape_regex "$key")
-    # Match "key": "value" or "key": value (for numbers/booleans)
-    local result=$(echo "$json" | grep -oE "\"$escaped_key\"[[:space:]]*:[[:space:]]*(\"[^\"]*\"|[0-9]+|true|false|null)" | head -1)
-    if [ -n "$result" ]; then
-        echo "$result" | sed -E 's/^"[^"]*"[[:space:]]*:[[:space:]]*//' | sed 's/^"//;s/"$//'
-    fi
+    local raw
+    raw=$(json_get_raw "$1" "$2")
+    case "$raw" in
+        '"'*'"')
+            raw="${raw#\"}"; raw="${raw%\"}"
+            raw="${raw//\\\//\/}"
+            raw="${raw//\\\"/\"}"
+            raw="${raw//\\\\/\\}"
+            printf '%s\n' "$raw" ;;
+        ''|'{'*|'['*) ;;
+        *) printf '%s\n' "$raw" ;;
+    esac
 }
 
-# Get array length from JSON (for simple arrays at top level)
-# Usage: json_array_length "$json"
-json_array_length() {
-    local json="$1"
-    # Count elements by counting commas + 1 (or 0 if empty)
-    local trimmed=$(echo "$json" | tr -d '\n\r\t ' | sed 's/^\[//;s/\]$//')
-    if [ -z "$trimmed" ] || [ "$trimmed" = "[]" ]; then
-        echo "0"
-        return
-    fi
-    # Count top-level commas (not inside nested structures)
-    local count=1
-    local depth=0
-    local in_string=false
-    local prev_char=""
-    local i=0
-    local len=${#trimmed}
-    
-    while [ $i -lt $len ]; do
-        local char="${trimmed:$i:1}"
-        if [ "$in_string" = true ]; then
-            if [ "$char" = '"' ] && [ "$prev_char" != "\\" ]; then
-                in_string=false
-            fi
-        else
-            case "$char" in
-                '"') in_string=true ;;
-                '[' | '{') depth=$((depth + 1)) ;;
-                ']' | '}') depth=$((depth - 1)) ;;
-                ',') [ $depth -eq 0 ] && count=$((count + 1)) ;;
-            esac
-        fi
-        prev_char="$char"
-        i=$((i + 1))
-    done
-    echo "$count"
-}
-
-# Get array element at index from JSON array
-# Usage: json_array_get "$json_array" index
-json_array_get() {
-    local json="$1"
-    local index="$2"
-    local trimmed=$(echo "$json" | tr -d '\n\r\t' | sed 's/^[[:space:]]*\[//;s/\][[:space:]]*$//')
-    
-    local current=0
-    local depth=0
-    local in_string=false
-    local prev_char=""
-    local start=0
-    local i=0
-    local len=${#trimmed}
-    
-    while [ $i -lt $len ]; do
-        local char="${trimmed:$i:1}"
-        if [ "$in_string" = true ]; then
-            if [ "$char" = '"' ] && [ "$prev_char" != "\\" ]; then
-                in_string=false
-            fi
-        else
-            case "$char" in
-                '"') in_string=true ;;
-                '[' | '{') depth=$((depth + 1)) ;;
-                ']' | '}') depth=$((depth - 1)) ;;
-                ',')
-                    if [ $depth -eq 0 ]; then
-                        if [ $current -eq $index ]; then
-                            echo "${trimmed:$start:$((i - start))}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
-                            return
-                        fi
-                        current=$((current + 1))
-                        start=$((i + 1))
-                    fi
-                    ;;
-            esac
-        fi
-        prev_char="$char"
-        i=$((i + 1))
-    done
-    
-    # Last element
-    if [ $current -eq $index ]; then
-        echo "${trimmed:$start}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
-    fi
-}
-
-# Get nested object value from JSON
+# Object (or array) value of a top-level key; "{}" when absent or scalar.
 # Usage: json_get_object "$json" "key"
 json_get_object() {
-    local json="$1"
-    local key="$2"
-    
-    # Flatten JSON to single line and extract object
-    local flat=$(echo "$json" | tr '\n' ' ' | tr -s ' ')
-    
-    # Find position of key and extract content after it
-    # Use Python-like approach with awk
-    echo "$flat" | awk -v key="\"$key\"" '
-    {
-        # Find the key
-        idx = index($0, key)
-        if (idx == 0) { print "{}"; exit }
-        
-        # Get everything after the key
-        rest = substr($0, idx + length(key))
-        
-        # Skip whitespace and colon
-        match(rest, /^[[:space:]]*:[[:space:]]*/)
-        rest = substr(rest, RLENGTH + 1)
-        
-        # Check first character
-        first = substr(rest, 1, 1)
-        if (first != "{" && first != "[") { print "{}"; exit }
-        
-        # Count brackets to find the end
-        depth = 0
-        in_str = 0
-        result = ""
-        n = length(rest)
-        
-        for (i = 1; i <= n; i++) {
-            c = substr(rest, i, 1)
-            result = result c
-            
-            if (in_str) {
-                if (c == "\"" && substr(rest, i-1, 1) != "\\") in_str = 0
-            } else {
-                if (c == "\"") in_str = 1
-                else if (c == "{" || c == "[") depth++
-                else if (c == "}" || c == "]") {
-                    depth--
-                    if (depth == 0) { print result; exit }
-                }
-            }
-        }
-        print "{}"
-    }'
+    local raw
+    raw=$(json_get_raw "$1" "$2")
+    case "$raw" in
+        '{'*|'['*) printf '%s\n' "$raw" ;;
+        *) echo "{}" ;;
+    esac
 }
 
-# Get array from JSON object by key
+# Array value of a top-level key; "[]" when absent.
 # Usage: json_get_array "$json" "key"
 json_get_array() {
-    local json="$1"
-    local key="$2"
-    local result=$(json_get_object "$json" "$key")
-    # Return empty array if result is empty object or invalid
-    if [ -z "$result" ] || [ "$result" = "{}" ]; then
-        echo "[]"
-    else
-        echo "$result"
-    fi
+    local result
+    result=$(json_get_object "$1" "$2")
+    [ "$result" != "{}" ] || result="[]"
+    printf '%s\n' "$result"
+}
+
+# Elements of a JSON array, one per line (raw JSON).
+# Usage: json_array_items "$json_array"
+json_array_items() {
+    printf '%s\n' "$1" | json_structural_lines - | awk -v mode=items "$AWK_JSON_SCAN"
+}
+
+# Non-empty string elements of a JSON array, unquoted, into JSON_STRINGS.
+# Usage: json_read_strings "$json_array"
+json_read_strings() {
+    JSON_STRINGS=()
+    local item
+    while IFS= read -r item; do
+        case "$item" in
+            '"'*'"') item="${item#\"}"; item="${item%\"}" ;;
+        esac
+        [ -z "$item" ] || JSON_STRINGS+=("$item")
+    done < <(json_array_items "$1")
 }
 # Put structural JSON delimiters on separate records without changing strings.
 # Line-oriented lockfile readers can then handle compact or pretty JSON alike.
@@ -469,16 +438,18 @@ OPTIONS:
                             runtime (Node.js / PHP: --package-name node --ecosystem runtime)
     --export-json [FILE]    Export results to JSON (FILE optional, default: vulnerabilities.json)
     --export-csv [FILE]     Export results to CSV (FILE optional, default: vulnerabilities.csv)
-    --github-org ORG        GitHub organization to fetch package.json files from
-    --github-repo REPO      GitHub repository to fetch package.json files from (format: owner/repo)
+    --github-org ORG        GitHub organization to fetch package.json files and lockfiles from
+    --github-repo REPO      GitHub repository to fetch package.json files and lockfiles from (format: owner/repo)
     --github-token TOKEN    GitHub personal access token (or use GITHUB_TOKEN env var)
     --github-output DIR     Output directory for fetched packages (default: ./packages)
     --github-only           Only fetch packages from GitHub, don't analyze local files
     --create-multiple-issues Create one GitHub issue per vulnerable package (requires --github-token)
     --create-single-issue   Create a single GitHub issue with all vulnerabilities (requires --github-token)
-    --fetch-all DIR         Fetch GHSA + OSV feeds for ALL ecosystems to DIR (default: data)
-    --fetch-osv [ECOS]      Fetch OSV feeds; optional comma list of ecosystems (default: all)
-    --fetch-ghsa [ECOS]     Fetch GHSA feeds (single clone); optional comma list (default: all)
+    --fetch-all [DIR]       Fetch GHSA + OSV + runtime feeds for ALL ecosystems to DIR (default: data)
+    --fetch-osv [ECOS|DIR]  Fetch OSV feeds into data/; optional comma list of ecosystems
+                            (purl types or lockfile aliases: pypi,go,rust...; default: all),
+                            or an existing directory to write every feed to
+    --fetch-ghsa [ECOS|DIR] Fetch GHSA feeds (single clone); same argument as --fetch-osv
     --fetch-runtime [DIR]   Fetch the Node.js / PHP runtime feed (OSV Bitnami) to
                             DIR/osv-runtime.purl (default: data)
     --only-package-json     Scan only package.json files (skip lockfiles)
@@ -621,16 +592,11 @@ GITHUB_RAW_BASE="https://raw.githubusercontent.com/maxgfr/package-checker.sh/ref
 # Output: file content to stdout
 resolve_ai_doc() {
     local file_path="$1"
-    local script_dir=""
 
-    # Try to find the script's own directory
-    if [ -n "${BASH_SOURCE[0]}" ]; then
-        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    fi
-
-    # 1. Local relative to script location
-    if [ -n "$script_dir" ] && [ -f "$script_dir/$file_path" ]; then
-        cat "$script_dir/$file_path"
+    # 1. Local relative to script location (symlinks resolved)
+    resolve_script_home
+    if [ -n "$SCRIPT_HOME" ] && [ -f "$SCRIPT_HOME/$file_path" ]; then
+        cat "$SCRIPT_HOME/$file_path"
         return 0
     fi
 
@@ -641,13 +607,10 @@ resolve_ai_doc() {
     fi
 
     # 3. Homebrew prefix
-    local brew_prefix=""
-    if command -v brew &> /dev/null; then
-        brew_prefix="$(brew --prefix 2>/dev/null)/share/package-checker"
-        if [ -f "$brew_prefix/$file_path" ]; then
-            cat "$brew_prefix/$file_path"
-            return 0
-        fi
+    resolve_brew_prefix
+    if [ -n "$BREW_PREFIX" ] && [ -f "$BREW_PREFIX/share/package-checker/$file_path" ]; then
+        cat "$BREW_PREFIX/share/package-checker/$file_path"
+        return 0
     fi
 
     # 4. Docker path
@@ -751,11 +714,55 @@ check_dependencies() {
     done
 }
 
+# Caches of the two resolvers below: values inherited from the environment
+# must never stand in for them (they decide where the built-in feeds come from).
+unset SCRIPT_HOME BREW_PREFIX
+
+# Directory of the real script file, symlinks resolved (Homebrew and the
+# Docker images run it through /usr/local/bin/package-checker). Empty when the
+# script is piped (curl ... | bash). Sets SCRIPT_HOME once.
+resolve_script_home() {
+    [ -z "${SCRIPT_HOME+x}" ] || return 0
+    SCRIPT_HOME=""
+    local path="${BASH_SOURCE[0]:-}" link hops=0
+    [ -n "$path" ] && [ -f "$path" ] || return 0
+    while [ -L "$path" ] && [ "$hops" -lt 32 ]; do
+        link=$(readlink "$path") || break
+        case "$link" in
+            /*) path="$link" ;;
+            *) path="$(dirname "$path")/$link" ;;
+        esac
+        hops=$((hops + 1))
+    done
+    SCRIPT_HOME=$(cd "$(dirname "$path")" 2>/dev/null && pwd) || SCRIPT_HOME=""
+}
+
+# Homebrew prefix, computed once (brew --prefix takes ~0.1 s). Sets
+# BREW_PREFIX ("" without Homebrew).
+resolve_brew_prefix() {
+    [ -z "${BREW_PREFIX+x}" ] || return 0
+    BREW_PREFIX=""
+    if command -v brew &> /dev/null; then
+        BREW_PREFIX=$(brew --prefix 2>/dev/null) || BREW_PREFIX=""
+    fi
+}
+
 # Temporary files removed when the script exits, whatever the exit path.
 PC_TEMP_FILES=()
+PC_TEMP_DIRS=()
 PC_CLEANUP_TRAP=false
 pc_cleanup_temp_files() {
     [ ${#PC_TEMP_FILES[@]} -eq 0 ] || rm -f -- "${PC_TEMP_FILES[@]}"
+    [ ${#PC_TEMP_DIRS[@]} -eq 0 ] || rm -rf -- "${PC_TEMP_DIRS[@]}"
+}
+# Register a temporary directory (feed generation: clones, zips) for removal
+# when the script exits, including on Ctrl-C or a CI timeout.
+register_temp_dir() {
+    [ -n "$1" ] && [ -d "$1" ] || return 1
+    PC_TEMP_DIRS+=("$1")
+    register_temp_file "$1/.package-checker-tmp"
+    trap 'exit 130' INT
+    trap 'exit 143' TERM
 }
 # Register a temp file for cleanup. The EXIT trap is installed once and keeps
 # any EXIT trap already set (it runs after the cleanup).
@@ -767,6 +774,7 @@ register_temp_file() {
     previous=$(trap -p EXIT)
     if [ -n "$previous" ]; then
         eval "set -- $previous"   # trap -- 'command' EXIT
+        # shellcheck disable=SC2064 # the previous trap is expanded now, on purpose
         trap "pc_cleanup_temp_files; $3" EXIT
     else
         trap pc_cleanup_temp_files EXIT
@@ -782,6 +790,7 @@ GITHUB_ONLY=false
 GITHUB_RATE_LIMIT_DELAY=2
 CREATE_GITHUB_ISSUE=false
 CREATE_SINGLE_ISSUE=false
+GITHUB_FAILED_REPOS=0   # organization repositories whose files could not be fetched
 
 # Make a GitHub API request with automatic retry on rate limit. A 403/429
 # rate-limit answer waits until the time GitHub gives (Retry-After or
@@ -893,7 +902,8 @@ get_github_repositories() {
         sleep "$GITHUB_RATE_LIMIT_DELAY"
     done
     
-    local total=$(echo "$all_repos" | wc -l | tr -d ' ')
+    local total=0
+    [ -z "$all_repos" ] || total=$(printf '%s\n' "$all_repos" | wc -l | tr -d ' ')
     echo -e "${GREEN}✅ Total repositories found: $total${NC}" >&2
     echo "" >&2
     
@@ -915,10 +925,16 @@ search_package_json_in_repo_tree() {
     local default_branch ref branch_info
     default_branch=$(json_get_value "$repo_info" "default_branch")
     ref="$default_branch"
-    if branch_info=$(github_request "https://api.github.com/repos/${repo_full_name}/branches/${default_branch}"); then
+    if branch_info=$(github_request "https://api.github.com/repos/${repo_full_name}/branches/${default_branch}" 2>/dev/null); then
         local commit_sha
-        commit_sha=$(json_get_value "$branch_info" "sha")
+        commit_sha=$(json_get_value "$(json_get_object "$branch_info" "commit")" "sha")
         [[ "$commit_sha" =~ ^[0-9a-f]{40}$ ]] && ref="$commit_sha"
+    elif [ "$(json_get_value "$repo_info" "size")" = 0 ]; then
+        # No default branch and no content: a repository without any commit
+        # (GitHub answers 409 for its tree). "size" alone is not enough: it
+        # is computed asynchronously and reads 0 on fresh repositories.
+        echo "   ✗ Empty repository: nothing to scan"
+        return 0
     fi
 
     # Get the full tree recursively
@@ -1022,13 +1038,14 @@ create_github_issue() {
     local labels_json
     labels_json=$(echo "$labels" | tr ',' '\n' | jq -R . | jq -s .)
 
-    # Create JSON payload with proper escaping using jq
+    # Create JSON payload with proper escaping using jq. The body goes
+    # through stdin, never the command line: a consolidated report can
+    # exceed the per-argument limit (128 KiB on Linux).
     local json_payload
-    json_payload=$(jq -n \
+    json_payload=$(printf '%s' "$issue_body" | jq -Rs \
         --arg title "$issue_title" \
-        --arg body "$issue_body" \
         --argjson labels "$labels_json" \
-        '{title: $title, body: $body, labels: $labels}')
+        '{title: $title, body: ., labels: $labels}') || return 1
 
     echo -e "${BLUE}📝 Creating issue on ${repo_full_name}...${NC}"
 
@@ -1038,8 +1055,8 @@ create_github_issue() {
         -H "Authorization: Bearer $GITHUB_TOKEN" \
         -H "Accept: application/vnd.github+json" \
         -H "X-GitHub-Api-Version: 2022-11-28" \
-        -d "$json_payload" \
-        "https://api.github.com/repos/${repo_full_name}/issues") || return 1
+        --data-binary @- \
+        "https://api.github.com/repos/${repo_full_name}/issues" <<< "$json_payload") || return 1
     local http_code="${response##*$'\n'}"
     response="${response%$'\n'*}"
 
@@ -1119,6 +1136,7 @@ fetch_github_packages() {
             # empty or unreadable repository must not stop the organization scan.
             if ! search_package_json_in_repo_tree "$repo_full_name" "$repo_name"; then
                 echo -e "${YELLOW}⚠️  Skipping $repo_full_name: unable to fetch its files${NC}"
+                GITHUB_FAILED_REPOS=$((GITHUB_FAILED_REPOS + 1))
             fi
             
             sleep "$GITHUB_RATE_LIMIT_DELAY"
@@ -1451,31 +1469,41 @@ parse_csv_to_lookup_eval() {
         return s
     }
 
-    function parse_csv_line(line, f,    i, n, in_quote, field, c) {
+    # RFC 4180: a quote opens a quoted field only at the start of a field
+    # (after optional spaces); elsewhere it is a literal character, so a stray
+    # quote such as 5" in a description cannot swallow the rest of the file.
+    function parse_csv_line(line, f,    i, n, in_quote, field, c, at_start) {
         n = 1
         field = ""
         in_quote = 0
+        at_start = 1
         for (i = 1; i <= length(line); i++) {
             c = substr(line, i, 1)
-            if (c == "\"") {
-                if (in_quote && substr(line, i+1, 1) == "\"") {
-                    field = field "\""
-                    i++
-                } else {
-                    in_quote = !in_quote
-                }
-            } else if (c == "," && !in_quote) {
+            if (in_quote) {
+                if (c == "\"") {
+                    if (substr(line, i+1, 1) == "\"") { field = field "\""; i++ }
+                    else in_quote = 0
+                } else field = field c
+            } else if (c == "\"" && at_start) {
+                in_quote = 1
+                at_start = 0
+            } else if (c == ",") {
                 f[n] = trim(field)
                 n++
                 field = ""
+                at_start = 1
             } else {
                 field = field c
+                if (c !~ /[[:space:]]/) at_start = 0
             }
         }
         f[n] = trim(field)
+        QUOTE_OPEN = in_quote
         return n
     }
 
+    # A UTF-8 byte order mark (Excel "CSV UTF-8") is not part of the header.
+    NR == 1 && substr($0, 1, 3) == "\357\273\277" { $0 = substr($0, 4) }
     {
         if (pending_line != "") {
             current_line = pending_line " " $0
@@ -1484,16 +1512,14 @@ parse_csv_to_lookup_eval() {
             current_line = $0
         }
 
-        # An odd number of quotes means the quoted field continues.
-        quote_count = gsub(/"/, "\"", current_line)
-        if (quote_count % 2 == 1) {
+        if (current_line == "") next
+
+        # A quoted field still open at the end of the line continues on the next.
+        field_count = parse_csv_line(current_line, fields)
+        if (QUOTE_OPEN) {
             pending_line = current_line
             next
         }
-
-        if (current_line == "") next
-
-        field_count = parse_csv_line(current_line, fields)
 
         if (!header_checked) {
             header_checked = 1
@@ -1505,6 +1531,15 @@ parse_csv_to_lookup_eval() {
                     if (by_name && lower_field == tolower(col1)) pkg_col = i
                     if (by_name && lower_field == tolower(col2)) ver_col = i
                     if (lower_field ~ /^(severity|ghsa|cve|source)$/) { meta_col[lower_field] = i; has_meta = 1 }
+                    if (lower_field == tolower(col1)) found1 = 1
+                    if (lower_field == tolower(col2)) found2 = 1
+                }
+                # Named columns that the header lacks would silently load
+                # other columns as package names and versions.
+                if (by_name && !(found1 && found2)) {
+                    printf "Error: CSV header has no column named %s\n", (found1 ? col2 : col1) > "/dev/stderr"
+                    failed = 1
+                    exit 1
                 }
                 next
             }
@@ -1523,7 +1558,14 @@ parse_csv_to_lookup_eval() {
         add_entry("*:" loose_name(pkg), ver, record, range_like(ver))
     }
 
-    END { emit_lookup() }
+    END {
+        if (failed) exit 1
+        if (pending_line != "") {
+            print "Error: unterminated quoted field in CSV source" > "/dev/stderr"
+            exit 1
+        }
+        emit_lookup()
+    }
     '
 }
 # Awk helpers shared by every feed parser (purl, SARIF, CycloneDX, Trivy).
@@ -1571,11 +1613,15 @@ function purl_split(p,   main_part, q, te, at) {
     if (substr(p, 1, 4) != "pkg:") return 0
     te = index(p, "/")
     if (te <= 5) return 0
+    # A "#subpath" names a file inside the package, never part of its version.
+    q = index(p, "#")
+    if (q > 0) p = substr(p, 1, q - 1)
     main_part = p
     q = index(p, "?")
     # The query string may itself contain "@": split it off first.
     if (q > 0) { main_part = substr(p, 1, q - 1); PURL_QUERY = substr(p, q + 1) }
-    PURL_TYPE = substr(main_part, 5, te - 5)
+    # The purl type is case-insensitive (pkg:NPM/x is pkg:npm/x).
+    PURL_TYPE = tolower(substr(main_part, 5, te - 5))
     # Name/version split at the LAST "@": scoped names start with "@".
     if (!match(main_part, /@[^@]*$/)) return 0
     at = RSTART
@@ -1630,9 +1676,13 @@ function add_entry(key, version, record, is_range,   meta_key, rk, vk) {
     seen_versions[vk] = 1
     if (!(key in seen_keys)) { seen_keys[key] = 1; key_count++ }
     if (is_range) {
-        pkg_ranges[key] = (key in pkg_ranges) ? pkg_ranges[key] "\n" version : version
+        # Explicit if/else: mawk creates the assignment target before the
+        # "in" test of a ternary, which then always holds (leading "|").
+        if (key in pkg_ranges) pkg_ranges[key] = pkg_ranges[key] "\n" version
+        else pkg_ranges[key] = version
     } else {
-        pkg_versions[key] = (key in pkg_versions) ? pkg_versions[key] "|" version : version
+        if (key in pkg_versions) pkg_versions[key] = pkg_versions[key] "|" version
+        else pkg_versions[key] = version
     }
 }
 # True when a version string is a range: operators, spaces, wildcards
@@ -1683,13 +1733,19 @@ parse_purl_to_lookup_eval() {
         filtering = (tokens_file != "")
         if (filtering) while ((getline t < tokens_file) > 0) wanted[t] = 1
     }
-    function parse_query_params(query_string, params,   n, i, pairs, eq) {
+    function parse_query_params(query_string, params,   n, i, pairs, eq, value) {
         delete params
         if (query_string == "") return
         n = split(query_string, pairs, "&")
         for (i = 1; i <= n; i++) {
             eq = index(pairs[i], "=")
-            if (eq > 0) params[substr(pairs[i], 1, eq - 1)] = substr(pairs[i], eq + 1)
+            # Values are percent-decoded; ";" separates the fields of an
+            # advisory record, so it cannot survive inside one.
+            if (eq > 0) {
+                value = pct_decode(substr(pairs[i], eq + 1))
+                gsub(/;/, ",", value)
+                params[tolower(substr(pairs[i], 1, eq - 1))] = value
+            }
         }
     }
 
@@ -1745,8 +1801,9 @@ parse_purl_to_lookup_eval() {
 # classifies the record (JP_EVENT = open | close | scalar), keeps a stack of
 # container names ("#" for an array element) and exposes JP_PATH, e.g.
 # "/#/runs/#/results/#" inside a SARIF result. For a scalar, JP_KEY/JP_VAL hold
-# the key and the unquoted value (escapes such as \n stay literal). On close,
-# JP_PATH is the path of the container that just closed.
+# the key and the unquoted value (escapes such as \n stay literal, except "\/"
+# which is read as "/"). On close, JP_PATH is the path of the container that
+# just closed and jp_depth + 1 its depth.
 AWK_JSON_PATH='
 function jp_step(line,   k, rest) {
     gsub(/^[[:space:]]+|[[:space:]]+$/, "", line)
@@ -1764,6 +1821,8 @@ function jp_step(line,   k, rest) {
         sub(/"[[:space:]]*:[[:space:]]*$/, "", k)
         k = substr(k, 2)
         rest = substr(line, RLENGTH + 1)
+        # "\/" is an optional JSON escape of "/" (purls, scoped names).
+        if (index(k, "\\/")) gsub(/\\\//, "/", k)
     }
     if (rest == "{" || rest == "[") {
         JP_EVENT = "open"
@@ -1774,7 +1833,10 @@ function jp_step(line,   k, rest) {
     JP_EVENT = "scalar"
     JP_PATH = jp_path()
     JP_KEY = k
-    if (rest ~ /^".*"$/) rest = substr(rest, 2, length(rest) - 2)
+    if (rest ~ /^".*"$/) {
+        rest = substr(rest, 2, length(rest) - 2)
+        if (index(rest, "\\/")) gsub(/\\\//, "/", rest)
+    }
     JP_VAL = rest
 }
 function jp_path(   i, p) {
@@ -1860,25 +1922,32 @@ parse_sbom_to_lookup_eval() {
         jp_step($0)
         if (JP_EVENT == "scalar") {
             if (JP_PATH ~ /\/components\/#$/) {
-                if (JP_KEY == "bom-ref") comp_ref = JP_VAL
-                else if (JP_KEY == "purl") comp_purl = JP_VAL
+                # Kept per depth: a component may hold nested components,
+                # whose fields must not replace (or reset) its own.
+                if (JP_KEY == "bom-ref") comp_ref[jp_depth] = JP_VAL
+                else if (JP_KEY == "purl") comp_purl[jp_depth] = JP_VAL
             } else if (JP_PATH ~ /\/vulnerabilities\/#$/ && JP_KEY == "id") {
                 vid = JP_VAL
             } else if (JP_PATH ~ /\/vulnerabilities\/#\/ratings\/#$/ && JP_KEY == "severity" && vsev == "") {
                 vsev = JP_VAL
             } else if (JP_PATH ~ /\/vulnerabilities\/#\/affects\/#$/ && JP_KEY == "ref") {
-                refs[++nrefs] = JP_VAL
+                aref = JP_VAL
             } else if (JP_PATH ~ /\/vulnerabilities\/#\/affects\/#\/versions\/#$/) {
                 if (JP_KEY == "version") aver = JP_VAL
                 else if (JP_KEY == "status") astatus = JP_VAL
             }
         } else if (JP_EVENT == "close") {
             if (JP_PATH ~ /\/components\/#$/) {
-                if (comp_ref != "" && comp_purl != "") purl_of[comp_ref] = comp_purl
-                comp_ref = comp_purl = ""
+                d = jp_depth + 1
+                if (comp_ref[d] != "" && comp_purl[d] != "") purl_of[comp_ref[d]] = comp_purl[d]
+                delete comp_ref[d]; delete comp_purl[d]
             } else if (JP_PATH ~ /\/vulnerabilities\/#\/affects\/#\/versions\/#$/) {
-                if (aver != "" && (astatus == "" || astatus == "affected")) extra[nrefs] = extra[nrefs] " " aver
+                if (aver != "" && (astatus == "" || astatus == "affected")) aextra = aextra " " aver
                 aver = astatus = ""
+            } else if (JP_PATH ~ /\/vulnerabilities\/#\/affects\/#$/) {
+                # The entry is complete: its keys may come in any order.
+                if (aref != "") { refs[++nrefs] = aref; extra[nrefs] = aextra }
+                aref = aextra = ""
             } else if (JP_PATH ~ /\/vulnerabilities\/#$/) {
                 for (r = 1; r <= nrefs; r++) {
                     n = ++nfind
@@ -1913,7 +1982,6 @@ cyclonedx_components() {
     {
         jp_step($0)
         if (JP_EVENT != "scalar" || JP_KEY != "purl" || JP_PATH !~ /\/components\/#$/ || JP_PATH ~ /^\/#\/metadata\//) next
-        gsub(/\\\//, "/", JP_VAL)
         if (!purl_split(JP_VAL)) next
         if (PURL_TYPE == "golang") sub(/^v/, "", PURL_VERSION)
         print PURL_TYPE "|" canon_purl_name(PURL_TYPE, PURL_NAME) "|" PURL_VERSION
@@ -1927,7 +1995,11 @@ analyze_cyclonedx_inventory() {
     local lockfile="$1"
     local vuln_count_before=${#VULNERABLE_PACKAGES[@]}
     local packages eco pkg_name version
-    packages=$(cyclonedx_components "$lockfile")
+    if [ -n "${SBOM_COMPONENTS[$lockfile]+x}" ]; then
+        packages="${SBOM_COMPONENTS[$lockfile]}"
+    else
+        packages=$(cyclonedx_components "$lockfile")
+    fi
     while IFS='|' read -r eco pkg_name version; do
         [ -z "$pkg_name" ] || [ -z "$version" ] && continue
         check_vulnerability "$eco" "$pkg_name" "$version" "$lockfile" || true
@@ -1980,6 +2052,11 @@ parse_json_to_lookup_eval() {
             else if (JP_KEY == "ghsa") ghsa = JP_VAL
             else if (JP_KEY == "cve") cve = JP_VAL
             else if (JP_KEY == "source") src = JP_VAL
+            else if ((JP_KEY == "versions" || JP_KEY == "versions_range") && JP_VAL != "" && JP_VAL != "null") {
+                # A single version written as a string instead of a list.
+                vals[++nv] = JP_VAL
+                ranged[nv] = (JP_KEY == "versions_range")
+            }
         } else if (JP_EVENT == "scalar" && jp_depth == 3 && pkg != "" && JP_VAL != "" &&
                    (jp_stack[3] == "versions" || jp_stack[3] == "versions_range")) {
             vals[++nv] = JP_VAL
@@ -2186,42 +2263,17 @@ load_config_file() {
     # Parse options settings if present
     local options_obj=$(json_get_object "$config_content" "options")
     if [ -n "$options_obj" ] && [ "$options_obj" != "{}" ]; then
-        # Parse ignore_paths array
-        local ignore_paths_array=$(json_get_array "$options_obj" "ignore_paths")
-        if [ "$ignore_paths_array" != "[]" ] && [ -n "$ignore_paths_array" ]; then
-            CONFIG_IGNORE_PATHS=()
-            local ignore_count=$(json_array_length "$ignore_paths_array")
-            for i in $(seq 0 $((ignore_count - 1))); do
-                local path_val=$(json_array_get "$ignore_paths_array" $i)
-                path_val=$(echo "$path_val" | sed 's/^"//;s/"$//')
-                CONFIG_IGNORE_PATHS+=("$path_val")
-            done
-        fi
-        
-        # Parse dependency_types array
-        local dep_types_array=$(json_get_array "$options_obj" "dependency_types")
-        if [ "$dep_types_array" != "[]" ] && [ -n "$dep_types_array" ]; then
-            CONFIG_DEPENDENCY_TYPES=()
-            local dep_count=$(json_array_length "$dep_types_array")
-            for i in $(seq 0 $((dep_count - 1))); do
-                local dep_val=$(json_array_get "$dep_types_array" $i)
-                dep_val=$(echo "$dep_val" | sed 's/^"//;s/"$//')
-                CONFIG_DEPENDENCY_TYPES+=("$dep_val")
-            done
-        fi
+        # An array without any non-empty entry keeps the built-in defaults.
+        json_read_strings "$(json_get_array "$options_obj" "ignore_paths")"
+        [ ${#JSON_STRINGS[@]} -eq 0 ] || CONFIG_IGNORE_PATHS=("${JSON_STRINGS[@]}")
 
-        # Parse ecosystems array (default-feed loading override; the CLI
-        # --ecosystems flag takes precedence over this when both are set).
-        local ecosystems_array=$(json_get_array "$options_obj" "ecosystems")
-        if [ "$ecosystems_array" != "[]" ] && [ -n "$ecosystems_array" ]; then
-            CONFIG_ECOSYSTEMS=""
-            local eco_count=$(json_array_length "$ecosystems_array")
-            for i in $(seq 0 $((eco_count - 1))); do
-                local eco_val=$(json_array_get "$ecosystems_array" $i)
-                eco_val=$(echo "$eco_val" | sed 's/^"//;s/"$//')
-                CONFIG_ECOSYSTEMS="${CONFIG_ECOSYSTEMS:+$CONFIG_ECOSYSTEMS }$eco_val"
-            done
-        fi
+        json_read_strings "$(json_get_array "$options_obj" "dependency_types")"
+        [ ${#JSON_STRINGS[@]} -eq 0 ] || CONFIG_DEPENDENCY_TYPES=("${JSON_STRINGS[@]}")
+
+        # Default-feed loading override; the CLI --ecosystems flag takes
+        # precedence over this when both are set.
+        json_read_strings "$(json_get_array "$options_obj" "ecosystems")"
+        [ ${#JSON_STRINGS[@]} -eq 0 ] || CONFIG_ECOSYSTEMS="${JSON_STRINGS[*]}"
 
         # Runtime version check (Node.js, PHP): on unless "runtime_check": false
         local runtime_check_val=$(json_get_value "$options_obj" "runtime_check")
@@ -2229,55 +2281,70 @@ load_config_file() {
     fi
     
     # Parse config file and extract sources array
-    local sources_array=$(json_get_array "$config_content" "sources")
-    local sources_count=$(json_array_length "$sources_array")
-    
+    local -a source_objs=()
+    local source_obj
+    while IFS= read -r source_obj; do
+        source_objs+=("$source_obj")
+    done < <(json_array_items "$(json_get_array "$config_content" "sources")")
+    local sources_count=${#source_objs[@]}
+
     if [ "$load_sources" != true ]; then
         [ "$sources_count" -eq 0 ] || echo -e "${BLUE}ℹ️  Configuration sources ignored: sources given on the command line take precedence${NC}"
     elif [ "$sources_count" -eq 0 ]; then
         echo -e "${YELLOW}⚠️  Warning: No sources found in configuration file${NC}"
         # Don't return 1 here - config may still have github settings
     else
-        for i in $(seq 0 $((sources_count - 1))); do
-            local source_obj=$(json_array_get "$sources_array" $i)
-            
+        local i url format name columns
+        for ((i = 0; i < sources_count; i++)); do
+            source_obj="${source_objs[$i]}"
+
             # Try to get url from "source" or "url" field
-            local url=$(json_get_value "$source_obj" "source")
+            url=$(json_get_value "$source_obj" "source")
             if [ -z "$url" ] || [ "$url" = "null" ]; then
                 url=$(json_get_value "$source_obj" "url")
             fi
-            
-            local format=$(json_get_value "$source_obj" "format")
-            local name=$(json_get_value "$source_obj" "name")
-            local columns=$(json_get_value "$source_obj" "columns")
-            
+            if [ -z "$url" ] || [ "$url" = "null" ]; then
+                echo -e "${RED}❌ Error: source $((i + 1)) of $config_path has no \"source\" or \"url\"${NC}"
+                return 1
+            fi
+
+            format=$(json_get_value "$source_obj" "format")
+            name=$(json_get_value "$source_obj" "name")
+            columns=$(json_get_value "$source_obj" "columns")
+
             # Set default name if not provided
             if [ -z "$name" ] || [ "$name" = "null" ]; then
                 name="Source $((i+1))"
             fi
-            
+
             # Handle null/empty values
-            [ "$format" = "null" ] && format=""
-            [ "$columns" = "null" ] && columns=""
-            
-            # Pass format only if explicitly specified
-            if [ -n "$format" ]; then
-                load_data_source "$url" "$format" "$name" "$columns" || return 1
-            else
-                load_data_source "$url" "" "$name" "$columns" || return 1
-            fi
+            [ "$format" != "null" ] || format=""
+            [ "$columns" != "null" ] || columns=""
+
+            load_data_source "$url" "$format" "$name" "$columns" || return 1
         done
     fi
-    
+
     return 0
 }
-get_base_version() {
-    local version="$1"
-    # Extract major.minor.patch, removing any pre-release or build metadata
-    # Use parameter expansion to avoid subshell (much faster)
-    local base="${version%%-*}"  # Remove everything after first dash
-    base="${base%%+*}"           # Also remove build metadata after +
-    echo "$base"
+# Order two decimal strings of any length without shell integer overflow
+# (a version part may exceed 2^63). An operand that is not all digits is
+# compared as text; an empty one counts as 0. Sets DIGITS_CMP (-1/0/1).
+compare_digits() {
+    local a="${1:-0}" b="${2:-0}"
+    if [[ "$a" == *[!0-9]* || "$b" == *[!0-9]* ]]; then
+        if [[ "$a" < "$b" ]]; then DIGITS_CMP=-1
+        elif [[ "$a" > "$b" ]]; then DIGITS_CMP=1
+        else DIGITS_CMP=0; fi
+        return
+    fi
+    while [[ "$a" == 0?* ]]; do a="${a#0}"; done
+    while [[ "$b" == 0?* ]]; do b="${b#0}"; done
+    if (( ${#a} != ${#b} )); then
+        (( ${#a} < ${#b} )) && DIGITS_CMP=-1 || DIGITS_CMP=1
+    elif [[ "$a" < "$b" ]]; then DIGITS_CMP=-1
+    elif [[ "$a" > "$b" ]]; then DIGITS_CMP=1
+    else DIGITS_CMP=0; fi
 }
 
 # Compare two semver versions
@@ -2413,12 +2480,16 @@ expand_pessimistic_range() {
     [ "$last" -eq 0 ] || { unset 'parts[last]'; last=$((last - 1)); }
     parts[last]=$(( 10#${parts[last]} + 1 ))
     local IFS='.'
-    EXPANDED_RANGE=">=$ver <${parts[*]}"
+    EXPANDED_RANGE=">=$ver <${parts[*]}${RANGE_BOUND_SUFFIX:-}"
 }
 
 # X-range token: an operator and a version ending in a wildcard (1.x, 1.2.*,
 # ==1.*, >=2.x). $1 operator ("" = "=" = "=="), $2 the numeric prefix (1, 1.2).
 # 1.x -> >=1 <2   1.2.* -> >=1.2 <1.3   >1.x -> >=2   <=1.x -> <2
+# !=1.2.* -> "!x1.2:1.3" (outside [1.2, 1.3), see RANGE_EXCLUDES).
+# RANGE_BOUND_SUFFIX (".dev0" for PyPI, set by _prepare_range) makes the
+# generated bounds include the pre-releases of the prefix and exclude those of
+# the next release, as PEP 440 prefix matching does (==1.0.* has 1.0rc1).
 # Sets EXPANDED_RANGE ("!" when it cannot be expressed as one AND list).
 expand_x_range() {
     local op="$1" base="$2" next
@@ -2428,12 +2499,14 @@ expand_x_range() {
     parts[last]=$(( 10#${parts[last]} + 1 ))
     next="${parts[*]}"
     next="${next// /.}"
+    local sfx="${RANGE_BOUND_SUFFIX:-}"
     case "$op" in
-        ""|=|==) EXPANDED_RANGE=">=$base <$next" ;;
-        ">=") EXPANDED_RANGE=">=$base" ;;
-        ">") EXPANDED_RANGE=">=$next" ;;
-        "<") EXPANDED_RANGE="<$base" ;;
-        "<=") EXPANDED_RANGE="<$next" ;;
+        ""|=|==) EXPANDED_RANGE=">=$base$sfx <$next$sfx" ;;
+        "!=") EXPANDED_RANGE="!x$base$sfx:$next$sfx" ;;
+        ">=") EXPANDED_RANGE=">=$base$sfx" ;;
+        ">") EXPANDED_RANGE=">=$next$sfx" ;;
+        "<") EXPANDED_RANGE="<$base$sfx" ;;
+        "<=") EXPANDED_RANGE="<$next$sfx" ;;
         *) EXPANDED_RANGE="!" ;;
     esac
 }
@@ -2475,13 +2548,18 @@ _prepare_interval() {
 # distinct string.
 declare -A RANGE_CACHE=()
 declare -A INTERVAL_CACHE=()
+# Excluded intervals of a range ("LOW:HIGH ...", from PEP 440 !=1.3.*), kept
+# out of RANGE_CACHE so the common case pays nothing for them.
+declare -A RANGE_EXCLUDES=()
 
 # Normalize one range (no "|" alternatives) into RANGE_CACHE[$2]. Custom
 # sources write ranges in many dialects: ">=1.0,<2.0", ">= 1.0", "==1.0",
 # "=1.0", "^1", "~1.2", "~>2.2", "~=2.2", "!=1.5", "1.x", "1.2.*",
 # "1.2.3 - 2.3.4".
 _prepare_range() {
-    local raw="$1" key="$2" r="$1" token op ver parsed="" bad=""
+    local raw="$1" key="$2" r="$1" token op ver parsed="" bad="" bare=0 count=0
+    local RANGE_BOUND_SUFFIX=""
+    [ "${key%%|*}" != pypi ] || RANGE_BOUND_SUFFIX=".dev0"
     r="${r//,/ }"
     # Hyphen range: "1.2.3 - 2.3.4" -> >=1.2.3 <=2.3.4; a partial upper bound
     # admits its whole line ("1.2 - 2" -> >=1.2 <3).
@@ -2495,7 +2573,7 @@ _prepare_range() {
         fi
     fi
     # Glue a detached operator to its version: ">= 1.0" -> ">=1.0".
-    while [[ "$r" =~ ^(.*)(\>=|\<=|==|!=|~\>|~=|\>|\<|=|\^|~)[[:space:]]+(.*)$ ]]; do
+    while [[ "$r" =~ ^(.*)(===|\>=|\<=|==|!=|~\>|~=|\>|\<|=|\^|~)[[:space:]]+(.*)$ ]]; do
         r="${BASH_REMATCH[1]}${BASH_REMATCH[2]}${BASH_REMATCH[3]}"
     done
     local -a tokens
@@ -2534,19 +2612,34 @@ _prepare_range() {
     fi
     read -ra tokens <<< "$expanded"
     for token in "${tokens[@]}"; do
-        if [[ "$token" =~ ^(\>=|\<=|==|!=|\>|\<|=)(.+)$ ]]; then
+        count=$((count + 1))
+        if [[ "$token" =~ ^(===|\>=|\<=|==|!=|\>|\<|=)(.+)$ ]]; then
             op="${BASH_REMATCH[1]}" ver="${BASH_REMATCH[2]}"
-            [ "$op" = "==" ] && op="="
+            # PEP 440 arbitrary equality (===) is a string match: equality.
+            [ "$op" != "==" ] && [ "$op" != "===" ] || op="="
+        elif [[ "$token" =~ ^!x(.+:.+)$ ]]; then
+            RANGE_EXCLUDES["$key"]+="${RANGE_EXCLUDES[$key]:+ }${BASH_REMATCH[1]}"
+            continue
         elif [[ "$token" =~ ^[vV]?[0-9] ]]; then
             op="=" ver="$token"     # a bare version is an exact constraint
+            bare=$((bare + 1))
         else
             bad="$token"; break
         fi
         parsed+="$op $ver "
     done
+    # Only exclusions ("!=1.3.*"): every other version matches.
+    [ -n "$parsed" ] || [ -z "${RANGE_EXCLUDES[$key]+x}" ] || [ -n "$bad" ] || parsed="* "
     if [ -n "$bad" ] || [ -z "$parsed" ]; then
         RANGE_CACHE["$key"]="!"
         [ -n "$raw" ] && echo -e "${YELLOW}⚠️  Warning: unsupported version range '$raw' (token '$bad'); it never matches${NC}" >&2
+        return
+    fi
+    # A list of bare versions ("1.0.0, 1.0.1") names each affected version:
+    # one of them must match (AND-ed exact versions could never match).
+    if [ "$bare" -gt 1 ] && [ "$bare" -eq "$count" ]; then
+        parsed="${parsed//= /}"
+        RANGE_CACHE["$key"]="anyof ${parsed% }"
         return
     fi
     RANGE_CACHE["$key"]="${parsed% }"
@@ -2587,8 +2680,26 @@ version_in_range() {
     local cache_key="${CHECK_ECO:-npm}|$range"
     [ -n "${RANGE_CACHE[$cache_key]+x}" ] || _prepare_range "$range" "$cache_key"
     local parsed="${RANGE_CACHE[$cache_key]}"
-    [ "$parsed" = "*" ] && return 0
     [ "$parsed" = "!" ] && return 1
+    local range_version
+    if [ -n "${RANGE_EXCLUDES[$cache_key]+x}" ]; then
+        local excluded
+        for excluded in ${RANGE_EXCLUDES[$cache_key]}; do
+            compare_versions_eco "${CHECK_ECO:-npm}" "$version" "${excluded%%:*}"
+            [ "$COMPARE_RESULT" = "-1" ] && continue
+            compare_versions_eco "${CHECK_ECO:-npm}" "$version" "${excluded#*:}"
+            [ "$COMPARE_RESULT" != "-1" ] || return 1
+        done
+    fi
+    [ "$parsed" = "*" ] && return 0
+    if [[ "$parsed" == "anyof "* ]]; then
+        local -a listed
+        read -ra listed <<< "${parsed#anyof }"
+        for range_version in "${listed[@]}"; do
+            version_matches_vulnerable "$version" "$range_version" && return 0
+        done
+        return 1
+    fi
 
     # Get base version for pre-release handling
     local base_version="${version%%-*}"
@@ -2600,7 +2711,7 @@ version_in_range() {
 
     local -a conditions
     read -ra conditions <<< "$parsed"
-    local idx operator range_version
+    local idx operator
 
     for (( idx = 0; idx < ${#conditions[@]}; idx += 2 )); do
         operator="${conditions[$idx]}"
@@ -2864,9 +2975,9 @@ compare_versions_pep440() {
     local postrank2="$_PEP_POSTRANK" postnum2="$_PEP_POSTNUM"
     local devrank2="$_PEP_DEVRANK" devnum2="$_PEP_DEVNUM"
 
-    # 1. Epoch (numeric; 10# guards any leading zeros).
-    if (( 10#$e1 < 10#$e2 )); then COMPARE_RESULT="-1"; return; fi
-    if (( 10#$e1 > 10#$e2 )); then COMPARE_RESULT="1";  return; fi
+    # 1. Epoch (numeric, any length).
+    compare_digits "$e1" "$e2"
+    [ "$DIGITS_CMP" = 0 ] || { COMPARE_RESULT="$DIGITS_CMP"; return; }
 
     # 2. Release, segment by segment, zero-padded (missing segment == 0).
     local len1=${#rel1[@]} len2=${#rel2[@]}
@@ -2875,8 +2986,8 @@ compare_versions_pep440() {
     local i s1 s2
     for (( i = 0; i < maxlen; i++ )); do
         s1="${rel1[$i]:-0}"; s2="${rel2[$i]:-0}"
-        if (( 10#$s1 < 10#$s2 )); then COMPARE_RESULT="-1"; return; fi
-        if (( 10#$s1 > 10#$s2 )); then COMPARE_RESULT="1";  return; fi
+        compare_digits "$s1" "$s2"
+        [ "$DIGITS_CMP" = 0 ] || { COMPARE_RESULT="$DIGITS_CMP"; return; }
     done
 
     # 3. Pre-release group (dev-only < pre < final/post).
@@ -2885,24 +2996,24 @@ compare_versions_pep440() {
     if [ "$prerank1" = 1 ]; then
         if [ "$prelet1" -lt "$prelet2" ]; then COMPARE_RESULT="-1"; return; fi
         if [ "$prelet1" -gt "$prelet2" ]; then COMPARE_RESULT="1";  return; fi
-        if (( 10#$prenum1 < 10#$prenum2 )); then COMPARE_RESULT="-1"; return; fi
-        if (( 10#$prenum1 > 10#$prenum2 )); then COMPARE_RESULT="1";  return; fi
+        compare_digits "$prenum1" "$prenum2"
+        [ "$DIGITS_CMP" = 0 ] || { COMPARE_RESULT="$DIGITS_CMP"; return; }
     fi
 
     # 4. Post-release (no post < post; then post number).
     if [ "$postrank1" -lt "$postrank2" ]; then COMPARE_RESULT="-1"; return; fi
     if [ "$postrank1" -gt "$postrank2" ]; then COMPARE_RESULT="1";  return; fi
     if [ "$postrank1" = 1 ]; then
-        if (( 10#$postnum1 < 10#$postnum2 )); then COMPARE_RESULT="-1"; return; fi
-        if (( 10#$postnum1 > 10#$postnum2 )); then COMPARE_RESULT="1";  return; fi
+        compare_digits "$postnum1" "$postnum2"
+        [ "$DIGITS_CMP" = 0 ] || { COMPARE_RESULT="$DIGITS_CMP"; return; }
     fi
 
     # 5. Dev-release (has dev < no dev; then dev number).
     if [ "$devrank1" -lt "$devrank2" ]; then COMPARE_RESULT="-1"; return; fi
     if [ "$devrank1" -gt "$devrank2" ]; then COMPARE_RESULT="1";  return; fi
     if [ "$devrank1" = 0 ]; then
-        if (( 10#$devnum1 < 10#$devnum2 )); then COMPARE_RESULT="-1"; return; fi
-        if (( 10#$devnum1 > 10#$devnum2 )); then COMPARE_RESULT="1";  return; fi
+        compare_digits "$devnum1" "$devnum2"
+        [ "$DIGITS_CMP" = 0 ] || { COMPARE_RESULT="$DIGITS_CMP"; return; }
     fi
 
     COMPARE_RESULT="0"
@@ -3001,9 +3112,8 @@ compare_versions_gem() {
         case "$s2" in ''|*[!0-9]*) isnum2=0 ;; *) isnum2=1 ;; esac
 
         if [ "$isnum1" = 1 ] && [ "$isnum2" = 1 ]; then
-            # 10# guards against octal misinterpretation of leading zeros.
-            if [ "$((10#$s1))" -lt "$((10#$s2))" ]; then COMPARE_RESULT="-1"; return; fi
-            if [ "$((10#$s1))" -gt "$((10#$s2))" ]; then COMPARE_RESULT="1"; return; fi
+            compare_digits "$s1" "$s2"
+            [ "$DIGITS_CMP" = 0 ] || { COMPARE_RESULT="$DIGITS_CMP"; return; }
         elif [ "$isnum1" = 0 ] && [ "$isnum2" = 1 ]; then
             COMPARE_RESULT="-1"; return   # string segment < numeric segment
         elif [ "$isnum1" = 1 ] && [ "$isnum2" = 0 ]; then
@@ -3155,6 +3265,7 @@ _mv_isnull() {
 # ListItem.normalize: drop trailing null items, continuing past non-null nested
 # lists (matching Maven's `else if (!(lastItem instanceof ListItem)) break`).
 _mv_normalize() {
+    # shellcheck disable=SC2206 # node ids: digits only, split on purpose (no here-string in this hot path)
     local -a kids=(${_MV_KIDS[$1]})
     local i cid
     for (( i = ${#kids[@]} - 1; i >= 0; i-- )); do
@@ -3238,6 +3349,7 @@ _mv_compare() {
             2) if [ -z "${_MV_KIDS[$l]}" ]; then
                    _MV_CMP=0
                else
+                   # shellcheck disable=SC2206 # node ids: digits only
                    local -a lk=(${_MV_KIDS[$l]}); _mv_compare "${lk[0]}" ""
                fi ;;
         esac
@@ -3265,6 +3377,7 @@ _mv_compare() {
 # ListItem vs ListItem: walk children in lock-step, padding the shorter side with
 # a null item and inverting that side's comparison (Maven's -1 * r.compareTo(l)).
 _mv_listcmp() {
+    # shellcheck disable=SC2206 # node ids: digits only, split on purpose (no here-string in this hot path)
     local -a lk=(${_MV_KIDS[$1]}) rk=(${_MV_KIDS[$2]})
     local nl=${#lk[@]} nr=${#rk[@]}
     local max=$nl
@@ -3335,16 +3448,13 @@ compare_versions_nuget() {
     local base2="${v2%%-*}"
 
     # --- Compare the Major.Minor.Patch.Revision quad numerically ---
-    local IFS='.'
-    local parts1=($base1)
-    local parts2=($base2)
-    unset IFS
-    local i n1 n2
+    local -a parts1 parts2
+    IFS='.' read -ra parts1 <<< "$base1"
+    IFS='.' read -ra parts2 <<< "$base2"
+    local i
     for i in 0 1 2 3; do
-        n1="${parts1[$i]:-0}"
-        n2="${parts2[$i]:-0}"
-        if [ "$n1" -lt "$n2" ]; then COMPARE_RESULT="-1"; return; fi
-        if [ "$n1" -gt "$n2" ]; then COMPARE_RESULT="1"; return; fi
+        compare_digits "${parts1[$i]:-0}" "${parts2[$i]:-0}"
+        [ "$DIGITS_CMP" = 0 ] || { COMPARE_RESULT="$DIGITS_CMP"; return; }
     done
 
     # --- Pre-release comparison (quads are equal) ---
@@ -3387,8 +3497,8 @@ compare_versions_nuget() {
         case "$id2" in ''|*[!0-9]*) isnum2=0 ;; *) isnum2=1 ;; esac
 
         if [ "$isnum1" = 1 ] && [ "$isnum2" = 1 ]; then
-            if [ "$id1" -lt "$id2" ]; then COMPARE_RESULT="-1"; return; fi
-            if [ "$id1" -gt "$id2" ]; then COMPARE_RESULT="1"; return; fi
+            compare_digits "$id1" "$id2"
+            [ "$DIGITS_CMP" = 0 ] || { COMPARE_RESULT="$DIGITS_CMP"; return; }
         elif [ "$isnum1" = 1 ]; then
             COMPARE_RESULT="-1"; return
         elif [ "$isnum2" = 1 ]; then
@@ -3436,7 +3546,9 @@ _composer_parse() {
     _CV_RANK=4 _CV_NUM=0 _CV_TAIL=""
     rest="${rest#[-._]}"
     [ -z "$rest" ] && return
-    if [[ "$rest" =~ ^(dev|alpha|beta|rc|patch|pl|stable|a|b|c|p)[-._]?([0-9]*)(.*)$ ]]; then
+    # The stability word must end the suffix or be followed by a separator:
+    # "preview" is not "p" (patch) followed by "review".
+    if [[ "$rest" =~ ^(dev|alpha|beta|rc|patch|pl|stable|a|b|c|p)[-._]?([0-9]*)([-._].*)?$ ]]; then
         case "${BASH_REMATCH[1]}" in
             dev) _CV_RANK=0 ;;
             alpha|a) _CV_RANK=1 ;;
@@ -3480,13 +3592,37 @@ compare_versions_composer() {
         (( rank1 < rank2 )) && COMPARE_RESULT=-1 || COMPARE_RESULT=1
         return
     fi
-    if (( 10#$num1 != 10#$num2 )); then
-        (( 10#$num1 < 10#$num2 )) && COMPARE_RESULT=-1 || COMPARE_RESULT=1
+    compare_digits "$num1" "$num2"
+    [ "$DIGITS_CMP" = 0 ] || { COMPARE_RESULT="$DIGITS_CMP"; return; }
+    _composer_tail_cmp "$tail1" "$tail2"
+    COMPARE_RESULT="$DIGITS_CMP"
+}
+
+# Order the remainders after the stability number: a "-dev" tail precedes
+# the bare release (1.0.0-RC1-dev < 1.0.0-RC1), which precedes any other
+# tail; other tails compare part by part, numbers numerically
+# (beta.1.2 < beta.1.10). Sets DIGITS_CMP.
+_composer_tail_cmp() {
+    local t1="${1#[-._]}" t2="${2#[-._]}" k1=1 k2=1
+    [ -z "$t1" ] || k1=2
+    [ -z "$t2" ] || k2=2
+    [[ "$t1" != dev* ]] || k1=0
+    [[ "$t2" != dev* ]] || k2=0
+    if [ "$k1" != "$k2" ]; then
+        [ "$k1" -lt "$k2" ] && DIGITS_CMP=-1 || DIGITS_CMP=1
         return
     fi
-    if [[ "$tail1" < "$tail2" ]]; then COMPARE_RESULT=-1; return; fi
-    if [[ "$tail1" > "$tail2" ]]; then COMPARE_RESULT=1; return; fi
-    COMPARE_RESULT=0
+    DIGITS_CMP=0
+    [ "$k1" = 2 ] || return 0
+    local -a p1 p2
+    IFS='-._' read -ra p1 <<< "$t1"
+    IFS='-._' read -ra p2 <<< "$t2"
+    local i n=${#p1[@]}
+    [ "${#p2[@]}" -le "$n" ] || n=${#p2[@]}
+    for (( i = 0; i < n; i++ )); do
+        compare_digits "${p1[$i]:-0}" "${p2[$i]:-0}"
+        [ "$DIGITS_CMP" = 0 ] || return 0
+    done
 }
 # Pub (Dart) version comparator. Routed to from compare_versions_eco when
 # CHECK_ECO=pub.
@@ -3623,6 +3759,7 @@ canonical_package_name() {
 # package (PACKAGE_FILTER = "eco:name") is reported.
 check_vulnerability() {
     local eco="$1" name="$2" version="$3" source="$4"
+    CHECKED_PACKAGE_COUNT=$(( ${CHECKED_PACKAGE_COUNT:-0} + 1 ))
     if [ -n "${PACKAGE_FILTER:-}" ] && [ "$eco:$name" != "$PACKAGE_FILTER" ]; then
         return 1
     fi
@@ -3881,19 +4018,25 @@ analyze_pnpm_lock() {
     /^[a-zA-Z]/ && !/^[[:space:]]/ && in_packages { in_packages=0 }
     in_packages {
         line = $0
-        # A package installed from a tarball URL or git ("xlsx@https://...")
-        # names no version in its key: pnpm records it in a version: field.
-        if (tarball_pkg != "" && line ~ /^    version:[[:space:]]*[^[:space:]]/) {
-            version = line
-            sub(/^    version:[[:space:]]*/, "", version)
-            gsub(/[\047"[:space:]]/, "", version)
-            if (version != "") print tarball_pkg "|" version
-            tarball_pkg = ""
+        # A package installed from a tarball URL or git names no version in
+        # its key ("xlsx@https://...", or before pnpm 9 a host path such as
+        # "github.com/owner/repo/<sha>" without even the name): pnpm records
+        # them in the name: and version: fields of the block.
+        if (want_fields && line ~ /^    (name|version):[[:space:]]*[^[:space:]]/) {
+            value = line
+            sub(/^    [a-z]+:[[:space:]]*/, "", value)
+            gsub(/[\047"[:space:]]/, "", value)
+            if (line ~ /^    name:/) field_name = value
+            else field_version = value
+            if (field_name != "" && field_version != "") {
+                print field_name "|" field_version
+                want_fields = 0
+            }
             next
         }
         # Only package-map keys, never nested dependency metadata.
         if (line !~ /^  [^[:space:]].*:[[:space:]]*$/) next
-        tarball_pkg = ""
+        want_fields = 0; field_name = ""; field_version = ""
         # Remove leading whitespace
         gsub(/^[[:space:]]+/, "", line)
         # Remove trailing colon
@@ -3923,33 +4066,19 @@ analyze_pnpm_lock() {
         # Remote tarball or git source: the version follows in the block.
         at = index(substr(line, 2), "@")
         if (at > 0 && substr(line, at + 2) ~ /^(https?:|git\+|git:|github:)/) {
-            tarball_pkg = substr(line, 1, at)
+            want_fields = 1
+            field_name = substr(line, 1, at)
             next
         }
 
-        # Must contain @ followed by digit (package@version)
-        if (match(line, /@[0-9]/)) {
-            # Extract package name and version manually
-            # Handle scoped packages (@scope/name@version)
-            if (substr(line, 1, 1) == "@") {
-                # Scoped: find second @
-                temp = substr(line, 2)
-                idx = index(temp, "@")
-                if (idx > 0) {
-                    pkg_name = "@" substr(temp, 1, idx-1)
-                    version = substr(temp, idx+1)
-                    print pkg_name "|" version
-                }
-            } else {
-                # Regular: name@version
-                idx = index(line, "@")
-                if (idx > 0) {
-                    pkg_name = substr(line, 1, idx-1)
-                    version = substr(line, idx+1)
-                    print pkg_name "|" version
-                }
-            }
+        # name@version, split at the first "@" after a leading scope marker.
+        if (at > 0 && substr(line, at + 2) ~ /^[0-9]/) {
+            print substr(line, 1, at) "|" substr(line, at + 2)
+            next
         }
+
+        # The key names no version: read the name: and version: fields.
+        want_fields = 1
     }
     ' "$lockfile" 2>/dev/null | sort -u)
 
@@ -4044,32 +4173,41 @@ analyze_deno_lock() {
     # Track vulnerabilities found in this file
     local vuln_count_before=${#VULNERABLE_PACKAGES[@]}
 
-    # Use awk to extract all npm packages in one pass (POSIX-compatible)
-    # Simplified: just extract "package@version": or "package@version_peer": patterns
+    # Only the keys of the npm package map name installed npm packages:
+    # "npm" (lockfile v4/v5), "packages"."npm" (v3) and "npm"."packages" (v2).
+    # jsr packages, specifiers and remote URLs sit in sibling sections and
+    # are not npm packages. json_structural_lines makes the layout (pretty or
+    # compact) irrelevant: an object opens at the end of its record.
     local packages
-    packages=$(awk '
+    packages=$(json_structural_lines "$lockfile" 2>/dev/null | awk '
     {
-        # Match package keys at start of line: "package@version" or "@scope/pkg@version"
-        # Must be followed by ": {" or "_peer": (not inside a string value)
-        if (match($0, /^[[:space:]]*"[^"]+@[0-9][^"]*"[[:space:]]*:/)) {
-            temp = substr($0, RSTART, RLENGTH)
-            # Extract content between first quotes
-            gsub(/^[[:space:]]*"/, "", temp)
-            gsub(/"[[:space:]]*:.*/, "", temp)
-
-            # Name/version split at the first "@" after the scope marker.
-            # Package names may contain "_" (string_decoder): only the
-            # version carries the "_peer@x" suffix, so strip it there.
-            at_idx = index(substr(temp, 2), "@")
-            if (at_idx > 0) {
-                pkg_name = substr(temp, 1, at_idx)
-                version = substr(temp, at_idx + 2)
-                sub(/_.*/, "", version)
-                if (pkg_name != "" && version != "") print pkg_name "|" version
-            }
+        rec = $0
+        sub(/[[:space:]]+$/, "", rec)
+        if (rec == "}" || rec == "]") { if (depth > 0) depth--; next }
+        last = substr(rec, length(rec))
+        if (last != "{" && last != "[") next
+        key = ""
+        if (match(rec, /^[[:space:]]*"[^"]*"[[:space:]]*:/)) {
+            key = substr(rec, RSTART, RLENGTH)
+            sub(/^[[:space:]]*"/, "", key)
+            sub(/"[[:space:]]*:$/, "", key)
         }
+        in_npm = (depth == 2 && stack[2] == "npm") ||
+            (depth == 3 && stack[2] == "packages" && stack[3] == "npm") ||
+            (depth == 3 && stack[2] == "npm" && stack[3] == "packages")
+        # Name/version split at the first "@" after the scope marker.
+        # Package names may contain "_" (string_decoder): only the
+        # version carries the "_peer@x" suffix, so strip it there.
+        at_idx = index(substr(key, 2), "@")
+        if (in_npm && last == "{" && at_idx > 0) {
+            pkg_name = substr(key, 1, at_idx)
+            version = substr(key, at_idx + 2)
+            sub(/_.*/, "", version)
+            if (version ~ /^[0-9]/) print pkg_name "|" version
+        }
+        stack[++depth] = key
     }
-    ' "$lockfile" 2>/dev/null | sort -u)
+    ' | sort -u)
 
     # Process extracted packages
     while IFS='|' read -r pkg_name version; do
@@ -4157,7 +4295,8 @@ ECOSYSTEM_REGISTRY=(
 # does not fetch workflow files. This is a documented limitation.
 PATH_ECOSYSTEM_REGISTRY=(
     "*/.github/workflows/*|*.yml,*.yaml|githubactions|analyze_github_workflow|actions"
-    "*|requirements-*.txt|pypi|analyze_requirements_txt|python"
+    "*|requirements-*.txt,requirements_*.txt,*-requirements.txt,*_requirements.txt,constraints.txt,constraints-*.txt|pypi|analyze_requirements_txt|python"
+    "*|*-gradle.lockfile|maven|analyze_gradle_lockfile|maven"
     "*/requirements/*|*.txt|pypi|analyze_requirements_txt|python"
 )
 
@@ -4199,12 +4338,11 @@ path_ecosystem_match() {
 }
 
 # Derive the per-basename lookup tables from ECOSYSTEM_REGISTRY. Called once
-# near the top of main(). Fills LOCKFILE_PARSER / LOCKFILE_ECO / LOCKFILE_ALIAS
+# near the top of main(). Fills LOCKFILE_PARSER / LOCKFILE_ECO
 # (keyed by basename) and KNOWN_LOCKFILE_ALIASES (space-separated unique list).
 build_ecosystem_tables() {
     LOCKFILE_PARSER=()
     LOCKFILE_ECO=()
-    LOCKFILE_ALIAS=()
     KNOWN_LOCKFILE_ALIASES=""
 
     local entry basename eco parser alias
@@ -4212,7 +4350,6 @@ build_ecosystem_tables() {
         IFS='|' read -r basename eco parser alias <<< "$entry"
         LOCKFILE_PARSER["$basename"]="$parser"
         LOCKFILE_ECO["$basename"]="$eco"
-        LOCKFILE_ALIAS["$basename"]="$alias"
 
         # Append alias to KNOWN_LOCKFILE_ALIASES only if not already present
         case " $KNOWN_LOCKFILE_ALIASES " in
@@ -4326,9 +4463,14 @@ analyze_requirements_txt() {
 
     local packages
     packages=$(awk '
+    # A UTF-8 byte order mark is an encoding marker, not part of the first name.
+    NR == 1 && substr($0, 1, 3) == "\357\273\277" { $0 = substr($0, 4) }
     {
         physical = $0
         sub(/\r$/, "", physical)
+        # pip drops comment lines before joining: a comment ending in "\"
+        # does not continue onto the next requirement.
+        if (physical ~ /^[[:space:]]*#/) physical = ""
         # pip joins physical lines without inserting whitespace. In particular
         # a pin may be followed by several --hash options on continued lines.
         if (physical ~ /\\$/) {
@@ -4336,21 +4478,25 @@ analyze_requirements_txt() {
             pending = pending physical
             next
         }
-        line = pending physical
+        requirement(pending physical)
         pending = ""
+    }
+    # A continuation on the last line still ends that requirement.
+    END { if (pending != "") requirement(pending) }
+    function requirement(line,   eq, name, ver, br) {
         sub(/[[:space:]]*#.*$/, "", line)          # strip inline/full comment
         sub(/;.*$/, "", line)                       # strip PEP 508 env marker
         gsub(/^[[:space:]]+/, "", line)             # trim
         gsub(/[[:space:]]+$/, "", line)
-        if (line == "") next
-        if (line ~ /^-/) next                       # -r/-c/-e/--hash/--index-url
-        if (line ~ /:\/\//) next                    # scheme:// (URL/VCS install)
+        if (line == "") return
+        if (line ~ /^-/) return                       # -r/-c/-e/--hash/--index-url
+        if (line ~ /:\/\//) return                    # scheme:// (URL/VCS install)
         gsub(/[[:space:]]*==[[:space:]]*/, "==", line)  # tolerate spaced pins
 
         # Exact pin only: name[extras]==version, no other operator. The name
         # char class excludes < > ! ~ =, so >=, <=, ~=, != cannot precede the
         # ==; the [^=...] after == rejects === and operator-led versions.
-        if (line !~ /^[A-Za-z0-9._-]+(\[[^]]*\])?==[^=<>!~ ]/) next
+        if (line !~ /^[A-Za-z0-9._-]+(\[[^]]*\])?==[^=<>!~ ]/) return
 
         eq = index(line, "==")
         name = substr(line, 1, eq - 1)
@@ -4358,7 +4504,7 @@ analyze_requirements_txt() {
         br = index(name, "[")                       # strip extras
         if (br > 0) name = substr(name, 1, br - 1)
         sub(/[[:space:]].*$/, "", ver)              # drop any trailing tokens
-        if (ver ~ /\*/) next                        # ==1.0.* is a range, not a pin
+        if (ver ~ /\*/) return                        # ==1.0.* is a range, not a pin
         if (name != "" && ver != "") print name "|" ver
     }
     ' "$lockfile" 2>/dev/null | sort -u)
@@ -4462,6 +4608,7 @@ analyze_go_sum() {
         }
         return out
     }
+    NR == 1 && substr($0, 1, 3) == "\357\273\277" { $0 = substr($0, 4) }
     {
         if ($0 ~ /^[[:space:]]*$/) next     # blank lines
         mod = $1
@@ -4505,6 +4652,7 @@ analyze_go_mod() {
     local godir="${lockfile%/*}"
     [ "$godir" = "$lockfile" ] && godir="."
     if [ -f "$godir/go.sum" ]; then
+        LOCKFILE_SKIPPED=1
         return 0
     fi
 
@@ -4512,7 +4660,25 @@ analyze_go_mod() {
 
     local packages
     packages=$(awk '
-    BEGIN { in_require = 0 }
+    # Requirements are collected first: a replace directive anywhere in the
+    # file decides which module version is actually built.
+    function add_require(line,   a, n) {
+        n = split(line, a, " ")
+        if (n >= 2) required[a[1]] = a[2]
+    }
+    # "old [version] => new [version]". A replacement without a version is a
+    # local directory: what it holds is unknown, as in go.sum (no entry).
+    function add_replace(line,   pos, a, b, na, nb, key) {
+        pos = index(line, "=>")
+        if (!pos) return
+        na = split(substr(line, 1, pos - 1), a, " ")
+        nb = split(substr(line, pos + 2), b, " ")
+        if (na < 1 || nb < 1) return
+        key = a[1] (na >= 2 ? "@" a[2] : "")
+        new_path[key] = b[1]
+        new_version[key] = (nb >= 2 ? b[2] : "")
+    }
+    NR == 1 && substr($0, 1, 3) == "\357\273\277" { $0 = substr($0, 4) }
     {
         line = $0
         sub(/\/\/.*$/, "", line)            # strip trailing // comment
@@ -4520,27 +4686,41 @@ analyze_go_mod() {
         gsub(/[[:space:]]+$/, "", line)
         if (line == "") next
 
-        if (in_require) {
-            if (line ~ /^\)/) { in_require = 0; next }
-            n = split(line, a, " ")
-            if (n >= 2) {
-                ver = a[2]; sub(/^v/, "", ver)
-                print a[1] "|" ver
-            }
+        if (block != "") {
+            if (line ~ /^\)/) { block = ""; next }
+            if (block == "require") add_require(line)
+            else if (block == "replace") add_replace(line)
             next
         }
 
-        if (line ~ /^require[[:space:]]*\(/) { in_require = 1; next }
-        if (line ~ /^require[[:space:]]+/) {
-            sub(/^require[[:space:]]+/, "", line)
-            n = split(line, a, " ")
-            if (n >= 2) {
-                ver = a[2]; sub(/^v/, "", ver)
-                print a[1] "|" ver
-            }
+        if (line ~ /^(require|replace|exclude|retract)[[:space:]]*\(/) {
+            block = line
+            sub(/[[:space:]]*\(.*$/, "", block)
             next
         }
-        # module / go / toolchain / replace / exclude directives: ignored
+        if (line ~ /^require[[:space:]]+/) {
+            sub(/^require[[:space:]]+/, "", line)
+            add_require(line)
+        } else if (line ~ /^replace[[:space:]]+/) {
+            sub(/^replace[[:space:]]+/, "", line)
+            add_replace(line)
+        }
+        # module / go / toolchain / exclude / retract directives: ignored
+    }
+    END {
+        for (path in required) {
+            version = required[path]
+            key = path "@" version
+            if (!(key in new_path)) key = path
+            name = path
+            if (key in new_path) {
+                if (new_version[key] == "") continue
+                name = new_path[key]
+                version = new_version[key]
+            }
+            sub(/^v/, "", version)
+            print name "|" version
+        }
     }
     ' "$lockfile" 2>/dev/null | sort -u)
 
@@ -4780,6 +4960,7 @@ analyze_gemfile_lock() {
     local packages
     packages=$(awk '
     BEGIN { in_gem = 0 }
+    NR == 1 && substr($0, 1, 3) == "\357\273\277" { $0 = substr($0, 4) }
     # Column-0 (unindented) line: a new top-level section. Re-evaluate
     # in_gem; every non-"GEM" header (and blank-adjacent noise) closes the
     # capture window until the next literal "GEM" header.
@@ -5047,56 +5228,87 @@ analyze_pom_xml() {
     local vuln_count_before=${#VULNERABLE_PACKAGES[@]}
 
     local packages
+    # One streaming pass: records are split at "<", so each one is a tag
+    # followed by the text up to the next tag. A stack of open elements gives
+    # every value its place: only the direct children of a <dependency> are
+    # its coordinates (an <exclusions> block is deeper), and project-level
+    # <properties> win over those of a <profile>. Versions are resolved at the
+    # end: <properties> may follow <dependencies>. Linear in the file size.
     packages=$(awk '
+    BEGIN { RS = "<" }
     function trim(v) { gsub(/^[[:space:]]+|[[:space:]]+$/, "", v); return v }
-    # Inner text of the first <tag>...</tag> in s, or "\001" when absent.
-    function inner(s, tag,   open, b, rest, e) {
-        open = "<" tag ">"
-        b = index(s, open)
-        if (b == 0) return "\001"
-        rest = substr(s, b + length(open))
-        e = index(rest, "</" tag ">")
-        if (e == 0) return "\001"
-        return trim(substr(rest, 1, e - 1))
+    # Text of the element that is currently open ("" target: ignored). Text
+    # after a comment inside an element (<version><!-- x -->1.0</version>)
+    # is appended to it.
+    function set_text(value, append) {
+        if (target == "") return
+        if (append) value = target_value[target] value
+        target_value[target] = value
     }
-    { doc = doc $0 "\n" }
+    NR == 1 { next }   # text before the first tag
+    {
+        record = $0
+        gsub(/\r/, "", record)
+        if (in_comment || substr(record, 1, 3) == "!--") {
+            e = index(record, "-->")
+            if (substr(record, 1, 3) == "!--") {
+                e = index(substr(record, 4), "-->")
+                if (e) e += 3
+            }
+            if (e == 0) { in_comment = 1; next }
+            in_comment = 0
+            set_text(trim(substr(record, e + 3)), 1)
+            next
+        }
+        c = substr(record, 1, 1)
+        if (c == "?" || c == "!") next
+        gt = index(record, ">")
+        if (gt == 0) next
+        tag = substr(record, 1, gt - 1)
+        text = trim(substr(record, gt + 1))
+        if (c == "/") {
+            name = trim(substr(tag, 2))
+            if (depth > 0 && stack[depth] == name) {
+                if (name == "dependency" && depth == dep_depth) dep_depth = 0
+                depth--
+            }
+            target = ""
+            next
+        }
+        self_closing = (substr(tag, length(tag)) == "/")
+        name = tag
+        sub(/[[:space:]\/].*$/, "", name)
+        if (self_closing) next
+        stack[++depth] = name
+        parent = stack[depth - 1]
+        target = ""
+        if (parent == "properties" && depth >= 3) {
+            if (depth == 3 && stack[1] == "project") target = "pp:" name
+            else if (!(("op:" name) in target_value)) target = "op:" name
+        }
+        if (name == "dependency" && dep_depth == 0) {
+            dep_depth = depth
+            n_deps++
+        } else if (dep_depth && depth == dep_depth + 1 &&
+                   (name == "groupId" || name == "artifactId" || name == "version")) {
+            target = "d" n_deps ":" name
+        }
+        set_text(text, 0)
+    }
     END {
-        gsub(/\r/, "", doc)
-        # Drop XML comments (an unterminated one runs to the end of file).
-        while ((b = index(doc, "<!--")) > 0) {
-            rest = substr(doc, b + 4)
-            e = index(rest, "-->")
-            doc = substr(doc, 1, b - 1) (e ? substr(rest, e + 3) : "")
-        }
-        # <properties><name>value</name>...</properties>
-        props = inner(doc, "properties")
-        if (props != "\001") {
-            while (match(props, /<[A-Za-z0-9_.-]+>[^<]*<\//)) {
-                m = substr(props, RSTART + 1, RLENGTH - 3)
-                gt = index(m, ">")
-                prop[substr(m, 1, gt - 1)] = trim(substr(m, gt + 1))
-                props = substr(props, RSTART + RLENGTH)
-            }
-        }
-        rest = doc
-        while (match(rest, /<dependency[[:space:]>]/)) {
-            rest = substr(rest, RSTART + RLENGTH)
-            e = index(rest, "</dependency>")
-            if (e == 0) break
-            block = substr(rest, 1, e - 1)
-            rest = substr(rest, e + 13)
-            while ((b = index(block, "<exclusions>")) > 0) {
-                x = index(substr(block, b), "</exclusions>")
-                block = substr(block, 1, b - 1) (x ? substr(block, b + x + 12) : "")
-            }
-            g = inner(block, "groupId"); a = inner(block, "artifactId"); v = inner(block, "version")
-            if (g == "\001" || a == "\001" || g == "" || a == "") continue
+        for (i = 1; i <= n_deps; i++) {
+            g = trim(target_value["d" i ":groupId"])
+            a = trim(target_value["d" i ":artifactId"])
+            v = trim(target_value["d" i ":version"])
+            if (g == "" || a == "") continue
             if (v ~ /^\$\{[^}]+\}$/) {
                 name = substr(v, 3, length(v) - 3)
-                v = (name in prop) ? prop[name] : ""
+                v = ("pp:" name) in target_value ? target_value["pp:" name] : \
+                    (("op:" name) in target_value ? target_value["op:" name] : "")
+                v = trim(v)
             }
             # Missing or unresolved versions come from a parent POM or a BOM.
-            if (v == "\001" || v == "" || index(v, "${")) { unversioned++; continue }
+            if (v == "" || index(v, "${")) { unversioned++; continue }
             # Version ranges are not installed versions.
             if (v ~ /^[\[(]/ || index(v, ",")) continue
             print g ":" a "|" v
@@ -5693,8 +5905,9 @@ analyze_package_resolved() {
 # WHAT IS CHECKED: the `uses:` step references that pin a published action, i.e.
 # `owner/repo@ref` or `owner/repo/subpath@ref` (the latter covers subpath
 # actions and reusable-workflow calls like `org/repo/.github/workflows/x.yml@ref`).
-# Both the plain mapping key (`uses: ...`) and the list-item form (`- uses: ...`)
-# are handled, quoted ("...") or unquoted.
+# The plain mapping key (`uses: ...`), the list-item form (`- uses: ...`) and a
+# single-line flow mapping (`- {name: x, uses: ...}`) are handled, quoted
+# ("...") or unquoted.
 #
 # SKIPPED by construction:
 #   * local actions  — `./path` or `../path` (no published version to check)
@@ -5738,12 +5951,27 @@ analyze_github_workflow() {
         line = $0
         gsub(/\r/, "", line)                    # tolerate CRLF checkouts
 
-        # Only lines whose key is `uses:` (optionally a `- uses:` list item).
-        if (line !~ /^[[:space:]]*-?[[:space:]]*uses[[:space:]]*:/) next
+        if (line ~ /^[[:space:]]*-?[[:space:]]*\{/ &&
+            match(line, /[{,][[:space:]]*uses[[:space:]]*:[[:space:]]*/)) {
+            # Flow mapping step: `- {name: x, uses: owner/repo@ref, with: {..}}`.
+            # The value ends at its closing quote, or at the next "," or "}".
+            val = substr(line, RSTART + RLENGTH)
+            quote = substr(val, 1, 1)
+            if (quote == "\"" || quote == "'\''") {
+                closing = index(substr(val, 2), quote)
+                if (closing == 0) next
+                val = substr(val, 2, closing - 1)
+            } else {
+                sub(/[[:space:]]*[,}].*$/, "", val)
+            }
+        } else {
+            # Only lines whose key is `uses:` (optionally a `- uses:` list item).
+            if (line !~ /^[[:space:]]*-?[[:space:]]*uses[[:space:]]*:/) next
 
-        # Strip everything up to and including the `uses:` key.
-        val = line
-        sub(/^[[:space:]]*-?[[:space:]]*uses[[:space:]]*:[[:space:]]*/, "", val)
+            # Strip everything up to and including the `uses:` key.
+            val = line
+            sub(/^[[:space:]]*-?[[:space:]]*uses[[:space:]]*:[[:space:]]*/, "", val)
+        }
 
         # Strip a trailing YAML comment (whitespace + # to EOL). Action refs
         # never contain a literal " #"; SHA-pin version comments are discarded.
@@ -5869,8 +6097,30 @@ runtime_file_kind() {
 
 # Print "runtime|spec" for every runtime version a file names, raw (quotes
 # and comments removed).
+#
+# json_runtime_values FILE RUNTIME PATH...: print "RUNTIME|value" for the
+# string or number at each slash PATH of a JSON file, in PATH order, in one
+# pass (paths are member names from the root object).
+json_runtime_values() {
+    local file="$1" runtime="$2"
+    shift 2
+    # AWK_JSON_PATH calls AWK_FEED_LIB functions: mawk rejects a program
+    # referencing undefined functions, even uncalled ones.
+    json_structural_lines "$file" 2>/dev/null | awk -v runtime="$runtime" -v wanted="$*" "$AWK_FEED_LIB$AWK_JSON_PATH"'
+    BEGIN { n = split(wanted, order, " ") }
+    {
+        jp_step($0)
+        if (JP_EVENT != "scalar" || JP_VAL == "null" || JP_VAL == "") next
+        path = JP_PATH "/" JP_KEY
+        sub(/^\/#/, "", path)
+        if (!(path in found)) found[path] = JP_VAL
+    }
+    END { for (i = 1; i <= n; i++) if (order[i] in found) print runtime "|" found[order[i]] }
+    '
+}
+
 runtime_specs() {
-    local file="$1" content obj value
+    local file="$1"
     runtime_file_kind "$file" || return 0
     case "$RUNTIME_KIND" in
         node_version|php_version)
@@ -5888,25 +6138,16 @@ runtime_specs() {
             ;;
         package_json)
             grep -qE '"(engines|volta)"[[:space:]]*:' "$file" || return 0
-            content=$(cat "$file")
-            for obj in engines volta; do
-                value=$(json_get_value "$(json_get_object "$content" "$obj")" node)
-                [ -z "$value" ] || [ "$value" = null ] || printf 'node|%s\n' "$value"
-            done
+            json_runtime_values "$file" node /engines/node /volta/node
             ;;
         composer_json)
             grep -q '"php"' "$file" || return 0
-            content=$(cat "$file")
             # config.platform.php: the PHP version composer resolves for
-            value=$(json_get_value "$(json_get_object "$(json_get_object "$content" config)" platform)" php)
-            [ -z "$value" ] || [ "$value" = null ] || printf 'php|%s\n' "$value"
-            value=$(json_get_value "$(json_get_object "$content" require)" php)
-            [ -z "$value" ] || [ "$value" = null ] || printf 'php|%s\n' "$value"
+            json_runtime_values "$file" php /config/platform/php /require/php
             ;;
         composer_lock)
             grep -q '"platform-overrides"' "$file" || return 0
-            value=$(json_get_value "$(json_get_object "$(cat "$file")" platform-overrides)" php)
-            [ -z "$value" ] || [ "$value" = null ] || printf 'php|%s\n' "$value"
+            json_runtime_values "$file" php /platform-overrides/php
             ;;
         dockerfile)
             # FROM [--platform=...] [registry/][library/]node:TAG[@digest] [AS name]
@@ -6041,7 +6282,10 @@ runtime_index() {
             *)
                 [ -n "${RANGE_CACHE[runtime|$range]+x}" ] || _prepare_range "$range" "runtime|$range"
                 parsed="${RANGE_CACHE[runtime|$range]}"
+                # Exclusions (!=1.3.*) and version lists: version_in_range decides.
+                [ -z "${RANGE_EXCLUDES[runtime|$range]+x}" ] || parsed="anyof"
                 case "$parsed" in
+                    "anyof"*) ;;
                     "*"|"!") cond="$parsed" ;;
                     *)
                         ok=true
@@ -6188,6 +6432,9 @@ scan_runtimes() {
     local file rt spec probe kind count before=${#VULNERABLE_PACKAGES[@]} warned=0
     local -A seen=() warn_specs=() warn_ids=() warn_fix=() warn_kind=()
     local ids n message label
+    # Monorepos repeat the same spec ("engines": {"node": ">=18"}) in every
+    # package: its advisory id list is formatted once (5 processes).
+    local -A ids_cache=()
     count=$(printf '%s\n' "$RUNTIME_FILES" | wc -l | tr -d ' ')
     echo "🧩 Checking runtime versions in $count file(s)..."
     while IFS= read -r file; do
@@ -6233,14 +6480,18 @@ scan_runtimes() {
         done < <(runtime_specs "$file")
 
         for rt in "${!warn_specs[@]}"; do
-            # Newest advisories first (CVE-YYYY-NNNN).
-            # shellcheck disable=SC2086 # space-separated advisory ids
-            ids=$(printf '%s\n' ${warn_ids[$rt]} | sort -u | sort -t- -k2,2nr -k3,3nr)
-            n=$(printf '%s\n' "$ids" | wc -l | tr -d ' ')
-            ids=$(printf '%s\n' "$ids" | head -n 3 | tr '\n' ' ')
-            ids="${ids% }"
-            ids="${ids// /, }"
-            [ "$n" -le 3 ] || ids+=" (+$((n - 3)) more)"
+            if [ -z "${ids_cache[${warn_ids[$rt]}]+x}" ]; then
+                # Newest advisories first (CVE-YYYY-NNNN).
+                # shellcheck disable=SC2086 # space-separated advisory ids
+                ids=$(printf '%s\n' ${warn_ids[$rt]} | sort -u | sort -t- -k2,2nr -k3,3nr)
+                n=$(printf '%s\n' "$ids" | wc -l | tr -d ' ')
+                ids=$(printf '%s\n' "$ids" | head -n 3 | tr '\n' ' ')
+                ids="${ids% }"
+                ids="${ids// /, }"
+                [ "$n" -le 3 ] || ids+=" (+$((n - 3)) more)"
+                ids_cache["${warn_ids[$rt]}"]="$ids"
+            fi
+            ids="${ids_cache[${warn_ids[$rt]}]}"
             label="$(runtime_display_name "$rt") ${warn_specs[$rt]}"
             if [ "${warn_kind[$rt]}" = line ]; then
                 message="$label: no release of this line fixes $ids"
@@ -6280,11 +6531,11 @@ json_print_string() {
 # --go-reachability, whether the code calls it.
 export_metadata() {
     local eco="$1" pkg="$2" file="$3"
-    local key="${eco}:${pkg}" name="${pkg%@*}"
-    severity="${VULN_METADATA_SEVERITY[$key]:-${VULN_METADATA_SEVERITY[$name]:-}}"
-    ghsa="${VULN_METADATA_GHSA[$key]:-${VULN_METADATA_GHSA[$name]:-}}"
-    cve="${VULN_METADATA_CVE[$key]:-${VULN_METADATA_CVE[$name]:-}}"
-    source="${VULN_METADATA_SOURCE[$key]:-${VULN_METADATA_SOURCE[$name]:-}}"
+    local key="${eco}:${pkg}"
+    severity="${VULN_METADATA_SEVERITY[$key]:-}"
+    ghsa="${VULN_METADATA_GHSA[$key]:-}"
+    cve="${VULN_METADATA_CVE[$key]:-}"
+    source="${VULN_METADATA_SOURCE[$key]:-}"
     fixed_in="${VULN_METADATA_FIX[$key]:-}"
     reachability_of "$file" "$key"
     reachability="$REACHABILITY"
@@ -6469,6 +6720,7 @@ feed_build_ecomap() {
 # $source is "ghsa" or "osv" (the source= param). Severity: the advisory's own
 # (GHSA database_specific), else the CVSS 3.x base score computed from the
 # first CVSS_V3 vector, MAL- (malicious package) advisories being critical.
+# shellcheck disable=SC2089,SC2090 # a jq program, passed through the environment
 FEED_JQ_PROGRAM='
 def emit_name($type; $name):
     if $type == "pypi" then ($name | ascii_downcase | gsub("[-_.]+"; "-"))
@@ -6486,13 +6738,13 @@ def cvss3_score:
     if (type == "string" and test("^CVSS:3\\.[01]/")) then
         # A missing metric reads as "" so the lookups give null, never an error.
         ((split("/")[1:] | map(split(":") | {(.[0]): (.[1] // "")}) | add) // {}) as $m
-        | ($m.S == "C") as $changed
+        | ({"U": false, "C": true}[$m.S // ""]) as $changed
         | ({"N": 0.85, "A": 0.62, "L": 0.55, "P": 0.2}[$m.AV // ""]) as $av
         | ({"L": 0.77, "H": 0.44}[$m.AC // ""]) as $ac
         | (if $changed then {"N": 0.85, "L": 0.68, "H": 0.5} else {"N": 0.85, "L": 0.62, "H": 0.27} end)[$m.PR // ""] as $pr
         | ({"N": 0.85, "R": 0.62}[$m.UI // ""]) as $ui
         | ([$m.C, $m.I, $m.A] | map({"H": 0.56, "L": 0.22, "N": 0}[. // ""])) as $cia
-        | if ([$av, $ac, $pr, $ui] + $cia | any(. == null)) then null else
+        | if ([$av, $ac, $pr, $ui, $changed] + $cia | any(. == null)) then null else
             (1 - ((1 - $cia[0]) * (1 - $cia[1]) * (1 - $cia[2]))) as $iss
             | (if $changed then 7.52 * ($iss - 0.029) - 3.25 * pow($iss - 0.02; 15) else 6.42 * $iss end) as $impact
             | (8.22 * $av * $ac * $pr * $ui) as $exploit
@@ -6509,14 +6761,16 @@ def score_severity:
     elif . > 0 then "LOW"
     else null end;
 
-select(.withdrawn == null) |
-.id as $id |
+# Every field is read through a type guard: one malformed value must not
+# make jq fail, which would drop every package of the advisory file.
+select(type == "object" and .withdrawn == null) |
+(.id | strings // "") as $id |
 (if ($id | startswith("MAL-")) then "CRITICAL"
- else (.database_specific.severity //
-       first(.severity[]? | select(.type == "CVSS_V3") | .score | cvss3_score | numbers | score_severity | strings) //
+ else ((.database_specific | objects | .severity | strings) //
+       first(.severity[]? | objects | select(.type == "CVSS_V3") | .score | cvss3_score | numbers | score_severity | strings) //
        "UNKNOWN") end) as $severity |
 
-(.aliases // []) as $aliases |
+[.aliases[]? | strings] as $aliases |
 # The GHSA id is the advisory id itself (GHSA feed, and OSV copies of GHSA
 # advisories) or else a GHSA alias. Any other non-CVE id (PYSEC-, GO-,
 # RUSTSEC-, MAL-, ...) is kept as id=.
@@ -6533,26 +6787,38 @@ select(.withdrawn == null) |
     ("source=" + $source)
 ] | join("&")) as $params |
 
-.affected[]? |
-.package.ecosystem as $e |
-($ecomap[$e // ""] // "") as $type |
+.affected[]? | objects |
+((.package | objects | .ecosystem | strings) // "") as $e |
+($ecomap[$e] // "") as $type |
 select($type != "") |
-(emit_name($type; .package.name)) as $pkg |
+((.package.name | strings) // "") as $name |
+select($name != "") |
+# RustSec informational notices "unmaintained" and "notice" are warnings
+# about a crate, not vulnerabilities of its versions (cargo audit reports them
+# apart): listing them would flag every version as vulnerable. "unsound"
+# notices describe a defect of specific versions and are kept.
+select(((.database_specific | objects | .informational) // null) as $info
+       | $info == null or $info == "unsound") |
+(emit_name($type; $name)) as $pkg |
 # GHSA records the upper bound of an interval with no known fix here
 # ("< 3.0.0", "<= 2.26.11"): it bounds the open interval, but is no fix.
-((.database_specific.last_known_affected_version_range // "") | gsub(" "; "")
+((.database_specific | objects | .last_known_affected_version_range | strings) // "" | gsub(" "; "")
  | if test("^<=?[0-9A-Za-z]") then . else "" end) as $last_known |
+# Ranges that define an interval (a range with only "limit" events does not).
+[.ranges[]? | objects | select(.type == "SEMVER" or .type == "ECOSYSTEM")
+ | select([.events[]? | objects | select(.introduced or .fixed or .last_affected)] | length > 0)] as $ranges |
 (
-    (.ranges[]? |
-        select(.type == "SEMVER" or .type == "ECOSYSTEM") |
-        .events |
-        ([.[] | select(.limit) | .limit] | if length == 0 then ["*"] else . end) as $limits |
+    ($ranges[] |
+        [.events[]? | objects] |
+        ([.[] | select(.limit) | .limit | strings] | if length == 0 then ["*"] else . end) as $limits |
         map(select(.introduced or .fixed or .last_affected)) |
         if length > 0 then
             reduce .[] as $event (
                 {current: {}, intervals: []};
                 if $event.introduced then
-                    .current = {introduced: $event.introduced}
+                    # A second "introduced" inside an open interval changes
+                    # nothing: the versions since the first one stay affected.
+                    if .current.introduced then . else .current = {introduced: $event.introduced} end
                 elif $event.fixed then
                     .intervals += [(.current + {fixed: $event.fixed})] |
                     .current = {}
@@ -6578,11 +6844,12 @@ select($type != "") |
             "pkg:\($type)/\($pkg)@\($bounds)\($cap)?\($params)\($fix_override)"
         else empty end
     ),
-    # Exact versions only for entries without SEMVER/ECOSYSTEM ranges (e.g. MAL
-    # advisories): OSV enumerates every version a range covers, so emitting them
-    # alongside ranges is redundant and pushes feeds past the GitHub 100 MB file limit.
-    (if ([.ranges[]? | select(.type == "SEMVER" or .type == "ECOSYSTEM")] | length) == 0 then
-        .versions[]? |
+    # Exact versions only for entries without a SEMVER/ECOSYSTEM interval (e.g.
+    # MAL advisories, or ranges with only "limit" events): OSV enumerates every
+    # version a range covers, so emitting them alongside ranges is redundant and
+    # pushes feeds past the GitHub 100 MB file limit.
+    (if ($ranges | length) == 0 then
+        .versions[]? | strings | select(. != "") |
         "pkg:\($type)/\($pkg)@\(.)?\($params)"
     else empty end)
 )'
@@ -6594,35 +6861,46 @@ select($type != "") |
 # Robustness: 8 parallel workers each write to their OWN temp file — never a
 # shared pipe — because concurrent jq processes writing to one pipe interleave
 # non-atomically and tear PURL lines (observed frequently under load). Each
-# worker runs jq once per file, so a malformed advisory is isolated: it is
-# skipped and counted (its partial output discarded) instead of failing the
-# whole ecosystem. Only a failed worker, or every file failing, prevents
-# replacement of the existing feed. Callers sort/split the combined file
-# (LC_ALL=C for locale stability).
+# worker runs jq once per batch of 400 files (one process start instead of
+# 400); a batch that jq cannot process is redone file by file, so a malformed
+# advisory is isolated: it is skipped and counted (its partial output
+# discarded) instead of failing the whole ecosystem. A failed write, a failed
+# worker, no input file, or every file failing prevents replacement of the
+# existing feed. Callers sort/split the combined file (LC_ALL=C for locale
+# stability).
 feed_emit_raw() {
     local in_dir="$1" src="$2" ecomap="$3" combined="$4"
     [ -d "$in_dir" ] && command -v jq >/dev/null 2>&1 || return 1
     local parts_dir total skipped
-    parts_dir=$(mktemp -d)
+    total=$(find "$in_dir" -name "*.json" -type f | wc -l | tr -d ' ')
+    if [ "$total" -eq 0 ]; then
+        echo "Error: no advisory file found in $in_dir; previous output preserved" >&2
+        return 1
+    fi
+    parts_dir=$(mktemp -d) || return 1
+    # shellcheck disable=SC2090
     export FEED_JQ_PROGRAM
     if ! (set -o pipefail; find "$in_dir" -name "*.json" -type f -print0 | \
         FEED_SRC="$src" FEED_ECOMAP="$ecomap" PARTS_DIR="$parts_dir" \
         xargs -0 -P 8 -n 400 sh -c '
             out=$(mktemp "$PARTS_DIR/part.XXXXXX") || exit 1
             bad=$(mktemp "$PARTS_DIR/bad.XXXXXX") || exit 1
-            for f in "$@"; do
-                if lines=$(jq -r --arg source "$FEED_SRC" --argjson ecomap "$FEED_ECOMAP" "$FEED_JQ_PROGRAM" "$f" 2>/dev/null); then
-                    [ -z "$lines" ] || printf "%s\n" "$lines"
-                else
-                    printf "%s\n" "$f" >> "$bad"
-                fi
-            done > "$out"
-        ' _ 2>/dev/null); then
+            emit() { jq -r --arg source "$FEED_SRC" --argjson ecomap "$FEED_ECOMAP" "$FEED_JQ_PROGRAM" "$@" 2>/dev/null; }
+            if ! emit "$@" > "$out"; then
+                : > "$out" || exit 1
+                for f in "$@"; do
+                    if lines=$(emit "$f"); then
+                        if [ -n "$lines" ]; then printf "%s\n" "$lines" >> "$out" || exit 1; fi
+                    else
+                        printf "%s\n" "$f" >> "$bad" || exit 1
+                    fi
+                done
+            fi
+        ' _); then
         echo "Error: Failed to generate feed; previous output preserved" >&2
         rm -rf "$parts_dir"
         return 1
     fi
-    total=$(find "$in_dir" -name "*.json" -type f | wc -l | tr -d ' ')
     skipped=$(cat "$parts_dir"/bad.* 2>/dev/null | wc -l | tr -d ' ')
     if [ "$skipped" -gt 0 ]; then
         echo "⚠️  Skipped $skipped of $total advisory file(s) that jq could not process" >&2
@@ -6632,8 +6910,52 @@ feed_emit_raw() {
             return 1
         fi
     fi
-    cat "$parts_dir"/part.* > "$combined" 2>/dev/null || true
+    if ! cat "$parts_dir"/part.* > "$combined"; then
+        echo "Error: unable to write $combined; previous output preserved" >&2
+        rm -rf "$parts_dir"
+        return 1
+    fi
     rm -rf "$parts_dir"
+}
+
+# Replace a feed file with a staged one, atomically, only when the staged file
+# has content: an empty result means a broken download or parse, not a feed
+# with no advisory. Feed files are world-readable like committed ones (mktemp
+# creates them 0600). Returns non-zero when the previous file was kept.
+feed_install() {
+    local staged="$1" out_file="$2"
+    if [ ! -s "$staged" ]; then
+        echo "⚠️  No entry generated for ${out_file##*/}; previous file preserved" >&2
+        rm -f "$staged"
+        return 1
+    fi
+    chmod 644 "$staged" && mv "$staged" "$out_file" && return 0
+    rm -f "$staged"
+    return 1
+}
+
+# Purl types requested on the command line (--fetch-ghsa / --fetch-osv):
+# lockfile aliases (go, rust, python...) map to their purl type. Sets
+# FEED_TYPES; returns non-zero, after an error message, when a token is not
+# a supported ecosystem.
+feed_resolve_types() {
+    FEED_TYPES=()
+    local token type
+    for token in "$@"; do
+        [ -n "$token" ] || continue
+        type=$(ecosystem_alias_to_purl "$token")
+        if [ -z "$(feed_eco_string "$type")" ]; then
+            echo "Error: unknown ecosystem '$token' (supported: $(feed_all_types))" >&2
+            return 1
+        fi
+        case " ${FEED_TYPES[*]} " in *" $type "*) ;; *) FEED_TYPES+=("$type") ;; esac
+    done
+}
+
+# Create (if needed) and print the absolute feed output directory.
+feed_output_dir() {
+    local dir="${FEED_OUTPUT_DIR:-data}"
+    mkdir -p "$dir" && (cd "$dir" && pwd)
 }
 
 # Fetch GitHub Security Advisory data for the requested ecosystems.
@@ -6649,28 +6971,22 @@ fetch_ghsa() {
         read -ra types <<< "$(feed_all_types)"
     fi
 
-    local out_dir="${FEED_OUTPUT_DIR:-data}"
-    mkdir -p "$out_dir"
-    out_dir=$(cd "$out_dir" && pwd)
+    feed_resolve_types "${types[@]}" || return 1
+    local -a valid_types=("${FEED_TYPES[@]}")
+    if [ "${#valid_types[@]}" -eq 0 ]; then
+        echo "Error: no ecosystem to fetch" >&2
+        return 1
+    fi
 
-    # Keep only supported types (warn + drop unknowns).
-    local -a valid_types=()
-    local t
-    for t in "${types[@]}"; do
-        [ -z "$t" ] && continue
-        if [ -z "$(feed_eco_string "$t")" ]; then
-            echo "⚠️  Skipping unknown ecosystem: $t" >&2
-            continue
-        fi
-        valid_types+=("$t")
-    done
-    [ "${#valid_types[@]}" -eq 0 ] && return 0
+    local out_dir
+    out_dir=$(feed_output_dir) || { echo "Error: unable to create the feed directory" >&2; return 1; }
 
-    local ecomap
+    local ecomap t
     ecomap=$(feed_build_ecomap "${valid_types[@]}")
 
     local ghsa_tmp
-    ghsa_tmp=$(mktemp -d)
+    ghsa_tmp=$(mktemp -d) || return 1
+    register_temp_dir "$ghsa_tmp"
     local GHSA_REPO="https://github.com/github/advisory-database.git"
     local CLONE_DIR="$ghsa_tmp/advisory-database"
 
@@ -6703,18 +7019,21 @@ fetch_ghsa() {
     fi
 
     # Split combined output by pkg:<type>/ prefix into per-ecosystem files.
-    local base out_file line_count
+    local base out_file line_count staged failed=0
     for t in "${valid_types[@]}"; do
         base=$(default_feed_filename "ghsa" "$t")
         out_file="$out_dir/$base"
         # LC_ALL=C: deterministic byte-order sort, reproducible across locales
         # (matches the CI runner and keeps committed feed diffs to real churn).
-        local staged
-        staged=$(mktemp "$out_file.tmp.XXXXXX") || return 1
-        if ! { grep "^pkg:$t/" "$combined" || true; } | LC_ALL=C sort -u > "$staged" || ! mv "$staged" "$out_file"; then
+        if ! staged=$(mktemp "$out_file.tmp.XXXXXX"); then
+            failed=1
+            continue
+        fi
+        if ! { grep "^pkg:$t/" "$combined" || true; } | LC_ALL=C sort -u > "$staged" ||
+            ! feed_install "$staged" "$out_file"; then
             rm -f "$staged"
-            rm -rf "$ghsa_tmp"
-            return 1
+            failed=1
+            continue
         fi
         line_count=$(wc -l < "$out_file" | tr -d ' ')
         echo "  → $base: $line_count entries" >&2
@@ -6722,6 +7041,7 @@ fetch_ghsa() {
 
     rm -rf "$ghsa_tmp"
     echo "GHSA processing complete" >&2
+    return "$failed"
 }
 
 # Fetch OSV vulnerability data for the requested ecosystems.
@@ -6737,24 +7057,29 @@ fetch_osv() {
         read -ra types <<< "$(feed_all_types)"
     fi
 
-    local out_dir="${FEED_OUTPUT_DIR:-data}"
-    mkdir -p "$out_dir"
-    out_dir=$(cd "$out_dir" && pwd)
+    feed_resolve_types "${types[@]}" || return 1
+    types=("${FEED_TYPES[@]}")
+    if [ "${#types[@]}" -eq 0 ]; then
+        echo "Error: no ecosystem to fetch" >&2
+        return 1
+    fi
+
+    local out_dir
+    out_dir=$(feed_output_dir) || { echo "Error: unable to create the feed directory" >&2; return 1; }
 
     local t eco_string osv_dir ecomap zip_file eco_tmp out_file base file_count line_count
     for t in "${types[@]}"; do
-        [ -z "$t" ] && continue
         eco_string=$(feed_eco_string "$t")
-        if [ -z "$eco_string" ]; then
-            echo "⚠️  Skipping unknown ecosystem: $t" >&2
-            continue
-        fi
         osv_dir=$(feed_osv_dir "$t")
         ecomap=$(feed_build_ecomap "$t")
         base=$(default_feed_filename "osv" "$t")
         out_file="$out_dir/$base"
 
-        eco_tmp=$(mktemp -d)
+        if ! eco_tmp=$(mktemp -d); then
+            failed=1
+            continue
+        fi
+        register_temp_dir "$eco_tmp"
         zip_file="$eco_tmp/all.zip"
 
         echo "Fetching OSV $eco_string vulnerabilities..." >&2
@@ -6784,8 +7109,12 @@ fetch_osv() {
             failed=1
             continue
         fi
-        staged=$(mktemp "$out_file.tmp.XXXXXX") || return 1
-        if ! LC_ALL=C sort -u "$combined" > "$staged" || ! mv "$staged" "$out_file"; then
+        if ! staged=$(mktemp "$out_file.tmp.XXXXXX"); then
+            rm -rf "$eco_tmp"
+            failed=1
+            continue
+        fi
+        if ! LC_ALL=C sort -u "$combined" > "$staged" || ! feed_install "$staged" "$out_file"; then
             rm -f "$staged"
             rm -rf "$eco_tmp"
             failed=1
@@ -6813,9 +7142,8 @@ RUNTIME_FEED_PACKAGES="node php"
 # copies describe the same CVEs for Bitnami's minimal images.
 fetch_runtime() {
     command -v jq >/dev/null 2>&1 || { echo "Error: jq is required to generate feeds" >&2; return 1; }
-    local out_dir="${FEED_OUTPUT_DIR:-data}"
-    mkdir -p "$out_dir"
-    out_dir=$(cd "$out_dir" && pwd)
+    local out_dir
+    out_dir=$(feed_output_dir) || { echo "Error: unable to create the feed directory" >&2; return 1; }
 
     local out_file="$out_dir/osv-runtime.purl" tmp pkg names="" staged line_count
     local -a patterns=()
@@ -6823,7 +7151,8 @@ fetch_runtime() {
         patterns+=("BIT-$pkg-[0-9]*")
         names="${names:+$names|}$pkg"
     done
-    tmp=$(mktemp -d)
+    tmp=$(mktemp -d) || return 1
+    register_temp_dir "$tmp"
 
     echo "Fetching OSV Bitnami runtime vulnerabilities ($RUNTIME_FEED_PACKAGES)..." >&2
     if ! curl -fsSL --connect-timeout 10 --max-time 300 "https://osv-vulnerabilities.storage.googleapis.com/Bitnami/all.zip" -o "$tmp/all.zip"; then
@@ -6845,7 +7174,7 @@ fetch_runtime() {
     staged=$(mktemp "$out_file.tmp.XXXXXX") || { rm -rf "$tmp"; return 1; }
     # Other Bitnami packages listed in the same advisories are dropped.
     if ! { grep -E "^pkg:runtime/($names)@" "$tmp/combined.purl" || true; } | LC_ALL=C sort -u > "$staged" ||
-        [ ! -s "$staged" ] || ! mv "$staged" "$out_file"; then
+        ! feed_install "$staged" "$out_file"; then
         echo "⚠️  No runtime advisory could be generated; previous runtime feed preserved" >&2
         rm -f "$staged"
         rm -rf "$tmp"
@@ -6866,7 +7195,7 @@ fetch_all() {
     echo "========================================="
     echo ""
 
-    mkdir -p "$output_dir"
+    mkdir -p "$output_dir" || return 1
 
     export FEED_OUTPUT_DIR="$output_dir"
 
@@ -6908,35 +7237,38 @@ fetch_all() {
     return "$status"
 }
 
+# find_default_source runs in command substitutions: resolve the installation
+# paths it probes once, in the calling shell, so they are not recomputed
+# (brew --prefix) for every feed. Only needed when a built-in feed is loaded.
+prepare_default_source_lookup() {
+    resolve_script_home
+    [ -d "$SCRIPT_HOME/data" ] || resolve_brew_prefix
+}
+
 # Find default source file with fallback logic. Tries, in order:
-# 1. the data/ directory next to this script (a git checkout or release)
+# 1. the data/ directory next to this script (symlinks resolved: a git
+#    checkout, a release, Homebrew or Docker through their symlinks)
 # 2. the Homebrew installation path
 # 3. the Docker /app/data/ directory
-# 4. ./data/ in the current directory
-# 5. the remote GitHub URL
-# The scanned project's own ./data must not shadow the built-in feeds, so the
-# current directory comes after every installation path.
+# 4. the remote GitHub URL
+# 5. ./data/ in the current directory, only when nothing else is reachable
+#    (offline piped run), with a warning
+# The scanned project is usually the current directory: its own data/ must
+# never replace the built-in feeds while those can be reached.
 # Returns path/URL if found, empty string if not found
 find_default_source() {
     local source_file="$1"  # e.g., "ghsa.purl" or "osv.purl"
 
-    local script_dir=""
-    if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
-        script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd) || script_dir=""
-    fi
-    if [ -n "$script_dir" ] && [ -f "$script_dir/data/$source_file" ]; then
-        echo "$script_dir/data/$source_file"
+    resolve_script_home
+    if [ -n "$SCRIPT_HOME" ] && [ -f "$SCRIPT_HOME/data/$source_file" ]; then
+        echo "$SCRIPT_HOME/data/$source_file"
         return 0
     fi
 
-    # Try Homebrew path
-    if command -v brew &> /dev/null; then
-        local brew_path
-        brew_path="$(brew --prefix)/share/package-checker/data/$source_file"
-        if [ -f "$brew_path" ]; then
-            echo "$brew_path"
-            return 0
-        fi
+    resolve_brew_prefix
+    if [ -n "$BREW_PREFIX" ] && [ -f "$BREW_PREFIX/share/package-checker/data/$source_file" ]; then
+        echo "$BREW_PREFIX/share/package-checker/data/$source_file"
+        return 0
     fi
 
     # Try Docker /app/data/ directory
@@ -6945,16 +7277,15 @@ find_default_source() {
         return 0
     fi
 
-    # Try local ./data/ directory
-    if [ -f "./data/$source_file" ]; then
-        echo "./data/$source_file"
-        return 0
-    fi
-
-    # Try remote GitHub URL as last resort
     local github_url="https://raw.githubusercontent.com/maxgfr/package-checker.sh/refs/heads/main/data/$source_file"
     if curl --output /dev/null --silent --head --fail --connect-timeout 10 --max-time 30 "$github_url" 2>/dev/null; then
         echo "$github_url"
+        return 0
+    fi
+
+    if [ -f "./data/$source_file" ]; then
+        echo -e "${YELLOW}⚠️  Warning: built-in feeds unreachable; using ./data/$source_file from the current directory${NC}" >&2
+        echo "./data/$source_file"
         return 0
     fi
 
@@ -7023,7 +7354,9 @@ fix_commands_for_eco() {
             printf '%smix deps.update %s\n' "$ind" "$pkg"
             ;;
         swift)
-            printf '%sswift package update %s\n' "$ind" "$pkg"
+            # SwiftPM takes the package identity (the last URL component),
+            # not the repository URL the findings are keyed by.
+            printf '%sswift package update %s\n' "$ind" "${pkg##*/}"
             ;;
         githubactions)
             printf '%s# Bump the `uses:` ref to the patched tag, e.g. %s@<patched-tag>\n' "$ind" "$pkg"
@@ -7279,11 +7612,11 @@ discover_project_files() {
             [ ${#match_args[@]} -gt 0 ] && match_args+=( -o )
             match_args+=( -name "$bn" )
         done
-        local pentry pglob nglobs palias ng gi
+        local pentry pglob nglobs ng gi
         local -a nglob_arr
         for pentry in "${selected_path_entries[@]}"; do
-            # peco/pparser are unused here (dispatch happens later); discard them.
-            IFS='|' read -r pglob nglobs _ _ palias <<< "$pentry"
+            # eco/parser/alias are unused here (dispatch happens later).
+            IFS='|' read -r pglob nglobs _ <<< "$pentry"
             [ ${#match_args[@]} -gt 0 ] && match_args+=( -o )
             match_args+=( '(' -path "$pglob" '(' )
             IFS=',' read -ra nglob_arr <<< "$nglobs"
@@ -7316,21 +7649,27 @@ discover_project_files() {
     if [ ${#match_args[@]} -gt 0 ]; then
         local -a find_args=( "$SEARCH_DIR" )
         local ignore_path
-        if [ ${#CONFIG_IGNORE_PATHS[@]} -gt 0 ]; then
-            find_args+=( '(' )
-            local first_ignore=true
-            for ignore_path in "${CONFIG_IGNORE_PATHS[@]}"; do
-                [ -n "$ignore_path" ] || continue
-                [ "$first_ignore" = true ] || find_args+=( -o )
-                first_ignore=false
-                find_args+=( -path "*/${ignore_path%/}" )
-            done
-            find_args+=( ')' -prune -o )
+        # Empty entries ("ignore_paths": [""]) are dropped first: an empty
+        # "( )" group is a find syntax error that would hide every file.
+        local -a prune_args=()
+        for ignore_path in "${CONFIG_IGNORE_PATHS[@]}"; do
+            ignore_path="${ignore_path%/}"
+            [ -n "$ignore_path" ] || continue
+            [ ${#prune_args[@]} -eq 0 ] || prune_args+=( -o )
+            prune_args+=( -path "*/$ignore_path" )
+        done
+        if [ ${#prune_args[@]} -gt 0 ]; then
+            find_args+=( '(' "${prune_args[@]}" ')' -prune -o )
         fi
         find_args+=( '(' "${match_args[@]}" ')' -type f -print )
         # An unreadable directory must not abort the scan (set -e): report it
-        # and keep whatever was found.
+        # and keep whatever was found. A failure that found nothing at all is
+        # not a scan: stop instead of reporting a clean project.
         if ! found=$(find "${find_args[@]}" 2>/dev/null); then
+            if [ -z "$found" ]; then
+                echo -e "${RED}❌ Error: unable to search $SEARCH_DIR for project files${NC}" >&2
+                exit "$EXIT_ERROR"
+            fi
             echo -e "${YELLOW}⚠️  Warning: some directories under $SEARCH_DIR could not be read; results may be incomplete${NC}" >&2
         fi
     fi
@@ -7458,7 +7797,9 @@ discover_project_files() {
         while IFS= read -r lfile; do
             [ -z "$lfile" ] && continue
             if [ -n "${SBOM_FILES[$lfile]+x}" ]; then
-                for e in $(cyclonedx_components "$lfile" | cut -d'|' -f1 | sort -u); do
+                # Parsed once: analyze_cyclonedx_inventory reuses the list.
+                SBOM_COMPONENTS["$lfile"]=$(cyclonedx_components "$lfile")
+                for e in $(printf '%s\n' "${SBOM_COMPONENTS[$lfile]}" | cut -d'|' -f1 | sort -u); do
                     case "$e" in
                         npm|pypi|golang|maven|cargo|gem|composer|nuget|pub|hex|swift|githubactions)
                             DETECTED_ECOSYSTEMS["$e"]=1 ;;
@@ -7538,7 +7879,6 @@ print_advisories() {
 main() {
     local use_config=true
     local cli_sources=false
-    local use_default_ghsa=false
     local custom_config=""
     local custom_sources=()
     local use_github=false
@@ -7593,21 +7933,19 @@ main() {
                 cli_sources=true
                 shift 2
                 ;;
-            --default-source-ghsa)
+            --default-source-ghsa|--default-source-osv|--default-source-ghsa-osv)
                 # Record intent; the feed is resolved per detected ecosystem
                 # after project discovery (see the source-loading section).
-                default_feeds="ghsa"
-                cli_sources=true
-                use_default_ghsa=true
-                shift
-                ;;
-            --default-source-osv)
-                default_feeds="osv"
-                cli_sources=true
-                shift
-                ;;
-            --default-source-ghsa-osv)
-                default_feeds="ghsa osv"
+                # The flags add up: --default-source-ghsa --default-source-osv
+                # loads both feeds.
+                local wanted_feed
+                for wanted_feed in ghsa osv; do
+                    case "$1" in *"-$wanted_feed"*) ;; *) continue ;; esac
+                    case " $default_feeds " in
+                        *" $wanted_feed "*) ;;
+                        *) default_feeds="${default_feeds:+$default_feeds }$wanted_feed" ;;
+                    esac
+                done
                 cli_sources=true
                 shift
                 ;;
@@ -7716,7 +8054,12 @@ main() {
                     */*|*.purl)
                         if [ -d "$2" ]; then FEED_OUTPUT_DIR="$2" fetch_osv
                         else FEED_OUTPUT_DIR="$(dirname "$2")" fetch_osv npm; fi ;;
-                    *) IFS=', ' read -ra _fetch_ecos <<< "$2"; fetch_osv "${_fetch_ecos[@]}" ;;
+                    # Ecosystem names win; otherwise an existing directory
+                    # named without a slash ("data") is the output directory.
+                    *) IFS=', ' read -ra _fetch_ecos <<< "$2"
+                       if ! feed_resolve_types "${_fetch_ecos[@]}" 2>/dev/null && [ -d "$2" ]; then
+                           FEED_OUTPUT_DIR="$2" fetch_osv
+                       else fetch_osv "${_fetch_ecos[@]}"; fi ;;
                 esac || exit "$EXIT_ERROR"
                 exit 0
                 ;;
@@ -7729,7 +8072,12 @@ main() {
                     */*|*.purl)
                         if [ -d "$2" ]; then FEED_OUTPUT_DIR="$2" fetch_ghsa
                         else FEED_OUTPUT_DIR="$(dirname "$2")" fetch_ghsa npm; fi ;;
-                    *) IFS=', ' read -ra _fetch_ecos <<< "$2"; fetch_ghsa "${_fetch_ecos[@]}" ;;
+                    # Ecosystem names win; otherwise an existing directory
+                    # named without a slash ("data") is the output directory.
+                    *) IFS=', ' read -ra _fetch_ecos <<< "$2"
+                       if ! feed_resolve_types "${_fetch_ecos[@]}" 2>/dev/null && [ -d "$2" ]; then
+                           FEED_OUTPUT_DIR="$2" fetch_ghsa
+                       else fetch_ghsa "${_fetch_ecos[@]}"; fi ;;
                 esac || exit "$EXIT_ERROR"
                 exit 0
                 ;;
@@ -7958,6 +8306,7 @@ main() {
     fi
 
     if [ -n "$feeds_to_load" ]; then
+        prepare_default_source_lookup
         if [ "$implicit_default" = true ]; then
             echo -e "${BLUE}ℹ️  No data source specified, using default GHSA source${NC}"
             echo ""
@@ -8010,6 +8359,7 @@ main() {
     if { [ "$runtime_check" != false ] && [ -n "$RUNTIME_FILES" ]; } ||
         { [ -n "$name" ] && [ "$ecosystem" = runtime ]; }; then
         local runtime_feed
+        prepare_default_source_lookup
         runtime_feed=$(find_default_source "osv-runtime.purl") || true
         if [ -n "$runtime_feed" ]; then
             echo -e "${GREEN}✓ Using runtime source: $runtime_feed${NC}"
@@ -8113,6 +8463,8 @@ main() {
             fi
             lockname="${lockfile##*/}"
             local lock_parser="${LOCKFILE_PARSER[$lockname]:-}"
+            local checked_before="${CHECKED_PACKAGE_COUNT:-0}"
+            LOCKFILE_SKIPPED=0   # set by a parser that defers to another file
             if [ -n "${SBOM_FILES[$lockfile]+x}" ]; then
                 analyze_cyclonedx_inventory "$lockfile"
             elif [ -n "$lock_parser" ]; then
@@ -8125,6 +8477,16 @@ main() {
                     IFS='|' read -r _pe_parser _pe_eco _pe_alias <<< "$_pe"
                     "$_pe_parser" "$lockfile" "$_pe_eco"
                 fi
+                # A workflow without a published action is ordinary.
+                lock_parser=""
+            fi
+            # A lockfile with content that yields no package at all is either
+            # empty of dependencies or in a shape the parser does not read:
+            # say so instead of letting "no vulnerabilities" imply a check.
+            if [ -n "$lock_parser" ] && [ "$LOCKFILE_SKIPPED" = 0 ] &&
+                [ "${CHECKED_PACKAGE_COUNT:-0}" = "$checked_before" ] &&
+                grep -q '[^[:space:]]' "$lockfile" 2>/dev/null; then
+                echo -e "${YELLOW}⚠️  [$lockfile] No package could be read from this file (no dependency, or an unsupported format)${NC}"
             fi
         done <<< "$LOCKFILES"
     fi
@@ -8251,8 +8613,13 @@ main() {
             fi
         done
 
-        # Display grouped results
-        for pkg in $(printf '%s\n' "${!pkg_files[@]}" | sort -u); do
+        # Display grouped results (read line by line: a key may hold spaces
+        # or glob characters, e.g. an SBOM version "1.0 beta")
+        local -a group_keys=()
+        while IFS= read -r pkg; do
+            group_keys+=("$pkg")
+        done < <(printf '%s\n' "${!pkg_files[@]}" | sort -u)
+        for pkg in "${group_keys[@]}"; do
             # Strip the ecosystem namespace for display (split at FIRST ':' only).
             # npm packages print with no prefix (byte-identical to legacy output);
             # other ecosystems get a "[eco] " label.
@@ -8331,9 +8698,14 @@ main() {
         export_vulnerabilities_csv "$export_csv_file" || exit "$EXIT_ERROR"
     fi
 
-    # An unreadable project file makes a clean result incomplete.
+    # An unreadable project file, or an organization repository that could
+    # not be fetched, makes a clean result incomplete.
     if [ "$FOUND_VULNERABLE" -eq 0 ] && [ "$UNREADABLE_FILE_COUNT" -gt 0 ]; then
         echo -e "${RED}❌ Scan incomplete: $UNREADABLE_FILE_COUNT project file(s) could not be read${NC}"
+        exit "$EXIT_ERROR"
+    fi
+    if [ "$FOUND_VULNERABLE" -eq 0 ] && [ "$GITHUB_FAILED_REPOS" -gt 0 ]; then
+        echo -e "${RED}❌ Scan incomplete: $GITHUB_FAILED_REPOS repository(ies) could not be fetched${NC}"
         exit "$EXIT_ERROR"
     fi
     exit $FOUND_VULNERABLE
