@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here, generated automatically from the [Conventional Commits](https://www.conventionalcommits.org/) by [semantic-release](https://github.com/semantic-release/semantic-release).
 
+# [1.114.0](https://github.com/maxgfr/ultrasec/compare/v1.113.0...v1.114.0) (2026-11-23)
+
+
+### Features
+
+* **deps:** re-pin package-checker at v1.17.20 ([856a59c](https://github.com/maxgfr/ultrasec/commit/856a59c6a80f70f01d414cd57f750f8d53ed9723))
+
 # [1.113.0](https://github.com/maxgfr/ultrasec/compare/v1.112.0...v1.113.0) (2026-11-22)
 
 
