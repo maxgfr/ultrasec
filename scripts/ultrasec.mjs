@@ -29290,7 +29290,7 @@ ${HELP}`);
 init_text();
 
 // src/types.ts
-var VERSION = "1.118.0";
+var VERSION = "1.118.1";
 var SCHEMA_VERSION2 = 11;
 var SEVERITIES2 = ["critical", "high", "medium", "low", "info"];
 var CONFIDENCES = ["high", "medium", "low"];
